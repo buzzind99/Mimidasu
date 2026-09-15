@@ -69,8 +69,8 @@ struct ContentView: View {
                 TranscriptView(model: model)
                 LiveStripView(
                     live: live,
-                    onCopy: { model.copySnippet($0) },
-                    onLookup: { model.handleLookupTap($0, source: .liveStrip) }
+                    onCopy: { text in model.copySnippet(text) },
+                    onLookup: { token in model.handleLookupTap(token, source: .liveStrip) }
                 )
                 // Strip-anchored popover: single non-virtualized view, so
                 // the strip owns it while the selection's anchor is the

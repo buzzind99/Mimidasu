@@ -33,7 +33,7 @@ struct TranslationQueueFallbackTests {
         private var batches: [[String]] = []
         private let transform: @Sendable (String) async throws -> String
 
-        init(transform: @escaping @Sendable (String) async throws -> String = { "EN:\($0)" }) {
+        init(transform: @escaping @Sendable (String) async throws -> String = { text in "EN:\(text)" }) {
             self.transform = transform
         }
 
@@ -66,7 +66,7 @@ struct TranslationQueueFallbackTests {
                 // Yield so the main-actor `noteRetry` hop lands before return.
                 try? await Task.sleep(for: .milliseconds(50))
             }
-            return texts.map { "EN:\($0)" }
+            return texts.map { text in "EN:\(text)" }
         }
     }
 
@@ -107,7 +107,7 @@ struct TranslationQueueFallbackTests {
         let sink = Sink()
         queue.setHandlers(
             result: { index, _ in sink.record(result: index) },
-            status: { sink.record(status: $0) }
+            status: { status in sink.record(status: status) }
         )
 
         queue.enqueue(makeSentence(index: 0, text: sentenceText))
@@ -148,7 +148,7 @@ struct TranslationQueueFallbackTests {
         let sink = Sink()
         queue.setHandlers(
             result: { index, _ in sink.record(result: index) },
-            status: { sink.record(status: $0) }
+            status: { status in sink.record(status: status) }
         )
 
         queue.enqueue(makeSentence(index: 0, text: sentenceText))
@@ -190,7 +190,7 @@ struct TranslationQueueFallbackTests {
         let sink = Sink()
         queue.setHandlers(
             result: { index, _ in sink.record(result: index) },
-            status: { sink.record(status: $0) }
+            status: { status in sink.record(status: status) }
         )
         let engine = RetryThenSucceedEngine()
         engine.onRetry = { progress in
@@ -241,7 +241,7 @@ struct TranslationQueueFallbackTests {
         let sink = Sink()
         queue.setHandlers(
             result: { index, _ in sink.record(result: index) },
-            status: { sink.record(status: $0) }
+            status: { status in sink.record(status: status) }
         )
         let engine = EchoEngine()
 

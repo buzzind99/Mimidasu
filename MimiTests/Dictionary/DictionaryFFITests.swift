@@ -81,6 +81,6 @@ struct DictionaryFFITests {
 private let realDylibIsStaged: Bool = {
     let fm = FileManager.default
     return DylibLoader.candidates(named: "libdictionary.dylib").contains { candidate in
-        candidate.map { fm.fileExists(atPath: $0) } ?? false
+        candidate.map { path in fm.fileExists(atPath: path) } ?? false
     }
 }()

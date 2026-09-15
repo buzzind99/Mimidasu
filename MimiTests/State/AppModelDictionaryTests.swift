@@ -56,7 +56,7 @@ struct AppModelDictionaryTests {
 
         model.prepareDictionaryIfNeeded(
             resolve: { nil },
-            prepare: { completion = $0 }
+            prepare: { handler in completion = handler }
         )
         completion?(.failure(failure))
 
@@ -72,7 +72,7 @@ struct AppModelDictionaryTests {
         model.prepareDictionaryIfNeeded(
             resolve: { URL(fileURLWithPath: "/tmp/ipadic.dic") },
             resolveJMDict: { nil },
-            prepareJMDict: { completion = $0 }
+            prepareJMDict: { handler in completion = handler }
         )
         completion?(.failure(failure))
 

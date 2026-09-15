@@ -193,8 +193,8 @@ final class AppModel {
         asrModelSettings: ASRModelSettings? = nil,
         translationTransport: HTTPTranslationTransport? = nil,
         jmDictLookup: JMDictLookup? = nil,
-        initialModelResolve: @escaping @Sendable (ASRModelChoice) -> URL? = {
-            ModelLocator.resolve(for: $0)
+        initialModelResolve: @escaping @Sendable (ASRModelChoice) -> URL? = { choice in
+            ModelLocator.resolve(for: choice)
         },
         retireWarmEngine: @escaping @Sendable () -> Void = {
             ASREngineFactory.retireWarmEngine()

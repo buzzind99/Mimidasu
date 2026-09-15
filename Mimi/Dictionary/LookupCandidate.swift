@@ -25,7 +25,9 @@ struct LookupCandidate: Equatable, Sendable {
     init(text: String, kind: Kind? = nil, reading: String? = nil) {
         self.text = text
         self.kind = kind ?? {
-            let ideographic = text.unicodeScalars.contains { $0.properties.isIdeographic }
+            let ideographic = text.unicodeScalars.contains { scalar in
+                scalar.properties.isIdeographic
+            }
             return ideographic ? .kanji : .kana
         }()
         self.reading = reading

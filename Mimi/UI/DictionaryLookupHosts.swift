@@ -47,14 +47,14 @@ struct DictionaryPopoverView: View {
                         onCopy: {
                             model.copySnippet(DictionaryContent.headword(of: entry) ?? "")
                         },
-                        onSelectAlso: { model.selectAlsoPill($0) },
-                        onStepEntry: { model.stepLookupEntry(to: $0) }
+                        onSelectAlso: { result in model.selectAlsoPill(result) },
+                        onStepEntry: { index in model.stepLookupEntry(to: index) }
                     )
                 }
             case let .notFound(surface, related):
                 DictionaryNotFoundView(
                     surface: surface, related: related,
-                    onSelectRelated: { model.selectAlsoPill($0) }
+                    onSelectRelated: { result in model.selectAlsoPill(result) }
                 )
             }
         }
@@ -104,14 +104,14 @@ struct DictionaryCardView: View {
                     DictionaryEntryPager(
                         entryIndex: pinned.entryIndex,
                         entryCount: result.entries.count,
-                        onStep: { model.stepLookupEntry(to: $0) }
+                        onStep: { index in model.stepLookupEntry(to: index) }
                     )
                 }
             }
             // The pager's height is reserved even when it is absent, so the
             // header row never changes height between lookups.
             .frame(height: DictionaryEntryPager.height)
-            .onHeightChange { labelHeight = $0 }
+            .onHeightChange { height in labelHeight = height }
             if let pinned = model.pinnedLookup {
                 pinnedContent(pinned, freeHeight: freeHeight)
             } else {
@@ -141,16 +141,16 @@ struct DictionaryCardView: View {
                     senseLimit: nil,
                     glossLimit: nil,
                     sensesViewportHeight: sensesViewport(freeHeight: freeHeight),
-                    onTopSectionHeightChange: { topSectionHeight = $0 },
-                    onAlsoHeightChange: { alsoHeight = $0 },
-                    onSensesHeightChange: { sensesContentHeight = $0 },
+                    onTopSectionHeightChange: { height in topSectionHeight = height },
+                    onAlsoHeightChange: { height in alsoHeight = height },
+                    onSensesHeightChange: { height in sensesContentHeight = height },
                     copyPlacement: .icon,
                     showsEntryPager: false,
                     onCopy: {
                         model.copySnippet(DictionaryContent.headword(of: entry) ?? "")
                     },
-                    onSelectAlso: { model.selectAlsoPill($0) },
-                    onStepEntry: { model.stepLookupEntry(to: $0) }
+                    onSelectAlso: { result in model.selectAlsoPill(result) },
+                    onStepEntry: { index in model.stepLookupEntry(to: index) }
                 )
             } else {
                 emptyHint
@@ -158,9 +158,9 @@ struct DictionaryCardView: View {
         case let .notFound(surface, related):
             DictionaryNotFoundView(
                 surface: surface, related: related,
-                onSelectRelated: { model.selectAlsoPill($0) }
+                onSelectRelated: { result in model.selectAlsoPill(result) }
             )
-            .onHeightChange { topSectionHeight = $0 }
+            .onHeightChange { height in topSectionHeight = height }
             .onAppear {
                 // Probes this state doesn't mount keep the viewport
                 // math at their zero-content values.

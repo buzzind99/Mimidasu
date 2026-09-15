@@ -54,7 +54,7 @@ struct SidebarView: View {
         .background(Theme.sidebar)
         .fileExporter(
             isPresented: $exportPresented,
-            document: exportData.map { ExportDocument(data: $0) },
+            document: exportData.map { data in ExportDocument(data: data) },
             contentTypes: [exportFormat.contentType],
             defaultFilename: "mimi-session.\(exportFormat.fileExtension)"
         ) { result in

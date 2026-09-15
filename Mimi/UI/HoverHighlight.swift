@@ -16,7 +16,7 @@ struct HoverHighlight<S: Shape>: ViewModifier {
                 shape.fill(tint.opacity(hovering && isEnabled ? opacity : 0))
                     .allowsHitTesting(false)
             }
-            .onHover { hovering = $0 }
+            .onHover { isHovering in hovering = isHovering }
             .animation(.easeOut(duration: 0.12), value: hovering)
     }
 }

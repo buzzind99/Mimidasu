@@ -79,7 +79,7 @@ struct SessionControllerAudioMeterTests {
 
         sut.capture.onChunk?(chunk)
         #expect(
-            sut.audioLevel.levels.allSatisfy { $0 == 0 },
+            sut.audioLevel.levels.allSatisfy { level in level == 0 },
             "the chunk callback must not touch the main-actor meter directly"
         )
 
@@ -104,7 +104,7 @@ struct SessionControllerAudioMeterTests {
         await pumpTimers(seconds: 0.3)
 
         #expect(
-            sut.audioLevel.levels.allSatisfy { $0 == 0 },
+            sut.audioLevel.levels.allSatisfy { level in level == 0 },
             "the new session's meter must start from a cleared stage"
         )
     }

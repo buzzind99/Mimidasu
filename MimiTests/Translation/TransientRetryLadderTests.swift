@@ -106,7 +106,7 @@ struct TransientRetryLadderTests {
         let log = Log()
         let ladder = TransientRetryLadder(
             retriesBadResponse: true,
-            sleep: { log.recordDelay($0) }
+            sleep: { duration in log.recordDelay(duration) }
         )
 
         let result = try await ladder.run {
@@ -127,7 +127,7 @@ struct TransientRetryLadderTests {
         let log = Log()
         let ladder = TransientRetryLadder(
             retriesBadResponse: true,
-            sleep: { log.recordDelay($0) }
+            sleep: { duration in log.recordDelay(duration) }
         )
 
         let thrown = await #expect(throws: TranslationEngineError.self) {
@@ -169,8 +169,8 @@ struct TransientRetryLadderTests {
                 throw TranslationEngineError.serverError(500)
             }
             return "ok"
-        } onRetry: {
-            log.recordProgress($0)
+        } onRetry: { progress in
+            log.recordProgress(progress)
         }
 
         #expect(log.entries == [

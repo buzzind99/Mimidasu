@@ -44,7 +44,7 @@ enum ReadingAlignment {
         guard let chunks = walk(surfaceScalars, from: 0, over: readingScalars[...]) else {
             return nil
         }
-        return chunks.map { Run(surface: $0.surface, kana: $0.kana) }
+        return chunks.map { chunk in Run(surface: chunk.surface, kana: chunk.kana) }
     }
 
     // MARK: - Internals
@@ -90,7 +90,9 @@ enum ReadingAlignment {
         }
         let target = fold(surface[anchor])
         var searchStart = reading.startIndex
-        while let match = reading[searchStart...].firstIndex(where: { fold($0) == target }) {
+        while let match = reading[searchStart...].firstIndex(where: { scalar in
+            fold(scalar) == target
+        }) {
             let consumed = reading[reading.startIndex ..< match]
             if consumesKanaOnly(consumed),
                let rest = walk(surface, from: index + 1, over: reading[match...])

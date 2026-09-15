@@ -274,7 +274,7 @@ struct SettingsView: View {
                 modes: Appearance.allCases,
                 selection: $appearance.binding,
                 label: \.label,
-                icon: { $0.systemImage },
+                icon: \.systemImage,
                 track: Palette.segmentTrack,
                 selectedFill: Palette.segmentFill,
                 unselectedColor: Palette.mutedText

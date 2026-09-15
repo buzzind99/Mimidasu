@@ -41,7 +41,7 @@ enum TranslationConnectionTester {
     private static func translateProbe(_ engine: any TranslationEngine) async -> Result<Void, TranslationEngineError> {
         do {
             let translations = try await engine.translate(["こんにちは"])
-            guard translations.allSatisfy({ !$0.isEmpty }) else {
+            guard translations.allSatisfy({ translation in !translation.isEmpty }) else {
                 return .failure(.badResponse("Provider returned an empty translation"))
             }
             return .success(())

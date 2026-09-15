@@ -37,8 +37,8 @@ struct SystemAudioCaptureTeardownTests {
     private func makeCapture(running: Bool) -> SystemAudioCapture {
         let capture = SystemAudioCapture()
         let recorder = recorder
-        capture.onChunk = { recorder.record($0) }
-        capture.onIOError = { recorder.record($0) }
+        capture.onChunk = { chunk in recorder.record(chunk) }
+        capture.onIOError = { error in recorder.record(error) }
         if running {
             capture.setRunningForTesting(true)
         }

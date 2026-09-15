@@ -13,8 +13,8 @@ import Testing
 @Suite("ReadingAnnotator dictionary corpus", .enabled(if: LiveDictionaryRuntime.isAvailable))
 struct ReadingAnnotatorLiveTests {
 
-    private static let annotator = ReadingAnnotator(tokenize: {
-        LiveDictionaryRuntime.engine?.tokenize($0)
+    private static let annotator = ReadingAnnotator(tokenize: { text in
+        LiveDictionaryRuntime.engine?.tokenize(text)
     })
 
     private func segments(_ text: String) throws -> [ReadingSegment] {
@@ -479,8 +479,8 @@ private let fallbackDatabaseURL: URL? = {
 )
 struct ReadingAnnotatorFallbackLiveTests {
 
-    private static let annotator = ReadingAnnotator(tokenize: {
-        LiveDictionaryRuntime.engine?.tokenize($0)
+    private static let annotator = ReadingAnnotator(tokenize: { text in
+        LiveDictionaryRuntime.engine?.tokenize(text)
     })
 
     private func segments(_ text: String) throws -> [ReadingSegment] {

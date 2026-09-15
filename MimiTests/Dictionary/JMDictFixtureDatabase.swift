@@ -67,7 +67,7 @@ enum JMDictFixtureDatabase {
         guard sqlite3_open_v2(
             url.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil
         ) == SQLITE_OK, let db else {
-            let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "open failed"
+            let message = db.map { handle in String(cString: sqlite3_errmsg(handle)) } ?? "open failed"
             sqlite3_close_v2(db)
             throw FixtureError.sqlite(message)
         }
@@ -324,7 +324,7 @@ private extension JMDictFixtureDatabase {
         }
         let kanji = word.kanji ?? []
         let kana = word.kana ?? []
-        let common = kanji.contains { $0.common } || kana.contains { $0.common }
+        let common = kanji.contains(where: \.common) || kana.contains(where: \.common)
         try insertRow(db, "INSERT INTO entries VALUES (?,?,?,?)", [
             .int(entSeq),
             .text(kanji.first?.text),
@@ -339,7 +339,7 @@ private extension JMDictFixtureDatabase {
         }
         for (ord, sense) in (word.sense ?? []).enumerated() {
             let glosses = (sense.gloss ?? [])
-                .filter { $0.lang == "eng" }
+                .filter { gloss in gloss.lang == "eng" }
                 .map(\.text)
                 .joined(separator: "; ")
             try insertRow(db, "INSERT INTO senses VALUES (?,?,?,?,?,?,?)", [
@@ -407,7 +407,7 @@ private extension JMDictFixtureDatabase {
     private static func exec(_ db: OpaquePointer, _ sql: String) throws {
         var error: UnsafeMutablePointer<CChar>?
         guard sqlite3_exec(db, sql, nil, nil, &error) == SQLITE_OK else {
-            let message = error.map { String(cString: $0) } ?? "unknown error"
+            let message = error.map { pointer in String(cString: pointer) } ?? "unknown error"
             sqlite3_free(error)
             throw FixtureError.sqlite(message)
         }

@@ -34,7 +34,7 @@ struct AppModelToastWiringTests {
 
         model.handleTranslationStatus(.retrying("External translation failed, 2 retries left"))
 
-        let toast = model.toasts.toasts.first { $0.key == ToastKey.translationRetry }
+        let toast = model.toasts.toasts.first { toast in toast.key == ToastKey.translationRetry }
         #expect(toast?.style == .yellowAuto)
         #expect(toast?.body == "External translation failed, 2 retries left")
         #expect(toast?.action == nil)
@@ -49,10 +49,10 @@ struct AppModelToastWiringTests {
             .degraded("External translation failed — using Apple on-device", .permanent)
         )
 
-        let toast = model.toasts.toasts.first { $0.key == ToastKey.translationFallback }
+        let toast = model.toasts.toasts.first { toast in toast.key == ToastKey.translationFallback }
         #expect(toast?.style == .yellowPersistent)
         #expect(toast?.action?.label == "Retry")
-        #expect(!model.toasts.toasts.contains { $0.key == ToastKey.translationUnavailable })
+        #expect(!model.toasts.toasts.contains { toast in toast.key == ToastKey.translationUnavailable })
     }
 
     @Test("an unavailable status posts the red card with Retry")
@@ -64,10 +64,10 @@ struct AppModelToastWiringTests {
             .unavailable("Invalid API key. Check the key in Settings, then retry.", .permanent)
         )
 
-        let toast = model.toasts.toasts.first { $0.key == ToastKey.translationUnavailable }
+        let toast = model.toasts.toasts.first { toast in toast.key == ToastKey.translationUnavailable }
         #expect(toast?.style == .redPersistent)
         #expect(toast?.action?.label == "Retry")
-        #expect(!model.toasts.toasts.contains { $0.key == ToastKey.translationFallback })
+        #expect(!model.toasts.toasts.contains { toast in toast.key == ToastKey.translationFallback })
     }
 
     // MARK: - Dismiss on exit
@@ -101,10 +101,10 @@ struct AppModelToastWiringTests {
 
         model.handleTranslationStatus(.ready)
 
-        let toast = model.toasts.toasts.first { $0.key == ToastKey.translationFallback }
+        let toast = model.toasts.toasts.first { toast in toast.key == ToastKey.translationFallback }
         #expect(toast?.style == .yellowPersistent)
         #expect(toast?.action?.label == "Retry")
-        #expect(!model.toasts.toasts.contains { $0.key == ToastKey.translationUnavailable })
+        #expect(!model.toasts.toasts.contains { toast in toast.key == ToastKey.translationUnavailable })
     }
 
     /// The fallback card survives a mid-session status move: posting
@@ -120,7 +120,7 @@ struct AppModelToastWiringTests {
 
         model.handleTranslationStatus(.translating)
 
-        #expect(!model.toasts.toasts.contains { $0.key == ToastKey.translationUnavailable })
-        #expect(model.toasts.toasts.contains { $0.key == ToastKey.translationFallback })
+        #expect(!model.toasts.toasts.contains { toast in toast.key == ToastKey.translationUnavailable })
+        #expect(model.toasts.toasts.contains { toast in toast.key == ToastKey.translationFallback })
     }
 }

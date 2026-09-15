@@ -195,7 +195,7 @@ struct CrispASREngineLibraryTests {
         library.transcribeReplies = ["キャップ。"]
         let engine = try makePreparedEngine(library)
         let errors = ErrorRecorder()
-        engine.onEngineError = { errors.record($0) }
+        engine.onEngineError = { message in errors.record(message) }
 
         engine.push(loudSecond) // VAD #1 → immediate degrade
         #expect(await pollUntilOffMain { !errors.all.isEmpty }, "the VAD degrade was reported")
@@ -214,7 +214,7 @@ struct CrispASREngineLibraryTests {
         library.vadReplies = [.failure(-1)]
         let engine = try makePreparedEngine(library)
         let errors = ErrorRecorder()
-        engine.onEngineError = { errors.record($0) }
+        engine.onEngineError = { message in errors.record(message) }
 
         for failure in 1 ... 3 {
             engine.push(loudSecond)
@@ -256,7 +256,7 @@ struct CrispASREngineLibraryTests {
         library.vadReplies = [.failure(-3)]
         let engine = try makePreparedEngine(library)
         let errors = ErrorRecorder()
-        engine.onEngineError = { errors.record($0) }
+        engine.onEngineError = { message in errors.record(message) }
 
         engine.push(silentSecond) // VAD #1 → degrade; utterance stays silent
         #expect(await pollUntilOffMain { !errors.all.isEmpty }, "the VAD degrade was reported")
@@ -278,7 +278,7 @@ struct CrispASREngineLibraryTests {
         library.recordTranscribePcm = false
         let engine = try makePreparedEngine(library)
         let errors = ErrorRecorder()
-        engine.onEngineError = { errors.record($0) }
+        engine.onEngineError = { message in errors.record(message) }
 
         engine.push(silentSecond) // VAD #1 → degrade (no decode: silent, short)
         #expect(await pollUntilOffMain { !errors.all.isEmpty }, "the VAD degrade was reported")
@@ -318,7 +318,7 @@ struct CrispASREngineLibraryTests {
         #expect(library.transcribeCalls[0].pcmCount == 2 * CrispASREngine.sampleRate)
         #expect(Array(library.transcribeCalls[0].pcm.prefix(16000)) == loudSecond)
         #expect(
-            library.transcribeCalls[0].pcm[16000...].allSatisfy { $0 == 0 },
+            library.transcribeCalls[0].pcm[16000...].allSatisfy { sample in sample == 0 },
             "the 1 s window must be zero-padded to the 2 s conv floor"
         )
 

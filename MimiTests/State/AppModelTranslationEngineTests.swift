@@ -147,7 +147,7 @@ struct AppModelTranslationEngineTests {
         )
         // The degraded card carries the Retry affordance; it must survive the
         // fresh Apple run's `.ready` while the latch is active.
-        let fallbackToast = model.toasts.toasts.first { $0.key == ToastKey.translationFallback }
+        let fallbackToast = model.toasts.toasts.first { toast in toast.key == ToastKey.translationFallback }
         #expect(fallbackToast?.style == .yellowPersistent)
         #expect(fallbackToast?.action?.label == "Retry")
 
@@ -325,7 +325,7 @@ struct AppModelTranslationEngineTests {
         #expect(model.activeTranslationEngine == .external)
         #expect(model.activeExternalProvider == .google)
         #expect(
-            !model.toasts.toasts.contains { $0.key == ToastKey.translationFallback },
+            !model.toasts.toasts.contains { toast in toast.key == ToastKey.translationFallback },
             "the fallback card is dismissed"
         )
 

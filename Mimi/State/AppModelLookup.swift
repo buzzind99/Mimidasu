@@ -107,10 +107,10 @@ extension AppModel {
     /// background task. UI state is only ever touched back on the main actor.
     func handleLookupTap(_ token: LookupToken, source: SelectedLookup.Source) {
         let segments = ReadingAnnotator.segments(for: token.sentenceText)?
-            .map { LookupSegment(
-                surface: $0.surface,
-                lemma: $0.lemma,
-                reading: Self.lookupReading(for: $0)
+            .map { segment in LookupSegment(
+                surface: segment.surface,
+                lemma: segment.lemma,
+                reading: Self.lookupReading(for: segment)
             ) }
         lookupGeneration &+= 1
         let generation = lookupGeneration
@@ -188,7 +188,9 @@ extension AppModel {
             // A resolved tap pins when anything resolved at all — a found
             // hit, or a not-found with related fallback hits; a bare miss
             // (nothing resolved) posts the amber warning pill instead.
-            if let content = resolved.flatMap({ Self.lookupContent(for: $0, surface: surface) }) {
+            if let content = resolved.flatMap({ resolution in
+                Self.lookupContent(for: resolution, surface: surface)
+            }) {
                 presentLookup(content: content, source: source)
             } else {
                 notices.post(
@@ -254,7 +256,7 @@ extension AppModel {
     func selectAlsoPill(_ result: LookupResult) {
         guard let pinned = pinnedLookup else { return }
         let source = selectedLookup?.source
-        let others = pinned.content.allResults.filter { $0 != result }
+        let others = pinned.content.allResults.filter { candidate in candidate != result }
         let content = LookupContent.found(
             result: result, also: others, origin: .tappedSurface
         )
@@ -268,9 +270,9 @@ extension AppModel {
     /// pin has no entries; the pager is inert.
     func stepLookupEntry(to index: Int) {
         let content = selectedLookup?.content ?? pinnedLookup?.content
-        guard let count = content?.displayResult?.entries.count, count > 0
+        guard let entries = content?.displayResult?.entries, !entries.isEmpty
         else { return }
-        let clamped = min(max(index, 0), count - 1)
+        let clamped = min(max(index, 0), entries.count - 1)
         selectedLookup?.entryIndex = clamped
         pinnedLookup?.entryIndex = clamped
     }

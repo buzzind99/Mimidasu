@@ -127,8 +127,8 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
 
         // Whole-system audio: one display-scoped filter with Mimi's own app
         // removed; the stream config excludes this process's audio as well.
-        let apps = content.applications.filter {
-            $0.bundleIdentifier != Bundle.main.bundleIdentifier
+        let apps = content.applications.filter { app in
+            app.bundleIdentifier != Bundle.main.bundleIdentifier
         }
         let filter = SCContentFilter(
             display: display, excludingApplications: apps, exceptingWindows: []
@@ -499,12 +499,12 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
             outBuffer.frameLength = 0
             var conversionError: NSError?
             status = converter.convert(to: outBuffer, error: &conversionError) { _, inputStatus in
-                if fed.withLock({ $0 }) {
+                if fed.withLock({ fed in fed }) {
                     inputStatus.pointee = .noDataNow
                     return nil
                 }
                 inputStatus.pointee = .haveData
-                fed.withLock { $0 = true }
+                fed.withLock { fed in fed = true }
                 return inputBuffer
             }
             guard status != .error, conversionError == nil,

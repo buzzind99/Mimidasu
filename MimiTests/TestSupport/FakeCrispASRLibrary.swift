@@ -85,7 +85,7 @@ final class FakeCrispASRLibrary: CrispASRLibraryAPI, @unchecked Sendable {
     func transcribeText(
         session: OpaquePointer?, pcm: borrowing Span<Float>, languageCode: String
     ) -> String? {
-        let pcmCopy = pcm.withUnsafeBufferPointer { Array($0) }
+        let pcmCopy = pcm.withUnsafeBufferPointer { buffer in Array(buffer) }
         if let hold = transcribeHoldSemaphore {
             lock.withLock { transcribeEntered = true }
             hold.wait()
@@ -106,7 +106,7 @@ final class FakeCrispASRLibrary: CrispASRLibraryAPI, @unchecked Sendable {
         pcm: borrowing Span<Float>,
         parameters: CrispASRVADParameters
     ) -> (count: Int32, spans: UnsafeMutablePointer<Float>?)? {
-        lock.withLock { vadCalls.append(pcm.withUnsafeBufferPointer { Array($0) }) }
+        lock.withLock { vadCalls.append(pcm.withUnsafeBufferPointer { buffer in Array(buffer) }) }
         if let hold = vadHoldSemaphore {
             lock.withLock { vadEntered = true }
             hold.wait()

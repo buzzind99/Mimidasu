@@ -80,7 +80,7 @@ struct AppearanceSetting: DynamicProperty {
 
     var projectedValue: AppearanceProjection {
         AppearanceProjection(
-            binding: Binding(get: { stored }, set: { stored = $0 }),
+            binding: Binding(get: { stored }, set: { newValue in stored = newValue }),
             resolvedColorScheme: resolvedColorScheme
         )
     }

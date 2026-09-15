@@ -231,7 +231,7 @@ struct OpenRouterEngineTests {
         let script = Script(handler: Self.okContent("   "))
         let log = ProgressLog()
         var engine = makeEngine(script: script)
-        engine.onRetry = { log.append($0) }
+        engine.onRetry = { progress in log.append(progress) }
 
         let thrown = await #expect(throws: TranslationEngineError.self) {
             try await engine.translate(["こんにちは"])
@@ -254,7 +254,7 @@ struct OpenRouterEngineTests {
         })
         let log = ProgressLog()
         var engine = makeEngine(script: script)
-        engine.onRetry = { log.append($0) }
+        engine.onRetry = { progress in log.append(progress) }
 
         let translations = try await engine.translate(["こんにちは"])
 

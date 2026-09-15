@@ -251,7 +251,7 @@ struct DictionaryEngineTests {
         let tokens = try #require(engine.tokenize(anyText))
 
         #expect(tokens == payloadTokens)
-        #expect(tokens.allSatisfy { $0.base == nil && $0.pos == nil })
+        #expect(tokens.allSatisfy { token in token.base == nil && token.pos == nil })
     }
 
     @Test("decodes an empty payload to no tokens")
@@ -336,7 +336,7 @@ struct DictionaryEngineLiveTests {
         let tokens = try #require(engine.tokenize("食べました"))
 
         #expect(
-            tokens.map { [$0.text, $0.reading] }
+            tokens.map { token in [token.text, token.reading] }
                 == [["食べ", "たべ"], ["まし", "まし"], ["た", "た"]]
         )
     }
@@ -348,7 +348,7 @@ struct DictionaryEngineLiveTests {
         let tokens = try #require(engine.tokenize("食べました"))
 
         #expect(
-            tokens.map { [$0.text, $0.base, $0.pos] }
+            tokens.map { token in [token.text, token.base, token.pos] }
                 == [["食べ", "食べる", "動詞"], ["まし", "ます", "助動詞"], ["た", "た", "助動詞"]]
         )
     }
@@ -359,7 +359,7 @@ struct DictionaryEngineLiveTests {
 
         let tokens = try #require(engine.tokenize("一回"))
 
-        #expect(tokens.map { [$0.text, $0.reading] } == [["一", "いち"], ["回", "かい"]])
+        #expect(tokens.map { token in [token.text, token.reading] } == [["一", "いち"], ["回", "かい"]])
     }
 
     @Test("spans the rare ideograph as one original-input scalar, unread")

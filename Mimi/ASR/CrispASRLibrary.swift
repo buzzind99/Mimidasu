@@ -164,8 +164,10 @@ final class CrispASRLibrary {
             }
         #endif
         var candidates: [String?] = [
-            dylibDirectory.map { $0 + "/\(vadModelFile)" },
-            Bundle.main.privateFrameworksPath.map { $0 + "/crispasr/\(vadModelFile)" }
+            dylibDirectory.map { directory in directory + "/\(vadModelFile)" },
+            Bundle.main.privateFrameworksPath.map { frameworksPath in
+                frameworksPath + "/crispasr/\(vadModelFile)"
+            }
         ]
         #if DEBUG
             candidates.append(FileManager.default.currentDirectoryPath
@@ -316,7 +318,8 @@ final class CrispASRLibrary {
         var info = Dl_info()
         let addr = UnsafeRawPointer(unsafeBitCast(fnSetGpuBackend, to: UnsafeRawPointer.self))
         if dladdr(addr, &info) != 0, let cPath = info.dli_fname {
-            dylibDirectory = (String(cString: cPath) as NSString).deletingLastPathComponent
+            dylibDirectory = URL(fileURLWithPath: String(cString: cPath))
+                .deletingLastPathComponent().path
         }
     }
 }

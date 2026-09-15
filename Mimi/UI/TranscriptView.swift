@@ -60,13 +60,13 @@ struct TranscriptView: View {
                         annotation: readingAnnotation,
                         scale: uiScale,
                         cursorMode: cursorMode,
-                        onCopy: { model.copySnippet($0) },
-                        onLookup: {
+                        onCopy: { text in model.copySnippet(text) },
+                        onLookup: { token in
                             model.handleLookupTap(
-                                $0,
+                                token,
                                 source: .transcript(
                                     sentenceIndex: entry.sentence.index,
-                                    tokenIndex: $0.tokenIndex
+                                    tokenIndex: token.tokenIndex
                                 )
                             )
                         },
@@ -170,8 +170,8 @@ struct TranscriptView: View {
         )
         return RubyTextView.LookupPopover(
             isPresented: model.lookupPopoverBinding(for: source),
-            content: model.selectedLookup?.popoverItem(for: source).map {
-                DictionaryPopoverView(model: model, selected: $0)
+            content: model.selectedLookup?.popoverItem(for: source).map { item in
+                DictionaryPopoverView(model: model, selected: item)
             }
         )
     }
@@ -302,7 +302,7 @@ enum TranscriptScrollPin {
         pinned: Bool, snapshot: Snapshot?
     ) -> (up: Bool, down: Bool) {
         (
-            up: snapshot.map { $0.distanceToTop > pinTolerance } ?? false,
+            up: snapshot.map { snap in snap.distanceToTop > pinTolerance } ?? false,
             down: !pinned
         )
     }

@@ -45,7 +45,7 @@ extension DictionaryStoreTests {
 
     @Test("returns the default versioned location when it exists")
     func resolvesJMDictDefaultLocation() {
-        let defaultExists: (URL) -> Bool = { $0.pathComponents.contains("dictionaries") }
+        let defaultExists: (URL) -> Bool = { url in url.pathComponents.contains("dictionaries") }
 
         let url = DictionaryStore.resolveJMDict(environment: [:], fileExists: defaultExists)
 
@@ -55,7 +55,7 @@ extension DictionaryStoreTests {
     @Test("prefers an existing MIMI_JMDICT override")
     func jmDictEnvOverrideWins() {
         let overridePath = "/custom/jmdict.sqlite"
-        let overrideExists: (URL) -> Bool = { $0.path == overridePath }
+        let overrideExists: (URL) -> Bool = { url in url.path == overridePath }
 
         let url = DictionaryStore.resolveJMDict(
             environment: ["MIMI_JMDICT": overridePath], fileExists: overrideExists
@@ -67,7 +67,7 @@ extension DictionaryStoreTests {
     @Test("falls through to the default location when the MIMI_JMDICT override is missing")
     func jmDictMissingEnvOverrideFallsThrough() {
         let missingOverride = "/missing/jmdict.sqlite"
-        let defaultExists: (URL) -> Bool = { $0.pathComponents.contains("dictionaries") }
+        let defaultExists: (URL) -> Bool = { url in url.pathComponents.contains("dictionaries") }
 
         let url = DictionaryStore.resolveJMDict(
             environment: ["MIMI_JMDICT": missingOverride], fileExists: defaultExists

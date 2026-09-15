@@ -92,12 +92,12 @@ enum ModelVerifier {
                   let modified = attrs[.modificationDate] as? Date
             else { return false }
             let key = CacheKey(path: file.path, size: size, modified: modified)
-            if state.withLock({ $0.hot.contains(key) }) {
+            if state.withLock({ state in state.hot.contains(key) }) {
                 return true
             }
             if contains(key) {
                 // Persisted hit: promote to the hot set.
-                state.withLock { _ = $0.hot.insert(key) }
+                state.withLock { state in _ = state.hot.insert(key) }
                 return true
             }
             do {
@@ -105,7 +105,7 @@ enum ModelVerifier {
             } catch {
                 return false
             }
-            state.withLock { _ = $0.hot.insert(key) }
+            state.withLock { state in _ = state.hot.insert(key) }
             record(key)
             return true
         }
@@ -168,7 +168,7 @@ enum ModelVerifier {
                 message: "model file could not be read for verification: \(error.localizedDescription)"
             )
         }
-        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        let hex = digest.map { byte in String(format: "%02x", byte) }.joined()
         if hex != expectedSHA256(for: choice).lowercased() {
             throw VerificationError(
                 message: "model file does not match Mimi's pinned checksum — "

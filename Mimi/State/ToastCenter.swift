@@ -89,7 +89,7 @@ final class ToastCenter {
         key: String, style: Style, title: String, body: String, action: Action? = nil
     ) {
         let toast: Toast
-        if let at = toasts.firstIndex(where: { $0.key == key }) {
+        if let at = toasts.firstIndex(where: { toast in toast.key == key }) {
             toast = Toast(
                 id: toasts[at].id, key: key, style: style,
                 title: title, body: body, action: action
@@ -111,7 +111,7 @@ final class ToastCenter {
     /// Removes the card with the given key (condition cleared).
     func dismiss(key: String) {
         timers.removeValue(forKey: key)?()
-        toasts.removeAll { $0.key == key }
+        toasts.removeAll { toast in toast.key == key }
     }
 
     /// Clears the whole stack (session stop/teardown).
@@ -137,7 +137,7 @@ final class ToastCenter {
     }
 
     private func dismiss(id: UUID) {
-        guard let toast = toasts.first(where: { $0.id == id }) else { return }
+        guard let toast = toasts.first(where: { candidate in candidate.id == id }) else { return }
         dismiss(key: toast.key)
     }
 }

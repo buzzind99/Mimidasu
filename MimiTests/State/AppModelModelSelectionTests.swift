@@ -41,7 +41,7 @@ struct AppModelModelSelectionTests {
         let liteURL = URL(fileURLWithPath: "/tmp/lite.gguf")
         let fullURL = URL(fileURLWithPath: "/tmp/full.gguf")
 
-        await model.refreshModelAvailability(resolve: { $0 == .full ? fullURL : liteURL })
+        await model.refreshModelAvailability(resolve: { choice in choice == .full ? fullURL : liteURL })
 
         #expect(model.modelAvailability == [.lite: liteURL, .full: fullURL])
         #expect(model.modelURL == liteURL, "the active choice's URL becomes modelURL")

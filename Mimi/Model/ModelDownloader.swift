@@ -46,8 +46,8 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
     init(
         choice: ASRModelChoice = .lite,
         destination: URL? = nil,
-        makeSession: @escaping (URLSessionDownloadDelegate) -> URLSession = {
-            URLSession(configuration: .default, delegate: $0, delegateQueue: nil)
+        makeSession: @escaping (URLSessionDownloadDelegate) -> URLSession = { delegate in
+            URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
         },
         makeTask: ((URLSession) -> URLSessionDownloadTask?)? = nil
     ) {
@@ -147,8 +147,9 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
             let now = Date()
             let enoughDelta = progress - lastPublishedProgress >= Self.progressDeltaThreshold
             let enoughTime =
-                lastPublishDate.map { now.timeIntervalSince($0) >= Self.progressIntervalThreshold }
-                    ?? true
+                lastPublishDate.map { date in
+                    now.timeIntervalSince(date) >= Self.progressIntervalThreshold
+                } ?? true
             guard enoughDelta || enoughTime else { return }
             lastPublishedProgress = progress
             lastPublishDate = now

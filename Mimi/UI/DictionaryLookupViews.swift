@@ -121,7 +121,7 @@ struct DictionaryEntryContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             topSection
-                .onHeightChange { onTopSectionHeightChange($0) }
+                .onHeightChange { height in onTopSectionHeightChange(height) }
             sensesSection
             alsoSection
         }
@@ -303,7 +303,7 @@ struct DictionaryEntryContentView: View {
     @ViewBuilder
     private var sensesSection: some View {
         let measuredRows = VStack(spacing: 0) { senseRows }
-            .onHeightChange { onSensesHeightChange($0) }
+            .onHeightChange { height in onSensesHeightChange(height) }
         if let viewport = sensesViewportHeight {
             ScrollView(.vertical) {
                 measuredRows
@@ -362,7 +362,7 @@ struct DictionaryEntryContentView: View {
                 label: "also:", results: also, onSelect: onSelectAlso
             )
         }
-        .onHeightChange { onAlsoHeightChange($0) }
+        .onHeightChange { height in onAlsoHeightChange(height) }
     }
 }
 
@@ -444,7 +444,7 @@ extension View {
     /// Height probe used by the dictionary card's scroll sizing: reports
     /// the view's own height through `onGeometryChange`.
     func onHeightChange(_ action: @escaping (CGFloat) -> Void) -> some View {
-        onGeometryChange(for: CGFloat.self, of: { $0.size.height }, action: action)
+        onGeometryChange(for: CGFloat.self, of: \.size.height, action: action)
     }
 }
 

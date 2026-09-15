@@ -190,19 +190,19 @@ enum JMDictExpansion {
         // away on that neighbor. The deep fallback never evicts the tapped
         // surface's own splits.
         var emitted = Set(candidates.map(\.candidate.text))
-        let tappedSplits = splitCandidates(for: tapped.surface).filter {
-            !emitted.contains($0.text)
+        let tappedSplits = splitCandidates(for: tapped.surface).filter { split in
+            !emitted.contains(split.text)
         }
-        candidates.append(contentsOf: tappedSplits.map {
-            ExpansionCandidate(candidate: $0, origin: .split)
+        candidates.append(contentsOf: tappedSplits.map { split in
+            ExpansionCandidate(candidate: split, origin: .split)
         })
         emitted.formUnion(tappedSplits.map(\.text))
         let crossingSplits = splitCandidates(
             for: members.map(\.surface).joined(),
             crossing: tapped.surface.unicodeScalars.count
-        ).filter { !emitted.contains($0.text) }
-        candidates.append(contentsOf: crossingSplits.map {
-            ExpansionCandidate(candidate: $0, origin: .split)
+        ).filter { split in !emitted.contains(split.text) }
+        candidates.append(contentsOf: crossingSplits.map { split in
+            ExpansionCandidate(candidate: split, origin: .split)
         })
         return Array(candidates.prefix(maxCandidates))
     }
@@ -293,7 +293,9 @@ enum JMDictExpansion {
         } else {
             0
         }
-        var cursor = base + segments[...index].reduce(0) { $0 + $1.surface.count }
+        var cursor = base + segments[...index].reduce(0) { total, segment in
+            total + segment.surface.count
+        }
 
         for position in segments.indices.dropFirst(index + 1) {
             let surface = segments[position].surface
@@ -302,7 +304,7 @@ enum JMDictExpansion {
             }
             if ReadingAnnotator.isNumeralRun(surface)
                 || particleOverrides.contains(surface)
-                || !surface.contains(where: { $0.isLetter || $0.isNumber })
+                || !surface.contains(where: { scalar in scalar.isLetter || scalar.isNumber })
             {
                 break
             }

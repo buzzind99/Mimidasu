@@ -31,7 +31,9 @@ struct TransientRetryLadder: Sendable {
         retries: Int = 2,
         backoffs: [Duration] = [.milliseconds(500), .seconds(2)],
         retriesBadResponse: Bool = false,
-        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { delay in
+            try await Task.sleep(for: delay)
+        }
     ) {
         self.retries = retries
         self.backoffs = backoffs

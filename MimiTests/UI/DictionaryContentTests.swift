@@ -104,7 +104,7 @@ struct DictionaryContentTests {
 
     @Test("senses cap at five with a hidden-count footer")
     func senseCap() {
-        let senses = (0 ..< 7).map { sense(glosses: ["gloss \($0)"]) }
+        let senses = (0 ..< 7).map { index in sense(glosses: ["gloss \(index)"]) }
 
         let truncated = DictionaryContent.truncated(senses, limit: DictionaryContent.maxSenses)
 
@@ -134,7 +134,7 @@ struct DictionaryContentTests {
 
     @Test("also pills cap at two")
     func alsoCap() {
-        let also = (0 ..< 3).map { result("word\($0)") }
+        let also = (0 ..< 3).map { index in result("word\(index)") }
 
         #expect(Array(DictionaryContent.truncatedAlso(also)).map(\.matched) == ["word0", "word1"])
         #expect(DictionaryContent.truncatedAlso([]).isEmpty)

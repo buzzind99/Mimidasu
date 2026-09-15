@@ -9,7 +9,7 @@ enum HUDHistory {
     /// otherwise the newest entry. Nil when `entries` is empty.
     static func displayedIndex(in entries: [SessionEntry], pinned: Int?) -> Int? {
         guard let newest = entries.last?.sentence.index else { return nil }
-        if let pinned, entries.contains(where: { $0.sentence.index == pinned }) {
+        if let pinned, entries.contains(where: { entry in entry.sentence.index == pinned }) {
             return pinned
         }
         return newest
@@ -22,7 +22,7 @@ enum HUDHistory {
     static func cycle(entries: [SessionEntry], pinned: Int?, step: Int) -> Int? {
         guard let newest = entries.last?.sentence.index else { return pinned }
         let current = pinned ?? newest
-        guard let at = entries.firstIndex(where: { $0.sentence.index == current }) else {
+        guard let at = entries.firstIndex(where: { entry in entry.sentence.index == current }) else {
             return pinned
         }
         let next = at + step

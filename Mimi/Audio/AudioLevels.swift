@@ -5,7 +5,7 @@ enum AudioLevels {
     /// ingress log.
     static func rms(of samples: [Float]) -> Float {
         guard !samples.isEmpty else { return 0 }
-        let energy = samples.reduce(0) { $0 + $1 * $1 }
+        let energy = samples.reduce(0) { partial, sample in partial + sample * sample }
         return (energy / Float(samples.count)).squareRoot()
     }
 }

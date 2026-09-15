@@ -52,7 +52,7 @@ struct SentenceBufferTests {
     private func makeSUT() -> (buffer: SentenceBuffer, sink: SentenceSink) {
         let sink = SentenceSink()
         let buffer = SentenceBuffer()
-        buffer.onSentence = { sink.receive($0) }
+        buffer.onSentence = { sentence in sink.receive(sentence) }
         return (buffer, sink)
     }
 
@@ -121,7 +121,7 @@ struct SentenceBufferTests {
 
         buffer.append(finalText: symbolOnlyFinal, startSample: 0, endSample: oneSecondInSamples)
 
-        #expect(sink.sentences.count == 0)
+        #expect(sink.sentences.isEmpty)
     }
 
     @Test("a symbol-only final after content stays as trailing punctuation")
@@ -154,7 +154,7 @@ struct SentenceBufferTests {
 
         buffer.tick(now: .now)
 
-        #expect(sink.sentences.count == 0)
+        #expect(sink.sentences.isEmpty)
     }
 
     @Test("tick with an empty buffer emits nothing")
@@ -163,7 +163,7 @@ struct SentenceBufferTests {
 
         buffer.tick(now: .now.advanced(by: .seconds(60)))
 
-        #expect(sink.sentences.count == 0)
+        #expect(sink.sentences.isEmpty)
     }
 
     // MARK: - Tier 3: length cap
@@ -229,7 +229,7 @@ struct SentenceBufferTests {
             finalText: "いいね", startSample: oneSecondInSamples, endSample: twoSecondsInSamples
         )
 
-        #expect(sink.sentences.count == 0)
+        #expect(sink.sentences.isEmpty)
 
         buffer.flush()
 
@@ -354,6 +354,6 @@ struct SentenceBufferTests {
 
         buffer.flush()
 
-        #expect(sink.sentences.count == 0)
+        #expect(sink.sentences.isEmpty)
     }
 }

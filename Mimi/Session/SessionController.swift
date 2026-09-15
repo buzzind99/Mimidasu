@@ -65,8 +65,8 @@ final class SessionController {
         latency: LatencyState,
         audioLevel: AudioLevelState = AudioLevelState(),
         translationQueue: TranslationQueue,
-        makeEngine: @escaping @Sendable (URL?, Bool) -> ASREngine? = {
-            ASREngineFactory.makeEngine(modelURL: $0, allowMock: $1)
+        makeEngine: @escaping @Sendable (URL?, Bool) -> ASREngine? = { modelURL, allowMock in
+            ASREngineFactory.makeEngine(modelURL: modelURL, allowMock: allowMock)
         },
         makeCapture: @escaping () -> any AudioCapturing = { SystemAudioCapture() },
         ensurePermission: @escaping () async -> Bool = {

@@ -38,7 +38,7 @@ struct TranslationQueueTests {
     /// guards the recording because `translate` runs off the main actor.
     private func makeEchoEngine(batchSize: Int = 16) -> MockTranslationEngine {
         MockTranslationEngine(preferredBatchSize: batchSize) { texts in
-            texts.map { "EN:\($0)" }
+            texts.map { text in "EN:\(text)" }
         }
     }
 
@@ -50,7 +50,7 @@ struct TranslationQueueTests {
         // Result-handler wiring is exercised by the delivery tests below.
         queue.setHandlers(
             result: { _, _ in },
-            status: { sink.receive(status: $0) }
+            status: { status in sink.receive(status: status) }
         )
 
         queue.resetForRetry()
@@ -65,7 +65,7 @@ struct TranslationQueueTests {
         let (queue, sink) = makeSUT()
         queue.setHandlers(
             result: { _, _ in },
-            status: { sink.receive(status: $0) }
+            status: { status in sink.receive(status: status) }
         )
 
         queue.resetForRetry()
@@ -109,7 +109,7 @@ struct TranslationQueueTests {
                     sink.receive(index: index, translation: translation)
                     delivered()
                 },
-                status: { sink.receive(status: $0) }
+                status: { status in sink.receive(status: status) }
             )
             let worker = Task { await queue.run(with: engine) }
             defer { worker.cancel() }
@@ -145,7 +145,7 @@ struct TranslationQueueTests {
                     sink.receive(index: index, translation: translation)
                     delivered()
                 },
-                status: { sink.receive(status: $0) }
+                status: { status in sink.receive(status: status) }
             )
             let worker = Task { await queue.run(with: engine) }
             defer { worker.cancel() }
@@ -184,7 +184,7 @@ struct TranslationQueueTests {
                     sink.receive(index: index, translation: translation)
                     delivered()
                 },
-                status: { sink.receive(status: $0) }
+                status: { status in sink.receive(status: status) }
             )
             let worker = Task { await queue.run(with: engine) }
             defer { worker.cancel() }
@@ -217,7 +217,7 @@ struct TranslationQueueTests {
             result: { index, translation in
                 sink.receive(index: index, translation: translation)
             },
-            status: { sink.receive(status: $0) }
+            status: { status in sink.receive(status: status) }
         )
 
         queue.enqueue(makeSentence(index: 0, text: text))
@@ -242,7 +242,7 @@ struct TranslationQueueTests {
                     sink.receive(index: index, translation: translation)
                     delivered()
                 },
-                status: { sink.receive(status: $0) }
+                status: { status in sink.receive(status: status) }
             )
             let worker = Task { await queue.run(with: engine) }
             defer { worker.cancel() }
@@ -272,7 +272,7 @@ struct TranslationQueueTests {
                     sink.receive(index: index, translation: translation)
                     delivered()
                 },
-                status: { sink.receive(status: $0) }
+                status: { status in sink.receive(status: status) }
             )
             let worker = Task { await queue.run(with: engine) }
             defer { worker.cancel() }
@@ -300,7 +300,7 @@ struct TranslationQueueTests {
             result: { index, translation in
                 sink.receive(index: index, translation: translation)
             },
-            status: { sink.receive(status: $0) }
+            status: { status in sink.receive(status: status) }
         )
 
         queue.enqueue(makeSentence(index: 0, text: sentenceText))

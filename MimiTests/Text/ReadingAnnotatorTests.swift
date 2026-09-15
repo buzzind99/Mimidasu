@@ -64,14 +64,14 @@ struct ReadingAnnotatorGuardTests {
         let calls = Mutex(0)
         let canned = tokens(["桜"], readings: ["さくら"])
         let annotator = ReadingAnnotator(tokenize: { _ in
-            calls.withLock { $0 += 1 }
+            calls.withLock { count in count += 1 }
             return canned
         })
 
         let first = try #require(annotator.segments(for: "桜"))
         let second = try #require(annotator.segments(for: "桜"))
 
-        #expect(calls.withLock { $0 } == 1)
+        #expect(calls.withLock { count in count } == 1)
         #expect(first.first === second.first)
     }
 
@@ -80,14 +80,14 @@ struct ReadingAnnotatorGuardTests {
         let calls = Mutex(0)
         let canned = tokens(["桜"], readings: ["さくら"])
         let annotator = ReadingAnnotator(tokenize: { _ in
-            calls.withLock { $0 += 1 }
+            calls.withLock { count in count += 1 }
             return canned
         })
 
         let first = try #require(annotator.segments(for: "桜", caching: false))
         let second = try #require(annotator.segments(for: "桜", caching: false))
 
-        #expect(calls.withLock { $0 } == 2)
+        #expect(calls.withLock { count in count } == 2)
         #expect(first.first !== second.first)
     }
 
@@ -451,7 +451,7 @@ struct ReadingAnnotatorFallbackTests {
         let annotator = makeAnnotator(
             [token("桜", start: 0, reading: "さくら")],
             readingFallback: { _ in
-                consulted.withLock { $0 = true }
+                consulted.withLock { flag in flag = true }
                 return nil
             }
         )
@@ -459,7 +459,7 @@ struct ReadingAnnotatorFallbackTests {
         let segments = try #require(annotator.segments(for: "桜"))
 
         #expect(describe(segments) == [["桜", "sakura", "さくら"]])
-        #expect(!consulted.withLock { $0 })
+        #expect(!consulted.withLock { flag in flag })
     }
 
     @Test("kana-only tokens without a reading read themselves, never the fallback")
@@ -468,7 +468,7 @@ struct ReadingAnnotatorFallbackTests {
         let annotator = makeAnnotator(
             [token("かな", start: 0)],
             readingFallback: { _ in
-                consulted.withLock { $0 = true }
+                consulted.withLock { flag in flag = true }
                 return "ゆき"
             }
         )
@@ -476,6 +476,6 @@ struct ReadingAnnotatorFallbackTests {
         let segments = try #require(annotator.segments(for: "かな"))
 
         #expect(describe(segments) == [["かな", "kana", nil]])
-        #expect(!consulted.withLock { $0 })
+        #expect(!consulted.withLock { flag in flag })
     }
 }

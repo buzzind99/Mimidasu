@@ -384,7 +384,7 @@ struct SessionControllerTests {
     func captureErrorsSurface() async throws {
         let sut = makeSUT()
         var messages: [String] = []
-        sut.controller.onCaptureError = { messages.append($0) }
+        sut.controller.onCaptureError = { message in messages.append(message) }
         _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
 
         sut.capture.onIOError?(.streamSetupFailed(captureFailureDetail))
@@ -397,7 +397,7 @@ struct SessionControllerTests {
     func engineErrorsSurface() async throws {
         let sut = makeSUT()
         var messages: [String] = []
-        sut.controller.onEngineError = { messages.append($0) }
+        sut.controller.onEngineError = { message in messages.append(message) }
         _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
 
         sut.engine.onEngineError?(engineFailureMessage)
@@ -432,7 +432,7 @@ struct SessionControllerTests {
             )
         ])
         var sentences: [Sentence] = []
-        sut.controller.onSentence = { sentences.append($0) }
+        sut.controller.onSentence = { sentence in sentences.append(sentence) }
         _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
         sut.controller.startTimers()
         let emitted = await pumpTimers(until: !sentences.isEmpty)
@@ -457,7 +457,7 @@ struct SessionControllerTests {
             )
         ])
         var sentences: [Sentence] = []
-        sut.controller.onSentence = { sentences.append($0) }
+        sut.controller.onSentence = { sentence in sentences.append(sentence) }
         _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
 
         await sut.controller.stop()

@@ -92,7 +92,7 @@ struct HUDView: View {
     /// Translated entries only; finalized-but-untranslated sentences never
     /// enter the cycle (the view doesn't move until their translation lands).
     private var translatedEntries: [SessionEntry] {
-        model.entries.filter { $0.joinedTranslations != nil }
+        model.entries.filter { entry in entry.joinedTranslations != nil }
     }
 
     private var completedSection: some View {
@@ -120,7 +120,7 @@ struct HUDView: View {
         guard let index = HUDHistory.displayedIndex(in: entries, pinned: model.hudPinnedIndex) else {
             return entries[entries.count - 1]
         }
-        return entries.last(where: { $0.sentence.index == index })
+        return entries.last(where: { entry in entry.sentence.index == index })
             ?? entries[entries.count - 1]
     }
 
@@ -161,7 +161,7 @@ struct HUDView: View {
             furiganaFont: .system(size: 11 * uiScale.factor, design: .monospaced),
             annotationColor: Theme.hudAnnotation,
             cursorMode: cursorMode,
-            onCopy: { model.copySnippet($0) }
+            onCopy: { text in model.copySnippet(text) }
         )
         .foregroundStyle(.white)
     }

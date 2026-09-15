@@ -30,7 +30,7 @@ final class JMDictLookup: @unchecked Sendable {
     static var defaultDatabaseURL: URL? {
         defaultDatabaseURL(
             destination: DictionaryStore.defaultDestinationDirectory,
-            fileExists: { FileManager.default.fileExists(atPath: $0.path) }
+            fileExists: { url in FileManager.default.fileExists(atPath: url.path) }
         )
     }
 
@@ -76,9 +76,9 @@ final class JMDictLookup: @unchecked Sendable {
     /// entry treats every candidate as the tapped word itself, so its
     /// outcome's `displayOrigin` is always `.tappedSurface`.
     func lookup(_ candidates: [LookupCandidate]) throws -> LookupOutcome? {
-        guard case let .found(outcome) = try lookup(candidates.map { ExpansionCandidate(
-            candidate: $0, origin: .tappedSurface
-        ) }) else { return nil }
+        guard case let .found(outcome) = try lookup(candidates.map { candidate in
+            ExpansionCandidate(candidate: candidate, origin: .tappedSurface)
+        }) else { return nil }
         return outcome
     }
 
@@ -135,13 +135,10 @@ final class JMDictLookup: @unchecked Sendable {
     /// expansion order (longest-first joins, then splits), so equal lengths
     /// keep that order.
     private static func longestFirst(_ results: [LookupResult]) -> [LookupResult] {
-        results.enumerated().sorted { lhs, rhs in
-            if lhs.element.matched.count != rhs.element.matched.count {
-                return lhs.element.matched.count > rhs.element.matched.count
-            }
-            return lhs.offset < rhs.offset
-        }
-        .map(\.element)
+        results.enumerated().sorted(using: [
+            KeyPathComparator(\.element.matched.count, order: .reverse),
+            KeyPathComparator(\.offset)
+        ]).map(\.element)
     }
 
     /// Releases the database handle. The instance stays closed permanently —
@@ -218,8 +215,8 @@ final class JMDictLookup: @unchecked Sendable {
                 let surface = ReadingAlignment.foldedKana(candidate.text)
                 let expected = candidate.reading.map(ReadingAlignment.foldedKana)
                 let ranked = entries.map { entry -> RankedEntry in
-                    let matchesSurface = (entry.keb ?? entry.reb).map {
-                        ReadingAlignment.foldedKana($0) == surface
+                    let matchesSurface = (entry.keb ?? entry.reb).map { writing in
+                        ReadingAlignment.foldedKana(writing) == surface
                     } ?? false
                     let matchesReading: Bool = if let expected, let reb = entry.reb {
                         ReadingAlignment.foldedKana(reb) == expected
@@ -229,17 +226,17 @@ final class JMDictLookup: @unchecked Sendable {
                     return RankedEntry(
                         surface: matchesSurface, reading: matchesReading, entry: entry
                     )
-                }.sorted {
-                    if $0.surface != $1.surface {
-                        return $0.surface
+                }.sorted { lhs, rhs in
+                    if lhs.surface != rhs.surface {
+                        return lhs.surface
                     }
-                    if $0.reading != $1.reading {
-                        return $0.reading
+                    if lhs.reading != rhs.reading {
+                        return lhs.reading
                     }
-                    if $0.entry.common != $1.entry.common {
-                        return $0.entry.common
+                    if lhs.entry.common != rhs.entry.common {
+                        return lhs.entry.common
                     }
-                    return $0.entry.entSeq < $1.entry.entSeq
+                    return lhs.entry.entSeq < rhs.entry.entSeq
                 }
                 return LookupResult(matched: candidate.text, entries: ranked.map(\.entry))
             }

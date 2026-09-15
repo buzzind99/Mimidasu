@@ -97,7 +97,7 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
     /// `sensevoice-small-q8_0.gguf`), so the guess follows the same naming
     /// the detector would resolve.
     static func fallbackBackend(modelPath: String) -> String {
-        let name = (modelPath as NSString).lastPathComponent.lowercased()
+        let name = URL(fileURLWithPath: modelPath).lastPathComponent.lowercased()
         return name.contains("funasr") ? "funasr" : "sensevoice"
     }
 
@@ -105,25 +105,20 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
     /// (`<sil>`, `/sil`, …, optionally pipe-wrapped). Stripped before the
     /// empty-text gates in `runDecode` so a silence-only decode emits no
     /// event instead of a tag literal.
-    static let nonSpeechTagRegex = try? NSRegularExpression(
-        pattern: #"(?:<\|?|</|/)(?:sil|noise|music|bar|unk|laugh|breath)\|?>?"#,
-        options: [.caseInsensitive]
-    )
+    ///
+    /// `nonisolated(unsafe)`: the SDK does not mark `Regex` `Sendable`, but it
+    /// is a value type with `let` internals, safe to share across threads.
+    nonisolated(unsafe) static let nonSpeechTag =
+        #/(?:<\|?|</|/)(?:sil|noise|music|bar|unk|laugh|breath)\|?>?/#.ignoresCase()
 
     /// Removes non-speech tags from a decode result, collapses whitespace,
     /// and joins the ASR's space-separated CJK tokens; "" when nothing spoken
     /// remains.
     static func sanitizeDecodeText(_ raw: String) -> String {
-        var text = raw
-        if let regex = nonSpeechTagRegex {
-            text = regex.stringByReplacingMatches(
-                in: text, options: [], range: NSRange(text.startIndex..., in: text),
-                withTemplate: " "
-            )
-        }
-        return droppingInterCJKWhitespace(
-            text
-                .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        droppingInterCJKWhitespace(
+            raw
+                .replacing(nonSpeechTag, with: " ")
+                .replacing(#/\s+/#, with: " ")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         )
     }

@@ -9,7 +9,7 @@ import Testing
 @Suite("JMDictExpansion potential unwrap")
 final class JMDictPotentialUnwrapTests {
     private func segments(_ pairs: (surface: String, lemma: String?)...) -> [LookupSegment] {
-        pairs.map { LookupSegment(surface: $0.surface, lemma: $0.lemma) }
+        pairs.map { pair in LookupSegment(surface: pair.surface, lemma: pair.lemma) }
     }
 
     @Test("a potential-form lemma gains the source-verb candidate behind it")

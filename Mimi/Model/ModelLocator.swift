@@ -38,11 +38,13 @@ enum ModelLocator {
     /// drive the bundled → downloaded → dev lookup.
     static func resolve(
         for choice: ASRModelChoice,
-        bundled: (ASRModelChoice) -> URL? = { ModelLocator.bundledURL(for: $0) },
-        downloaded: (ASRModelChoice) -> URL = { ModelLocator.downloadedURL(for: $0) },
-        dev: (ASRModelChoice) -> URL? = { ModelLocator.devCheckoutURL(for: $0) },
-        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
-        isVerified: (URL, ASRModelChoice) -> Bool = { ModelVerifier.isVerified($0, for: $1) }
+        bundled: (ASRModelChoice) -> URL? = { choice in ModelLocator.bundledURL(for: choice) },
+        downloaded: (ASRModelChoice) -> URL = { choice in ModelLocator.downloadedURL(for: choice) },
+        dev: (ASRModelChoice) -> URL? = { choice in ModelLocator.devCheckoutURL(for: choice) },
+        fileExists: (String) -> Bool = { path in FileManager.default.fileExists(atPath: path) },
+        isVerified: (URL, ASRModelChoice) -> Bool = { url, choice in
+            ModelVerifier.isVerified(url, for: choice)
+        }
     ) -> URL? {
         if let bundledURL = bundled(choice), isVerified(bundledURL, choice) {
             return bundledURL

@@ -98,7 +98,7 @@ extension ReadingAnnotator {
         _ token: DictionaryToken, surface: String, into pending: inout PendingNumber?
     ) {
         let ascii = surface.applyingTransform(.fullwidthToHalfwidth, reverse: false) ?? surface
-        if ascii.range(of: "^[0-9]+$", options: .regularExpression) != nil {
+        if ascii.contains(#/^[0-9]+$/#) {
             if var held = pending {
                 held.surface += held.gap
                 held.gap = ""
@@ -314,8 +314,8 @@ extension ReadingAnnotator {
     /// or auxiliaries (は, が, ました) and never fuse — they must keep their
     /// own segments so particle/function-word overrides still apply.
     private static func isCounterCandidate(_ surface: String) -> Bool {
-        surface.unicodeScalars.contains {
-            KanaClassification.isKanji($0) || KanaClassification.isKatakana($0)
+        surface.unicodeScalars.contains { scalar in
+            KanaClassification.isKanji(scalar) || KanaClassification.isKatakana(scalar)
         }
     }
 
@@ -345,7 +345,8 @@ extension ReadingAnnotator {
     /// 六 keeps its plain reading before 歳/等/千 (ろくさい/ろくとう/ろくせん):
     /// the fusion must not produce ろっさい.
     private static func rokuException(numberKana: String, counterKana: String) -> Bool {
-        numberKana == "ろく" && ["さい", "とう", "せん"].contains { counterKana.hasPrefix($0) }
+        numberKana == "ろく"
+            && ["さい", "とう", "せん"].contains { prefix in counterKana.hasPrefix(prefix) }
     }
 
     /// A ば行 onset keeps the plain reading for every numeral: 一番/六番/十番/
@@ -388,8 +389,6 @@ extension ReadingAnnotator {
     /// held back for counter fusion. Engine-fused compounds (一回, 十四日)
     /// contain non-numeral characters and never match.
     static func isNumeralRun(_ surface: String) -> Bool {
-        surface.range(
-            of: "^[0-9０-９一二三四五六七八九十百千万]+$", options: .regularExpression
-        ) != nil
+        surface.contains(#/^[0-9０-９一二三四五六七八九十百千万]+$/#)
     }
 }

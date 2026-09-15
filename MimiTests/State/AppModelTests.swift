@@ -193,7 +193,7 @@ struct AppModelTests {
         model.sessionController.onCaptureError?("stream died")
 
         #expect(model.phase == .sourceLost)
-        let toast = model.toasts.toasts.first { $0.key == ToastKey.captureLost }
+        let toast = model.toasts.toasts.first { toast in toast.key == ToastKey.captureLost }
         #expect(toast?.style == .redPersistent)
         #expect(toast?.body == "stream died")
         #expect(toast?.action?.label == "Restart capture")
@@ -208,8 +208,8 @@ struct AppModelTests {
 
         #expect(model.phase == .sourceLost)
         #expect(
-            model.toasts.toasts.contains {
-                $0.key == ToastKey.captureLost && $0.body == "stream died during start"
+            model.toasts.toasts.contains { toast in
+                toast.key == ToastKey.captureLost && toast.body == "stream died during start"
             }
         )
     }
@@ -256,7 +256,7 @@ struct AppModelTests {
 
         model.sessionController.onEngineError?("engine broke")
 
-        let toast = model.toasts.toasts.first { $0.key == ToastKey.asrWarning }
+        let toast = model.toasts.toasts.first { toast in toast.key == ToastKey.asrWarning }
         #expect(toast?.style == .yellowAuto)
         #expect(toast?.body == "engine broke")
     }

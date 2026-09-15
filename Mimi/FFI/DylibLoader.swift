@@ -22,18 +22,22 @@ enum DylibLoader {
             }
         #endif
         candidates.append(name)
-        candidates.append(Bundle.main.privateFrameworksPath.map { $0 + "/" + name })
+        candidates.append(Bundle.main.privateFrameworksPath.map { frameworksPath in
+            frameworksPath + "/" + name
+        })
+        let file = URL(fileURLWithPath: name)
         candidates.append(Bundle.main.path(
-            forResource: (name as NSString).deletingPathExtension,
-            ofType: (name as NSString).pathExtension
+            forResource: file.deletingPathExtension().path,
+            ofType: file.pathExtension
         ))
         candidates.append(Bundle.main.path(
-            forResource: (name as NSString).deletingPathExtension,
-            ofType: (name as NSString).pathExtension,
+            forResource: file.deletingPathExtension().path,
+            ofType: file.pathExtension,
             inDirectory: "Frameworks"
         ))
         #if DEBUG
-            let fallback = "local/frameworks" + (debugFallbackSubdirectory.map { "/" + $0 } ?? "")
+            let fallback = "local/frameworks"
+                + (debugFallbackSubdirectory.map { subdirectory in "/" + subdirectory } ?? "")
             candidates.append(FileManager.default.currentDirectoryPath + "/" + fallback + "/" + name)
         #endif
         return candidates
@@ -43,7 +47,9 @@ enum DylibLoader {
     /// recent `dlerror()` message (only meaningful for the default `open`).
     static func open(
         candidates: [String?],
-        open: (String) -> UnsafeMutableRawPointer? = { dlopen($0, RTLD_NOW | RTLD_LOCAL) }
+        open: (String) -> UnsafeMutableRawPointer? = { path in
+            dlopen(path, RTLD_NOW | RTLD_LOCAL)
+        }
     ) -> (handle: UnsafeMutableRawPointer?, lastError: String?) {
         var handle: UnsafeMutableRawPointer?
         var lastError: String?

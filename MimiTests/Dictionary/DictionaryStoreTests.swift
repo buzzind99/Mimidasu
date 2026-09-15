@@ -121,7 +121,7 @@ func makeJMDictSmokeDatabase(includeSmokeWord: Bool = true) throws -> URL {
     guard sqlite3_open_v2(
         url.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil
     ) == SQLITE_OK, let db else {
-        let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "open failed"
+        let message = db.map { handle in String(cString: sqlite3_errmsg(handle)) } ?? "open failed"
         sqlite3_close_v2(db)
         throw SmokeDatabaseError.sqlite(message)
     }
@@ -130,7 +130,7 @@ func makeJMDictSmokeDatabase(includeSmokeWord: Bool = true) throws -> URL {
     func exec(_ sql: String) throws {
         var error: UnsafeMutablePointer<CChar>?
         guard sqlite3_exec(db, sql, nil, nil, &error) == SQLITE_OK else {
-            let message = error.map { String(cString: $0) } ?? "unknown error"
+            let message = error.map { pointer in String(cString: pointer) } ?? "unknown error"
             sqlite3_free(error)
             throw SmokeDatabaseError.sqlite(message)
         }
@@ -265,7 +265,7 @@ final class DictionaryStoreTests {
 
     @Test("returns the default location when it exists")
     func resolvesDefaultLocation() {
-        let dictionariesExist: (URL) -> Bool = { $0.pathComponents.contains("dictionaries") }
+        let dictionariesExist: (URL) -> Bool = { url in url.pathComponents.contains("dictionaries") }
 
         let url = DictionaryStore.resolve(environment: [:], fileExists: dictionariesExist)
 
@@ -275,7 +275,7 @@ final class DictionaryStoreTests {
     @Test("prefers an existing env override")
     func envOverrideWins() {
         let overridePath = "/custom/ipadic.dic"
-        let overrideExists: (URL) -> Bool = { $0.path == overridePath }
+        let overrideExists: (URL) -> Bool = { url in url.path == overridePath }
 
         let url = DictionaryStore.resolve(
             environment: ["MIMI_DICT": overridePath], fileExists: overrideExists
@@ -287,7 +287,7 @@ final class DictionaryStoreTests {
     @Test("falls through to the default location when the env override is missing")
     func missingEnvOverrideFallsThrough() {
         let missingOverride = "/missing/ipadic.dic"
-        let dictionariesExist: (URL) -> Bool = { $0.pathComponents.contains("dictionaries") }
+        let dictionariesExist: (URL) -> Bool = { url in url.pathComponents.contains("dictionaries") }
 
         let url = DictionaryStore.resolve(
             environment: ["MIMI_DICT": missingOverride], fileExists: dictionariesExist
@@ -299,7 +299,7 @@ final class DictionaryStoreTests {
     #if DEBUG
         @Test("falls back to the dev-checkout copy when only it exists")
         func devCheckoutFallback() {
-            let modelsExist: (URL) -> Bool = { $0.pathComponents.contains("models") }
+            let modelsExist: (URL) -> Bool = { url in url.pathComponents.contains("models") }
 
             let url = DictionaryStore.resolve(environment: [:], fileExists: modelsExist)
 

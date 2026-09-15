@@ -43,8 +43,8 @@ struct SystemAudioCaptureTests {
     private func makeCapture(running: Bool) -> SystemAudioCapture {
         let capture = SystemAudioCapture()
         let recorder = recorder
-        capture.onChunk = { recorder.record($0) }
-        capture.onIOError = { recorder.record($0) }
+        capture.onChunk = { chunk in recorder.record(chunk) }
+        capture.onIOError = { error in recorder.record(error) }
         if running {
             capture.setRunningForTesting(true)
         }
@@ -230,7 +230,7 @@ struct SystemAudioCaptureTests {
 
         #expect(recorder.chunks.count == 1)
         let chunk = try #require(recorder.chunks.first)
-        #expect(chunk.samples == (0 ..< 2560).map { Float($0) + 5000 })
+        #expect(chunk.samples == (0 ..< 2560).map { index in Float(index) + 5000 })
         #expect(chunk.startSample == 0)
     }
 
@@ -243,7 +243,7 @@ struct SystemAudioCaptureTests {
 
         #expect(recorder.chunks.count == 1)
         let chunk = try #require(recorder.chunks.first)
-        #expect(chunk.samples == (0 ..< 2560).map { Float($0) + 5000 })
+        #expect(chunk.samples == (0 ..< 2560).map { index in Float(index) + 5000 })
         #expect(chunk.startSample == 0)
     }
 
@@ -325,9 +325,9 @@ struct SystemAudioCaptureTests {
         #expect(recorder.chunks.count >= 3)
         #expect(
             recorder.chunks.map(\.startSample)
-                == (0 ..< recorder.chunks.count).map { $0 * 2560 }
+                == (0 ..< recorder.chunks.count).map { index in index * 2560 }
         )
-        #expect(recorder.chunks.allSatisfy { $0.samples.count == 2560 })
+        #expect(recorder.chunks.allSatisfy { chunk in chunk.samples.count == 2560 })
     }
 
     @Test("a mid-stream sample-rate change rebuilds the converter and keeps chunks contiguous")
@@ -353,9 +353,9 @@ struct SystemAudioCaptureTests {
         #expect(recorder.chunks.count >= 3)
         #expect(
             recorder.chunks.map(\.startSample)
-                == (0 ..< recorder.chunks.count).map { $0 * 2560 }
+                == (0 ..< recorder.chunks.count).map { index in index * 2560 }
         )
-        #expect(recorder.chunks.allSatisfy { $0.samples.count == 2560 })
+        #expect(recorder.chunks.allSatisfy { chunk in chunk.samples.count == 2560 })
     }
 
     @Test("a resampled remainder below the chunk size is retained and leads the next chunk")
@@ -401,7 +401,7 @@ struct SystemAudioCaptureTests {
 
         #expect(recorder.errors.isEmpty)
         #expect(recorder.chunks.map(\.startSample) == [0, 2560, 5120])
-        #expect(recorder.chunks.allSatisfy { $0.samples.count == 2560 })
+        #expect(recorder.chunks.allSatisfy { chunk in chunk.samples.count == 2560 })
     }
 
     @Test("a non-float32 PCM payload surfaces formatUnavailable")

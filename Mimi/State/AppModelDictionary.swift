@@ -24,11 +24,11 @@ extension AppModel {
     func prepareDictionaryIfNeeded(
         resolve: @escaping () -> URL? = { DictionaryStore.resolve() },
         resolveJMDict: @escaping () -> URL? = { DictionaryStore.resolveJMDict() },
-        prepare: @escaping (@escaping @Sendable (Result<URL, Error>) -> Void) -> Void = {
-            DictionaryStore.shared.prepare(completion: $0)
+        prepare: @escaping (@escaping @Sendable (Result<URL, Error>) -> Void) -> Void = { handler in
+            DictionaryStore.shared.prepare(completion: handler)
         },
-        prepareJMDict: @escaping (@escaping @Sendable (Result<URL, Error>) -> Void) -> Void = {
-            DictionaryStore.shared.prepareJMDict(completion: $0)
+        prepareJMDict: @escaping (@escaping @Sendable (Result<URL, Error>) -> Void) -> Void = { handler in
+            DictionaryStore.shared.prepareJMDict(completion: handler)
         }
     ) {
         typealias Prepare = (@escaping @Sendable (Result<URL, Error>) -> Void) -> Void
@@ -74,7 +74,7 @@ extension AppModel {
                 prepare: prepareJMDict ?? DictionaryStore.shared.prepareJMDict
             )
         ]
-        let missing = artifacts.filter { $0.resolve() == nil }
+        let missing = artifacts.filter { artifact in artifact.resolve() == nil }
         guard !missing.isEmpty else { return }
         isPreparingDictionary = true
         defer { isPreparingDictionary = false }

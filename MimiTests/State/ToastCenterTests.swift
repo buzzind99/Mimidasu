@@ -243,7 +243,7 @@ private final class ManualScheduler: @unchecked Sendable {
 
     /// Live (uncancelled) firings, in schedule order.
     private var live: [ManualTimerToken] {
-        lock.withLock { scheduled.filter { !$0.cancelled } }
+        lock.withLock { scheduled.filter { token in !token.cancelled } }
     }
 
     var pendingCount: Int {

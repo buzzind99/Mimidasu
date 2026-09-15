@@ -102,7 +102,7 @@ struct CrispASREngineLifecycleTests {
         let modelURL = try tmp.write(Data("gguf".utf8), named: "model.gguf")
         let engine = try CrispASREngine(modelPath: modelURL, library: library)
         let errors = ErrorRecorder()
-        engine.onEngineError = { errors.record($0) }
+        engine.onEngineError = { message in errors.record(message) }
 
         try engine.prepare()
         try engine.prepare() // warm reuse — must not re-report
@@ -184,7 +184,7 @@ struct CrispASREngineLifecycleTests {
         #expect(library.transcribeCalls.count == 2)
         let flush = library.transcribeCalls[1]
         #expect(flush.pcmCount == 2 * CrispASREngine.sampleRate)
-        #expect(flush.pcm[16000...].allSatisfy { $0 == 0 }, "the flush pads the 1 s utterance")
+        #expect(flush.pcm[16000...].allSatisfy { sample in sample == 0 }, "the flush pads the 1 s utterance")
         #expect(engine.poll() == nil, "finish drains the inbox")
     }
 
@@ -194,7 +194,7 @@ struct CrispASREngineLifecycleTests {
         library.vadReplies = [.failure(-3)]
         let engine = try makePreparedEngine(library)
         let errors = ErrorRecorder()
-        engine.onEngineError = { errors.record($0) }
+        engine.onEngineError = { message in errors.record(message) }
 
         engine.push(silentSecond) // VAD #1 → degrade; utterance silent and short
         #expect(await pollUntilOffMain { !errors.all.isEmpty }, "the VAD degrade was reported")
@@ -230,8 +230,8 @@ struct CrispASREngineLifecycleTests {
         library.transcribeHoldSemaphore = nil // an unexpected flush decode must not hang the suite
         let drained = await task.value
         #expect(
-            drained.contains {
-                if case .final = $0 {
+            drained.contains { event in
+                if case .final = event {
                     true
                 } else {
                     false

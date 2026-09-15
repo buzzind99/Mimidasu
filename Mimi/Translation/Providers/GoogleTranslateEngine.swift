@@ -51,7 +51,7 @@ struct GoogleTranslateEngine: TranslationEngine {
     private static func decode(_ data: Data, expectedCount: Int) throws -> [String] {
         try BatchTranslateClient.decodeTexts(
             data, expectedCount: expectedCount, as: GoogleTranslateResponse.self
-        ) { $0.data.translations.map(\.translatedText) }
+        ) { response in response.data.translations.map(\.translatedText) }
     }
 }
 

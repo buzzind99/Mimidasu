@@ -56,7 +56,7 @@ struct ChatCompletionsClient: Sendable {
 
         do {
             return try await ladder.run({
-                let data = try await transport.send(request, classify: { Self.classify($0, $1) })
+                let data = try await transport.send(request, classify: Self.classify)
                 return try decode(data)
             }, onRetry: onRetry)
         } catch let failure as HTTPTranslationTransport.Failure {

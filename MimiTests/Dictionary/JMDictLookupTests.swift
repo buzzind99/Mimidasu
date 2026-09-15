@@ -66,7 +66,7 @@ final class JMDictLookupTests {
     func multiSenseOrder() throws {
         let result = try #require(try engine.lookup(LookupCandidate(text: "あめ")))
 
-        let entry = try #require(result.entries.first { $0.entSeq == 1_153_520 })
+        let entry = try #require(result.entries.first { entry in entry.entSeq == 1_153_520 })
         #expect(entry.senses.map(\.glosses.first) == ["(hard) candy", "rice-sugar", "amber"])
         #expect(entry.senses[2].misc == "abbr")
         #expect(entry.senses[1].pos == "n")
@@ -362,7 +362,7 @@ final class JMDictLookupTests {
         #expect(
             JMDictLookup.defaultDatabaseURL(
                 destination: destination,
-                fileExists: { $0 == checkout }
+                fileExists: { url in url == checkout }
             ) == checkout
         )
 

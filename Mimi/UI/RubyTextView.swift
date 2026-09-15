@@ -10,7 +10,7 @@ import SwiftUI
 /// romaji doesn't reverse to kana) render inline as plain text, so their
 /// surfaces stay top-aligned with annotated words on the same line.
 /// Consecutive plain runs fold into a single flow child.
-struct RubyTextView: View, @preconcurrency Equatable {
+struct RubyTextView: View, Equatable {
     let text: String
     var annotation: ReadingAnnotation = .romaji
     var surfaceFont: Font
@@ -98,7 +98,7 @@ struct RubyTextView: View, @preconcurrency Equatable {
         segments.map { segment in
             let surface = segment.surface
             let inert = surface.allSatisfy(\.isWhitespace)
-                || !surface.contains(where: { $0.isLetter || $0.isNumber })
+                || !surface.contains(where: { scalar in scalar.isLetter || scalar.isNumber })
             guard !inert else { return .inert(surface: surface) }
             let note: String? = switch annotation {
             case .none: nil
@@ -160,7 +160,7 @@ struct RubyTextView: View, @preconcurrency Equatable {
                 .italic(italic)
                 .foregroundStyle(hovering ? AnyShapeStyle(hoverColor) : AnyShapeStyle(.primary))
                 .textSelection(.disabled)
-                .onHover { hovering = $0 }
+                .onHover { isHovering in hovering = isHovering }
                 .pointerStyle(action == nil ? nil : .link)
                 .onTapGesture { action?() }
         }
@@ -295,10 +295,10 @@ struct RubyTextView: View, @preconcurrency Equatable {
     }
 
     /// Excludes `onCopy`, `onLookup`, and `lookupPopover` (closures have
-    /// no value identity). The witness stays MainActor-isolated (SwiftUI
-    /// diffs views on the main actor); the conformance is `@preconcurrency`
-    /// to permit that.
-    static func == (lhs: Self, rhs: Self) -> Bool {
+    /// no value identity). The witness is `nonisolated` so the conformance
+    /// needs no `@preconcurrency`: every compared property is an immutable
+    /// Sendable value.
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.text == rhs.text
             && lhs.annotation == rhs.annotation
             && lhs.surfaceFont == rhs.surfaceFont

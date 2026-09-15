@@ -22,7 +22,7 @@ struct AppleSessionEngine: TranslationEngine, @unchecked Sendable {
     }
 
     func translate(_ texts: [String]) async throws -> [String] {
-        let requests = texts.map { TranslationSession.Request(sourceText: $0) }
+        let requests = texts.map { text in TranslationSession.Request(sourceText: text) }
         let responses = try await session.translations(from: requests)
         return responses.map(\.targetText)
     }

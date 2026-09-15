@@ -27,7 +27,7 @@ enum DictionaryContent {
     /// the pill shows `zoPatts` alone.
     static func renderableHatsuon(_ hatsuon: String?) -> String? {
         guard let hatsuon, !hatsuon.isEmpty,
-              !hatsuon.contains(where: { "<>[]･~".contains($0) })
+              !hatsuon.contains(where: { marker in "<>[]･~".contains(marker) })
         else { return nil }
         return hatsuon
     }
@@ -42,7 +42,7 @@ enum DictionaryContent {
 
     static func pitchPill(for entry: JMDictEntry) -> PitchPill? {
         let hatsuon = renderableHatsuon(entry.hatsuon)
-        let zo = entry.zoPatts.flatMap { $0.isEmpty ? nil : $0 }
+        let zo = entry.zoPatts.flatMap { patts in patts.isEmpty ? nil : patts }
         guard hatsuon != nil || zo != nil else { return nil }
         return PitchPill(hatsuon: hatsuon, zoPatts: zo)
     }
@@ -50,7 +50,7 @@ enum DictionaryContent {
     /// Romaji line under the headword: kana→romaji over the reading; nil
     /// when the reading is missing or unmappable (no line).
     static func romaji(for entry: JMDictEntry) -> String? {
-        entry.reb.flatMap { KanaRomaji.romaji(fromKana: $0) }
+        entry.reb.flatMap { reb in KanaRomaji.romaji(fromKana: reb) }
     }
 
     /// First tag of the stored comma-joined POS string.
@@ -80,7 +80,7 @@ enum DictionaryContent {
     /// (promotion resets the pager to entry 0), falling back to the matched
     /// string when the result carries no entries.
     static func pillLabel(for result: LookupResult) -> String {
-        result.entries.first.flatMap { headword(of: $0) } ?? result.matched
+        result.entries.first.flatMap { entry in headword(of: entry) } ?? result.matched
     }
 
     /// Badge naming a display result that came from a forward join — the

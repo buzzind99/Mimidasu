@@ -96,7 +96,7 @@ struct FlowLayout: Layout {
             && cache.sizes.count == subviews.count
         guard !unchanged else { return }
         cache.fingerprint = fingerprint
-        cache.sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        cache.sizes = subviews.map { subview in subview.sizeThatFits(.unspecified) }
         cache.fitted = [:]
         cache.packedWidth = nil
         cache.placements = []
@@ -136,7 +136,7 @@ struct FlowLayout: Layout {
 
     private func measureIfNeeded(subviews: Subviews, into cache: inout Cache) {
         guard cache.sizes.count != subviews.count else { return }
-        cache.sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        cache.sizes = subviews.map { subview in subview.sizeThatFits(.unspecified) }
         cache.packedWidth = nil
     }
 

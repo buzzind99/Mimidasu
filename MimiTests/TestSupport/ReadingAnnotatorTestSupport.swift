@@ -55,5 +55,5 @@ func makeAnnotator(
 
 /// Compact [surface, romaji, furigana] rows for whole-segment assertions.
 func describe(_ segments: [ReadingSegment]?) -> [[String?]] {
-    segments?.map { [$0.surface, $0.romaji, $0.furigana] } ?? []
+    segments?.map { segment in [segment.surface, segment.romaji, segment.furigana] } ?? []
 }

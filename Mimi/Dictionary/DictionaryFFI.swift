@@ -45,7 +45,7 @@ struct DictionaryFFI {
         let payload: Data? = text.withCString { cText in
             guard let pointer = tokenizeJSON(handle, cText) else { return nil }
             defer { freeString(pointer) }
-            return String(validatingCString: pointer).map { Data($0.utf8) }
+            return String(validatingCString: pointer).map { payload in Data(payload.utf8) }
         }
         guard let payload else { return nil }
         return try? Self.decoder.decode([DictionaryToken].self, from: payload)
@@ -62,8 +62,12 @@ struct DictionaryFFI {
     /// Defaults are the real dlopen/dlsym; tests inject fakes to exercise
     /// candidate fallback and missing-symbol failures.
     static func load(
-        openLibrary: (String) -> UnsafeMutableRawPointer? = { dlopen($0, RTLD_NOW | RTLD_LOCAL) },
-        symbol: (UnsafeMutableRawPointer, String) -> UnsafeMutableRawPointer? = { dlsym($0, $1) }
+        openLibrary: (String) -> UnsafeMutableRawPointer? = { path in
+            dlopen(path, RTLD_NOW | RTLD_LOCAL)
+        },
+        symbol: (UnsafeMutableRawPointer, String) -> UnsafeMutableRawPointer? = { handle, name in
+            dlsym(handle, name)
+        }
     ) -> DictionaryFFI? {
         guard let handle = DylibLoader.open(
             candidates: dylibCandidates, open: openLibrary

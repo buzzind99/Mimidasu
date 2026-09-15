@@ -102,7 +102,7 @@ final class DictionaryStore: @unchecked Sendable {
     static func resolve() -> URL? {
         resolve(
             environment: ProcessInfo.processInfo.environment,
-            fileExists: { FileManager.default.fileExists(atPath: $0.path) }
+            fileExists: { url in FileManager.default.fileExists(atPath: url.path) }
         )
     }
 
@@ -123,7 +123,7 @@ final class DictionaryStore: @unchecked Sendable {
     static func resolveJMDict() -> URL? {
         resolveJMDict(
             environment: ProcessInfo.processInfo.environment,
-            fileExists: { FileManager.default.fileExists(atPath: $0.path) }
+            fileExists: { url in FileManager.default.fileExists(atPath: url.path) }
         )
     }
 
@@ -299,12 +299,12 @@ final class DictionaryStore: @unchecked Sendable {
     /// lines up behind an in-flight decompression on the store's queue
     /// exactly like a completion caller would.
     func prepare() async throws -> URL {
-        try await asyncFromCompletion { self.prepare(completion: $0) }
+        try await asyncFromCompletion { handler in self.prepare(completion: handler) }
     }
 
     /// JMDict counterpart of `prepare() async`.
     func prepareJMDict() async throws -> URL {
-        try await asyncFromCompletion { self.prepareJMDict(completion: $0) }
+        try await asyncFromCompletion { handler in self.prepareJMDict(completion: handler) }
     }
 
     private func asyncFromCompletion(
@@ -383,7 +383,7 @@ final class DictionaryStore: @unchecked Sendable {
         guard let tokens = ffi.tokenize(handle, Self.smokeWord) else {
             throw DictionaryStoreError.smokeTestFailed(reason: "tokenize returned null")
         }
-        guard tokens.contains(where: { $0.reading != nil }) else {
+        guard tokens.contains(where: { token in token.reading != nil }) else {
             throw DictionaryStoreError.smokeTestFailed(
                 reason: "no reading for \(Self.smokeWord)"
             )

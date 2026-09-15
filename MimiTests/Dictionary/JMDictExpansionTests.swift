@@ -7,7 +7,7 @@ import Testing
 @Suite("JMDictExpansion candidates")
 final class JMDictExpansionCandidateTests {
     private func segments(_ pairs: (surface: String, lemma: String?)...) -> [LookupSegment] {
-        pairs.map { LookupSegment(surface: $0.surface, lemma: $0.lemma) }
+        pairs.map { pair in LookupSegment(surface: pair.surface, lemma: pair.lemma) }
     }
 
     @Test("joins forward segments longest-first behind the tapped candidate")
@@ -239,8 +239,8 @@ final class JMDictExpansionCandidateTests {
         let splits = candidates.dropFirst()
 
         #expect(splits.map(\.candidate.text) == ["映", "画"])
-        #expect(splits.map(\.candidate.reading).allSatisfy { $0 == nil })
-        #expect(splits.map(\.candidate.kind).allSatisfy { $0 == .kanji })
+        #expect(splits.map(\.candidate.reading).allSatisfy { reading in reading == nil })
+        #expect(splits.map(\.candidate.kind).allSatisfy { kind in kind == .kanji })
     }
 
     @Test("splits trail the joins and never duplicate an earlier candidate")
@@ -501,7 +501,7 @@ final class JMDictExpansionTests {
         }
 
         #expect(related.map(\.matched) == ["雨", "尾"])
-        #expect(related.map { $0.entries.map(\.entSeq) } == [[9_990_030], [9_990_040]])
+        #expect(related.map { hit in hit.entries.map(\.entSeq) } == [[9_990_030], [9_990_040]])
     }
 
     @Test("related drops a later split hit that only re-resolves known entries")
@@ -520,7 +520,7 @@ final class JMDictExpansionTests {
             return
         }
         #expect(related.map(\.matched) == ["前"])
-        #expect(related.map { $0.entries.map(\.entSeq) } == [[9_990_060, 9_990_050]])
+        #expect(related.map { hit in hit.entries.map(\.entSeq) } == [[9_990_060, 9_990_050]])
     }
 
     @Test("a compound hit displays and its split hits trail in also")

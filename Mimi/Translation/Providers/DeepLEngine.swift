@@ -59,7 +59,7 @@ struct DeepLEngine: TranslationEngine {
     private static func decode(_ data: Data, expectedCount: Int) throws -> [String] {
         try BatchTranslateClient.decodeTexts(
             data, expectedCount: expectedCount, as: DeepLTranslateResponse.self
-        ) { $0.translations.map(\.text) }
+        ) { response in response.translations.map(\.text) }
     }
 }
 

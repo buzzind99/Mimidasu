@@ -25,7 +25,9 @@ enum ASREngineFactory {
     static func makeEngine(
         modelURL: URL?,
         allowMock: Bool,
-        makeNative: (URL) throws -> CrispASREngine? = { try CrispASREngine(modelPath: $0) }
+        makeNative: (URL) throws -> CrispASREngine? = { modelURL in
+            try CrispASREngine(modelPath: modelURL)
+        }
     ) -> ASREngine? {
         if let modelURL {
             return warm.withLock { state in
@@ -92,6 +94,6 @@ enum ASREngineFactory {
     /// for the rest of the process, but the factory suite shares one process
     /// and re-arms before every test.
     static func rearmWarmCacheForTesting() {
-        warm.withLock { $0.retired = false }
+        warm.withLock { state in state.retired = false }
     }
 }

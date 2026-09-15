@@ -88,8 +88,8 @@ final class ReadingAnnotator: @unchecked Sendable {
     private let readingFallback: @Sendable (String) -> String?
 
     init(
-        tokenize: @escaping (String) -> [DictionaryToken]? = {
-            DictionaryEngine.shared.tokenize($0)
+        tokenize: @escaping (String) -> [DictionaryToken]? = { text in
+            DictionaryEngine.shared.tokenize(text)
         },
         readingFallback: @escaping @Sendable (String) -> String? = ReadingAnnotator.jmDictReadingFallback
     ) {
