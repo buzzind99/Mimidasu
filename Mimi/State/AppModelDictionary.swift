@@ -1,9 +1,9 @@
 import Foundation
 
-/// One preparable dictionary artifact: the resolve probe and its builder.
-private struct DictionaryArtifact<Prepare> {
+/// One preparable dictionary artifact: the resolve probe and its async builder.
+private struct DictionaryArtifact {
     let resolve: () -> URL?
-    let prepare: Prepare
+    let prepare: () async throws -> URL
 }
 
 /// Dictionary preparation surface of `AppModel` (file split for the lint
@@ -24,16 +24,10 @@ extension AppModel {
     func prepareDictionaryIfNeeded(
         resolve: @escaping () -> URL? = { DictionaryStore.resolve() },
         resolveJMDict: @escaping () -> URL? = { DictionaryStore.resolveJMDict() },
-        prepare: @escaping (@escaping @Sendable (Result<URL, Error>) -> Void) -> Void = { handler in
-            DictionaryStore.shared.prepare(completion: handler)
-        },
-        prepareJMDict: @escaping (@escaping @Sendable (Result<URL, Error>) -> Void) -> Void = { handler in
-            DictionaryStore.shared.prepareJMDict(completion: handler)
-        }
+        prepare: @escaping () async throws -> URL = DictionaryStore.shared.prepare,
+        prepareJMDict: @escaping () async throws -> URL = DictionaryStore.shared.prepareJMDict
     ) {
-        typealias Prepare = (@escaping @Sendable (Result<URL, Error>) -> Void) -> Void
-        // Paired with the log tag a failed fire-and-forget build reports under.
-        let artifacts: [(DictionaryArtifact<Prepare>, String)] = [
+        let artifacts: [(DictionaryArtifact, String)] = [
             (
                 DictionaryArtifact(resolve: resolve, prepare: prepare),
                 "[dictionary] first-launch build failed; text stays unannotated"
@@ -44,8 +38,10 @@ extension AppModel {
             )
         ]
         for (artifact, log) in artifacts where artifact.resolve() == nil {
-            artifact.prepare { result in
-                if case let .failure(error) = result {
+            Task {
+                do {
+                    _ = try await artifact.prepare()
+                } catch {
                     print("\(log): \(error.localizedDescription)")
                 }
             }
@@ -60,19 +56,16 @@ extension AppModel {
     /// and only blocks when none is running. A failed build throws so the
     /// start fails visibly in the status bar (pressing Start again
     /// retries). The `resolve`/`prepare` pairs are injectable for tests;
-    /// the defaults drive the real store's async surface.
+    /// the defaults drive the real store.
     func ensureDictionaryReady(
         resolve: @escaping () -> URL? = { DictionaryStore.resolve() },
         resolveJMDict: @escaping () -> URL? = { DictionaryStore.resolveJMDict() },
-        prepare: (() async throws -> URL)? = nil,
-        prepareJMDict: (() async throws -> URL)? = nil
+        prepare: @escaping () async throws -> URL = DictionaryStore.shared.prepare,
+        prepareJMDict: @escaping () async throws -> URL = DictionaryStore.shared.prepareJMDict
     ) async throws {
-        let artifacts: [DictionaryArtifact<() async throws -> URL>] = [
-            DictionaryArtifact(resolve: resolve, prepare: prepare ?? DictionaryStore.shared.prepare),
-            DictionaryArtifact(
-                resolve: resolveJMDict,
-                prepare: prepareJMDict ?? DictionaryStore.shared.prepareJMDict
-            )
+        let artifacts: [DictionaryArtifact] = [
+            DictionaryArtifact(resolve: resolve, prepare: prepare),
+            DictionaryArtifact(resolve: resolveJMDict, prepare: prepareJMDict)
         ]
         let missing = artifacts.filter { artifact in artifact.resolve() == nil }
         guard !missing.isEmpty else { return }

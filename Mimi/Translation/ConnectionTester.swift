@@ -4,21 +4,21 @@ import Foundation
 /// one-sentence translation (cheap, exercises the real request path);
 /// OpenRouter hits `GET /api/v1/key` — validates the key without spending
 /// tokens. Probes run with zero transient retries so a failed test settles
-/// in a single round-trip. Results land in `TranslationSettings` and render
+/// in a single round-trip. Outcomes land in `TranslationSettings` and render
 /// inline.
 enum TranslationConnectionTester {
-    /// - Returns: `.success` or `.failure` with short status copy from the
-    ///   engine taxonomy (never key material or raw response bodies).
+    /// - Throws: A short-status `TranslationEngineError` from the engine
+    ///   taxonomy (never key material or raw response bodies).
     static func test(
         provider: TranslationProvider,
         key: String,
         transport: HTTPTranslationTransport? = nil
-    ) async -> Result<Void, TranslationEngineError> {
+    ) async throws(TranslationEngineError) {
         switch provider {
         case .apple:
-            .success(())
+            return
         case .google:
-            await translateProbe(
+            try await translateProbe(
                 GoogleTranslateEngine(
                     apiKey: key,
                     transport: transport,
@@ -26,7 +26,7 @@ enum TranslationConnectionTester {
                 )
             )
         case .deepl:
-            await translateProbe(
+            try await translateProbe(
                 DeepLEngine(
                     apiKey: key,
                     transport: transport,
@@ -34,19 +34,21 @@ enum TranslationConnectionTester {
                 )
             )
         case .openrouter:
-            await keyProbe(key, transport: transport)
+            try await keyProbe(key, transport: transport)
         }
     }
 
-    private static func translateProbe(_ engine: any TranslationEngine) async -> Result<Void, TranslationEngineError> {
+    private static func translateProbe(
+        _ engine: any TranslationEngine
+    ) async throws(TranslationEngineError) {
+        let translations: [String]
         do {
-            let translations = try await engine.translate(["こんにちは"])
-            guard translations.allSatisfy({ translation in !translation.isEmpty }) else {
-                return .failure(.badResponse("Provider returned an empty translation"))
-            }
-            return .success(())
+            translations = try await engine.translate(["こんにちは"])
         } catch {
-            return .failure(TransientRetryLadder.engineError(of: error))
+            throw TransientRetryLadder.engineError(of: error)
+        }
+        guard translations.allSatisfy({ translation in !translation.isEmpty }) else {
+            throw TranslationEngineError.badResponse("Provider returned an empty translation")
         }
     }
 
@@ -55,7 +57,7 @@ enum TranslationConnectionTester {
     private static func keyProbe(
         _ key: String,
         transport: HTTPTranslationTransport?
-    ) async -> Result<Void, TranslationEngineError> {
+    ) async throws(TranslationEngineError) {
         var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/key")!)
         request.httpMethod = "GET"
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
@@ -63,9 +65,8 @@ enum TranslationConnectionTester {
         let transport = transport ?? HTTPTranslationTransport(timeout: 15)
         do {
             _ = try await transport.send(request, classify: ChatCompletionsClient.classify)
-            return .success(())
         } catch {
-            return .failure(TransientRetryLadder.engineError(of: error))
+            throw TransientRetryLadder.engineError(of: error)
         }
     }
 }

@@ -86,15 +86,15 @@ extension AppModel {
             translationSettings.setTestResult(.failure("No API key configured"), for: provider)
             return false
         }
-        let result = await TranslationConnectionTester.test(
-            provider: provider, key: key, transport: translationTransport
-        )
-        let outcome = switch result {
-        case .success: ConnectionTestResult.success
-        case let .failure(error): ConnectionTestResult.failure(error.statusMessage)
+        do {
+            try await TranslationConnectionTester.test(
+                provider: provider, key: key, transport: translationTransport
+            )
+        } catch {
+            translationSettings.setTestResult(.failure(error.statusMessage), for: provider)
+            return false
         }
-        translationSettings.setTestResult(outcome, for: provider)
-        guard case .success = result else { return false }
+        translationSettings.setTestResult(.success, for: provider)
         if translationSettings.selectedProvider == provider {
             translationProviderDidChange()
         } else {

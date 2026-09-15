@@ -22,16 +22,19 @@ struct AppModelDictionaryTests {
     }
 
     @Test("kicks dictionary preparation when no dictionary resolves")
-    func kicksWhenUnresolved() {
+    func kicksWhenUnresolved() async {
         let model = makeModel()
         var prepareCalls = 0
 
         model.prepareDictionaryIfNeeded(
             resolve: { nil },
-            prepare: { _ in prepareCalls += 1 }
+            prepare: {
+                prepareCalls += 1
+                return URL(fileURLWithPath: "/tmp/ipadic.dic")
+            }
         )
 
-        #expect(prepareCalls == 1)
+        #expect(await pollUntil { prepareCalls == 1 }, "the preparation kicks for the unresolved artifact")
     }
 
     @Test("skips dictionary preparation when a dictionary already resolves")
@@ -42,47 +45,56 @@ struct AppModelDictionaryTests {
 
         model.prepareDictionaryIfNeeded(
             resolve: { resolved },
-            prepare: { _ in prepareCalls += 1 }
+            prepare: {
+                prepareCalls += 1
+                return resolved
+            }
         )
 
         #expect(prepareCalls == 0)
     }
 
     @Test("a failed preparation is log-only and raises no user-visible error")
-    func failedBuildStaysQuiet() {
+    func failedBuildStaysQuiet() async {
         let model = makeModel()
-        var completion: ((Result<URL, Error>) -> Void)?
         let failure = DictionaryStore.DictionaryStoreError.libraryUnavailable
+        var prepareCalls = 0
 
         model.prepareDictionaryIfNeeded(
             resolve: { nil },
-            prepare: { handler in completion = handler }
+            prepare: {
+                prepareCalls += 1
+                throw failure
+            }
         )
-        completion?(.failure(failure))
 
+        #expect(await pollUntil { prepareCalls == 1 }, "the failing preparation runs")
         #expect(!model.isPreparingDictionary)
     }
 
     @Test("a failed JMDict preparation is log-only and raises no user-visible error")
-    func failedJMDBuildStaysQuiet() {
+    func failedJMDBuildStaysQuiet() async {
         let model = makeModel()
-        var completion: ((Result<URL, Error>) -> Void)?
         let failure = DictionaryStore.DictionaryStoreError.smokeTestFailed(reason: "smoke")
+        var prepareCalls = 0
 
         model.prepareDictionaryIfNeeded(
             resolve: { URL(fileURLWithPath: "/tmp/ipadic.dic") },
             resolveJMDict: { nil },
-            prepareJMDict: { handler in completion = handler }
+            prepareJMDict: {
+                prepareCalls += 1
+                throw failure
+            }
         )
-        completion?(.failure(failure))
 
+        #expect(await pollUntil { prepareCalls == 1 }, "the failing preparation runs")
         #expect(!model.isPreparingDictionary)
     }
 
     // MARK: - Two artifacts, covered independently
 
     @Test("kicks both preparations when neither artifact resolves")
-    func kicksBothWhenUnresolved() {
+    func kicksBothWhenUnresolved() async {
         let model = makeModel()
         var prepareCalls = 0
         var jmDictPrepareCalls = 0
@@ -90,16 +102,21 @@ struct AppModelDictionaryTests {
         model.prepareDictionaryIfNeeded(
             resolve: { nil },
             resolveJMDict: { nil },
-            prepare: { _ in prepareCalls += 1 },
-            prepareJMDict: { _ in jmDictPrepareCalls += 1 }
+            prepare: {
+                prepareCalls += 1
+                return URL(fileURLWithPath: "/tmp/ipadic.dic")
+            },
+            prepareJMDict: {
+                jmDictPrepareCalls += 1
+                return URL(fileURLWithPath: "/tmp/jmdict.sqlite")
+            }
         )
 
-        #expect(prepareCalls == 1)
-        #expect(jmDictPrepareCalls == 1)
+        #expect(await pollUntil { prepareCalls == 1 && jmDictPrepareCalls == 1 }, "both preparations kick")
     }
 
     @Test("a resolved tokenizer dictionary does not excuse a missing JMDict database")
-    func resolvedIPADICStillPreparesJMDict() {
+    func resolvedIPADICStillPreparesJMDict() async {
         let model = makeModel()
         var prepareCalls = 0
         var jmDictPrepareCalls = 0
@@ -107,16 +124,22 @@ struct AppModelDictionaryTests {
         model.prepareDictionaryIfNeeded(
             resolve: { URL(fileURLWithPath: "/tmp/ipadic.dic") },
             resolveJMDict: { nil },
-            prepare: { _ in prepareCalls += 1 },
-            prepareJMDict: { _ in jmDictPrepareCalls += 1 }
+            prepare: {
+                prepareCalls += 1
+                return URL(fileURLWithPath: "/tmp/ipadic.dic")
+            },
+            prepareJMDict: {
+                jmDictPrepareCalls += 1
+                return URL(fileURLWithPath: "/tmp/jmdict.sqlite")
+            }
         )
 
-        #expect(prepareCalls == 0)
-        #expect(jmDictPrepareCalls == 1)
+        #expect(await pollUntil { jmDictPrepareCalls == 1 }, "the missing JMDict preparation kicks")
+        #expect(prepareCalls == 0, "the resolved tokenizer dictionary must not prepare")
     }
 
     @Test("a resolved JMDict database does not excuse a missing tokenizer dictionary")
-    func resolvedJMDictStillPreparesIPADIC() {
+    func resolvedJMDictStillPreparesIPADIC() async {
         let model = makeModel()
         var prepareCalls = 0
         var jmDictPrepareCalls = 0
@@ -124,12 +147,18 @@ struct AppModelDictionaryTests {
         model.prepareDictionaryIfNeeded(
             resolve: { nil },
             resolveJMDict: { URL(fileURLWithPath: "/tmp/jmdict.sqlite") },
-            prepare: { _ in prepareCalls += 1 },
-            prepareJMDict: { _ in jmDictPrepareCalls += 1 }
+            prepare: {
+                prepareCalls += 1
+                return URL(fileURLWithPath: "/tmp/ipadic.dic")
+            },
+            prepareJMDict: {
+                jmDictPrepareCalls += 1
+                return URL(fileURLWithPath: "/tmp/jmdict.sqlite")
+            }
         )
 
-        #expect(prepareCalls == 1)
-        #expect(jmDictPrepareCalls == 0)
+        #expect(await pollUntil { prepareCalls == 1 }, "the missing tokenizer preparation kicks")
+        #expect(jmDictPrepareCalls == 0, "the resolved JMDict database must not prepare")
     }
 
     @Test("skips both preparations when both artifacts resolve")
@@ -141,8 +170,14 @@ struct AppModelDictionaryTests {
         model.prepareDictionaryIfNeeded(
             resolve: { URL(fileURLWithPath: "/tmp/ipadic.dic") },
             resolveJMDict: { URL(fileURLWithPath: "/tmp/jmdict.sqlite") },
-            prepare: { _ in prepareCalls += 1 },
-            prepareJMDict: { _ in jmDictPrepareCalls += 1 }
+            prepare: {
+                prepareCalls += 1
+                return URL(fileURLWithPath: "/tmp/ipadic.dic")
+            },
+            prepareJMDict: {
+                jmDictPrepareCalls += 1
+                return URL(fileURLWithPath: "/tmp/jmdict.sqlite")
+            }
         )
 
         #expect(prepareCalls == 0)

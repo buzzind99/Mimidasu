@@ -10,28 +10,29 @@ struct TranslationConnectionTesterTests {
         HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
     }
 
+    /// Runs the probe expecting failure, returning the taxonomy error it
+    /// throws.
     private static func requireFailure(
-        _ result: Result<Void, TranslationEngineError>
-    ) -> TranslationEngineError {
-        guard case let .failure(error) = result else {
-            Issue.record("expected failure, got \(result)")
+        provider: TranslationProvider,
+        key: String,
+        transport: HTTPTranslationTransport
+    ) async -> TranslationEngineError {
+        do {
+            try await TranslationConnectionTester.test(provider: provider, key: key, transport: transport)
+            Issue.record("expected failure, got success")
             return .network
+        } catch {
+            return error
         }
-        return error
     }
 
     @Test("Apple needs no probe")
-    func appleSucceeds() async {
-        let result = await TranslationConnectionTester.test(provider: .apple, key: "")
-
-        guard case .success = result else {
-            Issue.record("expected success, got \(result)")
-            return
-        }
+    func appleSucceeds() async throws {
+        try await TranslationConnectionTester.test(provider: .apple, key: "")
     }
 
     @Test("Google probes with a one-sentence translate")
-    func googleProbe() async {
+    func googleProbe() async throws {
         let googleURL = GoogleTranslateEngine.endpoint
         let transport = HTTPTranslationTransport(timeout: 1) { _ in
             (
@@ -40,12 +41,7 @@ struct TranslationConnectionTesterTests {
             )
         }
 
-        let result = await TranslationConnectionTester.test(provider: .google, key: "k", transport: transport)
-
-        guard case .success = result else {
-            Issue.record("expected success, got \(result)")
-            return
-        }
+        try await TranslationConnectionTester.test(provider: .google, key: "k", transport: transport)
     }
 
     @Test("an invalid Google key fails with invalidKey")
@@ -55,13 +51,11 @@ struct TranslationConnectionTesterTests {
             (Data(), Self.httpResponse(googleURL, 403))
         }
 
-        let result = await TranslationConnectionTester.test(provider: .google, key: "k", transport: transport)
-
-        #expect(Self.requireFailure(result) == .invalidKey)
+        #expect(await Self.requireFailure(provider: .google, key: "k", transport: transport) == .invalidKey)
     }
 
     @Test("DeepL probes with a one-sentence translate against the Pro endpoint")
-    func deeplProbe() async {
+    func deeplProbe() async throws {
         let deeplURL = DeepLEngine.proEndpoint
         let transport = HTTPTranslationTransport(timeout: 1) { _ in
             (
@@ -70,12 +64,7 @@ struct TranslationConnectionTesterTests {
             )
         }
 
-        let result = await TranslationConnectionTester.test(provider: .deepl, key: "k", transport: transport)
-
-        guard case .success = result else {
-            Issue.record("expected success, got \(result)")
-            return
-        }
+        try await TranslationConnectionTester.test(provider: .deepl, key: "k", transport: transport)
     }
 
     @Test("an invalid DeepL key fails with invalidKey without retrying")
@@ -85,9 +74,7 @@ struct TranslationConnectionTesterTests {
             (Data(), Self.httpResponse(deeplURL, 403))
         }
 
-        let result = await TranslationConnectionTester.test(provider: .deepl, key: "k", transport: transport)
-
-        #expect(Self.requireFailure(result) == .invalidKey)
+        #expect(await Self.requireFailure(provider: .deepl, key: "k", transport: transport) == .invalidKey)
     }
 
     @Test("a DeepL probe with an empty translation fails as badResponse")
@@ -97,9 +84,10 @@ struct TranslationConnectionTesterTests {
             (Data(#"{"translations":[{"text":""}]}"#.utf8), Self.httpResponse(deeplURL, 200))
         }
 
-        let result = await TranslationConnectionTester.test(provider: .deepl, key: "k", transport: transport)
-
-        #expect(Self.requireFailure(result) == .badResponse("Provider returned an empty translation"))
+        #expect(
+            await Self.requireFailure(provider: .deepl, key: "k", transport: transport)
+                == .badResponse("Provider returned an empty translation")
+        )
     }
 
     @Test("OpenRouter probes GET /api/v1/key with the bearer key")
@@ -114,12 +102,8 @@ struct TranslationConnectionTesterTests {
             return (Data(), Self.httpResponse(keyURL, 200))
         }
 
-        let result = await TranslationConnectionTester.test(provider: .openrouter, key: "or-key", transport: transport)
+        try await TranslationConnectionTester.test(provider: .openrouter, key: "or-key", transport: transport)
 
-        guard case .success = result else {
-            Issue.record("expected success, got \(result)")
-            return
-        }
         let request = try #require(capture.request)
         #expect(request.httpMethod == "GET")
         #expect(request.url == keyURL)
@@ -133,8 +117,6 @@ struct TranslationConnectionTesterTests {
             (Data(), Self.httpResponse(keyURL, 401))
         }
 
-        let result = await TranslationConnectionTester.test(provider: .openrouter, key: "or-key", transport: transport)
-
-        #expect(Self.requireFailure(result) == .invalidKey)
+        #expect(await Self.requireFailure(provider: .openrouter, key: "or-key", transport: transport) == .invalidKey)
     }
 }

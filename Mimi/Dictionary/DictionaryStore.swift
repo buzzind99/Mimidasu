@@ -197,22 +197,24 @@ final class DictionaryStore: @unchecked Sendable {
 
     /// Decompresses the bundled model if the dictionary does not exist yet;
     /// no-op afterwards. Concurrent callers coalesce on the single
-    /// decompression. `completion` runs on the main queue with the dictionary
-    /// URL, or an error — callers silently degrade to plain text and may
-    /// retry (next launch or a later call).
-    func prepare(completion: @escaping @Sendable (Result<URL, Error>) -> Void) {
-        run(.tokenizer, completion: completion)
+    /// decompression — later callers suspend behind the in-flight work on the
+    /// store's serial queue and observe its outcome. Throws when the artifact
+    /// is missing, the runtime library is unavailable, or the decompress
+    /// fails — callers silently degrade to plain text and may retry (next
+    /// launch or a later call).
+    func prepare() async throws -> URL {
+        try await run(.tokenizer)
     }
 
-    /// JMDict counterpart of `prepare(completion:)`: decompresses the bundled
+    /// JMDict counterpart of `prepare()`: decompresses the bundled
     /// `jmdict-<tag>.sqlite.zst` into the versioned destination, smoke-queries
     /// it through the JMDict lookup engine, and promotes it into place. The
     /// versioned filename is the staleness key — a new pin stages a new file
     /// and stale `jmdict-*.sqlite` artifacts from earlier pins are removed
     /// after a successful promote. Same coalescing: concurrent callers line
     /// up on the store's serial queue.
-    func prepareJMDict(completion: @escaping @Sendable (Result<URL, Error>) -> Void) {
-        run(.jmDict, completion: completion)
+    func prepareJMDict() async throws -> URL {
+        try await run(.jmDict)
     }
 
     /// One prepared artifact: its phase slot, destination filename, bundled
@@ -251,36 +253,37 @@ final class DictionaryStore: @unchecked Sendable {
         }
     }
 
-    /// Runs on the serial queue. Coalesces concurrent callers behind the
-    /// phase check: a prepared artifact (done phase, or an earlier launch's
-    /// file) is adopted; otherwise it is staged and promoted. A failed
-    /// prepare resets the phase so a later call retries.
-    private func run(
-        _ artifact: Artifact, completion: @escaping @Sendable (Result<URL, Error>) -> Void
-    ) {
-        queue.async {
-            if case let .done(url) = self[keyPath: artifact.phaseKeyPath] {
-                self.complete(completion, .success(url))
-                return
-            }
-            let destination = self.destinationDirectory
-                .appendingPathComponent(artifact.destinationFileName)
-            if FileManager.default.fileExists(atPath: destination.path) {
-                // Prepared by an earlier launch: adopt it, don't re-decompress.
-                self[keyPath: artifact.phaseKeyPath] = .done(destination)
-                self.afterPrepare(artifact, promoted: destination)
-                self.complete(completion, .success(destination))
-                return
-            }
-            do {
-                let url = try self.prepareArtifact(artifact, destination: destination)
-                self.afterPrepare(artifact, promoted: url)
-                self[keyPath: artifact.phaseKeyPath] = .done(url)
-                self.complete(completion, .success(url))
-            } catch {
-                // Retryable: a later prepare (or next launch) starts over.
-                self[keyPath: artifact.phaseKeyPath] = .idle
-                self.complete(completion, .failure(error))
+    /// Dispatches onto the serial queue and awaits the outcome. Coalesces
+    /// concurrent callers behind the phase check: a prepared artifact (done
+    /// phase, or an earlier launch's file) is adopted; otherwise it is staged
+    /// and promoted. A failed prepare resets the phase so a later call
+    /// retries.
+    private func run(_ artifact: Artifact) async throws -> URL {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                if case let .done(url) = self[keyPath: artifact.phaseKeyPath] {
+                    continuation.resume(returning: url)
+                    return
+                }
+                let destination = self.destinationDirectory
+                    .appendingPathComponent(artifact.destinationFileName)
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    // Prepared by an earlier launch: adopt it, don't re-decompress.
+                    self[keyPath: artifact.phaseKeyPath] = .done(destination)
+                    self.afterPrepare(artifact, promoted: destination)
+                    continuation.resume(returning: destination)
+                    return
+                }
+                do {
+                    let url = try self.prepareArtifact(artifact, destination: destination)
+                    self.afterPrepare(artifact, promoted: url)
+                    self[keyPath: artifact.phaseKeyPath] = .done(url)
+                    continuation.resume(returning: url)
+                } catch {
+                    // Retryable: a later prepare (or next launch) starts over.
+                    self[keyPath: artifact.phaseKeyPath] = .idle
+                    continuation.resume(throwing: error)
+                }
             }
         }
     }
@@ -292,37 +295,6 @@ final class DictionaryStore: @unchecked Sendable {
     private func afterPrepare(_ artifact: Artifact, promoted url: URL) {
         guard artifact == .jmDict else { return }
         removeLegacyJMDictArtifacts(keeping: url)
-    }
-
-    /// Async surface over the completion-based prepares above, which stay the
-    /// primitives. Coalescing semantics are unchanged — the continuation
-    /// lines up behind an in-flight decompression on the store's queue
-    /// exactly like a completion caller would.
-    func prepare() async throws -> URL {
-        try await asyncFromCompletion { handler in self.prepare(completion: handler) }
-    }
-
-    /// JMDict counterpart of `prepare() async`.
-    func prepareJMDict() async throws -> URL {
-        try await asyncFromCompletion { handler in self.prepareJMDict(completion: handler) }
-    }
-
-    private func asyncFromCompletion(
-        _ start: (@escaping @Sendable (Result<URL, Error>) -> Void) -> Void
-    ) async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
-            // The completion runs on the main queue; resuming here hops the
-            // value back to the awaiting context.
-            start { result in
-                continuation.resume(with: result)
-            }
-        }
-    }
-
-    private func complete(
-        _ completion: @escaping @Sendable (Result<URL, Error>) -> Void, _ result: Result<URL, Error>
-    ) {
-        DispatchQueue.main.async { completion(result) }
     }
 
     /// Runs on the serial queue. Stages a private copy of the artifact's zst

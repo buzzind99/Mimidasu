@@ -209,8 +209,7 @@ final class DictionaryStoreTests {
         )
     }
 
-    /// Drives the store's async `prepare()` surface (the completion API
-    /// underneath is exercised by every test going through this helper).
+    /// Drives the store's async `prepare()` surface.
     private func prepare(_ store: DictionaryStore) async throws -> URL {
         try await store.prepare()
     }
