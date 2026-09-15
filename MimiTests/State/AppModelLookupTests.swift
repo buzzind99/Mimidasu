@@ -205,7 +205,7 @@ final class AppModelLookupTests {
 
     @Test("an infrastructure error posts the dictionaryLookup toast and never the pill")
     func errorPostsToast() async {
-        let engine = JMDictLookup(resolveDatabase: { self.fixture.url })
+        let engine = JMDictLookup(resolveDatabase: { [url = self.fixture.url] in url })
         engine.close()
         let model = makeModel(jmDictLookup: engine)
 

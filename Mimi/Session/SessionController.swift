@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Owns the mechanics of a live capture → ASR session: engine lifecycle and
 /// warm-up scheduling, system-audio capture wiring, sentence buffering, and
@@ -323,25 +324,28 @@ final class SessionController {
 
 /// Single-slot handoff for the sidebar AUDIO meter: `handleCaptureChunk`
 /// stages the chunk's RMS from the SCK output queue; the main-actor poll
-/// tick drains the latest value into `AudioLevelState`. Lock-guarded (same
-/// pattern as `SystemAudioCapture`/`DictionaryEngine`) — the slot only ever
-/// holds a `Float`, so `NSLock.withLock` bounds the critical sections to
-/// sub-microsecond work. `take()` leaves the slot empty: with no new chunks
-/// (source lost), the poll tick simply doesn't re-publish and the meter
-/// freezes at its last level until `reset()`/`clear()`.
-private final class StagedRMS {
-    private let lock = NSLock()
-    private var value: Float?
+/// tick drains the latest value into `AudioLevelState`. `Mutex`-guarded
+/// (same pattern as `SystemAudioCapture`/`DictionaryEngine`) — the slot only
+/// ever holds a `Float`, so the critical sections stay sub-microsecond.
+/// `take()` leaves the slot empty: with no new chunks (source lost), the
+/// poll tick simply doesn't re-publish and the meter freezes at its last
+/// level until `reset()`/`clear()`.
+private final class StagedRMS: Sendable {
+    private let slot = Mutex<Float?>(nil)
 
     func stage(_ rms: Float) {
-        lock.withLock { value = rms }
+        slot.withLock { value in value = rms }
     }
 
     func take() -> Float? {
-        lock.withLock { let v = value; value = nil; return v }
+        slot.withLock { value -> Float? in
+            let latest = value
+            value = nil
+            return latest
+        }
     }
 
     func clear() {
-        lock.withLock { value = nil }
+        slot.withLock { value in value = nil }
     }
 }

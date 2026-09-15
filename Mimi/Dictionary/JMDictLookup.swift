@@ -1,27 +1,23 @@
 import Foundation
+import Synchronization
 
 /// Read-only lookup engine over the prepared JMDict SQLite database
 /// (`jmdict-<tag>.sqlite`). Uses the system SQLite through `SQLiteDatabase` —
 /// no new dependency — and every candidate resolves through an exact
 /// `headwords.text = ?` hit on the build's B-tree index.
 ///
-/// Sendable by locking contract (same stance as `DictionaryEngine`): the
-/// only mutable state is the lazily opened database, guarded by `lock`, and
-/// every query runs under it.
-final class JMDictLookup: @unchecked Sendable {
+/// Sendable by construction: the only mutable state is the lazily opened
+/// database, held in a `Mutex`-guarded `State`, and every query runs inside
+/// its `withLock` scope.
+final class JMDictLookup: Sendable {
     private enum State {
         case idle
         case open(SQLiteDatabase)
         case closed
     }
 
-    private let lock = NSLock()
-    private let resolveDatabase: () -> URL?
-    /// Guarded by `lock`. Opened lazily on the first query and kept warm; a
-    /// failed open is never cached, so a later call retries naturally (the
-    /// database may still be preparing). `close()` is permanent for this
-    /// instance — subsequent queries throw `.databaseClosed`.
-    private var state: State = .idle
+    private let state: Mutex<State>
+    private let resolveDatabase: @Sendable () -> URL?
 
     /// Where the prepared JMDict database lives: the Application Support
     /// location `DictionaryStore` promotes into, or — debug checkouts only —
@@ -53,9 +49,14 @@ final class JMDictLookup: @unchecked Sendable {
     }
 
     /// `resolveDatabase` is injectable for tests; the default resolves the
-    /// prepared database location above.
-    init(resolveDatabase: @escaping () -> URL? = { JMDictLookup.defaultDatabaseURL }) {
+    /// prepared database location above. The mutex-guarded `State` opens the
+    /// database lazily on the first query and keeps it warm; a failed open is
+    /// never cached, so a later call retries naturally (the database may
+    /// still be preparing). `close()` is permanent for this instance —
+    /// subsequent queries throw `.databaseClosed`.
+    init(resolveDatabase: @escaping @Sendable () -> URL? = { JMDictLookup.defaultDatabaseURL }) {
         self.resolveDatabase = resolveDatabase
+        state = Mutex(.idle)
     }
 
     deinit {
@@ -144,11 +145,11 @@ final class JMDictLookup: @unchecked Sendable {
     /// Releases the database handle. The instance stays closed permanently —
     /// a testing seam for the closed-handle error path (the app never closes).
     func close() {
-        lock.withLock {
-            if case let .open(database) = state {
+        state.withLock { current in
+            if case let .open(database) = current {
                 database.close()
             }
-            state = .closed
+            current = .closed
         }
     }
 
@@ -167,8 +168,8 @@ final class JMDictLookup: @unchecked Sendable {
     /// Throws on infrastructure failure; callers degrade to unannotated.
     func reading(forWriting writing: String) throws -> String? {
         do {
-            return try lock.withLock {
-                let db = try openedDatabase()
+            return try state.withLock { current -> String? in
+                let db = try openedDatabase(&current)
                 let statement = try db.statement(Self.readingSQL)
                 statement.bind(writing, at: 1)
                 guard try statement.step(), let reb = statement.optionalText(0) else {
@@ -181,12 +182,12 @@ final class JMDictLookup: @unchecked Sendable {
         }
     }
 
-    // MARK: - Core (lock-held)
+    // MARK: - Core (mutex-held)
 
     private func lookupResult(for candidate: LookupCandidate) throws -> LookupResult? {
         do {
-            return try lock.withLock {
-                let db = try openedDatabase()
+            return try state.withLock { current -> LookupResult? in
+                let db = try openedDatabase(&current)
                 var rowByEntry: [Int: HeadwordRow] = [:]
                 for row in try headwordRows(matching: candidate.text, db: db)
                     where rowByEntry[row.entryID] == nil
@@ -333,10 +334,10 @@ final class JMDictLookup: @unchecked Sendable {
         return senses
     }
 
-    // MARK: - Database lifecycle (lock-held)
+    // MARK: - Database lifecycle (mutex-held)
 
-    private func openedDatabase() throws -> SQLiteDatabase {
-        switch state {
+    private func openedDatabase(_ current: inout State) throws -> SQLiteDatabase {
+        switch current {
         case let .open(database):
             return database
         case .closed:
@@ -353,7 +354,7 @@ final class JMDictLookup: @unchecked Sendable {
         } catch {
             throw JMDictLookupError(error)
         }
-        state = .open(database)
+        current = .open(database)
         return database
     }
 

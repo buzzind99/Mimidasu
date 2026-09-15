@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 @testable import Mimi
+import Synchronization
 import Testing
 
 // MARK: - Fixtures
@@ -105,7 +106,7 @@ struct DictionaryEngineTests {
 
     private func makeEngine(
         ffi: DictionaryFFI? = makeFakeFFI(),
-        resolveDictionary: @escaping () -> URL? = { fakeDictionaryURL }
+        resolveDictionary: @escaping @Sendable () -> URL? = { fakeDictionaryURL }
     ) -> DictionaryEngine {
         DictionaryEngine(ffi: ffi, resolveDictionary: resolveDictionary)
     }
@@ -176,13 +177,15 @@ struct DictionaryEngineTests {
     /// arrives); the act under test is the second call after it appears.
     @Test("retries the open when the dictionary resolves later")
     func dictionaryResolvedLater() {
-        var dictionaryURL: URL?
+        let dictionaryURL = Mutex<URL?>(nil)
 
-        let engine = makeEngine(resolveDictionary: { dictionaryURL })
+        let engine = makeEngine(resolveDictionary: {
+            dictionaryURL.withLock { current in current }
+        })
 
         fakeTokenizeJSONText = payloadMixed
         #expect(engine.tokenize(anyText) == nil)
-        dictionaryURL = fakeDictionaryURL
+        dictionaryURL.withLock { current in current = fakeDictionaryURL }
         #expect(engine.tokenize(anyText) == payloadTokens)
     }
 

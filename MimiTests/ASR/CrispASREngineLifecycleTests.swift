@@ -13,7 +13,7 @@ import Testing
 /// the library seam and the vad/decode queues are per-engine instance state,
 /// so the suite is NOT `.serialized`. Timelines converge through bounded
 /// `pollUntilOffMain` polls on the fake's recorded calls and the engine's
-/// lock-guarded state, never bare sleeps.
+/// mutex-guarded state, never bare sleeps.
 @Suite("CrispASREngine (fake library, lifecycle)")
 struct CrispASREngineLifecycleTests {
 
@@ -44,9 +44,9 @@ struct CrispASREngineLifecycleTests {
         return engine
     }
 
-    /// Reads engine state under its lock — jobs mutate it on their queues.
-    private func state<T>(_ engine: CrispASREngine, _ read: () -> T) -> T {
-        engine.lock.withLock { read() }
+    /// Reads engine state under its mutex — jobs mutate it on their queues.
+    private func state<T>(_ engine: CrispASREngine, _ read: (CrispASREngine.State) -> T) -> T {
+        engine.state.withLock { current in read(current) }
     }
 
     private func requireFinal(_ event: ASREvent?, text: String, start: Int, end: Int) {
@@ -113,7 +113,7 @@ struct CrispASREngineLifecycleTests {
                     + "finalization falls back to the 12s cap"
             ]
         )
-        #expect(state(engine) { engine.vadActive } == false)
+        #expect(state(engine) { current in current.vadActive } == false)
         #expect(library.openSessionCount == 1, "the second prepare reuses the warm session")
     }
 
@@ -222,7 +222,7 @@ struct CrispASREngineLifecycleTests {
 
         let task = Task.detached { engine.finish() }
         #expect(
-            await pollUntilOffMain { state(engine) { engine.finishing } },
+            await pollUntilOffMain { state(engine) { current in current.finishing } },
             "finish entered the drain while the decode is in flight"
         )
 

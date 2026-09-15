@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Swift wrapper over `libcrispasr.dylib` (stable C session ABI, bound at
 /// runtime with dlopen/dlsym so the app builds and launches before the native
@@ -25,17 +26,20 @@ import Foundation
 ///     "redecode" final mode) and posts one clean `.final`.
 ///
 /// Threading: pushes land on the caller's audio thread but only take the
-/// state lock; actual decoding runs on a dedicated serial queue so the main
+/// state mutex; actual decoding runs on a dedicated serial queue so the main
 /// thread's 60 ms `poll()` loop never blocks behind a multi-second decode.
 /// VAD analysis runs on its own serial queue: an AR decode takes seconds,
 /// and endpointing must never wait behind one (a starved VAD freezes both
 /// the partial gate and silence detection). The two job types interlock
-/// only through the state lock; the C library serializes VAD access to the
+/// only through the state mutex; the C library serializes VAD access to the
 /// cached model internally.
 ///
-/// Sendability: all shared state is `lock`/`prepareLock`-guarded, so the
-/// engine is safe to hand across concurrency domains (e.g. `finish()` runs
-/// detached from the main actor on session stop).
+/// Sendability: all mutable engine state lives in `State` behind a `Mutex`
+/// (`state`), and `prepareMutex` serializes prepare/close, so the engine is
+/// safe to hand across concurrency domains (e.g. `finish()` runs detached
+/// from the main actor on session stop). `@unchecked` remains for
+/// `onEngineError` and the injected library seam, neither of which the
+/// compiler can see as thread-confined.
 final class CrispASREngine: ASREngine, @unchecked Sendable {
     let isMock = false
 
@@ -174,79 +178,98 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
         self.modelPath = modelPath.path
         self.languageCode = languageCode
         lib = try library ?? CrispASRLibrary.open()
-        if let vad = lib.vadModelPath {
-            vadModelPath = vad
-        } else {
-            vadModelPath = nil
-            vadUnavailableReason =
-                "VAD unavailable (missing firered-vad.gguf or libcrispasr VAD symbols) — " +
+        let vadModelPath = lib.vadModelPath
+        vadUnavailableReason = if vadModelPath == nil {
+            "VAD unavailable (missing firered-vad.gguf or libcrispasr VAD symbols) — " +
                 "finalization falls back to the \(Self.utteranceCapSamples / Self.sampleRate)s cap"
+        } else {
+            nil
         }
+        state = Mutex(State(vadModelPath: vadModelPath))
     }
 
     // MARK: - State
 
-    let lock = NSLock()
-    /// Serializes `prepare` so a background warm-up and a session start can
-    /// never both open a C session (the second opener would leak the first).
-    let prepareLock = NSLock()
+    /// All mutable engine state, guarded by `state`: jobs mutate it on the
+    /// decode/VAD queues, pushes on the audio thread, `finish`/`close` on
+    /// their callers. Every access runs inside a `state.withLock` scope;
+    /// helpers that need the locked state take it as an explicit `inout`
+    /// parameter and must only be called from such a scope.
+    ///
+    /// `@unchecked` only for the C session handle: `OpaquePointer` is an
+    /// opaque token the compiler can't see as safe to copy across threads —
+    /// the mutex is what serializes every mutation.
+    struct State: @unchecked Sendable {
+        var session: OpaquePointer?
+        var totalSamples = 0
+        var window: [Float] = [] // last `lengthSamples` samples
+        var utterance: [Float] = [] // PCM since the last final
+        var utteranceStartSample = 0
+        /// Bumped on every final/discard so stale VAD results (snapshot taken
+        /// before the reset) can be ignored.
+        var utteranceGeneration = 0
+        var lastDecodeDispatchSample = 0
+        /// `vadLastSpeechEndSample` at the time the last partial was dispatched.
+        /// Partials only re-decode when the VAD has confirmed speech beyond this,
+        /// so a pause doesn't chain identical window redecodes (which would both
+        /// freeze the HUD draft and starve the VAD on the serial decode queue).
+        var lastPartialSpeechEndSample = 0
+        var processedCount = 0
+        var decodeInFlight = false
+        var vadInFlight = false
+        var finishing = false
+        var inbox: [ASREvent] = []
+        var consecutiveDecodeFailures = 0
+
+        /// VAD state.
+        var vadModelPath: String?
+        /// Flipped off at runtime on VAD failure → degraded mode for the session.
+        var vadEnabled = true
+        var consecutiveVADFailures = 0
+        var lastVADDispatchSample = 0
+        /// True once the VAD has found a speech span in the current utterance.
+        var utteranceHasSpeech = false
+        /// RMS backstop: any chunk since the last final/discard was not silent.
+        var utteranceHasLoudAudio = false
+        /// Absolute sample of the end of the last VAD speech span (nil = none yet).
+        var vadLastSpeechEndSample: Int?
+        /// Absolute sample through which VAD results are valid for the current
+        /// utterance (0 = nothing analyzed). Endpointing only trusts a span end
+        /// once analysis has progressed past it.
+        var vadAnalyzedThroughSample = 0
+        /// Absolute sample of the start of the first speech span in the utterance.
+        var vadFirstSpeechStartSample: Int?
+        /// Set once in `prepare` when the VAD can't be used; reported once.
+        var vadUnavailableReported = false
+
+        /// True when the VAD is actually in the loop (symbols bound, model
+        /// present, not runtime-disabled). Everything else is degraded mode.
+        var vadActive: Bool {
+            vadEnabled && vadModelPath != nil
+        }
+    }
+
+    /// All shared mutable state; `withLock` scopes are the only access.
+    let state: Mutex<State>
+    /// Serializes `prepare` (and `close`) so a background warm-up and a
+    /// session start can never both open a C session (the second opener
+    /// would leak the first). Held across the multi-second session open.
+    let prepareMutex = Mutex<Void>(())
     let decodeQueue = DispatchQueue(label: "mimi.asr.decode", qos: .userInitiated)
     let vadQueue = DispatchQueue(label: "mimi.asr.vad", qos: .userInitiated)
     /// Signaled after every decode or VAD completion so `finish` can wait
     /// out in-flight work. Never waited on by the job paths themselves.
     let jobFinished = DispatchSemaphore(value: 0)
 
-    var session: OpaquePointer?
-
-    var totalSamples = 0
-    var window: [Float] = [] // last `lengthSamples` samples
-    var utterance: [Float] = [] // PCM since the last final
-    var utteranceStartSample = 0
-    /// Bumped on every final/discard so stale VAD results (snapshot taken
-    /// before the reset) can be ignored.
-    var utteranceGeneration = 0
-    var lastDecodeDispatchSample = 0
-    /// `vadLastSpeechEndSample` at the time the last partial was dispatched.
-    /// Partials only re-decode when the VAD has confirmed speech beyond this,
-    /// so a pause doesn't chain identical window redecodes (which would both
-    /// freeze the HUD draft and starve the VAD on the serial decode queue).
-    var lastPartialSpeechEndSample = 0
-    var processedCount = 0
-    var decodeInFlight = false
-    var vadInFlight = false
-    var finishing = false
-    var inbox: [ASREvent] = []
-    var consecutiveDecodeFailures = 0
-
-    /// VAD state (all guarded by `lock`).
-    var vadModelPath: String?
     /// Set in init when the VAD can't be used; reported once in `prepare`.
-    private var vadUnavailableReason: String?
-    private var vadUnavailableReported = false
-    /// Flipped off at runtime on VAD failure → degraded mode for the session.
-    var vadEnabled = true
-    var consecutiveVADFailures = 0
-    var lastVADDispatchSample = 0
-    /// True once the VAD has found a speech span in the current utterance.
-    var utteranceHasSpeech = false
-    /// RMS backstop: any chunk since the last final/discard was not silent.
-    var utteranceHasLoudAudio = false
-    /// Absolute sample of the end of the last VAD speech span (nil = none yet).
-    var vadLastSpeechEndSample: Int?
-    /// Absolute sample through which VAD results are valid for the current
-    /// utterance (0 = nothing analyzed). Endpointing only trusts a span end
-    /// once analysis has progressed past it.
-    var vadAnalyzedThroughSample = 0
-    /// Absolute sample of the start of the first speech span in the utterance.
-    var vadFirstSpeechStartSample: Int?
+    private let vadUnavailableReason: String?
 
     var processedSamples: Int {
-        lock.lock(); defer { lock.unlock() }
-        return processedCount
+        state.withLock { current in current.processedCount }
     }
 
     var pushedSamples: Int {
-        lock.withLock { totalSamples }
+        state.withLock { current in current.totalSamples }
     }
 
     // MARK: - ASREngine
@@ -255,89 +278,101 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
         guard FileManager.default.fileExists(atPath: modelPath) else {
             throw ASREngineError.modelNotFound(modelPath)
         }
-        prepareLock.lock()
-        defer { prepareLock.unlock() }
-        // Warm restart: the C session from a previous run is still open —
-        // reuse it and skip the multi-second GGUF load + Metal compile.
-        let alreadyOpen = lock.withLock { session != nil }
-        if alreadyOpen {
+        // `Mutex.withLock` rethrows untyped, so the typed failure comes out
+        // of the scope as a value and is thrown at its edge.
+        let failure: ASREngineError? = prepareMutex.withLock { _ in
+            // Warm restart: the C session from a previous run is still open —
+            // reuse it and skip the multi-second GGUF load + Metal compile.
+            let alreadyOpen = state.withLock { current in current.session != nil }
+            if alreadyOpen {
+                #if DEBUG
+                    print("[asr] prepare: reusing warm session (model already loaded)")
+                #endif
+                return nil
+            }
+            // TLS-backed GPU preference: must be set on the same thread that
+            // opens the session (prepare runs once, before any decode starts).
+            let backend = lib.detectBackend(modelPath: modelPath) ?? Self.fallbackBackend(modelPath: modelPath)
             #if DEBUG
-                print("[asr] prepare: reusing warm session (model already loaded)")
+                print("[asr] prepare: opening C session (\(backend)/metal)")
             #endif
-            return
+            lib.setGpuBackend("metal")
+            guard let handle = lib.openSession(modelPath: modelPath, backend: backend) else {
+                return ASREngineError.createFailed(
+                    "crispasr_session_open_explicit failed (backend \(backend))"
+                )
+            }
+            // Publish the handle under the state mutex: `close()` nils it
+            // there, and finish/runDecode snapshot it there.
+            state.withLock { current in current.session = handle }
+            return nil
         }
-        // TLS-backed GPU preference: must be set on the same thread that
-        // opens the session (prepare runs once, before any decode starts).
-        let backend = lib.detectBackend(modelPath: modelPath) ?? Self.fallbackBackend(modelPath: modelPath)
-        #if DEBUG
-            print("[asr] prepare: opening C session (\(backend)/metal)")
-        #endif
-        lib.setGpuBackend("metal")
-        guard let handle = lib.openSession(modelPath: modelPath, backend: backend) else {
-            throw ASREngineError.createFailed(
-                "crispasr_session_open_explicit failed (backend \(backend))"
-            )
+        if let failure {
+            throw failure
         }
-        // Publish the handle under the state lock: `close()` nils it there,
-        // and finish/runDecode snapshot it there.
-        lock.withLock { session = handle }
-        if let reason = vadUnavailableReason, !vadUnavailableReported {
-            vadUnavailableReported = true
-            #if DEBUG
-                print("[asr] \(reason)")
-            #endif
-            onEngineError?(reason)
+        if let reason = vadUnavailableReason {
+            let shouldReport = state.withLock { current -> Bool in
+                guard !current.vadUnavailableReported else { return false }
+                current.vadUnavailableReported = true
+                return true
+            }
+            if shouldReport {
+                #if DEBUG
+                    print("[asr] \(reason)")
+                #endif
+                onEngineError?(reason)
+            }
         }
     }
 
     func openStream() throws(ASREngineError) {
-        lock.withLock {
-            totalSamples = 0
-            window = []
-            utterance = []
-            utteranceStartSample = 0
-            utteranceGeneration += 1
-            lastDecodeDispatchSample = 0
-            lastPartialSpeechEndSample = 0
-            processedCount = 0
-            decodeInFlight = false
-            vadInFlight = false
-            finishing = false
-            inbox = []
-            lastVADDispatchSample = 0
-            utteranceHasSpeech = false
-            utteranceHasLoudAudio = false
-            vadLastSpeechEndSample = nil
-            vadAnalyzedThroughSample = 0
-            vadFirstSpeechStartSample = nil
-            consecutiveDecodeFailures = 0
-            consecutiveVADFailures = 0
-            vadEnabled = true
+        state.withLock { current in
+            current.totalSamples = 0
+            current.window = []
+            current.utterance = []
+            current.utteranceStartSample = 0
+            current.utteranceGeneration += 1
+            current.lastDecodeDispatchSample = 0
+            current.lastPartialSpeechEndSample = 0
+            current.processedCount = 0
+            current.decodeInFlight = false
+            current.vadInFlight = false
+            current.finishing = false
+            current.inbox = []
+            current.lastVADDispatchSample = 0
+            current.utteranceHasSpeech = false
+            current.utteranceHasLoudAudio = false
+            current.vadLastSpeechEndSample = nil
+            current.vadAnalyzedThroughSample = 0
+            current.vadFirstSpeechStartSample = nil
+            current.consecutiveDecodeFailures = 0
+            current.consecutiveVADFailures = 0
+            current.vadEnabled = true
         }
     }
 
     func push(_ samples: [Float]) {
-        lock.withLock {
-            guard session != nil, !finishing else { return }
-            window.append(contentsOf: samples)
-            if window.count > Self.lengthSamples {
-                window.removeFirst(window.count - Self.lengthSamples)
+        state.withLock { current in
+            guard current.session != nil, !current.finishing else { return }
+            current.window.append(contentsOf: samples)
+            if current.window.count > Self.lengthSamples {
+                current.window.removeFirst(current.window.count - Self.lengthSamples)
             }
-            totalSamples += samples.count
+            current.totalSamples += samples.count
 
             // Every chunk feeds the utterance (bounded by the forced-final cap);
             // speech vs. silence is the VAD's call, not an energy threshold's.
-            if utterance.isEmpty {
-                utteranceStartSample = totalSamples - samples.count
+            if current.utterance.isEmpty {
+                current.utteranceStartSample = current.totalSamples - samples.count
             }
-            utterance.append(contentsOf: samples)
+            current.utterance.append(contentsOf: samples)
 
             // RMS backstop: track whether this buffer is not truly silent.
             if AudioLevels.rms(of: samples) > Self.speechRMS {
-                utteranceHasLoudAudio = true
+                current.utteranceHasLoudAudio = true
             }
 
-            maybeScheduleWorkLocked()
+            maybeScheduleWork(&current)
         }
     }
 }

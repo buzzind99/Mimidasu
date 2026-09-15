@@ -15,7 +15,7 @@ import Testing
 /// the library seam and the vad/decode queues are per-engine instance state,
 /// so the suite is NOT `.serialized`. Timelines converge through bounded
 /// `pollUntilOffMain` polls on the fake's recorded calls and the engine's
-/// lock-guarded state, never bare sleeps.
+/// mutex-guarded state, never bare sleeps.
 @Suite("CrispASREngine (fake library)")
 struct CrispASREngineLibraryTests {
 
@@ -46,9 +46,9 @@ struct CrispASREngineLibraryTests {
         return engine
     }
 
-    /// Reads engine state under its lock — jobs mutate it on their queues.
-    private func state<T>(_ engine: CrispASREngine, _ read: () -> T) -> T {
-        engine.lock.withLock { read() }
+    /// Reads engine state under its mutex — jobs mutate it on their queues.
+    private func state<T>(_ engine: CrispASREngine, _ read: (CrispASREngine.State) -> T) -> T {
+        engine.state.withLock { current in read(current) }
     }
 
     /// Drains `poll()` until a final appears (bounded); returns it, or nil
@@ -117,7 +117,7 @@ struct CrispASREngineLibraryTests {
 
         #expect(await pollUntilOffMain { library.transcribeCalls.count == 2 }, "endpoint final decoded")
         #expect(
-            await pollUntilOffMain { state(engine) { engine.utteranceGeneration } == 2 },
+            await pollUntilOffMain { state(engine) { current in current.utteranceGeneration } == 2 },
             "the tag-only final closed out the utterance — the finalized span is trimmed, the trailing silence seeds the next utterance"
         )
         #expect(engine.poll() == nil, "a `<sil>`-only decode must not become a final")
@@ -145,8 +145,8 @@ struct CrispASREngineLibraryTests {
         let engine = try makePreparedEngine(library)
 
         engine.push([Float](repeating: 0.1, count: 48000)) // 3 s, past the discard floor
-        #expect(await pollUntilOffMain { state(engine) { engine.utterance.isEmpty } }, "discard observed")
-        #expect(state(engine) { engine.vadAnalyzedThroughSample } == 0, "the discard resets the analysis cursor")
+        #expect(await pollUntilOffMain { state(engine) { current in current.utterance.isEmpty } }, "discard observed")
+        #expect(state(engine) { current in current.vadAnalyzedThroughSample } == 0, "the discard resets the analysis cursor")
 
         engine.push(loudSecond)
         #expect(await pollUntilOffMain { library.vadCalls.count == 2 }, "the next utterance's VAD pass ran")
@@ -155,7 +155,7 @@ struct CrispASREngineLibraryTests {
             library.vadCalls[1].count == 16000,
             "the discarded utterance must not accumulate into the next VAD snapshot"
         )
-        #expect(state(engine) { engine.utteranceGeneration } == 2)
+        #expect(state(engine) { current in current.utteranceGeneration } == 2)
         #expect(library.transcribeCalls.isEmpty, "speechless audio must never decode")
         #expect(engine.poll() == nil)
     }
@@ -200,7 +200,7 @@ struct CrispASREngineLibraryTests {
         engine.push(loudSecond) // VAD #1 → immediate degrade
         #expect(await pollUntilOffMain { !errors.all.isEmpty }, "the VAD degrade was reported")
         #expect(errors.all == ["VAD failed (-3) — falling back to cap-only finalization"])
-        #expect(state(engine) { engine.vadEnabled } == false)
+        #expect(state(engine) { current in current.vadEnabled } == false)
 
         engine.push([Float](repeating: 0.1, count: 12 * CrispASREngine.sampleRate)) // loud cap
         await requireFinal(pollFinal(engine), text: "キャップ。", start: 0, end: 208_000)
@@ -219,12 +219,12 @@ struct CrispASREngineLibraryTests {
         for failure in 1 ... 3 {
             engine.push(loudSecond)
             #expect(
-                await pollUntilOffMain { state(engine) { engine.consecutiveVADFailures } == failure },
+                await pollUntilOffMain { state(engine) { current in current.consecutiveVADFailures } == failure },
                 "VAD failure #\(failure) counted"
             )
         }
 
-        #expect(state(engine) { engine.vadEnabled } == false)
+        #expect(state(engine) { current in current.vadEnabled } == false)
         #expect(errors.all == ["VAD failed (-1) — falling back to cap-only finalization"])
         #expect(library.transcribeCalls.isEmpty)
     }
@@ -238,14 +238,14 @@ struct CrispASREngineLibraryTests {
         engine.push(loudSecond)
         #expect(
             await pollUntilOffMain {
-                !library.vadCalls.isEmpty && state(engine) { engine.vadInFlight } == false
+                !library.vadCalls.isEmpty && state(engine) { current in current.vadInFlight } == false
             },
             "the nil reply was delivered and the VAD pass ran to completion"
         )
 
-        #expect(state(engine) { engine.consecutiveVADFailures } == 0)
-        #expect(state(engine) { engine.vadInFlight } == false)
-        #expect(state(engine) { engine.utteranceGeneration } == 1, "no discard, no final")
+        #expect(state(engine) { current in current.consecutiveVADFailures } == 0)
+        #expect(state(engine) { current in current.vadInFlight } == false)
+        #expect(state(engine) { current in current.utteranceGeneration } == 1, "no discard, no final")
         #expect(library.transcribeCalls.isEmpty, "no endpoint was scheduled")
         #expect(engine.poll() == nil)
     }
@@ -262,7 +262,7 @@ struct CrispASREngineLibraryTests {
         #expect(await pollUntilOffMain { !errors.all.isEmpty }, "the VAD degrade was reported")
 
         engine.push([Float](repeating: 0, count: 12 * CrispASREngine.sampleRate)) // silent cap
-        #expect(await pollUntilOffMain { state(engine) { engine.utterance.isEmpty } }, "the silent cap discarded the utterance")
+        #expect(await pollUntilOffMain { state(engine) { current in current.utterance.isEmpty } }, "the silent cap discarded the utterance")
 
         #expect(library.transcribeCalls.isEmpty, "the RMS backstop must block the cap decode")
         #expect(engine.poll() == nil)
@@ -296,7 +296,7 @@ struct CrispASREngineLibraryTests {
             "ASR decode failed (×1)",
             "ASR decode failed (×32)"
         ])
-        #expect(state(engine) { engine.consecutiveDecodeFailures } == 32)
+        #expect(state(engine) { current in current.consecutiveDecodeFailures } == 32)
     }
 
     // MARK: - Partials
@@ -324,7 +324,7 @@ struct CrispASREngineLibraryTests {
 
         engine.push([Float](repeating: 0.1, count: 8000)) // 0.5 s more speech
         #expect(
-            await pollUntilOffMain { state(engine) { engine.vadAnalyzedThroughSample } == 24000 },
+            await pollUntilOffMain { state(engine) { current in current.vadAnalyzedThroughSample } == 24000 },
             "the second VAD pass analyzed the longer utterance"
         )
         #expect(library.transcribeCalls.count == 1, "0.5 s of confirmed new speech is below the cadence")
@@ -380,15 +380,15 @@ struct CrispASREngineLibraryTests {
         #expect(await pollUntilOffMain { library.transcribeEntered }, "the cap decode entered the fake")
 
         library.transcribeHoldSemaphore?.signal() // the decode closes generation 1
-        #expect(await pollUntilOffMain { state(engine) { engine.utteranceGeneration } == 2 }, "the decode closed generation 1")
+        #expect(await pollUntilOffMain { state(engine) { current in current.utteranceGeneration } == 2 }, "the decode closed generation 1")
 
         library.vadHoldSemaphore?.signal() // VAD #1 resumes into a stale generation
         #expect(await pollUntilOffMain { library.vadFreeCount == 1 }, "the stale VAD result was freed")
 
-        #expect(state(engine) { engine.vadAnalyzedThroughSample } == 0)
-        #expect(state(engine) { engine.utteranceHasSpeech } == false)
-        #expect(state(engine) { engine.vadLastSpeechEndSample } == nil)
-        #expect(state(engine) { engine.utterance.isEmpty })
+        #expect(state(engine) { current in current.vadAnalyzedThroughSample } == 0)
+        #expect(state(engine) { current in current.utteranceHasSpeech } == false)
+        #expect(state(engine) { current in current.vadLastSpeechEndSample } == nil)
+        #expect(state(engine) { current in current.utterance.isEmpty })
         await requireFinal(pollFinal(engine), text: "ファイナル。", start: 0, end: 208_000)
     }
 }

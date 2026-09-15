@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Manages the local dictionary files the annotation and lookup layers read.
 /// Both artifacts ship compressed in the app bundle and are decompressed once
@@ -9,9 +10,11 @@ import Foundation
 /// staleness key: an app update shipping a new pin stages a *new* file and
 /// stale ones are removed after the next successful promote.
 ///
-/// Sendable by queue contract: `phases` is the only mutable state and every
-/// access happens on the serial `queue` (see the `Phase` comment below).
-final class DictionaryStore: @unchecked Sendable {
+/// Sendable by construction: `phases` is the only mutable state, wrapped in
+/// a `Mutex`, and every access happens on the serial `queue` too (see the
+/// `Phase` comment below — the queue is the coalescing point, the mutex
+/// makes the store compiler-checked Sendable).
+final class DictionaryStore: Sendable {
     static let shared = DictionaryStore()
 
     enum DictionaryStoreError: LocalizedError, Equatable {
@@ -178,7 +181,7 @@ final class DictionaryStore: @unchecked Sendable {
     private let bundledJMDictSource: URL?
     private let destinationDirectory: URL
     private let ffi: DictionaryFFI?
-    private var phases = Phases()
+    private let phases = Mutex(Phases())
 
     /// `ffi` and the locations are injectable for tests; defaults resolve the
     /// real runtime and locations. Loading the library at init is cheap
@@ -238,10 +241,10 @@ final class DictionaryStore: @unchecked Sendable {
             }
         }
 
-        var phaseKeyPath: ReferenceWritableKeyPath<DictionaryStore, Phase> {
+        var phaseKeyPath: WritableKeyPath<Phases, Phase> {
             switch self {
-            case .tokenizer: \.phases.ipadic
-            case .jmDict: \.phases.jmDict
+            case .tokenizer: \.ipadic
+            case .jmDict: \.jmDict
             }
         }
 
@@ -261,7 +264,10 @@ final class DictionaryStore: @unchecked Sendable {
     private func run(_ artifact: Artifact) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
-                if case let .done(url) = self[keyPath: artifact.phaseKeyPath] {
+                let phase = self.phases.withLock { current in
+                    current[keyPath: artifact.phaseKeyPath]
+                }
+                if case let .done(url) = phase {
                     continuation.resume(returning: url)
                     return
                 }
@@ -269,7 +275,7 @@ final class DictionaryStore: @unchecked Sendable {
                     .appendingPathComponent(artifact.destinationFileName)
                 if FileManager.default.fileExists(atPath: destination.path) {
                     // Prepared by an earlier launch: adopt it, don't re-decompress.
-                    self[keyPath: artifact.phaseKeyPath] = .done(destination)
+                    self.setPhase(artifact, to: .done(destination))
                     self.afterPrepare(artifact, promoted: destination)
                     continuation.resume(returning: destination)
                     return
@@ -277,14 +283,22 @@ final class DictionaryStore: @unchecked Sendable {
                 do {
                     let url = try self.prepareArtifact(artifact, destination: destination)
                     self.afterPrepare(artifact, promoted: url)
-                    self[keyPath: artifact.phaseKeyPath] = .done(url)
+                    self.setPhase(artifact, to: .done(url))
                     continuation.resume(returning: url)
                 } catch {
                     // Retryable: a later prepare (or next launch) starts over.
-                    self[keyPath: artifact.phaseKeyPath] = .idle
+                    self.setPhase(artifact, to: .idle)
                     continuation.resume(throwing: error)
                 }
             }
+        }
+    }
+
+    /// Serial-queue runs only (the queue is the coalescing point — see
+    /// `Phase`); the mutex keeps `phases` compiler-checked Sendable.
+    private func setPhase(_ artifact: Artifact, to phase: Phase) {
+        phases.withLock { current in
+            current[keyPath: artifact.phaseKeyPath] = phase
         }
     }
 

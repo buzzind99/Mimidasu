@@ -22,7 +22,7 @@ struct CrispASREngineLiveTests {
     // MARK: - Helpers
 
     private func session(_ engine: CrispASREngine) -> OpaquePointer? {
-        engine.lock.withLock { engine.session }
+        engine.state.withLock { current in current.session }
     }
 
     private func makePreparedEngine() throws -> CrispASREngine {
@@ -125,7 +125,7 @@ struct CrispASREngineLiveTests {
         try engine.openStream()
         // openStream re-enables VAD; degrade after it so the 12 s forced-final
         // cap is the only endpoint on synthesized audio.
-        engine.lock.withLock { engine.vadEnabled = false }
+        engine.state.withLock { current in current.vadEnabled = false }
 
         let cap = CrispASREngine.utteranceCapSamples
         var pushed = 0
