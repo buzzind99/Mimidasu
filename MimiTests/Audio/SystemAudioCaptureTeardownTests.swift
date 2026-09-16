@@ -1,14 +1,13 @@
 import Foundation
 @testable import Mimi
-import ScreenCaptureKit
 import Testing
 
 /// Tests `SystemAudioCapture`'s teardown paths — the `stop()` fence and the
-/// dead-stream reset — through the internal delegate seams
-/// (`handleSampleBuffer`/`handleStreamStopped`), split out of
+/// dead-device reset — through the internal seams
+/// (`handleAudioBufferList`/`handleDeviceDied`), split out of
 /// `SystemAudioCaptureTests` to keep both suites small. Callbacks either run
 /// synchronously on the calling thread or are parked on test-owned gates, so
-/// the interleavings are structural, not timed. No ScreenCaptureKit involved.
+/// the interleavings are structural, not timed. No audio HAL involved.
 @Suite("SystemAudioCapture teardown")
 struct SystemAudioCaptureTeardownTests {
 
@@ -48,9 +47,9 @@ struct SystemAudioCaptureTeardownTests {
     // MARK: - Stop fence
 
     @Test("stop() fences an in-flight callback and nothing lands after it returns")
-    func stopFencesInFlightCallback() throws {
+    func stopFencesInFlightCallback() {
         let capture = makeCapture(running: true)
-        let buffer = try SampleBufferSynthesis.make(frames: 2 * 2560)
+        let buffer = AudioBufferListSynthesis.make(frames: 2 * 2560)
         let recorder = recorder
 
         // Raw Thread + semaphore handoff instead of a `confirmation()`:
@@ -73,9 +72,9 @@ struct SystemAudioCaptureTeardownTests {
 
         // The callback thread deliberately hands the buffer in off-main —
         // that is the real production path; the buffer is read-only here.
-        nonisolated(unsafe) let callbackBuffer = buffer
+        let callbackBuffer = buffer
         let callbackThread = Thread {
-            capture.handleSampleBuffer(callbackBuffer, type: .audio)
+            capture.handleAudioBufferList(callbackBuffer.pointer, asbd: callbackBuffer.asbd)
         }
         callbackThread.start()
         #expect(chunkDelivered.wait(timeout: .now() + 2) == .success)
@@ -98,26 +97,26 @@ struct SystemAudioCaptureTeardownTests {
     }
 
     @Test("sample buffers are dropped after stop() returns")
-    func samplesDroppedAfterStop() throws {
+    func samplesDroppedAfterStop() {
         let capture = makeCapture(running: true)
-        let buffer = try SampleBufferSynthesis.make(frames: 2560)
+        let buffer = AudioBufferListSynthesis.make(frames: 2560)
 
-        capture.handleSampleBuffer(buffer, type: .audio)
+        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
         #expect(recorder.chunks.count == 1)
 
         capture.stop()
-        capture.handleSampleBuffer(buffer, type: .audio)
+        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
         #expect(!capture.isRunning)
         #expect(recorder.chunks.count == 1)
         #expect(recorder.errors.isEmpty)
     }
 
     @Test("a stop during extraction drops the in-flight samples")
-    func stopDuringExtractionDropsSamples() throws {
+    func stopDuringExtractionDropsSamples() {
         let capture = makeCapture(running: true)
         // One chunk's worth: if the fence failed, the buffer would surface
         // as exactly one chunk.
-        let buffer = try SampleBufferSynthesis.make(frames: 2560)
+        let buffer = AudioBufferListSynthesis.make(frames: 2560)
 
         // Park the callback inside `extractMono` — past every entry guard,
         // still before the locked re-check — so `stop()` provably runs while
@@ -132,9 +131,9 @@ struct SystemAudioCaptureTeardownTests {
         }
 
         let callbackFinished = DispatchSemaphore(value: 0)
-        nonisolated(unsafe) let callbackBuffer = buffer
+        let callbackBuffer = buffer
         let callbackThread = Thread {
-            capture.handleSampleBuffer(callbackBuffer, type: .audio)
+            capture.handleAudioBufferList(callbackBuffer.pointer, asbd: callbackBuffer.asbd)
             callbackFinished.signal()
         }
         callbackThread.start()
@@ -149,47 +148,49 @@ struct SystemAudioCaptureTeardownTests {
         #expect(recorder.errors.isEmpty)
     }
 
-    // MARK: - SCStreamDelegate stop handling
+    // MARK: - Device-death handling
 
-    @Test("a stream-stopped event while running resets the state and reports the error")
-    func streamStoppedWhileRunning() throws {
+    @Test("a device-died event while running resets the state and reports the error")
+    func deviceDiedWhileRunning() throws {
         let capture = makeCapture(running: true)
-        let streamError = NSError(
+        let deviceError = NSError(
             domain: "mimi.tests", code: 42,
             userInfo: [NSLocalizedDescriptionKey: "stream died"]
         )
 
-        capture.handleStreamStopped(streamError)
+        capture.handleDeviceDied(deviceError)
 
         #expect(!capture.isRunning)
         #expect(recorder.chunks.isEmpty)
         #expect(recorder.errors.count == 1)
         let error = try #require(recorder.errors.first)
-        guard case let .streamSetupFailed(detail) = error else {
-            Issue.record("expected .streamSetupFailed, got \(error)")
+        guard case let .captureLost(detail) = error else {
+            Issue.record("expected .captureLost, got \(error)")
             return
         }
         #expect(detail == "stream died")
     }
 
     @Test(
-        "a stream-stopped event clears the accumulator so new samples never stitch onto leftovers"
+        "a device-died event clears the accumulator so new samples never stitch onto leftovers"
     )
-    func streamStoppedClearsAccumulator() throws {
+    func deviceDiedClearsAccumulator() throws {
         let capture = makeCapture(running: true)
-        let streamError = NSError(domain: "mimi.tests", code: 9)
+        let deviceError = NSError(domain: "mimi.tests", code: 9)
 
         // A full chunk pre-death: pins that session-relative offsets
         // intentionally continue across the death (`startSample` does not
         // reset), while the accumulator itself is dropped.
-        try capture.handleSampleBuffer(SampleBufferSynthesis.make(frames: 2560), type: .audio)
+        let first = AudioBufferListSynthesis.make(frames: 2560)
+        capture.handleAudioBufferList(first.pointer, asbd: first.asbd)
         #expect(recorder.chunks.count == 1)
-        capture.handleStreamStopped(streamError)
+        capture.handleDeviceDied(deviceError)
 
-        // The instance stays usable after the stream died: the next run must
+        // The instance stays usable after the device died: the next run must
         // not stitch new samples onto pre-death leftovers.
         capture.setRunningForTesting(true)
-        try capture.handleSampleBuffer(SampleBufferSynthesis.make(frames: 2560), type: .audio)
+        let second = AudioBufferListSynthesis.make(frames: 2560)
+        capture.handleAudioBufferList(second.pointer, asbd: second.asbd)
 
         #expect(recorder.chunks.count == 2)
         let chunk = try #require(recorder.chunks.last)
@@ -197,12 +198,12 @@ struct SystemAudioCaptureTeardownTests {
         #expect(chunk.samples == (0 ..< 2560).map(Float.init))
     }
 
-    @Test("a stream-stopped event while not running is a no-op")
-    func streamStoppedWhenNotRunning() {
+    @Test("a device-died event while not running is a no-op")
+    func deviceDiedWhenNotRunning() {
         let capture = makeCapture(running: false)
-        let streamError = NSError(domain: "mimi.tests", code: 7)
+        let deviceError = NSError(domain: "mimi.tests", code: 7)
 
-        capture.handleStreamStopped(streamError)
+        capture.handleDeviceDied(deviceError)
 
         #expect(!capture.isRunning)
         #expect(recorder.errors.isEmpty)

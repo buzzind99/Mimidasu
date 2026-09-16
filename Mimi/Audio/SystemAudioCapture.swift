@@ -1,6 +1,6 @@
 import AVFoundation
+import CoreAudio
 import Foundation
-import ScreenCaptureKit
 import Synchronization
 
 /// Emitted mono 16 kHz chunk (160 ms = 2,560 samples). `samples` is a value
@@ -12,44 +12,76 @@ struct AudioChunk: Sendable {
 }
 
 /// Errors surfaced by the capture pipeline.
-enum CaptureError: LocalizedError {
-    case permissionDenied
-    case noDisplayFound
+enum CaptureError: LocalizedError, Equatable {
+    /// The system refused tap capture: the system-audio recording permission
+    /// (a TCC category separate from Microphone) is missing or denied. Carries
+    /// the raw HAL status because both statuses it is built from also arise
+    /// without a permission problem (`'!hog'` from a hog-mode conflict,
+    /// `'nope'` from any illegal operation); keeping the code in the message
+    /// lets support tell the cases apart.
+    case audioCaptureDenied(OSStatus)
+    /// The capture stream died after it started — output device removed, tap
+    /// revoked, aggregate reconfigured. Distinct from `.streamSetupFailed` so
+    /// the mid-session card doesn't misreport a loss as a failed start.
+    case captureLost(String)
     case streamSetupFailed(String)
     case formatUnavailable
 
     var errorDescription: String? {
         switch self {
-        case .permissionDenied:
-            "Screen Recording access is required to capture system audio. Grant it "
-                + "in System Settings → Privacy & Security → Screen Recording, then restart Mimi."
-        case .noDisplayFound:
-            "No display available to attach the audio stream to."
+        case let .audioCaptureDenied(status):
+            "System audio recording is not permitted. Grant it in System Settings → "
+                + "Privacy & Security → Screen & System Audio Recording, then start again. "
+                + "(HAL status \(status))"
+        case let .captureLost(detail):
+            "System audio capture stopped: \(detail)"
         case let .streamSetupFailed(detail):
             "Failed to start system audio capture: \(detail)"
         case .formatUnavailable:
             "Could not process the captured audio format."
         }
     }
+
+    /// Classifies a failed `AudioDeviceStart`. The HAL refuses unpermitted
+    /// capture with its generic `'nope'` (kAudioHardwareIllegalOperationError)
+    /// or `'!hog'` (kAudioDevicePermissionsError) — there is no TCC-specific
+    /// status, so the raw status is carried into the `.audioCaptureDenied`
+    /// message. Only `AudioDeviceStart` maps to `.audioCaptureDenied`: it is
+    /// the aggregate's first IO that triggers the TCC prompt, so
+    /// tap/aggregate creation succeeds while unpermitted and a failure there
+    /// is a real setup bug, not a denial.
+    static func make(status: OSStatus, call: String) -> CaptureError {
+        let refused = status == kAudioHardwareIllegalOperationError
+            || status == kAudioDevicePermissionsError
+        return refused
+            ? .audioCaptureDenied(status)
+            : .streamSetupFailed("\(call): \(status)")
+    }
 }
 
 /// The capture surface `SessionController` drives. `SystemAudioCapture`
 /// conforms as-is; tests inject a scripted double so `begin()` and the
-/// chunk path run without ScreenCaptureKit.
+/// chunk path run without the audio HAL.
 protocol AudioCapturing: AnyObject, Sendable {
+    /// Chunks arrive on the capture's dedicated IO queue.
     var onChunk: ((AudioChunk) -> Void)? { get set }
+    /// Errors arrive on the IO queue (data-path failures) or the listener
+    /// queue (device death / tap removal) — not necessarily main.
     var onIOError: ((CaptureError) -> Void)? { get set }
     func start() async throws
     func stop()
 }
 
-/// Teardown-vs-callback state. Sample callbacks run on `outputQueue`, but
+/// Teardown-vs-callback state. Sample callbacks run on `ioQueue`, but
 /// `stop()` can be called from any thread — the capture's mutex is what
 /// fences an in-flight callback against teardown: one that passed the cheap
 /// entry check re-checks under the mutex before touching state or calling
 /// `onChunk`, so no chunk can land after `stop()` returns.
 private struct CaptureState {
     var isRunning = false
+    /// True for the whole of `start()`, so two concurrent starts can't both
+    /// pass the `isRunning` guard and clobber each other's HAL objects.
+    var isStarting = false
     var accumulated: [Float] = []
     /// Read cursor into `accumulated`: consumed chunks compact once per
     /// callback instead of a `removeFirst` memmove per chunk.
@@ -57,43 +89,59 @@ private struct CaptureState {
     var emittedSamples = 0
 }
 
-/// Captures the entirety of system audio with a ScreenCaptureKit audio-only
-/// stream and delivers mono 16 kHz chunks.
+/// Captures the entirety of system audio with a Core Audio process tap and
+/// delivers mono 16 kHz chunks.
 ///
-/// Threading: sample buffers arrive on the dedicated SCK output queue; the
-/// delegate downmixes/resamples when needed, slices 160 ms chunks, and calls
-/// `onChunk` on that queue. Silence suppression (VAD + RMS backstop) is the
-/// engine's job.
+/// A global `CATapDescription` tap (excluding Mimi's own process) is attached
+/// as the sole input of a private aggregate device; an IO block on that
+/// device receives the system mix each IO cycle. The tap keeps playback
+/// unmuted — audio still reaches the speakers.
 ///
-/// Sendable by locking contract: `state` (a `Mutex`) guards `isRunning` and
-/// the chunk accumulator (`accumulated`, `accumulatedStart`,
-/// `emittedSamples`) — see the comment there. Two deliberate exemptions,
-/// both single-owner: `stream` is only touched after winning the locked
-/// `isRunning` handoff (the setter in `start()`, or the one teardown winner
-/// between `stop()` and `handleStreamStopped`), and the resample caches
-/// (`converter`, `inBuffer`, `outBuffer`) live only on the serial
-/// sample-callback path.
-final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
-    SCStreamDelegate, SCStreamOutput
-{
+/// Threading: IO blocks arrive on the dedicated `ioQueue`; the block extracts
+/// and downmixes the PCM, slices 160 ms chunks, and calls `onChunk` on that
+/// queue. Silence suppression (VAD + RMS backstop) is the engine's job.
+///
+/// Sendable by locking contract: `state` (a `Mutex`) guards `isRunning`, the
+/// in-flight-start flag, and the chunk accumulator (`accumulated`,
+/// `accumulatedStart`, `emittedSamples`) — see the comment there. `hal`
+/// (`AudioCaptureHAL`) owns the tap/aggregate/IOProc IDs, their property
+/// listeners, and the live tap format; a single claim wins teardown, so a
+/// concurrent `stop()`/`deinit`/`handleDeviceDied` can never double-destroy.
+/// The resample caches (`converter`, `cachedConverterRate`, `cachedInputFormat`,
+/// `inBuffer`, `outBuffer`) are touched only while holding `state`: the IO path
+/// resamples inside the locked append scope, and teardown clears them under the
+/// same lock, so an in-flight callback can never use a half-reset converter.
+final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
     static let outputSampleRate: Double = 16000
     static let chunkSamples = Int(outputSampleRate * 0.16)
-    /// Rate requested from SCK: the system mix's native rate. The 16 kHz
-    /// conversion for ASR happens locally (AVAudioConverter), where its
-    /// quality is controlled — SCK's internal sample-rate conversion is
-    /// opaque, so we avoid asking it to downsample.
+    /// Bound on `drain`'s converter passes. A healthy converter needs one or
+    /// two; a pathological one reporting `.haveData` with zero frames forever
+    /// must not hang the realtime IO thread.
+    static let maxDrainPasses = 128
+    /// Nominal rate of the system mix the tap delivers at. The actual rate is
+    /// read from the tap's format at start and may differ per output device;
+    /// the 16 kHz conversion for ASR happens locally (AVAudioConverter), where
+    /// its quality is controlled.
     static let captureSampleRate = 48000
 
     var onChunk: ((AudioChunk) -> Void)?
     var onIOError: ((CaptureError) -> Void)?
 
-    private let outputQueue = DispatchQueue(
-        label: "mimi.capture.sck", qos: .userInteractive
+    private let ioQueue = DispatchQueue(
+        label: "mimi.capture.tap", qos: .userInteractive
+    )
+    private let listenerQueue = DispatchQueue(
+        label: "mimi.capture.tap.listener", qos: .userInitiated
     )
 
     private let state = Mutex(CaptureState())
 
-    private var stream: SCStream?
+    /// Owns the tap, aggregate, IO proc, property listeners, and the live tap
+    /// format; see `AudioCaptureHAL`.
+    private let hal = AudioCaptureHAL()
+
+    /// Resample caches. Guarded by `state`: the IO path fills them inside the
+    /// locked append scope, and teardown clears them under the same lock.
     private var converter: AVAudioConverter?
     private var cachedConverterRate: Double = 0
 
@@ -101,71 +149,85 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
         state.withLock { current in current.isRunning }
     }
 
-    // MARK: - Permission
-
-    /// Triggers the TCC prompt when undetermined. Returns false if Screen
-    /// Recording has not been granted (granting requires an app restart).
-    static func ensurePermission() async -> Bool {
-        if CGPreflightScreenCaptureAccess() {
-            return true
-        }
-        // The shareable-content query triggers the system prompt.
-        _ = try? await SCShareableContent.excludingDesktopWindows(
-            false, onScreenWindowsOnly: false
-        )
-        return CGPreflightScreenCaptureAccess()
-    }
-
     // MARK: - Lifecycle
 
     func start() async throws {
-        guard !isRunning else { return }
+        // The whole of start() runs under the `isStarting` claim so two
+        // concurrent calls can't both pass the guard and overwrite each
+        // other's HAL objects (which would orphan a tap and aggregate).
+        let began = state.withLock { current -> Bool in
+            guard !current.isRunning, !current.isStarting else { return false }
+            current.isStarting = true
+            return true
+        }
+        guard began else { return }
+        defer { state.withLock { current in current.isStarting = false } }
 
-        let content: SCShareableContent
+        // Whole-system mix minus Mimi itself.
+        let exclusions = try [NSNumber(value: ProcessTapSetup.ownProcessObject())]
+        let tap = try ProcessTapSetup.createTap(excluding: exclusions)
+        hal.storeTap(tap.id)
         do {
-            content = try await SCShareableContent.excludingDesktopWindows(
-                false, onScreenWindowsOnly: true
-            )
+            let asbd = try ProcessTapSetup.format(of: tap.id)
+            hal.storeFormat(asbd)
         } catch {
-            throw CaptureError.streamSetupFailed(error.localizedDescription)
-        }
-        guard let display = content.displays.first else {
-            throw CaptureError.noDisplayFound
+            teardownHALNow()
+            throw error
         }
 
-        // Whole-system audio: one display-scoped filter with Mimi's own app
-        // removed; the stream config excludes this process's audio as well.
-        let apps = content.applications.filter { app in
-            app.bundleIdentifier != Bundle.main.bundleIdentifier
-        }
-        let filter = SCContentFilter(
-            display: display, excludingApplications: apps, exceptingWindows: []
-        )
-
-        let config = SCStreamConfiguration()
-        config.capturesAudio = true
-        config.excludesCurrentProcessAudio = true
-        config.sampleRate = Self.captureSampleRate
-        config.channelCount = 1
-        // Audio-only stream: keep the (unused) video track as cheap as possible.
-        config.width = 2
-        config.height = 2
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 10)
-        config.queueDepth = 3
-
-        let stream = SCStream(filter: filter, configuration: config, delegate: self)
-        self.stream = stream
+        let aggregate: AudioDeviceID
         do {
-            try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: outputQueue)
-            try await stream.startCapture()
+            aggregate = try ProcessTapSetup.createAggregateDevice(tapUID: tap.uid)
         } catch {
-            self.stream = nil
-            throw CaptureError.streamSetupFailed(error.localizedDescription)
+            teardownHALNow()
+            throw error
+        }
+        hal.storeAggregate(aggregate)
+
+        // The block is Block_copy'd and outlives this call, so it reaches the
+        // capture through a weak box — no retain cycle with the stored
+        // IOProcID. It captures the rig strongly (the rig never retains the
+        // capture). Its audio-buffer param is a non-optional C pointer.
+        let box = WeakCaptureBox(self)
+        let rig = hal
+        var procID: AudioDeviceIOProcID?
+        let procStatus = AudioDeviceCreateIOProcIDWithBlock(
+            &procID, aggregate, ioQueue
+        ) { _, inputData, _, _, _ in
+            guard let asbd = rig.currentFormat, let capture = box.value else { return }
+            capture.handleAudioBufferList(inputData, asbd: asbd)
+        }
+        guard procStatus == noErr, let procID else {
+            // Defensive: status and procID are linked in practice, but a
+            // non-nil procID returned alongside an error would leak — the
+            // stored-ID teardown below can't see it.
+            if let procID {
+                AudioDeviceDestroyIOProcID(aggregate, procID)
+            }
+            teardownHALNow()
+            throw CaptureError.streamSetupFailed("AudioDeviceCreateIOProcIDWithBlock: \(procStatus)")
+        }
+        hal.storeIOProc(procID)
+
+        hal.registerListeners(
+            aggregate: aggregate, tap: tap.id, queue: listenerQueue
+        ) { [weak self] error in
+            self?.handleDeviceDied(error)
         }
 
-        state.withLock { current in current.isRunning = true }
+        let startStatus = AudioDeviceStart(aggregate, procID)
+        guard startStatus == noErr else {
+            teardownHALNow()
+            throw CaptureError.make(status: startStatus, call: "AudioDeviceStart")
+        }
+
+        state.withLock { current in
+            current.isRunning = true
+            current.isStarting = false
+        }
         #if DEBUG
-            print("[capture] SCK system-audio stream started (target: 48 kHz mono in, 16 kHz out)")
+            let rate = hal.currentFormat?.mSampleRate ?? 0
+            print("[capture] process-tap system-audio IO started (tap format: \(rate) Hz, target: 16 kHz mono out)")
         #endif
     }
 
@@ -179,41 +241,34 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
         }
         guard wasRunning else { return }
 
-        let stream = stream
-        self.stream = nil
-        Task {
-            try? await stream?.stopCapture()
-            try? stream?.removeStreamOutput(self, type: .audio)
-        }
+        // `AudioDeviceStop` waits for in-flight IO blocks to drain, so the
+        // fence above plus the blocks' own locked re-check guarantee no chunk
+        // lands after `stop()` returns. The HAL wait hops off the caller
+        // thread (it can block for an IO period); the claim happens
+        // synchronously so a deinit racing the task can't leak or double-free.
+        hal.teardownOffThread(queue: listenerQueue)
+        resetResamplerCaches()
     }
 
     // MARK: - Test seam
 
-    /// Marks the capture as running without a live SCK stream so the delegate
-    /// data path can be exercised directly via `handleSampleBuffer`.
-    /// Production reaches the same state through `start()`.
+    /// Marks the capture as running without a live tap so the data path can
+    /// be exercised directly via `handleAudioBufferList`. Production reaches
+    /// the same state through `start()`.
     func setRunningForTesting(_ value: Bool) {
         state.withLock { current in current.isRunning = value }
     }
 
-    /// Invoked at the top of `extractMono` — before the buffer-list copy and
-    /// downmix — so tests can park an in-flight callback past every entry
-    /// guard and fence teardown against it deterministically. Nil in
-    /// production.
+    /// Invoked at the top of `extractMono` — before the downmix — so tests
+    /// can park an in-flight callback past every entry guard and fence
+    /// teardown against it deterministically. Nil in production.
     var onExtractionEntered: (() -> Void)?
 
-    // MARK: - SCStreamDelegate
+    // MARK: - Dead-device recovery
 
-    /// Forwards to the internal seam — tests drive `handleStreamStopped`
-    /// directly instead of constructing an `SCStream`.
-    func stream(_ stream: SCStream, didStopWithError error: Error) {
-        handleStreamStopped(error)
-    }
-
-    /// `SCStreamDelegate` seam: teardown of a dead stream. Mirrors `stop()`'s
-    /// state reset so a dead stream never leaves stale accumulator state
-    /// behind.
-    func handleStreamStopped(_ error: Error) {
+    /// Forwards to the internal seam — tests drive `handleDeviceDied`
+    /// directly instead of constructing HAL objects.
+    func handleDeviceDied(_ error: Error) {
         let wasRunning = state.withLock { current -> Bool in
             guard current.isRunning else { return false }
             current.isRunning = false
@@ -222,36 +277,47 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
             return true
         }
         guard wasRunning else { return }
-        stream = nil
-        onIOError?(.streamSetupFailed(error.localizedDescription))
+        // Already off the main actor (listener queue / test thread), so the
+        // HAL drain can run inline.
+        teardownHALNow()
+        onIOError?(.captureLost(error.localizedDescription))
     }
 
-    // MARK: - SCStreamOutput
-
-    /// Forwards to the internal seam — tests drive `handleSampleBuffer`
-    /// directly with synthesized sample buffers.
-    func stream(
-        _ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
-        of type: SCStreamOutputType
-    ) {
-        handleSampleBuffer(sampleBuffer, type: type)
+    /// Synchronous HAL teardown plus the resample-cache reset, for the
+    /// `start()` failure arms and the dead-device path (both already off the
+    /// caller's critical thread).
+    private func teardownHALNow() {
+        hal.teardown(queue: listenerQueue)
+        resetResamplerCaches()
     }
 
-    /// `SCStreamOutput` seam: the sample callback data path (guards, downmix,
-    /// resample, chunking). Synchronous, so tests get a deterministic stop
-    /// fence.
-    func handleSampleBuffer(_ sampleBuffer: CMSampleBuffer, type: SCStreamOutputType) {
-        guard type == .audio, isRunning, CMSampleBufferDataIsReady(sampleBuffer) else { return }
-        guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) else { return }
-        guard let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else {
-            return
+    /// Drops the resampler's cached converter/buffers. Runs under the state
+    /// lock so it is mutually exclusive with an in-flight callback resampling
+    /// (the IO path holds the same lock around `appendToAccumulator`).
+    private func resetResamplerCaches() {
+        state.withLock { _ in
+            converter = nil
+            cachedConverterRate = 0
         }
-        let asbd = asbdPtr.pointee
-        guard asbd.mFormatID == kAudioFormatLinearPCM else { return }
-        let deliveredFrames = CMSampleBufferGetNumSamples(sampleBuffer)
-        guard deliveredFrames > 0 else { return }
+    }
 
-        guard let mono = extractMono(sampleBuffer: sampleBuffer, asbd: asbd) else {
+    deinit {
+        // Never block the caller: `SessionController` nils the capture on the
+        // main actor, and the HAL drain can wait an IO period.
+        hal.teardownOffThread(queue: listenerQueue)
+    }
+
+    // MARK: - IO-block data path
+
+    /// The IO block callback data path (guards, downmix, resample, chunking).
+    /// Synchronous, so tests get a deterministic stop fence.
+    func handleAudioBufferList(
+        _ abl: UnsafePointer<AudioBufferList>, asbd: AudioStreamBasicDescription
+    ) {
+        guard isRunning else { return }
+        guard asbd.mFormatID == kAudioFormatLinearPCM else { return }
+
+        guard let mono = extractMono(bufferList: abl, asbd: asbd) else {
             onIOError?(.formatUnavailable)
             return
         }
@@ -291,7 +357,7 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
         return true
     }
 
-    // MARK: - Resample (primary path: SCK delivers the native 48 kHz mix)
+    // MARK: - Resample (primary path: taps deliver the native 48 kHz mix)
 
     private lazy var outputFormat: AVAudioFormat = .init(
         standardFormatWithSampleRate: Self.outputSampleRate, channels: 1
@@ -353,7 +419,9 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
     /// Drains `input` through `converter`, accumulating every output frame.
     /// Loops while the converter reports `.haveData` (output buffer full,
     /// more pending) instead of converting once, so its priming backlog is
-    /// never clipped. Returns `nil` on conversion failure.
+    /// never clipped. Returns `nil` on conversion failure, and is bounded by
+    /// `maxDrainPasses` — a converter stuck on `.haveData` with zero frames
+    /// would otherwise spin the realtime IO thread forever.
     ///
     /// The converter's input block is `@Sendable`: `input` is captured by
     /// value and its single feed gated with a Mutex (the block is invoked
@@ -373,7 +441,9 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
         let fed = Mutex(false)
         var output: [Float] = []
         var status: AVAudioConverterOutputStatus = .haveData
+        var passes = 0
         repeat {
+            passes += 1
             outBuffer.frameLength = 0
             var conversionError: NSError?
             status = converter.convert(to: outBuffer, error: &conversionError) { _, inputStatus in
@@ -391,7 +461,12 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
 
             let n = Int(outBuffer.frameLength)
             output.append(contentsOf: UnsafeBufferPointer(start: src, count: n))
-        } while status == .haveData
+        } while status == .haveData && passes < Self.maxDrainPasses
+        #if DEBUG
+            if status == .haveData {
+                print("[capture] converter drain hit the \(Self.maxDrainPasses)-pass cap; truncating this callback")
+            }
+        #endif
         return output
     }
 
@@ -423,148 +498,23 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
     }
 }
 
-// MARK: - PCM extraction
+/// Weak, sendable hop for the block-captured IO closure: the capture must be
+/// releasable while the HAL still holds the block.
+private final class WeakCaptureBox: @unchecked Sendable {
+    fileprivate weak var value: SystemAudioCapture?
 
-extension SystemAudioCapture {
-
-    /// Pulls float32 PCM out of the sample buffer and downmixes to mono.
-    /// Handles both interleaved (one buffer, N channels) and deinterleaved
-    /// (N one-channel buffers) layouts.
-    private func extractMono(sampleBuffer: CMSampleBuffer, asbd: AudioStreamBasicDescription) -> [Float]? {
-        onExtractionEntered?()
-        guard MemoryLayout<Float>.size == 4, asbd.mBitsPerChannel == 32,
-              asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0
-        else {
-            print("unsupported SCK audio format: \(asbd)")
-            return nil
-        }
-
-        guard let copy = audioBufferListCopy(from: sampleBuffer) else { return nil }
-        defer { copy.cleanup() }
-        return downmixToMono(
-            buffers: copy.buffers,
-            frames: copy.frames,
-            channels: copy.channels,
-            interleaved: copy.interleaved
-        )
+    init(_ value: SystemAudioCapture?) {
+        self.value = value
     }
+}
 
-    /// Raw copy of a sample buffer's `AudioBufferList` plus its PCM layout.
-    /// `abl` points into memory owned by this struct; the caller must invoke
-    /// `cleanup()` once the buffer pointers are no longer needed (the
-    /// retained block buffer keeps the PCM payload alive until then).
-    private struct AudioBufferListCopy {
-        let abl: UnsafeMutablePointer<AudioBufferList>
-        let blockBuffer: CMBlockBuffer
-        let buffers: UnsafeMutableAudioBufferListPointer
-        let frames: Int
-        let channels: Int
-        let interleaved: Bool
-
-        func cleanup() {
-            abl.deallocate()
-        }
-    }
-
-    /// Copies the buffer list out of the sample buffer (two-pass: query the
-    /// exact required size first — it includes the PCM payload, not just the
-    /// list struct — then fill the list) and analyzes its layout. On failure
-    /// the copy is freed and `nil` returned.
-    private func audioBufferListCopy(from sampleBuffer: CMSampleBuffer) -> AudioBufferListCopy? {
-        var listSize = 0
-        var status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
-            sampleBuffer, bufferListSizeNeededOut: &listSize,
-            bufferListOut: nil, bufferListSize: 0,
-            blockBufferAllocator: nil, blockBufferMemoryAllocator: nil,
-            flags: kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment,
-            blockBufferOut: nil
-        )
-        guard status == noErr, listSize > 0 else {
-            print("CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer (size): \(status)")
-            return nil
-        }
-
-        let raw = UnsafeMutableRawPointer.allocate(
-            byteCount: listSize, alignment: MemoryLayout<AudioBufferList>.alignment
-        )
-        let abl = raw.assumingMemoryBound(to: AudioBufferList.self)
-        var copy: AudioBufferListCopy?
-        defer {
-            if copy == nil {
-                raw.deallocate()
-            }
-        }
-        memset(abl, 0, listSize)
-
-        var blockBuffer: CMBlockBuffer?
-        status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
-            sampleBuffer, bufferListSizeNeededOut: nil,
-            bufferListOut: abl, bufferListSize: listSize,
-            blockBufferAllocator: kCFAllocatorDefault,
-            blockBufferMemoryAllocator: kCFAllocatorDefault,
-            flags: kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment,
-            blockBufferOut: &blockBuffer
-        )
-        guard status == noErr else {
-            print("CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer: \(status)")
-            return nil
-        }
-        // The payload lives in the retained block buffer; it must outlive
-        // the reads of the buffer list pointers below.
-        guard let blockBuffer, blockBuffer.dataLength > 0 else { return nil }
-
-        let buffers = UnsafeMutableAudioBufferListPointer(abl)
-        let nBuffers = Int(abl.pointee.mNumberBuffers)
-        guard nBuffers >= 1, buffers[0].mData != nil else { return nil }
-
-        var channels = 0
-        var interleaved = false
-        var frames = 0
-        if nBuffers == 1 {
-            channels = max(1, Int(buffers[0].mNumberChannels))
-            interleaved = channels > 1
-            frames = Int(buffers[0].mDataByteSize) / MemoryLayout<Float>.size / channels
-        } else {
-            channels = nBuffers
-            interleaved = false
-            frames = Int(buffers[0].mDataByteSize) / MemoryLayout<Float>.size
-        }
-        guard frames > 0, channels > 0 else { return nil }
-
-        copy = AudioBufferListCopy(
-            abl: abl, blockBuffer: blockBuffer, buffers: buffers,
-            frames: frames, channels: channels, interleaved: interleaved
-        )
-        return copy
-    }
-
-    /// Averages all channels to mono. `buffers` must stay valid (its backing
-    /// memory is freed by the caller after this returns).
-    private func downmixToMono(
-        buffers: UnsafeMutableAudioBufferListPointer,
-        frames: Int,
-        channels: Int,
-        interleaved: Bool
-    ) -> [Float] {
-        let firstData = buffers[0].mData!
-
-        var mono = [Float](repeating: 0, count: frames)
-        let scale = 1.0 / Float(channels)
-        for f in 0 ..< frames {
-            var sum: Float = 0
-            for ch in 0 ..< channels {
-                let ptr: UnsafeMutablePointer<Float>
-                if interleaved {
-                    ptr = firstData.assumingMemoryBound(to: Float.self)
-                    sum += ptr[f * channels + ch]
-                } else {
-                    guard let data = buffers[ch].mData else { continue }
-                    ptr = data.assumingMemoryBound(to: Float.self)
-                    sum += ptr[f]
-                }
-            }
-            mono[f] = channels > 1 ? sum * scale : sum
-        }
-        return mono
-    }
+/// A registered `AudioObjectPropertyListenerBlock` plus the address it was
+/// registered under — both needed for the matching removal call. `@unchecked`
+/// Sendable: it never actually crosses isolation unsafely (it only lives
+/// inside `SystemAudioCapture`'s `hal` mutex and is handed straight back to
+/// the HAL removal call on the queue it was registered with), but the block
+/// typedef isn't imported as `Sendable`.
+private struct PropertyListener: @unchecked Sendable {
+    let address: AudioObjectPropertyAddress
+    let block: AudioObjectPropertyListenerBlock
 }

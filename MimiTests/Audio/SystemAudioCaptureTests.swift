@@ -1,19 +1,16 @@
-import CoreGraphics
+import CoreAudio
 import Foundation
 @testable import Mimi
-import ScreenCaptureKit
 import Testing
 
-/// Tests `SystemAudioCapture`'s data path through the internal delegate
-/// seams (`handleSampleBuffer`), driven by synthesized `CMSampleBuffer`s
-/// from `SampleBufferSynthesis` — no ScreenCaptureKit involved, and the
-/// callbacks run synchronously on the calling thread. `ensurePermission()`'s
-/// preflight-granted arm is covered machine-gated (a Screen Recording grant
-/// on the host). Excluded (needs TCC interaction and a live display stream):
-/// `start()`'s SCK stream setup, `ensurePermission()`'s request arm, and
-/// `stop()`'s SCK teardown — the stop fence and dead-stream reset live in
+/// Tests `SystemAudioCapture`'s data path through the internal seam
+/// (`handleAudioBufferList`), driven by synthesized `AudioBufferList`s from
+/// `AudioBufferListSynthesis` — no audio HAL involved, and the callbacks run
+/// synchronously on the calling thread. Excluded (needs the audio HAL):
+/// `start()`'s tap and aggregate-device setup and `stop()`'s HAL teardown —
+/// the stop fence and dead-device reset live in
 /// `SystemAudioCaptureTeardownTests`. The resample converter-failure branch
-/// is not fixture-reachable either: Core Media rejects non-positive sample
+/// is not fixture-reachable either: Core Audio rejects non-positive sample
 /// rates before a converter is ever built, and any positive rate builds one.
 @Suite("SystemAudioCapture")
 struct SystemAudioCaptureTests {
@@ -82,7 +79,7 @@ struct SystemAudioCaptureTests {
         #expect(chunk.samples == [1, 2, 3])
     }
 
-    // MARK: - Lifecycle guards (the SCK shell itself stays excluded)
+    // MARK: - Lifecycle guards (the HAL shell itself stays excluded)
 
     @Test("stop is a safe no-op while not running")
     func stopWhenNotRunning() {
@@ -93,32 +90,15 @@ struct SystemAudioCaptureTests {
         #expect(!capture.isRunning)
     }
 
-    // MARK: - ensurePermission
-
-    @Test(
-        "ensurePermission returns true on the preflight-granted arm",
-        .enabled(if: CGPreflightScreenCaptureAccess())
-    )
-    func ensurePermissionGrantedArm() async {
-        #expect(await SystemAudioCapture.ensurePermission())
-    }
-
     // MARK: - CaptureError descriptions
 
-    @Test("permissionDenied explains the grant and restart steps")
-    func permissionDeniedDescription() {
+    @Test("audioCaptureDenied explains the grant steps and carries the HAL status")
+    func audioCaptureDeniedDescription() {
         #expect(
-            CaptureError.permissionDenied.errorDescription
-                == "Screen Recording access is required to capture system audio. Grant it "
-                + "in System Settings → Privacy & Security → Screen Recording, then restart Mimi."
-        )
-    }
-
-    @Test("noDisplayFound explains the missing display")
-    func noDisplayFoundDescription() {
-        #expect(
-            CaptureError.noDisplayFound.errorDescription
-                == "No display available to attach the audio stream to."
+            CaptureError.audioCaptureDenied(kAudioHardwareIllegalOperationError).errorDescription
+                == "System audio recording is not permitted. Grant it in System Settings → "
+                + "Privacy & Security → Screen & System Audio Recording, then start again. "
+                + "(HAL status \(kAudioHardwareIllegalOperationError))"
         )
     }
 
@@ -138,69 +118,80 @@ struct SystemAudioCaptureTests {
         )
     }
 
-    // MARK: - Sample-callback guards
+    // MARK: - CaptureError.make status classification
 
-    @Test("a non-audio output type is ignored")
-    func nonAudioOutputTypeIgnored() throws {
-        let capture = makeCapture(running: true)
-        let buffer = try SampleBufferSynthesis.make(frames: 2560)
+    @Test("'nope' from AudioDeviceStart classifies as audioCaptureDenied")
+    func nopeStatusClassifiesAsDenied() {
+        let error = CaptureError.make(
+            status: kAudioHardwareIllegalOperationError, call: "AudioDeviceStart"
+        )
 
-        capture.handleSampleBuffer(buffer, type: .screen)
-
-        #expect(recorder.chunks.isEmpty)
-        #expect(recorder.errors.isEmpty)
+        #expect(error == .audioCaptureDenied(kAudioHardwareIllegalOperationError))
     }
 
-    @Test("a sample buffer while not running is ignored")
-    func samplesIgnoredWhileNotRunning() throws {
+    @Test("'!hog' from a tap setup call classifies as audioCaptureDenied")
+    func permissionsStatusClassifiesAsDenied() {
+        let error = CaptureError.make(
+            status: kAudioDevicePermissionsError, call: "AudioDeviceStart"
+        )
+
+        #expect(error == .audioCaptureDenied(kAudioDevicePermissionsError))
+    }
+
+    @Test("any other status stays a streamSetupFailed with the call and code")
+    func otherStatusStaysStreamSetupFailed() {
+        let error = CaptureError.make(
+            status: kAudioHardwareUnspecifiedError, call: "AudioDeviceStart"
+        )
+
+        #expect(
+            error == .streamSetupFailed(
+                "AudioDeviceStart: \(kAudioHardwareUnspecifiedError)"
+            )
+        )
+    }
+
+    // MARK: - Data-path guards
+
+    @Test("a buffer list while not running is ignored")
+    func samplesIgnoredWhileNotRunning() {
         let capture = makeCapture(running: false)
-        let buffer = try SampleBufferSynthesis.make(frames: 2560)
+        let buffer = AudioBufferListSynthesis.make(frames: 2560)
 
-        capture.handleSampleBuffer(buffer, type: .audio)
-
-        #expect(recorder.chunks.isEmpty)
-        #expect(recorder.errors.isEmpty)
-    }
-
-    @Test("a sample buffer whose data is not ready is ignored")
-    func notReadyBufferIgnored() throws {
-        let capture = makeCapture(running: true)
-        let buffer = try SampleBufferSynthesis.make(frames: 2560, dataReady: false)
-
-        capture.handleSampleBuffer(buffer, type: .audio)
-
-        #expect(recorder.chunks.isEmpty)
-        #expect(recorder.errors.isEmpty)
-    }
-
-    @Test("a sample buffer without a format description is ignored")
-    func missingFormatDescriptionIgnored() throws {
-        let capture = makeCapture(running: true)
-        let buffer = try SampleBufferSynthesis.make(frames: 2560, withFormatDescription: false)
-
-        capture.handleSampleBuffer(buffer, type: .audio)
+        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
 
         #expect(recorder.chunks.isEmpty)
         #expect(recorder.errors.isEmpty)
     }
 
     @Test("a non-LinearPCM buffer is ignored")
-    func nonPCMBufferIgnored() throws {
+    func nonPCMBufferIgnored() {
         let capture = makeCapture(running: true)
-        let buffer = try SampleBufferSynthesis.make(frames: 2560, format: .nonPCM)
+        let buffer = AudioBufferListSynthesis.make(frames: 2560, format: .nonPCM)
 
-        capture.handleSampleBuffer(buffer, type: .audio)
+        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
 
         #expect(recorder.chunks.isEmpty)
         #expect(recorder.errors.isEmpty)
     }
 
     @Test("a zero-frame buffer is ignored")
-    func zeroFrameBufferIgnored() throws {
+    func zeroFrameBufferIgnored() {
         let capture = makeCapture(running: true)
-        let buffer = try SampleBufferSynthesis.make(frames: 0)
+        let buffer = AudioBufferListSynthesis.make(frames: 0)
 
-        capture.handleSampleBuffer(buffer, type: .audio)
+        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
+
+        #expect(recorder.chunks.isEmpty)
+        #expect(recorder.errors.isEmpty)
+    }
+
+    @Test("a null-data IO cycle is ignored instead of ending the session")
+    func nullDataBufferIgnored() {
+        let capture = makeCapture(running: true)
+        let buffer = AudioBufferListSynthesis.make(frames: 2560, nullData: true)
+
+        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
 
         #expect(recorder.chunks.isEmpty)
         #expect(recorder.errors.isEmpty)
@@ -211,9 +202,9 @@ struct SystemAudioCaptureTests {
     @Test("mono 16 kHz frames pass through as one exact 160 ms chunk")
     func monoPassthroughChunk() throws {
         let capture = makeCapture(running: true)
-        let buffer = try SampleBufferSynthesis.make(frames: 2560)
+        let buffer = AudioBufferListSynthesis.make(frames: 2560)
 
-        capture.handleSampleBuffer(buffer, type: .audio)
+        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
 
         #expect(recorder.chunks.count == 1)
         let chunk = try #require(recorder.chunks.first)
@@ -224,9 +215,9 @@ struct SystemAudioCaptureTests {
     @Test("interleaved stereo frames downmix to the channel average")
     func interleavedStereoDownmix() throws {
         let capture = makeCapture(running: true)
-        let buffer = try SampleBufferSynthesis.make(frames: 2560, channels: 2, interleaved: true)
+        let buffer = AudioBufferListSynthesis.make(frames: 2560, channels: 2, interleaved: true)
 
-        capture.handleSampleBuffer(buffer, type: .audio)
+        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
 
         #expect(recorder.chunks.count == 1)
         let chunk = try #require(recorder.chunks.first)
@@ -237,9 +228,9 @@ struct SystemAudioCaptureTests {
     @Test("deinterleaved stereo frames downmix to the channel average")
     func deinterleavedStereoDownmix() throws {
         let capture = makeCapture(running: true)
-        let buffer = try SampleBufferSynthesis.make(frames: 2560, channels: 2, interleaved: false)
+        let buffer = AudioBufferListSynthesis.make(frames: 2560, channels: 2, interleaved: false)
 
-        capture.handleSampleBuffer(buffer, type: .audio)
+        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
 
         #expect(recorder.chunks.count == 1)
         let chunk = try #require(recorder.chunks.first)
@@ -252,9 +243,9 @@ struct SystemAudioCaptureTests {
     @Test("a callback's samples slice into exact 160 ms chunks")
     func slicesExactChunksFromOneCallback() throws {
         let capture = makeCapture(running: true)
-        let buffer = try SampleBufferSynthesis.make(frames: 3 * 2560)
+        let buffer = AudioBufferListSynthesis.make(frames: 3 * 2560)
 
-        capture.handleSampleBuffer(buffer, type: .audio)
+        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
 
         #expect(recorder.chunks.count == 3)
         #expect(recorder.chunks.map(\.startSample) == [0, 2560, 5120])
@@ -265,16 +256,16 @@ struct SystemAudioCaptureTests {
     @Test("a remainder below the chunk size is retained and leads the next chunk")
     func remainderRetainedAcrossCallbacks() throws {
         let capture = makeCapture(running: true)
-        let first = try SampleBufferSynthesis.make(frames: 2561)
-        let second = try SampleBufferSynthesis.make(frames: 2560)
+        let first = AudioBufferListSynthesis.make(frames: 2561)
+        let second = AudioBufferListSynthesis.make(frames: 2560)
 
-        capture.handleSampleBuffer(first, type: .audio)
+        capture.handleAudioBufferList(first.pointer, asbd: first.asbd)
         let firstChunk = try #require(recorder.chunks.first)
 
         #expect(recorder.chunks.count == 1)
         #expect(firstChunk.samples.count == 2560)
 
-        capture.handleSampleBuffer(second, type: .audio)
+        capture.handleAudioBufferList(second.pointer, asbd: second.asbd)
 
         #expect(recorder.chunks.count == 2)
         let secondChunk = try #require(recorder.chunks.last)
@@ -287,9 +278,9 @@ struct SystemAudioCaptureTests {
     @Test("44.1 kHz mono input is resampled to 16 kHz before chunking")
     func resamplesToOutputRate() throws {
         let capture = makeCapture(running: true)
-        let buffer = try SampleBufferSynthesis.make(frames: 8192, sampleRate: 44100)
+        let buffer = AudioBufferListSynthesis.make(frames: 8192, sampleRate: 44100)
 
-        capture.handleSampleBuffer(buffer, type: .audio)
+        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
 
         #expect(recorder.errors.isEmpty)
         #expect(recorder.chunks.count == 1)
@@ -310,12 +301,12 @@ struct SystemAudioCaptureTests {
     }
 
     @Test("48 kHz input keeps delivering chunks across successive callbacks")
-    func resamplesAcrossSuccessiveCallbacks() throws {
+    func resamplesAcrossSuccessiveCallbacks() {
         let capture = makeCapture(running: true)
-        let buffer = try SampleBufferSynthesis.make(frames: 7680, sampleRate: 48000)
+        let buffer = AudioBufferListSynthesis.make(frames: 7680, sampleRate: 48000)
 
         for _ in 0 ..< 4 {
-            capture.handleSampleBuffer(buffer, type: .audio)
+            capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
         }
 
         // A converter that latches to end-of-stream after the first callback
@@ -331,20 +322,18 @@ struct SystemAudioCaptureTests {
     }
 
     @Test("a mid-stream sample-rate change rebuilds the converter and keeps chunks contiguous")
-    func rateChangeRebuildsConverter() throws {
+    func rateChangeRebuildsConverter() {
         let capture = makeCapture(running: true)
 
-        try capture.handleSampleBuffer(
-            SampleBufferSynthesis.make(frames: 8192, sampleRate: 44100), type: .audio
-        )
+        let first = AudioBufferListSynthesis.make(frames: 8192, sampleRate: 44100)
+        capture.handleAudioBufferList(first.pointer, asbd: first.asbd)
         // The fresh 48 kHz converter's priming backlog withholds a few
         // hundred early output frames, so feed several callbacks before
         // counting chunks — same accepted looseness as
         // `resamplesAcrossSuccessiveCallbacks`.
         for _ in 0 ..< 4 {
-            try capture.handleSampleBuffer(
-                SampleBufferSynthesis.make(frames: 7680, sampleRate: 48000), type: .audio
-            )
+            let buffer = AudioBufferListSynthesis.make(frames: 7680, sampleRate: 48000)
+            capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
         }
 
         // The rate change must not reuse the 44.1 kHz converter: a stale
@@ -365,16 +354,14 @@ struct SystemAudioCaptureTests {
         // 6144 frames at 48 kHz → ≤ 2048 ideal output frames, and the
         // converter's priming backlog only lowers that — safely below the
         // chunk size, so the accumulator holds a resampled remainder.
-        try capture.handleSampleBuffer(
-            SampleBufferSynthesis.make(frames: 6144, sampleRate: 48000), type: .audio
-        )
+        let seed = AudioBufferListSynthesis.make(frames: 6144, sampleRate: 48000)
+        capture.handleAudioBufferList(seed.pointer, asbd: seed.asbd)
         #expect(recorder.chunks.isEmpty)
 
         // Steady-state output is a full chunk's worth, topping up the
         // remainder to exactly one more chunk.
-        try capture.handleSampleBuffer(
-            SampleBufferSynthesis.make(frames: 7680, sampleRate: 48000), type: .audio
-        )
+        let steady = AudioBufferListSynthesis.make(frames: 7680, sampleRate: 48000)
+        capture.handleAudioBufferList(steady.pointer, asbd: steady.asbd)
 
         #expect(recorder.errors.isEmpty)
         #expect(recorder.chunks.count == 1)
@@ -387,17 +374,15 @@ struct SystemAudioCaptureTests {
     }
 
     @Test("a larger callback after a small one reallocates the converter buffers")
-    func bufferGrowthAcrossCallbacks() throws {
+    func bufferGrowthAcrossCallbacks() {
         let capture = makeCapture(running: true)
 
         // 320 frames seed the input/output PCM buffers; the 60× larger
         // callback must grow both instead of clipping or failing.
-        try capture.handleSampleBuffer(
-            SampleBufferSynthesis.make(frames: 320, sampleRate: 48000), type: .audio
-        )
-        try capture.handleSampleBuffer(
-            SampleBufferSynthesis.make(frames: 3 * 7680, sampleRate: 48000), type: .audio
-        )
+        let small = AudioBufferListSynthesis.make(frames: 320, sampleRate: 48000)
+        capture.handleAudioBufferList(small.pointer, asbd: small.asbd)
+        let large = AudioBufferListSynthesis.make(frames: 3 * 7680, sampleRate: 48000)
+        capture.handleAudioBufferList(large.pointer, asbd: large.asbd)
 
         #expect(recorder.errors.isEmpty)
         #expect(recorder.chunks.map(\.startSample) == [0, 2560, 5120])
@@ -407,9 +392,9 @@ struct SystemAudioCaptureTests {
     @Test("a non-float32 PCM payload surfaces formatUnavailable")
     func int16PayloadSurfacesFormatUnavailable() throws {
         let capture = makeCapture(running: true)
-        let buffer = try SampleBufferSynthesis.make(frames: 2560, format: .int16)
+        let buffer = AudioBufferListSynthesis.make(frames: 2560, format: .int16)
 
-        capture.handleSampleBuffer(buffer, type: .audio)
+        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
 
         #expect(recorder.chunks.isEmpty)
         #expect(recorder.errors.count == 1)
