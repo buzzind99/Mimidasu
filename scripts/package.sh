@@ -6,7 +6,10 @@
 #
 # Signed with the local self-signed "Mimi Dev" certificate (when present) so
 # TCC permission grants (Screen Recording) persist across rebuilds; falls
-# back to ad-hoc signing otherwise, like scripts/bootstrap.sh.
+# back to ad-hoc signing otherwise, like scripts/bootstrap.sh. When the
+# SIGN_IDENTITY override names a "Developer ID Application" certificate, all
+# code is hardened-runtime signed with a trusted timestamp — the notarizable
+# shape used by scripts/release.sh.
 # Launch locally after "Open Anyway" / xattr -cr.
 # Usage: scripts/package.sh
 
@@ -23,6 +26,15 @@ else
   SIGN_IDENTITY="-"
   echo "==> No \"${PREFERRED_IDENTITY}\" certificate found — signing the DMG ad-hoc" >&2
   echo "    (Screen Recording grants will not persist across rebuilds)" >&2
+fi
+
+# "Developer ID Application" identities are the notarizable kind: the notary
+# service requires the hardened runtime and a trusted timestamp. Older bash
+# (3.2) rejects empty arrays under set -u, hence the ${arr[@]+...} guards.
+CS_HARDEN=()
+if [[ "${SIGN_IDENTITY}" == "Developer ID Application:"* ]]; then
+  CS_HARDEN=(--options runtime --timestamp)
+  echo "==> Developer ID identity — signing hardened (--options runtime --timestamp)" >&2
 fi
 
 cd "${REPO_ROOT}"
@@ -53,7 +65,7 @@ sign_app() {
   # Sign last: staging (dylibs, README) modifies the bundle after the build,
   # which would otherwise invalidate the seal. Nested dylibs are already
   # signed by stage_runtime; this seals the outer bundle over them.
-  codesign --force --sign "${SIGN_IDENTITY}" "$1"
+  codesign --force --sign "${SIGN_IDENTITY}" ${CS_HARDEN[@]+"${CS_HARDEN[@]}"} "$1"
 }
 
 stage_runtime() {
@@ -66,7 +78,7 @@ stage_runtime() {
   # broken.
   if [[ -f "${REPO_ROOT}/local/frameworks/libdictionary.dylib" ]]; then
     cp -f "${REPO_ROOT}/local/frameworks/libdictionary.dylib" "${fwdir}/libdictionary.dylib"
-    codesign --force --sign "${SIGN_IDENTITY}" "${fwdir}/libdictionary.dylib"
+    codesign --force --sign "${SIGN_IDENTITY}" ${CS_HARDEN[@]+"${CS_HARDEN[@]}"} "${fwdir}/libdictionary.dylib"
   else
     echo "ERROR: dictionary runtime not built. Run scripts/build_dictionary.sh first." >&2
     exit 1
@@ -102,20 +114,28 @@ stage_runtime() {
   # subdirectory of Contents/Frameworks.
   cp -R "${REPO_ROOT}/local/frameworks/crispasr" "${fwdir}/crispasr"
   find "${fwdir}/crispasr" -type f \( -name "*.dylib" -o -name crispasr -o -name "*.gguf" \) | while read -r f; do
-    codesign --force --sign "${SIGN_IDENTITY}" "${f}"
+    codesign --force --sign "${SIGN_IDENTITY}" ${CS_HARDEN[@]+"${CS_HARDEN[@]}"} "${f}"
   done
 }
 
 stage_readme() {
   local app="$1"
-  cat > "/tmp/mimi-launch-notes.txt" <<EOF
-Mimi — real-time JP livestream transcriber/translator
-
-This app is signed with a self-signed local certificate ("Mimi Dev").
+  local launch_notes
+  if [[ "${SIGN_IDENTITY}" == "Developer ID Application:"* ]]; then
+    launch_notes='This app is signed with a Developer ID certificate and notarized
+(distributed via scripts/release.sh). Just double-click Mimi.app to
+install — no security workarounds needed.'
+  else
+    launch_notes='This app is signed with a self-signed local certificate ("Mimi Dev").
 First launch may be blocked by macOS:
   1. Double-click Mimi.app once.
   2. Open System Settings → Privacy & Security → scroll to "Open Anyway".
-  3. Or run:  xattr -cr /Applications/Mimi.app
+  3. Or run:  xattr -cr /Applications/Mimi.app'
+  fi
+  cat > "/tmp/mimi-launch-notes.txt" <<EOF
+Mimi — real-time system audio transcriber/translator
+
+${launch_notes}
 
 Compatibility: Apple Silicon, macOS 15+.
 First run: grant Screen Recording access (system audio capture via
