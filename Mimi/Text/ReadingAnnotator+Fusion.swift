@@ -319,6 +319,14 @@ extension ReadingAnnotator {
         }
     }
 
+    /// The b- and p-series forms of every は行 onset, keyed by the plain
+    /// (h-series) kana. Doubles as the membership test for which onsets
+    /// `voiceAcrossN` voices at all.
+    private static let voicedOnsets: [Character: (b: String, p: String)] = [
+        "は": ("ば", "ぱ"), "ひ": ("び", "ぴ"), "ふ": ("ぶ", "ぷ"),
+        "へ": ("べ", "ぺ"), "ほ": ("ぼ", "ぽ")
+    ]
+
     /// Voicing across a number's moraic ん (さん/よん/せん/まん): a following
     /// は行 counter voices — to the p-series for the assimilating counters
     /// (ふん 分, ほ 歩, はつ 発: さんぷん, さんぽ, さんぱつ) and to the rendaku
@@ -327,19 +335,13 @@ extension ReadingAnnotator {
     private static func voiceAcrossN(numberKana: String, counterKana: String) -> String {
         guard numberKana.hasSuffix("ん"),
               let first = counterKana.first,
-              "はひふへほ".contains(String(first))
+              let onset = voicedOnsets[first]
         else { return numberKana + counterKana }
         // 歩 reads as bare ほ while 本 is ほん — the exact match separates
         // the p-voiced 歩 from the rendaku 本.
         let toP = counterKana == "ほ"
             || counterKana.hasPrefix("ふ") || counterKana.hasPrefix("はつ")
-        let voiced = toP
-            ? ["は": "ぱ", "ひ": "ぴ", "ふ": "ぷ", "へ": "ぺ", "ほ": "ぽ"]
-            : ["は": "ば", "ひ": "び", "ふ": "ぶ", "へ": "べ", "ほ": "ぼ"]
-        guard let onset = voiced[String(first)] else {
-            return numberKana + counterKana
-        }
-        return numberKana + onset + counterKana.dropFirst()
+        return numberKana + (toP ? onset.p : onset.b) + counterKana.dropFirst()
     }
 
     /// 六 keeps its plain reading before 歳/等/千 (ろくさい/ろくとう/ろくせん):
@@ -362,13 +364,10 @@ extension ReadingAnnotator {
     /// `KanaRomaji` realizes the sound. ば行 onsets never geminate
     /// (`voicedOnsetException`), so they can't reach this.
     private static func postSokuonVoicing(_ kana: String) -> String {
-        let voiced = [
-            "は": "ぱ", "ひ": "ぴ", "ふ": "ぷ", "へ": "ぺ", "ほ": "ぽ"
-        ]
-        guard let first = kana.first, let p = voiced[String(first)] else {
+        guard let first = kana.first, let onset = voicedOnsets[first] else {
             return kana
         }
-        return p + kana.dropFirst()
+        return onset.p + kana.dropFirst()
     }
 
     /// Digit runs whose counter readings the dictionary can't see, in kana
