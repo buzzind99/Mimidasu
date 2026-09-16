@@ -24,7 +24,8 @@ struct AppModelTranslationEngineTests {
         let settings = isolatedTranslationSettings(suite: "test.AppModelEngine")
         if provider != .apple {
             // A configured external provider is selected (the Settings key
-            // card does this once the post-save connection test succeeds).
+            // card does this once the post-save connection test succeeds and
+            // the cloud disclosure is confirmed).
             try? settings.saveKey("test-key-1234", for: provider)
             settings.select(provider)
         }
@@ -371,10 +372,11 @@ struct AppModelTranslationEngineTests {
 
     // MARK: - Connection-verified provider switch
 
-    /// A verified probe moves the selection and records `.success`; the
-    /// engine itself attaches only when the settings change is applied (the
-    /// SettingsView `.onChange` contract).
-    @Test("a verified probe selects the provider; applying the change attaches its engine")
+    /// A verified probe to a different external provider holds the selection
+    /// behind the disclosure; confirming moves it, and the engine attaches
+    /// only when the settings change is applied (the SettingsView `.onChange`
+    /// contract).
+    @Test("a verified probe holds for disclosure; confirming attaches its engine")
     func verifiedProbeSelectsProvider() async {
         let settings = makeSettings(provider: .google)
         try? settings.saveKey("test-key-1234", for: .openrouter)
@@ -391,8 +393,12 @@ struct AppModelTranslationEngineTests {
         let verified = await model.verifyAndSelectTranslationProvider(.openrouter)
 
         #expect(verified)
-        #expect(settings.selectedProvider == .openrouter, "the probe moved the selection")
         #expect(settings.testResult(for: .openrouter) == .success)
+        #expect(settings.selectedProvider == .google, "the switch waits for the disclosure")
+        #expect(model.pendingCloudDisclosure == .openrouter)
+
+        model.confirmCloudDisclosure()
+        #expect(settings.selectedProvider == .openrouter, "confirming moves the selection")
         #expect(model.activeExternalProvider == .google, "activation waits for the settings-change observer")
 
         // SettingsView's onChange applies the selection change.

@@ -80,7 +80,12 @@ extension AppModel {
     /// On success the provider becomes the selection — SettingsView's
     /// `.onChange(of: selectedProvider)` re-attaches its engine — unless it's
     /// already selected, in which case the engine re-attaches directly (the
-    /// key card's re-test path). Returns whether the key verified.
+    /// key card's re-test path, not a switch, so no disclosure). Every fresh
+    /// activation of a cloud provider is held in `pendingCloudDisclosure`
+    /// until the user confirms the off-machine disclosure
+    /// (`confirmCloudDisclosure`); there is no persisted acknowledgment, so
+    /// the sheet reappears on each switch to an external provider. Returns
+    /// whether the key verified.
     func verifyAndSelectTranslationProvider(_ provider: TranslationProvider) async -> Bool {
         guard let key = translationSettings.key(for: provider) else {
             translationSettings.setTestResult(.failure("No API key configured"), for: provider)
@@ -96,11 +101,30 @@ extension AppModel {
         }
         translationSettings.setTestResult(.success, for: provider)
         if translationSettings.selectedProvider == provider {
+            // Already selected: a re-test, not a switch — re-attach directly.
             translationProviderDidChange()
+        } else if provider.isExternal {
+            pendingCloudDisclosure = provider
         } else {
             translationSettings.select(provider)
         }
         return true
+    }
+
+    /// Confirms the pending cloud disclosure: completes the held selection
+    /// (SettingsView's `.onChange` then re-attaches the engine). The sheet
+    /// dismisses through the cleared `pendingCloudDisclosure`.
+    func confirmCloudDisclosure() {
+        guard let provider = pendingCloudDisclosure else { return }
+        pendingCloudDisclosure = nil
+        translationSettings.select(provider)
+    }
+
+    /// Declines the pending cloud disclosure: the selection stays put and
+    /// nothing is recorded — the next switch to that provider raises the
+    /// disclosure again.
+    func declineCloudDisclosure() {
+        pendingCloudDisclosure = nil
     }
 
     /// Builds the selected external provider's engine, or nil when Apple is

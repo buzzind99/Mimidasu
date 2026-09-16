@@ -5,7 +5,7 @@ import SwiftUI
 /// navigation chrome. Buttons highlight pink on hover; appearance segments use
 /// a neutral wash.
 struct SettingsView: View {
-    var model: AppModel
+    @Bindable private var model: AppModel
     @Bindable private var settings: TranslationSettings
     @AppearanceSetting private var appearance
     @State private var keyDraft = ""
@@ -27,7 +27,7 @@ struct SettingsView: View {
     }
 
     init(model: AppModel) {
-        self.model = model
+        _model = Bindable(wrappedValue: model)
         _settings = Bindable(wrappedValue: model.translationSettings)
     }
 
@@ -56,6 +56,13 @@ struct SettingsView: View {
             keyDraft = ""
             keySaveFailed = false
             model.translationProviderDidChange()
+        }
+        // The cloud-provider disclosure, raised whenever an external
+        // activation is held in `pendingCloudDisclosure`; confirming
+        // completes the selection (the `.onChange` above attaches the
+        // engine), dismissing either way clears the bound item.
+        .sheet(item: $model.pendingCloudDisclosure) { provider in
+            CloudDisclosureSheet(provider: provider, model: model)
         }
         // The Settings scene keeps its window — and this view's @State —
         // cached after close, so transient card state survives a reopen and
