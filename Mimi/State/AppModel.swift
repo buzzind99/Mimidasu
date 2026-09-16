@@ -299,16 +299,12 @@ final class AppModel {
     /// denied system-audio permission or a muted source. The first audible
     /// chunk dismisses it (`sessionController.onAudioDetected`).
     private func postNoAudioWarning() {
-        toasts.post(
-            key: ToastKey.noAudio, style: .redPersistent,
-            title: "No audio detected",
+        postPersistentCard(
+            key: ToastKey.noAudio, title: "No audio detected",
             body: "No audio has been detected since the session started. "
                 + "Check that audio is playing and that system audio recording "
                 + "is enabled for Mimi in System Settings.",
-            action: ToastCenter.Action(
-                label: "Open System Settings",
-                handler: { [weak self] in self?.openAudioPrivacySettings() }
-            )
+            action: .init(label: "Open System Settings", handler: { [weak self] in self?.openAudioPrivacySettings() })
         )
     }
 
@@ -326,14 +322,15 @@ final class AppModel {
     /// The `capture.lost` red card with the Restart-capture fix action;
     /// re-posted (deduped in place) when a restart fails.
     private func postCaptureLost(body: String) {
-        toasts.post(
-            key: ToastKey.captureLost, style: .redPersistent,
-            title: "Capture lost", body: body,
-            action: ToastCenter.Action(
-                label: "Restart capture",
-                handler: { [weak self] in self?.restartCapture() }
-            )
+        postPersistentCard(
+            key: ToastKey.captureLost, title: "Capture lost", body: body,
+            action: .init(label: "Restart capture", handler: { [weak self] in self?.restartCapture() })
         )
+    }
+
+    /// Shares red-persistent card construction between the two capture cards.
+    private func postPersistentCard(key: String, title: String, body: String, action: ToastCenter.Action) {
+        toasts.post(key: key, style: .redPersistent, title: title, body: body, action: action)
     }
 
     // MARK: - Model / app discovery
