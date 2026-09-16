@@ -107,10 +107,10 @@ private struct CaptureState {
 /// (`AudioCaptureHAL`) owns the tap/aggregate/IOProc IDs, their property
 /// listeners, and the live tap format; a single claim wins teardown, so a
 /// concurrent `stop()`/`deinit`/`handleDeviceDied` can never double-destroy.
-/// The resample caches (`converter`, `cachedConverterRate`, `cachedInputFormat`,
-/// `inBuffer`, `outBuffer`) are touched only while holding `state`: the IO path
-/// resamples inside the locked append scope, and teardown clears them under the
-/// same lock, so an in-flight callback can never use a half-reset converter.
+/// The `resampler` cache (converter, rate, formats, PCM buffers) is touched
+/// only while holding `state`: the IO path resamples inside the locked append
+/// scope, and teardown clears it under the same lock, so an in-flight callback
+/// can never use a half-reset converter.
 final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
     /// Target rate for the ASR mono chunks. The tap delivers the system mix at
     /// the output device's native rate (nominally 48 kHz); conversion to this
@@ -138,10 +138,18 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
     /// format; see `AudioCaptureHAL`.
     private let halRig = AudioCaptureHAL()
 
-    /// Resample caches. Guarded by `state`: the IO path fills them inside the
-    /// locked append scope, and teardown clears them under the same lock.
-    private var converter: AVAudioConverter?
-    private var cachedConverterRate: Double = 0
+    /// The resampler's converter and reusable PCM buffers, replaced as a unit
+    /// on reset. Guarded by `state`: the IO path fills them inside the locked
+    /// append scope, and teardown clears them under the same lock.
+    private struct ResamplerCache {
+        var converter: AVAudioConverter?
+        var converterRate: Double = 0
+        var inputFormat: AVAudioFormat?
+        var inBuffer: AVAudioPCMBuffer?
+        var outBuffer: AVAudioPCMBuffer?
+    }
+
+    private var resampler = ResamplerCache()
 
     var isRunning: Bool {
         state.withLock { current in current.isRunning }
@@ -161,61 +169,56 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
         guard began else { return }
         defer { state.withLock { current in current.isStarting = false } }
 
-        // Whole-system mix minus Mimi itself.
-        let exclusions = try [NSNumber(value: ProcessTapFactory.currentProcessObject())]
-        let tap = try ProcessTapFactory.createTap(excluding: exclusions)
-        halRig.trackTap(tap.objectID)
+        // Each object is tracked as it is created; the single catch unwinds
+        // whatever was built, so no arm has to repeat the teardown.
         do {
+            // Whole-system mix minus Mimi itself.
+            let exclusions = try [NSNumber(value: ProcessTapFactory.currentProcessObject())]
+            let tap = try ProcessTapFactory.createTap(excluding: exclusions)
+            halRig.trackTap(tap.objectID)
+
             let asbd = try ProcessTapFactory.tapFormat(of: tap.objectID)
             halRig.storeTapFormat(asbd)
-        } catch {
-            teardownHALNow()
-            throw error
-        }
 
-        let aggregate: AudioDeviceID
-        do {
-            aggregate = try ProcessTapFactory.createAggregateDevice(for: tap)
-        } catch {
-            teardownHALNow()
-            throw error
-        }
-        halRig.trackAggregate(aggregate)
+            let aggregate = try ProcessTapFactory.createAggregateDevice(for: tap)
+            halRig.trackAggregate(aggregate)
 
-        // The block is Block_copy'd and outlives this call, so it reaches the
-        // capture through a weak box — no retain cycle with the stored
-        // IOProcID. It captures the rig strongly (the rig never retains the
-        // capture). Its audio-buffer param is a non-optional C pointer.
-        let box = WeakRef(self)
-        var procID: AudioDeviceIOProcID?
-        let procStatus = AudioDeviceCreateIOProcIDWithBlock(
-            &procID, aggregate, ioQueue
-        ) { [halRig = self.halRig] _, inputData, _, _, _ in
-            guard let asbd = halRig.currentTapFormat, let capture = box.value else { return }
-            capture.handleAudioBufferList(inputData, format: asbd)
-        }
-        guard procStatus == noErr, let procID else {
-            // Defensive: status and procID are linked in practice, but a
-            // non-nil procID returned alongside an error would leak — the
-            // stored-ID teardown below can't see it.
-            if let procID {
-                AudioDeviceDestroyIOProcID(aggregate, procID)
+            // The block is Block_copy'd and outlives this call, so it reaches
+            // the capture through a weak box — no retain cycle with the stored
+            // IOProcID. It captures the rig strongly (the rig never retains the
+            // capture). Its audio-buffer param is a non-optional C pointer.
+            let box = WeakRef(self)
+            var procID: AudioDeviceIOProcID?
+            let procStatus = AudioDeviceCreateIOProcIDWithBlock(
+                &procID, aggregate, ioQueue
+            ) { [halRig = self.halRig] _, inputData, _, _, _ in
+                guard let asbd = halRig.currentTapFormat, let capture = box.value else { return }
+                capture.handleAudioBufferList(inputData, format: asbd)
             }
-            teardownHALNow()
-            throw CaptureError.setupFailed("AudioDeviceCreateIOProcIDWithBlock: \(procStatus)")
-        }
-        halRig.trackIOProc(procID)
+            guard procStatus == noErr, let procID else {
+                // Defensive: status and procID are linked in practice, but a
+                // non-nil procID returned alongside an error would leak — the
+                // tracked-ID teardown can't see it.
+                if let procID {
+                    AudioDeviceDestroyIOProcID(aggregate, procID)
+                }
+                throw CaptureError.setupFailed("AudioDeviceCreateIOProcIDWithBlock: \(procStatus)")
+            }
+            halRig.trackIOProc(procID)
 
-        halRig.registerListeners(
-            aggregate: aggregate, tap: tap.objectID, queue: listenerQueue
-        ) { [weak self] error in
-            self?.handleDeviceDied(error)
-        }
+            halRig.registerListeners(
+                aggregate: aggregate, tap: tap.objectID, queue: listenerQueue
+            ) { [weak self] error in
+                self?.handleDeviceDied(error)
+            }
 
-        let startStatus = AudioDeviceStart(aggregate, procID)
-        guard startStatus == noErr else {
-            teardownHALNow()
-            throw CaptureError.classifyStartStatus(startStatus)
+            let startStatus = AudioDeviceStart(aggregate, procID)
+            guard startStatus == noErr else {
+                throw CaptureError.classifyStartStatus(startStatus)
+            }
+        } catch {
+            resetPipeline(blocking: true)
+            throw error
         }
 
         state.withLock { current in
@@ -242,8 +245,7 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
         // lands after `stop()` returns. The HAL wait hops off the caller
         // thread (it can block for an IO period); the claim happens
         // synchronously so a deinit racing the task can't leak or double-free.
-        halRig.teardownDetached(on: listenerQueue)
-        resetResamplerCaches()
+        resetPipeline(blocking: false)
     }
 
     // MARK: - Test seam
@@ -275,29 +277,23 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
         guard wasRunning else { return }
         // Already off the main actor (listener queue / test thread), so the
         // HAL drain can run inline.
-        teardownHALNow()
+        resetPipeline(blocking: true)
         onIOError?(.captureLost(error.localizedDescription))
     }
 
-    /// Synchronous HAL teardown plus the resample-cache reset, for the
-    /// `start()` failure arms and the dead-device path (both already off the
-    /// caller's critical thread).
-    private func teardownHALNow() {
-        halRig.teardownBlocking(on: listenerQueue)
-        resetResamplerCaches()
-    }
-
-    /// Drops the resampler's cached converter and buffers. Runs under the state
-    /// lock so it is mutually exclusive with an in-flight callback resampling
-    /// (the IO path holds the same lock around `append`).
-    private func resetResamplerCaches() {
-        state.withLock { _ in
-            converter = nil
-            cachedConverterRate = 0
-            cachedInputFormat = nil
-            inBuffer = nil
-            outBuffer = nil
+    /// Drops the live HAL objects and the resampler caches. `blocking` picks
+    /// the synchronous HAL drain (`start()`'s failure path and the dead-device
+    /// path, both already off their critical thread) over the detached one
+    /// (`stop()`, which must not wait an IO period). The cache reset runs
+    /// under the state lock so it is mutually exclusive with an in-flight
+    /// callback resampling (the IO path holds the same lock around `append`).
+    private func resetPipeline(blocking: Bool) {
+        if blocking {
+            halRig.teardownBlocking(on: listenerQueue)
+        } else {
+            halRig.teardownDetached(on: listenerQueue)
         }
+        state.withLock { _ in resampler = ResamplerCache() }
     }
 
     deinit {
@@ -362,14 +358,8 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
         standardFormatWithSampleRate: Self.outputSampleRate, channels: 1
     )!
 
-    /// PCM buffers reused across chunks (reallocated only if a future
-    /// source rate/duration needs more capacity).
-    private var cachedInputFormat: AVAudioFormat?
-    private var inBuffer: AVAudioPCMBuffer?
-    private var outBuffer: AVAudioPCMBuffer?
-
     private func resample(_ mono: [Float], from rate: Double) -> [Float]? {
-        if cachedConverterRate != rate {
+        if resampler.converterRate != rate {
             guard let inFormat = AVAudioFormat(
                 standardFormatWithSampleRate: rate, channels: 1
             ),
@@ -378,20 +368,25 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
                 print("AVAudioConverter creation failed: \(rate) → \(outputFormat)")
                 return nil
             }
-            converter = newConverter
-            cachedInputFormat = inFormat
-            cachedConverterRate = rate
-            inBuffer = nil
-            outBuffer = nil
+            resampler.converter = newConverter
+            resampler.inputFormat = inFormat
+            resampler.converterRate = rate
+            resampler.inBuffer = nil
+            resampler.outBuffer = nil
         }
-        guard let converter, let inFormat = cachedInputFormat else { return nil }
+        guard let converter = resampler.converter,
+              let inFormat = resampler.inputFormat
+        else { return nil }
 
-        if inBuffer == nil || inBuffer!.frameCapacity < AVAudioFrameCount(mono.count) {
-            inBuffer = AVAudioPCMBuffer(
+        if resampler.inBuffer == nil
+            || resampler.inBuffer!.frameCapacity < AVAudioFrameCount(mono.count)
+        {
+            resampler.inBuffer = AVAudioPCMBuffer(
                 pcmFormat: inFormat, frameCapacity: AVAudioFrameCount(mono.count)
             )
         }
-        guard let inBuffer, inBuffer.floatChannelData != nil else { return nil }
+        guard let inBuffer = resampler.inBuffer, inBuffer.floatChannelData != nil
+        else { return nil }
         inBuffer.frameLength = AVAudioFrameCount(mono.count)
         if let dst = inBuffer.floatChannelData?[0] {
             mono.withUnsafeBufferPointer { src in
@@ -405,12 +400,14 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
         // or the tail of each callback's samples would be clipped.
         let ratio = Self.outputSampleRate / rate
         let outCapacity = AVAudioFrameCount(Double(mono.count) * ratio) + AVAudioFrameCount(mono.count) + 32
-        if outBuffer == nil || outBuffer!.frameCapacity < outCapacity {
-            outBuffer = AVAudioPCMBuffer(
+        if resampler.outBuffer == nil
+            || resampler.outBuffer!.frameCapacity < outCapacity
+        {
+            resampler.outBuffer = AVAudioPCMBuffer(
                 pcmFormat: outputFormat, frameCapacity: outCapacity
             )
         }
-        guard let outBuffer else { return nil }
+        guard let outBuffer = resampler.outBuffer else { return nil }
 
         return drain(inBuffer, through: converter, into: outBuffer)
     }

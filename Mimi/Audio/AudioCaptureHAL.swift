@@ -15,9 +15,17 @@ final class AudioCaptureHAL: @unchecked Sendable {
         var tapID: AudioObjectID?
         var aggregateID: AudioDeviceID?
         var ioProcID: AudioDeviceIOProcID?
-        var deviceDiedListener: PropertyListener?
-        var tapListListener: PropertyListener?
+        /// Aggregate-device listeners (device death, tap-list change), removed
+        /// together with the aggregate.
+        var aggregateListeners: [PropertyListener] = []
         var formatListener: PropertyListener?
+    }
+
+    /// One fatal aggregate listener: the selector to watch and the reason its
+    /// firing reports.
+    private struct FatalListener {
+        let selector: AudioObjectPropertySelector
+        let description: String
     }
 
     /// The live HAL handles; empty whenever no capture is up.
@@ -62,15 +70,22 @@ final class AudioCaptureHAL: @unchecked Sendable {
         queue: DispatchQueue,
         onDeviceDied: @escaping @Sendable (NSError) -> Void
     ) {
-        let alive = makeListener(
-            for: aggregate, selector: kAudioDevicePropertyDeviceIsAlive, queue: queue
-        ) { onDeviceDied(Self.deviceDiedError("system audio capture device died")) }
-        live.withLock { current in current.deviceDiedListener = alive }
-
-        let tapList = makeListener(
-            for: aggregate, selector: kAudioAggregateDevicePropertyTapList, queue: queue
-        ) { onDeviceDied(Self.deviceDiedError("system audio capture tap list changed")) }
-        live.withLock { current in current.tapListListener = tapList }
+        let fatal = [
+            FatalListener(
+                selector: kAudioDevicePropertyDeviceIsAlive,
+                description: "system audio capture device died"
+            ),
+            FatalListener(
+                selector: kAudioAggregateDevicePropertyTapList,
+                description: "system audio capture tap list changed"
+            )
+        ]
+        for listener in fatal {
+            let registered = makeListener(
+                for: aggregate, selector: listener.selector, queue: queue
+            ) { onDeviceDied(Self.deviceDiedError(listener.description)) }
+            live.withLock { current in current.aggregateListeners.append(registered) }
+        }
 
         registerFormatListener(tap: tap, queue: queue)
     }
@@ -94,6 +109,8 @@ final class AudioCaptureHAL: @unchecked Sendable {
 
     /// A failed listener registration silently disables recovery (dead-device,
     /// tap-list, format-change) with no other symptom — surface it in DEBUG.
+    /// Deliberately not an `assertionFailure`: a flaky registration must not
+    /// crash every debug run.
     private func checkListenerStatus(
         _ status: OSStatus, selector: AudioObjectPropertySelector
     ) {
@@ -101,7 +118,6 @@ final class AudioCaptureHAL: @unchecked Sendable {
         #if DEBUG
             print("[capture] property listener '\(selector)' registration failed: \(status)")
         #endif
-        assertionFailure("AudioObjectAddPropertyListenerBlock failed for '\(selector)': \(status)")
     }
 
     private func registerFormatListener(tap: AudioObjectID, queue: DispatchQueue) {
@@ -174,10 +190,7 @@ final class AudioCaptureHAL: @unchecked Sendable {
 
     private func removeListeners(_ claimed: HALHandles, queue: DispatchQueue) {
         if let device = claimed.aggregateID {
-            if let listener = claimed.deviceDiedListener {
-                Self.removeListener(listener, from: device, queue: queue)
-            }
-            if let listener = claimed.tapListListener {
+            for listener in claimed.aggregateListeners {
                 Self.removeListener(listener, from: device, queue: queue)
             }
         }
