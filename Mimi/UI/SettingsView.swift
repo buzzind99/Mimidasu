@@ -10,6 +10,9 @@ struct SettingsView: View {
     @AppearanceSetting private var appearance
     @State private var keyDraft = ""
     @State private var keySaveFailed = false
+    /// Edit buffer for the OpenRouter model field; committed to the stored
+    /// model only on Save.
+    @State private var modelDraft = ""
     /// An external provider being set up but not yet configured: its key
     /// card is shown, but the selection (checkmark) stays on the current
     /// provider until a key is saved and the connection test succeeds.
@@ -29,6 +32,7 @@ struct SettingsView: View {
     init(model: AppModel) {
         _model = Bindable(wrappedValue: model)
         _settings = Bindable(wrappedValue: model.translationSettings)
+        _modelDraft = State(initialValue: model.translationSettings.openRouterModel)
     }
 
     var body: some View {
@@ -55,6 +59,7 @@ struct SettingsView: View {
             pendingProvider = nil
             keyDraft = ""
             keySaveFailed = false
+            modelDraft = settings.openRouterModel
             model.translationProviderDidChange()
         }
         // The cloud-provider disclosure, raised whenever an external
@@ -78,6 +83,7 @@ struct SettingsView: View {
             verifyingProvider = nil
             keyDraft = ""
             keySaveFailed = false
+            modelDraft = settings.openRouterModel
         }
     }
 
@@ -117,7 +123,8 @@ struct SettingsView: View {
             if displayedProvider.isExternal {
                 SettingsKeyCard(
                     model: model, settings: settings, provider: displayedProvider,
-                    keyDraft: $keyDraft, keySaveFailed: $keySaveFailed
+                    keyDraft: $keyDraft, keySaveFailed: $keySaveFailed,
+                    modelDraft: $modelDraft
                 )
             }
             appearanceCard

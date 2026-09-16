@@ -13,6 +13,9 @@ struct SettingsKeyCard: View {
     let provider: TranslationProvider
     @Binding var keyDraft: String
     @Binding var keySaveFailed: Bool
+    /// Edit buffer for the OpenRouter model field. The stored model only
+    /// changes on Save, so an abandoned edit never reaches the engine.
+    @Binding var modelDraft: String
     @State private var isTestingConnection = false
 
     var body: some View {
@@ -100,24 +103,25 @@ struct SettingsKeyCard: View {
             settingsDivider()
             KickerLabel("MODEL", color: Palette.label, size: 9.5)
             HStack(spacing: 8) {
-                TextField("tencent/hy-mt2-30b-a3b", text: $settings.openRouterModel)
+                TextField("tencent/hy-mt2-30b-a3b", text: $modelDraft)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(Palette.primaryText)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
                     .settingsFieldBackground()
-                // The model string persists as typed; Save re-attaches the
-                // engine so a changed model takes effect on a live session.
-                SettingsPill(label: "Save", prominent: true) {
+                // Save commits the draft and re-attaches the engine so a
+                // changed model takes effect on a live session; an uncommitted
+                // edit never reaches the engine. Disabled while the draft
+                // matches the stored model.
+                SettingsPill(
+                    label: "Save", prominent: true,
+                    isEnabled: modelDraft != settings.openRouterModel
+                ) {
+                    settings.openRouterModel = modelDraft
                     model.translationProviderDidChange()
                 }
             }
-            Text("Current model: \(settings.effectiveOpenRouterModel)")
-                .font(.system(size: 10.5, design: .monospaced))
-                .foregroundStyle(Palette.mutedText)
-                .lineLimit(1)
-                .truncationMode(.middle)
         }
     }
 
