@@ -82,7 +82,7 @@ struct AppModelExportTests {
             initialModelResolve: { _ in nil }
         )
         await model.initialModelCheck?.value
-        try await model.sessionController.begin(
+        _ = try await model.sessionController.begin(
             modelURL: URL(fileURLWithPath: "/tmp/model.gguf"), modelID: "mock"
         )
         return model
