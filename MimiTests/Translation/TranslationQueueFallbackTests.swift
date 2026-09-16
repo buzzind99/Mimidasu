@@ -8,8 +8,8 @@ import Testing
 /// cancellation mid-batch re-queues, and `noteRetry` surfaces retry progress
 /// without clobbering terminal or post-batch states.
 ///
-/// Swift Testing confirmations have no timeout, so every wait inside a
-/// confirmation scope is bounded by `pollUntil(timeout:)`.
+/// Every wait is bounded by `pollUntil(timeout:)`, so a lost delivery fails
+/// on the named expectation instead of stalling the suite.
 @MainActor
 @Suite("TranslationQueue fallback ladder")
 struct TranslationQueueFallbackTests {
@@ -51,22 +51,50 @@ struct TranslationQueueFallbackTests {
         }
     }
 
-    /// Fires one retry-progress report mid-call (the in-engine ladder
-    /// simulation) and then succeeds, so the queue renders
-    /// translating → retrying → ready.
-    private final class RetryThenSucceedEngine: TranslationEngine, @unchecked Sendable {
+    /// Blocks inside `translate` until `release()` is called, so tests hold a
+    /// batch observably in flight instead of betting on a fixed sleep. Fires
+    /// one retry report on entry when `firesRetry` is set, and throws `error`
+    /// (when provided) after release.
+    private final class GatedEngine: TranslationEngine, @unchecked Sendable {
         let preferredBatchSize = 16
         var onRetry: (@Sendable (RetryProgress) -> Void)?
-        private var fired = false
+
+        private let lock = NSLock()
+        private var released = false
+        private var releaseContinuation: CheckedContinuation<Void, Never>?
+        private let firesRetry: Bool
+        private let error: (any Error)?
+
+        init(firesRetry: Bool = false, error: (any Error)? = nil) {
+            self.firesRetry = firesRetry
+            self.error = error
+        }
 
         func translate(_ texts: [String]) async throws -> [String] {
-            if !fired {
-                fired = true
+            if firesRetry {
                 onRetry?(RetryProgress(stage: .batchRetry, attemptsLeft: 2))
-                // Yield so the main-actor `noteRetry` hop lands before return.
-                try? await Task.sleep(for: .milliseconds(50))
+            }
+            await withCheckedContinuation { continuation in
+                lock.withLock {
+                    if released {
+                        continuation.resume()
+                    } else {
+                        releaseContinuation = continuation
+                    }
+                }
+            }
+            if let error {
+                throw error
             }
             return texts.map { text in "EN:\(text)" }
+        }
+
+        func release() {
+            lock.withLock {
+                released = true
+                releaseContinuation?.resume()
+                releaseContinuation = nil
+            }
         }
     }
 
@@ -114,16 +142,22 @@ struct TranslationQueueFallbackTests {
         queue.enqueue(makeSentence(index: 1, text: otherSentenceText))
 
         _ = Task { await queue.run(with: dead) }
-        await pollUntil(timeout: 5) {
-            if case .unavailable = queue.status {
-                return true
-            }
-            return false
-        }
+        #expect(
+            await pollUntil(timeout: 5) {
+                if case .unavailable = queue.status {
+                    return true
+                }
+                return false
+            },
+            "the dead engine publishes .unavailable"
+        )
         #expect(sink.results.isEmpty, "the dead run must not deliver")
 
         let replacementWorker = Task { await queue.run(with: replacement) }
-        await pollUntil(timeout: 5) { sink.results.count == 2 }
+        #expect(
+            await pollUntil(timeout: 5) { sink.results.count == 2 },
+            "the replacement run replays both pending sentences"
+        )
 
         #expect(sink.results == [0, 1], "the surviving pending must replay in order")
         #expect(queue.status == .ready)
@@ -136,6 +170,51 @@ struct TranslationQueueFallbackTests {
         #expect(replacement.recordedBatches.count == 1)
 
         replacementWorker.cancel()
+    }
+
+    // MARK: - Stale-run nudge
+
+    /// A dead run's failure — its engine throws after a newer run took over —
+    /// re-queues its batch and nudges the newer run's parked wake loop, so the
+    /// re-queued work is replayed instead of stranded. Both workers are gated
+    /// so the handover is deterministic.
+    @Test("a stale run's failure nudges the parked newer run to replay")
+    func staleRunFailureNudgesParkedNewerRunToReplay() async {
+        let queue = TranslationQueue()
+        let sink = Sink()
+        queue.setHandlers(
+            result: { index, _ in sink.record(result: index) },
+            status: { status in sink.record(status: status) }
+        )
+
+        // Worker A takes the sentence into an in-flight batch and stays there.
+        let dead = GatedEngine(error: TranslationEngineError.network)
+        queue.enqueue(makeSentence(index: 0, text: sentenceText))
+        let deadWorker = Task { await queue.run(with: dead) }
+        #expect(
+            await pollUntil(timeout: 5) { queue.status == .translating },
+            "worker A holds the sentence in an in-flight batch"
+        )
+
+        // Worker B replaces A (bumps the generation) and parks with nothing
+        // pending, since A still holds the batch.
+        let replacement = EchoEngine()
+        let liveWorker = Task { await queue.run(with: replacement) }
+        #expect(
+            await pollUntil(timeout: 5) { queue.status == .ready },
+            "worker B parks after publishing .ready"
+        )
+
+        dead.release()
+
+        #expect(
+            await pollUntil(timeout: 5) { sink.results == [0] },
+            "the stale run's re-queued batch replays on the newer run"
+        )
+        #expect(replacement.recordedBatches.count == 1, "the newer run replays the batch once")
+
+        deadWorker.cancel()
+        liveWorker.cancel()
     }
 
     // MARK: - Cancellation mid-batch requeues
@@ -161,7 +240,10 @@ struct TranslationQueueFallbackTests {
             return "unreachable"
         }
         let worker = Task { await queue.run(with: sleeper) }
-        await pollUntil(timeout: 5) { queue.status == .translating }
+        #expect(
+            await pollUntil(timeout: 5) { queue.status == .translating },
+            "the batch is observably in flight"
+        )
 
         worker.cancel()
         await worker.value
@@ -174,7 +256,10 @@ struct TranslationQueueFallbackTests {
         // The replay: a fresh run translates the surviving batch.
         let replacement = EchoEngine()
         let replacementWorker = Task { await queue.run(with: replacement) }
-        await pollUntil(timeout: 5) { sink.results.count == 1 }
+        #expect(
+            await pollUntil(timeout: 5) { sink.results.count == 1 },
+            "the replacement run replays the re-queued batch"
+        )
         #expect(sink.results == [0])
 
         replacementWorker.cancel()
@@ -183,7 +268,9 @@ struct TranslationQueueFallbackTests {
     // MARK: - noteRetry
 
     /// An external engine's retry report surfaces as `.retrying` between
-    /// `.translating` and the next outcome, with the footer copy.
+    /// `.translating` and the next outcome, with the footer copy. The engine
+    /// is held in flight until the report is observed, so the ordering is
+    /// deterministic instead of a timing bet.
     @Test("noteRetry renders translating → retrying → ready with footer copy")
     func noteRetrySurfacesBetweenTranslatingAndReady() async {
         let queue = TranslationQueue()
@@ -192,14 +279,24 @@ struct TranslationQueueFallbackTests {
             result: { index, _ in sink.record(result: index) },
             status: { status in sink.record(status: status) }
         )
-        let engine = RetryThenSucceedEngine()
+        let engine = GatedEngine(firesRetry: true)
         engine.onRetry = { progress in
             Task { @MainActor in queue.noteRetry(progress) }
         }
 
         queue.enqueue(makeSentence(index: 0, text: sentenceText))
         let worker = Task { await queue.run(with: engine) }
-        await pollUntil(timeout: 5) { sink.results.count == 1 }
+        #expect(
+            await pollUntil(timeout: 5) {
+                sink.statuses.contains(.retrying("External translation failed, 2 retries left"))
+            },
+            "the retry report surfaces while the batch is still in flight"
+        )
+        engine.release()
+        #expect(
+            await pollUntil(timeout: 5) { sink.results.count == 1 },
+            "the released batch delivers"
+        )
         worker.cancel()
 
         #expect(sink.results == [0])
@@ -216,12 +313,15 @@ struct TranslationQueueFallbackTests {
 
         queue.enqueue(makeSentence(index: 0, text: sentenceText))
         let worker = Task { await queue.run(with: engine) }
-        await pollUntil(timeout: 5) {
-            if case .unavailable = queue.status {
-                return true
-            }
-            return false
-        }
+        #expect(
+            await pollUntil(timeout: 5) {
+                if case .unavailable = queue.status {
+                    return true
+                }
+                return false
+            },
+            "the dead engine publishes .unavailable"
+        )
         worker.cancel()
 
         queue.noteRetry(RetryProgress(stage: .batchRetry, attemptsLeft: 1))
@@ -247,7 +347,10 @@ struct TranslationQueueFallbackTests {
 
         queue.enqueue(makeSentence(index: 0, text: sentenceText))
         let worker = Task { await queue.run(with: engine) }
-        await pollUntil(timeout: 5) { sink.results.count == 1 }
+        #expect(
+            await pollUntil(timeout: 5) { sink.results.count == 1 },
+            "the batch delivers and settles at .ready"
+        )
         #expect(queue.status == .ready)
         worker.cancel()
 

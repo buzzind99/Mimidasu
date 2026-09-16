@@ -115,7 +115,10 @@ struct TranslationQueueTests {
             defer { worker.cancel() }
 
             queue.enqueue(makeSentence(index: 0, text: sentenceText))
-            await pollUntil(timeout: resultTimeout) { sink.results.count == 1 }
+            #expect(
+                await pollUntil(timeout: resultTimeout) { sink.results.count == 1 },
+                "the sentence translates through the worker"
+            )
         }
 
         let delivery = try #require(sink.results.first)
@@ -151,14 +154,22 @@ struct TranslationQueueTests {
             defer { worker.cancel() }
 
             queue.enqueue(makeSentence(index: 0, text: sentenceText))
-            await pollUntil(timeout: resultTimeout) { sink.results.count == 1 }
+            #expect(
+                await pollUntil(timeout: resultTimeout) { sink.results.count == 1 },
+                "the first sentence translates"
+            )
             // Wait for the worker to publish .ready again (batch done), so the
             // second enqueue lands on an idle worker and must wake it.
-            await pollUntil(timeout: resultTimeout) { queue.status == .ready }
-            #expect(queue.status == .ready)
+            #expect(
+                await pollUntil(timeout: resultTimeout) { queue.status == .ready },
+                "the worker republishes .ready after the batch"
+            )
 
             queue.enqueue(makeSentence(index: 1, text: otherSentenceText))
-            await pollUntil(timeout: resultTimeout) { sink.results.count == 2 }
+            #expect(
+                await pollUntil(timeout: resultTimeout) { sink.results.count == 2 },
+                "the idle worker wakes on the second enqueue"
+            )
         }
 
         let second = try #require(sink.results.last)
@@ -190,7 +201,10 @@ struct TranslationQueueTests {
             defer { worker.cancel() }
 
             queue.enqueue(makeSentence(index: 0, text: sentenceText))
-            await pollUntil(timeout: resultTimeout) { sink.results.count == 1 }
+            #expect(
+                await pollUntil(timeout: resultTimeout) { sink.results.count == 1 },
+                "the sentence is delivered before the cache probe"
+            )
             let seed = try #require(sink.results.first).translation
 
             queue.enqueue(makeSentence(index: 5, text: sentenceText))
@@ -250,7 +264,10 @@ struct TranslationQueueTests {
             queue.enqueue(makeSentence(index: 0, text: sentenceText))
             queue.enqueue(makeSentence(index: 1, text: "   "))
             queue.enqueue(makeSentence(index: 2, text: otherSentenceText))
-            await pollUntil(timeout: resultTimeout) { sink.results.count == 2 }
+            #expect(
+                await pollUntil(timeout: resultTimeout) { sink.results.count == 2 },
+                "both real sentences translate"
+            )
         }
 
         #expect(sink.results.map(\.index) == [0, 2])
@@ -280,7 +297,10 @@ struct TranslationQueueTests {
             for index in 0 ..< 3 {
                 queue.enqueue(makeSentence(index: index, text: "\(sentenceText)\(index)"))
             }
-            await pollUntil(timeout: resultTimeout) { sink.results.count == 3 }
+            #expect(
+                await pollUntil(timeout: resultTimeout) { sink.results.count == 3 },
+                "all three sentences translate across both batches"
+            )
         }
 
         #expect(engine.recordedBatches.map(\.count) == [2, 1])
@@ -341,12 +361,15 @@ struct TranslationQueueTests {
             defer { worker.cancel() }
 
             queue.enqueue(makeSentence(index: 0, text: sentenceText))
-            await pollUntil(timeout: resultTimeout) {
-                if case .unavailable = queue.status {
-                    return true
-                }
-                return false
-            }
+            #expect(
+                await pollUntil(timeout: resultTimeout) {
+                    if case .unavailable = queue.status {
+                        return true
+                    }
+                    return false
+                },
+                "the engine failure publishes .unavailable"
+            )
         }
 
         #expect(sink.statuses.count == 3)
@@ -359,15 +382,15 @@ struct TranslationQueueTests {
         // The mock is a fixed-contract engine: a `.badResponse` is permanent.
         #expect(severity == .permanent)
 
-        // Generous margin over drain's own timeout: the early return is
-        // near-instant, and the assertion must never trip on scheduling
-        // jitter. A regression (waiting out the deadline) costs 3 s, not a
-        // hang.
-        let start = Date()
+        // The early return is near-instant; a regression (waiting out the 3 s
+        // deadline) is what the monotonic wall-clock bound catches. 2.5 s
+        // leaves headroom for scheduling pauses without losing the gap.
+        let clock = ContinuousClock()
+        let start = clock.now
         let drained = await queue.drain(timeout: 3.0)
         #expect(!drained)
         #expect(
-            Date().timeIntervalSince(start) < 1.5,
+            clock.now - start < .seconds(2.5),
             "drain must early-return on .unavailable, not wait out the deadline"
         )
     }

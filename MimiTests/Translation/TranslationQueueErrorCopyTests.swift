@@ -42,7 +42,10 @@ struct TranslationQueueErrorCopyTests {
         queue.setHandlers(result: { _, _ in }, status: { _ in })
         queue.enqueue(Sentence(index: 0, startS: 0, endS: 1, lang: "ja", text: "テスト"))
         let worker = Task { await queue.run(with: engine) }
-        await pollUntil(timeout: resultTimeout) { isUnavailable(queue.status) }
+        #expect(
+            await pollUntil(timeout: resultTimeout) { isUnavailable(queue.status) },
+            "the engine failure publishes .unavailable"
+        )
         worker.cancel()
 
         guard case let .unavailable(message, severity) = queue.status else {
@@ -65,7 +68,9 @@ struct TranslationQueueErrorCopyTests {
     /// every engine error the queue can surface, classified into the
     /// transient/permanent toast severities (fixed-contract `.badResponse`,
     /// `.invalidKey`, and `.quotaExceeded` are permanent; everything the
-    /// retry ladder treats as retryable is transient).
+    /// retry ladder treats as retryable is transient). A thrown
+    /// `TranslationEngineError.cancelled` is not a `CancellationError`, so it
+    /// renders `.unavailable` like any other engine error.
     @Test("engine errors render their copy with the toast severity", arguments: [
         (
             TranslationEngineError.invalidKey,
@@ -92,6 +97,10 @@ struct TranslationQueueErrorCopyTests {
             TranslationEngineError.network,
             "Network error reaching the provider. Check the connection, then retry.",
             TranslationFailureSeverity.transient
+        ),
+        (
+            TranslationEngineError.cancelled,
+            "Translation was cancelled.", TranslationFailureSeverity.transient
         )
     ])
     func engineErrorCopy(
