@@ -54,7 +54,7 @@ enum ModelLocator {
             return downloadedURL
         }
         if let devURL = dev(choice), fileExists(devURL.path), isVerified(devURL, choice) {
-            return devURL.absoluteURL
+            return devURL
         }
         return nil
     }

@@ -5,11 +5,12 @@ import Testing
 /// Tests `ModelLocator` per-choice path composition and `resolve(for:)`'s
 /// bundled → downloaded → dev ordering — the order pinned over injected
 /// candidates, so no real model location is touched. The end-to-end check
-/// against the real downloaded model is environment-gated; the dev fallback
+/// against the real downloaded model is environment-gated. The dev fallback
 /// (`models/` relative to the working directory, DEBUG-only) and
 /// `resolve(for:)`'s final `nil` return sit behind the downloaded-model
-/// branch in production and are unreachable in the test host whenever an
-/// installed model exists.
+/// branch in production and are unreachable via the default locators in the
+/// test host whenever an installed model exists; the nil return itself is
+/// pinned by the injected-candidates tests below.
 @Suite("ModelLocator")
 struct ModelLocatorTests {
 
@@ -68,7 +69,9 @@ struct ModelLocatorTests {
 
     @Test(
         "resolve returns the downloaded Lite model when it is verified",
-        .enabled(if: ModelVerifier.isVerified(ModelLocator.downloadedURL(for: .lite), for: .lite))
+        .enabled(if: ModelVerifier.isVerified(
+            ModelLocator.downloadedURL(for: .lite), for: .lite, store: .sharedReadOnly
+        ))
     )
     func resolveReturnsVerifiedDownloaded() {
         #expect(ModelLocator.resolve(for: .lite) == ModelLocator.downloadedURL(for: .lite))
@@ -81,7 +84,7 @@ struct ModelLocatorTests {
 
             if let resolved {
                 #expect(FileManager.default.fileExists(atPath: resolved.path))
-                #expect(ModelVerifier.isVerified(resolved, for: choice))
+                #expect(ModelVerifier.isVerified(resolved, for: choice, store: .sharedReadOnly))
             }
         }
     }
@@ -134,7 +137,7 @@ struct ModelLocatorTests {
             isVerified: { url, _ in url == dev }
         )
 
-        #expect(resolved == dev.absoluteURL)
+        #expect(resolved == dev)
     }
 
     @Test("resolve is nil when no candidate exists or verifies")

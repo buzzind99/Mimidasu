@@ -31,11 +31,25 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
         choice.downloadURL
     }
 
+    /// User-facing copy for a downloaded file that failed verification.
+    nonisolated static func verificationFailureMessage(_ error: Error) -> String {
+        "Verification failed: \(error.localizedDescription)"
+    }
+
+    /// User-facing copy for a transfer that failed outright.
+    nonisolated static func downloadFailureMessage(_ error: Error) -> String {
+        "Download failed: \(error.localizedDescription). Retry, or drop the GGUF into "
+            + "\(ModelLocator.modelsDirectory.path) manually."
+    }
+
     /// The choice whose URL, destination, and SHA-256 pin this downloader
     /// works against.
     private let choice: ASRModelChoice
     /// Internal (not private) so tests can pin the choice-derived destination.
     let destination: URL
+    /// Positive-verdict cache consulted when a file already sits at the
+    /// destination; injectable so tests never touch the production cache.
+    private let verdictStore: ModelVerifier.VerdictStore
     private let makeSession: (URLSessionDownloadDelegate) -> URLSession
     private let makeTask: (URLSession) -> URLSessionDownloadTask?
 
@@ -46,6 +60,7 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
     init(
         choice: ASRModelChoice = .lite,
         destination: URL? = nil,
+        verdictStore: ModelVerifier.VerdictStore = .shared,
         makeSession: @escaping (URLSessionDownloadDelegate) -> URLSession = { delegate in
             URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
         },
@@ -53,6 +68,7 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
     ) {
         self.choice = choice
         self.destination = destination ?? ModelLocator.downloadedURL(for: choice)
+        self.verdictStore = verdictStore
         self.makeSession = makeSession
         self.makeTask = makeTask ?? { session in
             session.downloadTask(with: ModelDownloader.downloadURL(for: choice))
@@ -87,7 +103,7 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
         try? fm.createDirectory(at: ModelLocator.modelsDirectory, withIntermediateDirectories: true)
 
         if fm.fileExists(atPath: destination.path) {
-            if ModelVerifier.isVerified(destination, for: choice) {
+            if ModelVerifier.isVerified(destination, for: choice, store: verdictStore) {
                 setState(.done(destination))
                 return
             }
@@ -182,7 +198,7 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
             self.invalidateSession()
             if let failure {
                 try? fm.removeItem(at: location)
-                self.state = .failed("Verification failed: \(failure.localizedDescription)")
+                self.state = .failed(Self.verificationFailureMessage(failure))
             } else {
                 self.resumeData = nil
                 self.state = .done(destination)
@@ -198,9 +214,7 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
             if (error as NSError).code == NSURLErrorCancelled {
                 return
             }
-            self.state = .failed(
-                "Download failed: \(error.localizedDescription). Retry, or drop the GGUF into \(ModelLocator.modelsDirectory.path) manually."
-            )
+            self.state = .failed(Self.downloadFailureMessage(error))
         }
     }
 

@@ -47,7 +47,6 @@ struct ModelVerifierTests {
         let file = try temporary.write(Data([0x00, 0x01, 0x02]), named: "mismatch.gguf")
 
         #expect(!ModelVerifier.isVerified(file, for: .lite, store: makeStore()))
-        #expect(!ModelVerifier.isVerified(file, for: .lite, store: makeStore()))
     }
 
     @Test("a mismatching file records no persisted verdict")
@@ -72,12 +71,12 @@ struct ModelVerifierTests {
         #expect(
             ModelVerifier.expectedSHA256(for: .lite) != ModelVerifier.expectedSHA256(for: .full)
         )
-        #expect(ASRModelChoice.full.pinnedSHA256.count == 64)
+        #expect(ASRModelChoice.full.pinnedSHA256.allSatisfy { $0.isHexDigit && !$0.isUppercase })
     }
 
     /// A same-size content mutation bumps the file's mtime, so the (path,
     /// size, mtime) key no longer matches the recorded verdict and a re-hash
-    /// runs — which now catches the corruption the old size-only key missed.
+    /// runs, catching the corruption.
     @Test(
         "a size or mtime change invalidates the verdict and forces a re-hash",
         .enabled(if: TestEnvironment.repoDevModelInstalled)
@@ -215,8 +214,7 @@ struct ModelVerifierTests {
         }
         let failure = try #require(error)
 
-        #expect(failure.message == "model file does not match Mimi's pinned checksum — "
-            + "delete it and re-download, or replace it with an authentic copy")
+        #expect(failure.message == ModelVerifier.checksumMismatchMessage)
         #expect(failure.errorDescription == failure.message)
     }
 

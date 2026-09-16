@@ -13,6 +13,11 @@ import Synchronization
 /// Residual risk (accepted; same trust model as `ModelDownloader`, which
 /// trusts the file at the well-known path after download-time verification)
 enum ModelVerifier {
+    /// User-facing copy for a file whose digest does not match the pin.
+    static let checksumMismatchMessage =
+        "model file does not match Mimi's pinned checksum — "
+            + "delete it and re-download, or replace it with an authentic copy"
+
     /// Pinned SHA-256 for the choice's GGUF (release-time integrity check).
     static func expectedSHA256(for choice: ASRModelChoice) -> String {
         choice.pinnedSHA256
@@ -70,16 +75,26 @@ enum ModelVerifier {
     final class VerdictStore: Sendable {
         /// Production location: `~/Library/Application Support/Mimi/
         /// verification-cache.json` (sibling of the models directory).
-        static let shared = VerdictStore(url: {
+        static let sharedURL: URL = {
             let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             return base.appendingPathComponent("Mimi/verification-cache.json")
-        }())
+        }()
+
+        /// Production store: reads persisted verdicts and records new ones.
+        static let shared = VerdictStore(url: sharedURL)
+
+        /// Read-only view of the production location: reads persisted verdicts
+        /// but never records new ones. Used by probes that must not mutate
+        /// user state (test gating).
+        static let sharedReadOnly = VerdictStore(url: sharedURL, recordsVerdicts: false)
 
         let url: URL
+        private let recordsVerdicts: Bool
         private let state = Mutex(VerdictStoreState())
 
-        init(url: URL) {
+        init(url: URL, recordsVerdicts: Bool = true) {
             self.url = url
+            self.recordsVerdicts = recordsVerdicts
         }
 
         /// True iff the file matches the choice's pinned SHA-256, consulting
@@ -106,7 +121,9 @@ enum ModelVerifier {
                 return false
             }
             state.withLock { state in _ = state.hot.insert(key) }
-            record(key)
+            if recordsVerdicts {
+                record(key)
+            }
             return true
         }
 
@@ -170,10 +187,7 @@ enum ModelVerifier {
         }
         let hex = digest.map { byte in String(format: "%02x", byte) }.joined()
         if hex != expectedSHA256(for: choice).lowercased() {
-            throw VerificationError(
-                message: "model file does not match Mimi's pinned checksum — "
-                    + "delete it and re-download, or replace it with an authentic copy"
-            )
+            throw VerificationError(message: checksumMismatchMessage)
         }
     }
 }
