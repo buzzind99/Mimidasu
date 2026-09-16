@@ -24,16 +24,20 @@ struct HTTPTranslationTransport: Sendable {
     /// - Parameters:
     ///   - timeout: per-provider request timeout (Google/DeepL 15 s,
     ///     OpenRouter 30 s).
+    ///   - configuration: injectable `URLSession` stack; production uses
+    ///     `.default`. Ignored when `perform` is supplied. Tests inject a
+    ///     `protocolClasses` stub to drive the real `URLSession` round-trip
+    ///     without a network.
     ///   - perform: injectable round-trip for tests; nil drives a real
     ///     `URLSession` configured with the timeout.
     init(
         timeout: TimeInterval,
+        configuration: URLSessionConfiguration = .default,
         perform: (@Sendable (URLRequest) async throws -> (Data, HTTPURLResponse))? = nil
     ) {
         if let perform {
             self.perform = perform
         } else {
-            let configuration = URLSessionConfiguration.default
             configuration.timeoutIntervalForRequest = timeout
             configuration.timeoutIntervalForResource = timeout
             configuration.requestCachePolicy = .reloadIgnoringLocalCacheData

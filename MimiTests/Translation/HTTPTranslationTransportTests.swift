@@ -25,16 +25,6 @@ struct HTTPTranslationTransportTests {
         HTTPURLResponse(url: URL(string: "https://provider.test/translate")!, statusCode: status, httpVersion: nil, headerFields: headers)!
     }
 
-    // MARK: - Default session construction
-
-    /// The production path (no injected `perform`) must configure a real
-    /// `URLSession` without crashing; the round-trip itself needs a network
-    /// and is left to integration.
-    @Test("the default transport builds a real URLSession-backed sender")
-    func defaultConstructionBuildsRealSession() {
-        _ = HTTPTranslationTransport(timeout: 1)
-    }
-
     // MARK: - HTTPS enforcement
 
     @Test("plain-HTTP requests are rejected as network errors")
@@ -159,5 +149,45 @@ struct HTTPTranslationTransportTests {
         await #expect(throws: CancellationError.self) {
             try await transport.send(request) { _, _ in nil }
         }
+    }
+}
+
+/// Drives the production `perform` closure (a real `URLSession`) with a
+/// stubbed `URLProtocol` injected through the configuration — no network.
+@Suite("HTTPTranslationTransport default session")
+struct HTTPTranslationTransportSessionTests {
+
+    /// Returns a 200 with a fixed body for every request, without a network.
+    private class StubURLProtocol: URLProtocol, @unchecked Sendable {
+        override class func canInit(with request: URLRequest) -> Bool {
+            true
+        }
+
+        override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+            request
+        }
+
+        override func startLoading() {
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil
+            )!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(#"{"ok":true}"#.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+        }
+
+        override func stopLoading() {}
+    }
+
+    @Test("the default transport performs a real URLSession round-trip")
+    func defaultTransportRoundTripReturns2xxBody() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubURLProtocol.self]
+        let transport = HTTPTranslationTransport(timeout: 1, configuration: configuration)
+        let request = try URLRequest(url: #require(URL(string: "https://provider.test/translate")))
+
+        let returned = try await transport.send(request) { _, _ in nil }
+
+        #expect(returned == Data(#"{"ok":true}"#.utf8))
     }
 }
