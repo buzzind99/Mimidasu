@@ -378,8 +378,11 @@ final class ReadingAnnotator: @unchecked Sendable {
     /// Whole-surface reading overrides, keyed by the written form: 一日 is a
     /// single dictionary token whose first reading is the date ついたち, but
     /// transcripts mean the duration word いちにち — the date reading stays
-    /// with the digit form (1日 → ついたち, `digitDateReadings`).
-    private static let surfaceReadings = ["一日": "いちにち"]
+    /// with the digit form (1日 → ついたち, `digitDateReadings`). The
+    /// standalone 笑 noun reads えみ, but transcripts mean the laughter わら
+    /// (net-slang 笑, and ASR fragments like 笑てない that tokenize 笑
+    /// standalone).
+    private static let surfaceReadings = ["一日": "いちにち", "笑": "わら"]
 
     // MARK: - Text helpers
 

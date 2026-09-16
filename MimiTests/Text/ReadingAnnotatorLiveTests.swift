@@ -45,6 +45,15 @@ struct ReadingAnnotatorLiveTests {
         #expect(describe(segments) == expected)
     }
 
+    @Test("the ASR's sokuon-dropped 笑てない still reads the standalone 笑 as the laughter わら")
+    func sokuonDroppedStandaloneLaugh() throws {
+        let segments = try segments("笑てない")
+
+        #expect(describe(segments) == [
+            ["笑", "wara", "わら"], ["て", "te", nil], ["ない", "nai", nil]
+        ])
+    }
+
     @Test("geminate-fuses the stem-final sokuon with the auxiliary (高かった → takakatta)")
     func stemFinalSokuon() throws {
         let segments = try segments("高かった")
@@ -66,6 +75,7 @@ struct ReadingAnnotatorLiveTests {
         ("八分", "happun", "はっぷん"),
         ("八歳", "hassai", "はっさい"),
         ("一日", "ichinichi", "いちにち"),
+        ("笑", "wara", "わら"),
         ("600回", "roppyakkai", "ろっぴゃっかい"),
         ("私", "watashi", "わたし"),
         ("お母さん", "okaasan", "おかあさん"),

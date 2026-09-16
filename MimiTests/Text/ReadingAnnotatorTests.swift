@@ -141,6 +141,24 @@ struct ReadingAnnotatorAnnotationTests {
         #expect(describe(segments) == [["抹茶", "matcha", "まっちゃ"]])
     }
 
+    @Test("overrides the standalone 笑 noun reading (えみ) with the laughter reading (わら)")
+    func standaloneWaraiOverridesEmi() throws {
+        let annotator = makeAnnotator([token("笑", start: 0, reading: "えみ")])
+
+        let segments = try #require(annotator.segments(for: "笑"))
+
+        #expect(describe(segments) == [["笑", "wara", "わら"]])
+    }
+
+    @Test("overrides the fallback's standalone 笑 noun reading (えみ) with the laughter reading (わら)")
+    func standaloneWaraiOverridesFallbackEmi() throws {
+        let annotator = makeAnnotator([token("笑", start: 0)], readingFallback: { _ in "えみ" })
+
+        let segments = try #require(annotator.segments(for: "笑"))
+
+        #expect(describe(segments) == [["笑", "wara", "わら"]])
+    }
+
     /// Single dictionary entries carrying an etymological particle は still
     /// read it as the particle "wa" (segmented で+は contexts hit the
     /// bare-particle override instead).
