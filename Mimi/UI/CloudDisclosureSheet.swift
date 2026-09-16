@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Confirmation shown whenever a cloud translation provider is about to
-/// become active (held selection in `AppModel.pendingCloudDisclosure`):
+/// become active (held selection in `AppModel.providerAwaitingDisclosure`):
 /// states plainly that transcript sentences will be sent to the chosen
 /// provider over the internet, so the app's local-processing claim stays
 /// accurate about its behavior. Confirming completes the selection;
@@ -10,7 +10,7 @@ import SwiftUI
 /// provider.
 struct CloudDisclosureSheet: View {
     let provider: TranslationProvider
-    var model: AppModel
+    let model: AppModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {

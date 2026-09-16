@@ -133,7 +133,7 @@ final class AppModel {
     /// sentences will be sent to this provider before it becomes the
     /// selection. Nil when no disclosure is pending. Internal: managed from
     /// `AppModelTranslation.swift`.
-    var pendingCloudDisclosure: TranslationProvider?
+    var providerAwaitingDisclosure: TranslationProvider?
 
     /// The refresh spawned by the most recent `selectModel` (tracked so
     /// `adoptDownloadedModel` can await it instead of stacking passes).

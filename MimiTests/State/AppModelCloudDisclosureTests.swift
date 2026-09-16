@@ -4,7 +4,7 @@ import Testing
 
 /// Tests the cloud disclosure gate on external provider activation: a
 /// key-verified probe that switches to a cloud provider holds the selection
-/// in `pendingCloudDisclosure` until the user confirms (which completes the
+/// in `providerAwaitingDisclosure` until the user confirms (which completes the
 /// selection) or declines (which keeps the current provider and re-arms the
 /// gate). The gate is per-switch, not a persisted one-time acknowledgment:
 /// switching to an external provider raises it every time.
@@ -77,7 +77,7 @@ struct AppModelCloudDisclosureTests {
         #expect(verified)
         #expect(settings.testResult(for: .openrouter) == .success)
         #expect(settings.selectedProvider == .apple, "the selection is held")
-        #expect(model.pendingCloudDisclosure == .openrouter)
+        #expect(model.providerAwaitingDisclosure == .openrouter)
         #expect(model.activeExternalProvider == nil, "activation waits for the selection")
 
         await stopTranslation(model)
@@ -98,7 +98,7 @@ struct AppModelCloudDisclosureTests {
         _ = await model.verifyAndSelectTranslationProvider(.openrouter)
         model.confirmCloudDisclosure()
 
-        #expect(model.pendingCloudDisclosure == nil)
+        #expect(model.providerAwaitingDisclosure == nil)
         #expect(settings.selectedProvider == .openrouter)
 
         await stopTranslation(model)
@@ -120,13 +120,13 @@ struct AppModelCloudDisclosureTests {
         _ = await model.verifyAndSelectTranslationProvider(.openrouter)
         model.declineCloudDisclosure()
 
-        #expect(model.pendingCloudDisclosure == nil)
+        #expect(model.providerAwaitingDisclosure == nil)
         #expect(settings.selectedProvider == .apple)
 
         let verified = await model.verifyAndSelectTranslationProvider(.openrouter)
 
         #expect(verified)
-        #expect(model.pendingCloudDisclosure == .openrouter, "the disclosure re-arms")
+        #expect(model.providerAwaitingDisclosure == .openrouter, "the disclosure re-arms")
         #expect(settings.selectedProvider == .apple)
 
         await stopTranslation(model)
@@ -152,7 +152,7 @@ struct AppModelCloudDisclosureTests {
 
         _ = await model.verifyAndSelectTranslationProvider(.google)
 
-        #expect(model.pendingCloudDisclosure == .google, "the switch re-raises the disclosure")
+        #expect(model.providerAwaitingDisclosure == .google, "the switch re-raises the disclosure")
         #expect(settings.selectedProvider == .openrouter, "the selection waits for confirmation")
 
         await stopTranslation(model)

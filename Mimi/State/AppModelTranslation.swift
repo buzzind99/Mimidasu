@@ -81,7 +81,7 @@ extension AppModel {
     /// `.onChange(of: selectedProvider)` re-attaches its engine — unless it's
     /// already selected, in which case the engine re-attaches directly (the
     /// key card's re-test path, not a switch, so no disclosure). Every fresh
-    /// activation of a cloud provider is held in `pendingCloudDisclosure`
+    /// activation of a cloud provider is held in `providerAwaitingDisclosure`
     /// until the user confirms the off-machine disclosure
     /// (`confirmCloudDisclosure`); there is no persisted acknowledgment, so
     /// the sheet reappears on each switch to an external provider. Returns
@@ -104,7 +104,7 @@ extension AppModel {
             // Already selected: a re-test, not a switch — re-attach directly.
             translationProviderDidChange()
         } else if provider.isExternal {
-            pendingCloudDisclosure = provider
+            providerAwaitingDisclosure = provider
         } else {
             translationSettings.select(provider)
         }
@@ -113,10 +113,10 @@ extension AppModel {
 
     /// Confirms the pending cloud disclosure: completes the held selection
     /// (SettingsView's `.onChange` then re-attaches the engine). The sheet
-    /// dismisses through the cleared `pendingCloudDisclosure`.
+    /// dismisses through the cleared `providerAwaitingDisclosure`.
     func confirmCloudDisclosure() {
-        guard let provider = pendingCloudDisclosure else { return }
-        pendingCloudDisclosure = nil
+        guard let provider = providerAwaitingDisclosure else { return }
+        providerAwaitingDisclosure = nil
         translationSettings.select(provider)
     }
 
@@ -124,7 +124,7 @@ extension AppModel {
     /// nothing is recorded — the next switch to that provider raises the
     /// disclosure again.
     func declineCloudDisclosure() {
-        pendingCloudDisclosure = nil
+        providerAwaitingDisclosure = nil
     }
 
     /// Builds the selected external provider's engine, or nil when Apple is

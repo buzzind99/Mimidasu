@@ -58,10 +58,10 @@ struct SettingsView: View {
             model.translationProviderDidChange()
         }
         // The cloud-provider disclosure, raised whenever an external
-        // activation is held in `pendingCloudDisclosure`; confirming
+        // activation is held in `providerAwaitingDisclosure`; confirming
         // completes the selection (the `.onChange` above attaches the
         // engine), dismissing either way clears the bound item.
-        .sheet(item: $model.pendingCloudDisclosure) { provider in
+        .sheet(item: $model.providerAwaitingDisclosure) { provider in
             CloudDisclosureSheet(provider: provider, model: model)
         }
         // The Settings scene keeps its window — and this view's @State —
