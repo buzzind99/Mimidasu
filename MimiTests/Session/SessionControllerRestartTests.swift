@@ -108,7 +108,7 @@ struct SessionControllerRestartTests {
             let attempt = lock.withLock { starts += 1; return starts }
             log.record("capture.start#\(attempt)")
             if attempt > 1 {
-                throw CaptureError.streamSetupFailed("boom")
+                throw CaptureError.setupFailed("boom")
             }
         }
 
@@ -198,7 +198,7 @@ struct SessionControllerRestartTests {
         }
 
         #expect(
-            thrown?.errorDescription == CaptureError.streamSetupFailed(captureFailureDetail).errorDescription
+            thrown?.errorDescription == CaptureError.setupFailed(captureFailureDetail).errorDescription
         )
         #expect(
             log.names == [

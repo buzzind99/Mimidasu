@@ -304,14 +304,14 @@ struct SessionControllerTests {
 
     @Test("begin rethrows a capture start failure and skips engine setup")
     func beginCaptureFailureThrows() async throws {
-        let sut = makeSUT(captureStartError: CaptureError.streamSetupFailed(captureFailureDetail))
+        let sut = makeSUT(captureStartError: CaptureError.setupFailed(captureFailureDetail))
 
         let thrown = await #expect(throws: CaptureError.self) {
             try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
         }
 
         #expect(
-            thrown?.errorDescription == CaptureError.streamSetupFailed(captureFailureDetail).errorDescription
+            thrown?.errorDescription == CaptureError.setupFailed(captureFailureDetail).errorDescription
         )
         #expect(sut.log.names == ["factory allowMock=true", "capture.start"])
         #expect(sut.controller.sessionMetadata == nil)
@@ -371,10 +371,10 @@ struct SessionControllerTests {
         sut.controller.onCaptureError = { message in messages.append(message) }
         _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
 
-        sut.capture.onIOError?(.streamSetupFailed(captureFailureDetail))
+        sut.capture.onIOError?(.setupFailed(captureFailureDetail))
         #expect(await pollUntil { !messages.isEmpty }, "the capture error surfaces")
 
-        #expect(messages.first == CaptureError.streamSetupFailed(captureFailureDetail).errorDescription)
+        #expect(messages.first == CaptureError.setupFailed(captureFailureDetail).errorDescription)
     }
 
     @Test("engine errors surface through onEngineError")

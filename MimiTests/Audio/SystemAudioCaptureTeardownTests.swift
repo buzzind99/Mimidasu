@@ -74,7 +74,7 @@ struct SystemAudioCaptureTeardownTests {
         // that is the real production path; the buffer is read-only here.
         let callbackBuffer = buffer
         let callbackThread = Thread {
-            capture.handleAudioBufferList(callbackBuffer.pointer, asbd: callbackBuffer.asbd)
+            capture.handleAudioBufferList(callbackBuffer.pointer, format: callbackBuffer.asbd)
         }
         callbackThread.start()
         #expect(chunkDelivered.wait(timeout: .now() + 2) == .success)
@@ -101,11 +101,11 @@ struct SystemAudioCaptureTeardownTests {
         let capture = makeCapture(running: true)
         let buffer = AudioBufferListSynthesis.make(frames: 2560)
 
-        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
+        capture.handleAudioBufferList(buffer.pointer, format: buffer.asbd)
         #expect(recorder.chunks.count == 1)
 
         capture.stop()
-        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
+        capture.handleAudioBufferList(buffer.pointer, format: buffer.asbd)
         #expect(!capture.isRunning)
         #expect(recorder.chunks.count == 1)
         #expect(recorder.errors.isEmpty)
@@ -133,7 +133,7 @@ struct SystemAudioCaptureTeardownTests {
         let callbackFinished = DispatchSemaphore(value: 0)
         let callbackBuffer = buffer
         let callbackThread = Thread {
-            capture.handleAudioBufferList(callbackBuffer.pointer, asbd: callbackBuffer.asbd)
+            capture.handleAudioBufferList(callbackBuffer.pointer, format: callbackBuffer.asbd)
             callbackFinished.signal()
         }
         callbackThread.start()
@@ -182,7 +182,7 @@ struct SystemAudioCaptureTeardownTests {
         // intentionally continue across the death (`startSample` does not
         // reset), while the accumulator itself is dropped.
         let first = AudioBufferListSynthesis.make(frames: 2560)
-        capture.handleAudioBufferList(first.pointer, asbd: first.asbd)
+        capture.handleAudioBufferList(first.pointer, format: first.asbd)
         #expect(recorder.chunks.count == 1)
         capture.handleDeviceDied(deviceError)
 
@@ -190,7 +190,7 @@ struct SystemAudioCaptureTeardownTests {
         // not stitch new samples onto pre-death leftovers.
         capture.setRunningForTesting(true)
         let second = AudioBufferListSynthesis.make(frames: 2560)
-        capture.handleAudioBufferList(second.pointer, asbd: second.asbd)
+        capture.handleAudioBufferList(second.pointer, format: second.asbd)
 
         #expect(recorder.chunks.count == 2)
         let chunk = try #require(recorder.chunks.last)

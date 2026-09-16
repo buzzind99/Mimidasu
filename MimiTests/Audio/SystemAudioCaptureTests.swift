@@ -54,7 +54,6 @@ struct SystemAudioCaptureTests {
     func chunkConstants() {
         #expect(SystemAudioCapture.outputSampleRate == 16000)
         #expect(SystemAudioCapture.chunkSamples == 2560)
-        #expect(SystemAudioCapture.captureSampleRate == 48000)
     }
 
     // MARK: - AudioChunk
@@ -102,10 +101,10 @@ struct SystemAudioCaptureTests {
         )
     }
 
-    @Test("streamSetupFailed includes the detail")
-    func streamSetupFailedDescription() {
+    @Test("setupFailed includes the detail")
+    func setupFailedDescription() {
         #expect(
-            CaptureError.streamSetupFailed("stream stopped").errorDescription
+            CaptureError.setupFailed("stream stopped").errorDescription
                 == "Failed to start system audio capture: stream stopped"
         )
     }
@@ -118,34 +117,28 @@ struct SystemAudioCaptureTests {
         )
     }
 
-    // MARK: - CaptureError.make status classification
+    // MARK: - CaptureError.classifyStartStatus classification
 
     @Test("'nope' from AudioDeviceStart classifies as audioCaptureDenied")
     func nopeStatusClassifiesAsDenied() {
-        let error = CaptureError.make(
-            status: kAudioHardwareIllegalOperationError, call: "AudioDeviceStart"
-        )
+        let error = CaptureError.classifyStartStatus(kAudioHardwareIllegalOperationError)
 
         #expect(error == .audioCaptureDenied(kAudioHardwareIllegalOperationError))
     }
 
     @Test("'!hog' from a tap setup call classifies as audioCaptureDenied")
     func permissionsStatusClassifiesAsDenied() {
-        let error = CaptureError.make(
-            status: kAudioDevicePermissionsError, call: "AudioDeviceStart"
-        )
+        let error = CaptureError.classifyStartStatus(kAudioDevicePermissionsError)
 
         #expect(error == .audioCaptureDenied(kAudioDevicePermissionsError))
     }
 
-    @Test("any other status stays a streamSetupFailed with the call and code")
-    func otherStatusStaysStreamSetupFailed() {
-        let error = CaptureError.make(
-            status: kAudioHardwareUnspecifiedError, call: "AudioDeviceStart"
-        )
+    @Test("any other status stays a setupFailed with the call and code")
+    func otherStatusStaysSetupFailed() {
+        let error = CaptureError.classifyStartStatus(kAudioHardwareUnspecifiedError)
 
         #expect(
-            error == .streamSetupFailed(
+            error == .setupFailed(
                 "AudioDeviceStart: \(kAudioHardwareUnspecifiedError)"
             )
         )
@@ -158,7 +151,7 @@ struct SystemAudioCaptureTests {
         let capture = makeCapture(running: false)
         let buffer = AudioBufferListSynthesis.make(frames: 2560)
 
-        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
+        capture.handleAudioBufferList(buffer.pointer, format: buffer.asbd)
 
         #expect(recorder.chunks.isEmpty)
         #expect(recorder.errors.isEmpty)
@@ -169,7 +162,7 @@ struct SystemAudioCaptureTests {
         let capture = makeCapture(running: true)
         let buffer = AudioBufferListSynthesis.make(frames: 2560, format: .nonPCM)
 
-        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
+        capture.handleAudioBufferList(buffer.pointer, format: buffer.asbd)
 
         #expect(recorder.chunks.isEmpty)
         #expect(recorder.errors.isEmpty)
@@ -180,7 +173,7 @@ struct SystemAudioCaptureTests {
         let capture = makeCapture(running: true)
         let buffer = AudioBufferListSynthesis.make(frames: 0)
 
-        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
+        capture.handleAudioBufferList(buffer.pointer, format: buffer.asbd)
 
         #expect(recorder.chunks.isEmpty)
         #expect(recorder.errors.isEmpty)
@@ -191,7 +184,7 @@ struct SystemAudioCaptureTests {
         let capture = makeCapture(running: true)
         let buffer = AudioBufferListSynthesis.make(frames: 2560, nullData: true)
 
-        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
+        capture.handleAudioBufferList(buffer.pointer, format: buffer.asbd)
 
         #expect(recorder.chunks.isEmpty)
         #expect(recorder.errors.isEmpty)
@@ -204,7 +197,7 @@ struct SystemAudioCaptureTests {
         let capture = makeCapture(running: true)
         let buffer = AudioBufferListSynthesis.make(frames: 2560)
 
-        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
+        capture.handleAudioBufferList(buffer.pointer, format: buffer.asbd)
 
         #expect(recorder.chunks.count == 1)
         let chunk = try #require(recorder.chunks.first)
@@ -217,7 +210,7 @@ struct SystemAudioCaptureTests {
         let capture = makeCapture(running: true)
         let buffer = AudioBufferListSynthesis.make(frames: 2560, channels: 2, interleaved: true)
 
-        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
+        capture.handleAudioBufferList(buffer.pointer, format: buffer.asbd)
 
         #expect(recorder.chunks.count == 1)
         let chunk = try #require(recorder.chunks.first)
@@ -230,7 +223,7 @@ struct SystemAudioCaptureTests {
         let capture = makeCapture(running: true)
         let buffer = AudioBufferListSynthesis.make(frames: 2560, channels: 2, interleaved: false)
 
-        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
+        capture.handleAudioBufferList(buffer.pointer, format: buffer.asbd)
 
         #expect(recorder.chunks.count == 1)
         let chunk = try #require(recorder.chunks.first)
@@ -245,7 +238,7 @@ struct SystemAudioCaptureTests {
         let capture = makeCapture(running: true)
         let buffer = AudioBufferListSynthesis.make(frames: 3 * 2560)
 
-        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
+        capture.handleAudioBufferList(buffer.pointer, format: buffer.asbd)
 
         #expect(recorder.chunks.count == 3)
         #expect(recorder.chunks.map(\.startSample) == [0, 2560, 5120])
@@ -259,13 +252,13 @@ struct SystemAudioCaptureTests {
         let first = AudioBufferListSynthesis.make(frames: 2561)
         let second = AudioBufferListSynthesis.make(frames: 2560)
 
-        capture.handleAudioBufferList(first.pointer, asbd: first.asbd)
+        capture.handleAudioBufferList(first.pointer, format: first.asbd)
         let firstChunk = try #require(recorder.chunks.first)
 
         #expect(recorder.chunks.count == 1)
         #expect(firstChunk.samples.count == 2560)
 
-        capture.handleAudioBufferList(second.pointer, asbd: second.asbd)
+        capture.handleAudioBufferList(second.pointer, format: second.asbd)
 
         #expect(recorder.chunks.count == 2)
         let secondChunk = try #require(recorder.chunks.last)
@@ -280,7 +273,7 @@ struct SystemAudioCaptureTests {
         let capture = makeCapture(running: true)
         let buffer = AudioBufferListSynthesis.make(frames: 8192, sampleRate: 44100)
 
-        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
+        capture.handleAudioBufferList(buffer.pointer, format: buffer.asbd)
 
         #expect(recorder.errors.isEmpty)
         #expect(recorder.chunks.count == 1)
@@ -306,7 +299,7 @@ struct SystemAudioCaptureTests {
         let buffer = AudioBufferListSynthesis.make(frames: 7680, sampleRate: 48000)
 
         for _ in 0 ..< 4 {
-            capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
+            capture.handleAudioBufferList(buffer.pointer, format: buffer.asbd)
         }
 
         // A converter that latches to end-of-stream after the first callback
@@ -326,14 +319,14 @@ struct SystemAudioCaptureTests {
         let capture = makeCapture(running: true)
 
         let first = AudioBufferListSynthesis.make(frames: 8192, sampleRate: 44100)
-        capture.handleAudioBufferList(first.pointer, asbd: first.asbd)
+        capture.handleAudioBufferList(first.pointer, format: first.asbd)
         // The fresh 48 kHz converter's priming backlog withholds a few
         // hundred early output frames, so feed several callbacks before
         // counting chunks — same accepted looseness as
         // `resamplesAcrossSuccessiveCallbacks`.
         for _ in 0 ..< 4 {
             let buffer = AudioBufferListSynthesis.make(frames: 7680, sampleRate: 48000)
-            capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
+            capture.handleAudioBufferList(buffer.pointer, format: buffer.asbd)
         }
 
         // The rate change must not reuse the 44.1 kHz converter: a stale
@@ -355,13 +348,13 @@ struct SystemAudioCaptureTests {
         // converter's priming backlog only lowers that — safely below the
         // chunk size, so the accumulator holds a resampled remainder.
         let seed = AudioBufferListSynthesis.make(frames: 6144, sampleRate: 48000)
-        capture.handleAudioBufferList(seed.pointer, asbd: seed.asbd)
+        capture.handleAudioBufferList(seed.pointer, format: seed.asbd)
         #expect(recorder.chunks.isEmpty)
 
         // Steady-state output is a full chunk's worth, topping up the
         // remainder to exactly one more chunk.
         let steady = AudioBufferListSynthesis.make(frames: 7680, sampleRate: 48000)
-        capture.handleAudioBufferList(steady.pointer, asbd: steady.asbd)
+        capture.handleAudioBufferList(steady.pointer, format: steady.asbd)
 
         #expect(recorder.errors.isEmpty)
         #expect(recorder.chunks.count == 1)
@@ -380,9 +373,9 @@ struct SystemAudioCaptureTests {
         // 320 frames seed the input/output PCM buffers; the 60× larger
         // callback must grow both instead of clipping or failing.
         let small = AudioBufferListSynthesis.make(frames: 320, sampleRate: 48000)
-        capture.handleAudioBufferList(small.pointer, asbd: small.asbd)
+        capture.handleAudioBufferList(small.pointer, format: small.asbd)
         let large = AudioBufferListSynthesis.make(frames: 3 * 7680, sampleRate: 48000)
-        capture.handleAudioBufferList(large.pointer, asbd: large.asbd)
+        capture.handleAudioBufferList(large.pointer, format: large.asbd)
 
         #expect(recorder.errors.isEmpty)
         #expect(recorder.chunks.map(\.startSample) == [0, 2560, 5120])
@@ -394,7 +387,7 @@ struct SystemAudioCaptureTests {
         let capture = makeCapture(running: true)
         let buffer = AudioBufferListSynthesis.make(frames: 2560, format: .int16)
 
-        capture.handleAudioBufferList(buffer.pointer, asbd: buffer.asbd)
+        capture.handleAudioBufferList(buffer.pointer, format: buffer.asbd)
 
         #expect(recorder.chunks.isEmpty)
         #expect(recorder.errors.count == 1)

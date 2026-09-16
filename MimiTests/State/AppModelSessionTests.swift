@@ -336,12 +336,12 @@ struct AppModelSessionTests {
         #expect(await pollUntil { sut.model.phase == .running }, "start brings the session up to running")
         #expect(await pollUntil { sut.model.entries.count == 1 }, "the scripted final lands in the transcript")
 
-        sut.capture.onIOError?(.streamSetupFailed("stream died"))
+        sut.capture.onIOError?(.setupFailed("stream died"))
         #expect(await pollUntil { sut.model.phase == .sourceLost }, "the capture death parks the model on source lost")
 
         let toast = sut.model.toasts.toasts.first { toast in toast.key == ToastKey.captureLost }
         #expect(toast?.style == .redPersistent)
-        #expect(toast?.body == CaptureError.streamSetupFailed("stream died").errorDescription)
+        #expect(toast?.body == CaptureError.setupFailed("stream died").errorDescription)
         #expect(toast?.action?.label == "Restart capture")
 
         sut.model.restartCapture()

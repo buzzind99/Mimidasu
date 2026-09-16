@@ -4,7 +4,7 @@ import Foundation
 
 /// Owns a synthesized `AudioBufferList` and its `AudioStreamBasicDescription`
 /// for exercising `SystemAudioCapture`'s data path without the audio HAL
-/// (`handleAudioBufferList(box.pointer, asbd: box.asbd)`). The memory lives
+/// (`handleAudioBufferList(box.pointer, format: box.asbd)`). The memory lives
 /// until the box deinits; the data path reads it synchronously.
 ///
 /// Payload values are deterministic so tests can compute expected downmix and

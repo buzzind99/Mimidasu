@@ -11,7 +11,7 @@ import Synchronization
 /// lint gate).
 final class AudioCaptureHAL: @unchecked Sendable {
 
-    private struct Objects {
+    private struct HALHandles {
         var tapID: AudioObjectID?
         var aggregateID: AudioDeviceID?
         var ioProcID: AudioDeviceIOProcID?
@@ -20,35 +20,35 @@ final class AudioCaptureHAL: @unchecked Sendable {
         var formatListener: PropertyListener?
     }
 
-    /// The live HAL objects; empty whenever no capture is up.
-    private let objects = Mutex(Objects())
+    /// The live HAL handles; empty whenever no capture is up.
+    private let live = Mutex(HALHandles())
 
     /// The tap's stream format. A `Mutex`, not a plain field: the IO block
     /// reads it on the capture's IO queue while the format-change listener
     /// rewrites it on the listener queue when the output device (and its
     /// rate) changes.
-    private let format = Mutex<AudioStreamBasicDescription?>(nil)
+    private let tapFormat = Mutex<AudioStreamBasicDescription?>(nil)
 
-    var currentFormat: AudioStreamBasicDescription? {
-        format.withLock { value in value }
+    var currentTapFormat: AudioStreamBasicDescription? {
+        tapFormat.withLock { value in value }
     }
 
     // MARK: - Ownership
 
-    func storeTap(_ id: AudioObjectID) {
-        objects.withLock { current in current.tapID = id }
+    func trackTap(_ id: AudioObjectID) {
+        live.withLock { current in current.tapID = id }
     }
 
-    func storeAggregate(_ id: AudioDeviceID) {
-        objects.withLock { current in current.aggregateID = id }
+    func trackAggregate(_ id: AudioDeviceID) {
+        live.withLock { current in current.aggregateID = id }
     }
 
-    func storeIOProc(_ id: AudioDeviceIOProcID) {
-        objects.withLock { current in current.ioProcID = id }
+    func trackIOProc(_ id: AudioDeviceIOProcID) {
+        live.withLock { current in current.ioProcID = id }
     }
 
-    func storeFormat(_ asbd: AudioStreamBasicDescription) {
-        format.withLock { value in value = asbd }
+    func storeTapFormat(_ asbd: AudioStreamBasicDescription) {
+        tapFormat.withLock { value in value = asbd }
     }
 
     // MARK: - Listeners
@@ -65,12 +65,12 @@ final class AudioCaptureHAL: @unchecked Sendable {
         let alive = makeListener(
             for: aggregate, selector: kAudioDevicePropertyDeviceIsAlive, queue: queue
         ) { onDeviceDied(Self.deviceDiedError("system audio capture device died")) }
-        objects.withLock { current in current.deviceDiedListener = alive }
+        live.withLock { current in current.deviceDiedListener = alive }
 
         let tapList = makeListener(
             for: aggregate, selector: kAudioAggregateDevicePropertyTapList, queue: queue
         ) { onDeviceDied(Self.deviceDiedError("system audio capture tap list changed")) }
-        objects.withLock { current in current.tapListListener = tapList }
+        live.withLock { current in current.tapListListener = tapList }
 
         registerFormatListener(tap: tap, queue: queue)
     }
@@ -111,12 +111,12 @@ final class AudioCaptureHAL: @unchecked Sendable {
             mElement: kAudioObjectPropertyElementMain
         )
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            guard let self, let asbd = try? ProcessTapSetup.format(of: tap) else { return }
-            format.withLock { value in value = asbd }
+            guard let self, let asbd = try? ProcessTapFactory.tapFormat(of: tap) else { return }
+            tapFormat.withLock { value in value = asbd }
         }
         let status = AudioObjectAddPropertyListenerBlock(tap, &address, queue, block)
         checkListenerStatus(status, selector: kAudioTapPropertyFormat)
-        objects.withLock { current in
+        live.withLock { current in
             current.formatListener = PropertyListener(address: address, block: block)
         }
     }
@@ -133,9 +133,9 @@ final class AudioCaptureHAL: @unchecked Sendable {
 
     /// Synchronous teardown for callers already off their critical thread
     /// (the listener queue) and for `start()`'s failure arms.
-    func teardown(queue: DispatchQueue) {
-        guard let claimed = claim() else { return }
-        format.withLock { value in value = nil }
+    func teardownBlocking(on queue: DispatchQueue) {
+        guard let claimed = claimLiveObjects() else { return }
+        tapFormat.withLock { value in value = nil }
         removeListeners(claimed, queue: queue)
         Self.destroy(
             tap: claimed.tapID, aggregate: claimed.aggregateID, ioProc: claimed.ioProcID
@@ -146,9 +146,9 @@ final class AudioCaptureHAL: @unchecked Sendable {
     /// the caller thread because `AudioDeviceStop` can block an IO period.
     /// Listener removal is immediate (cheap, and must match the registration
     /// queue); only the Sendable HAL object IDs cross into the detached task.
-    func teardownOffThread(queue: DispatchQueue) {
-        guard let claimed = claim() else { return }
-        format.withLock { value in value = nil }
+    func teardownDetached(on queue: DispatchQueue) {
+        guard let claimed = claimLiveObjects() else { return }
+        tapFormat.withLock { value in value = nil }
         removeListeners(claimed, queue: queue)
         let tap = claimed.tapID
         let aggregate = claimed.aggregateID
@@ -161,18 +161,18 @@ final class AudioCaptureHAL: @unchecked Sendable {
     /// Atomically takes ownership of the live objects, emptying the stored
     /// slot so no second teardown path can double-destroy them. Nil when
     /// there is nothing left to tear down.
-    private func claim() -> Objects? {
-        objects.withLock { current -> Objects? in
+    private func claimLiveObjects() -> HALHandles? {
+        live.withLock { current -> HALHandles? in
             guard current.tapID != nil || current.aggregateID != nil
                 || current.ioProcID != nil
             else { return nil }
             let claimed = current
-            current = Objects()
+            current = HALHandles()
             return claimed
         }
     }
 
-    private func removeListeners(_ claimed: Objects, queue: DispatchQueue) {
+    private func removeListeners(_ claimed: HALHandles, queue: DispatchQueue) {
         if let device = claimed.aggregateID {
             if let listener = claimed.deviceDiedListener {
                 Self.removeListener(listener, from: device, queue: queue)
@@ -206,7 +206,7 @@ final class AudioCaptureHAL: @unchecked Sendable {
             AudioHardwareDestroyAggregateDevice(device)
         }
         if let tap {
-            ProcessTapSetup.destroyTap(tap)
+            ProcessTapFactory.destroyTap(tap)
         }
     }
 }

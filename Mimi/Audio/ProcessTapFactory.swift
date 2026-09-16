@@ -5,12 +5,12 @@ import Foundation
 /// `SystemAudioCapture`: a global process tap — the whole system mix, minus
 /// excluded processes — attached as the sole input of a private aggregate
 /// device. Excluded from unit tests: every call talks to the audio HAL.
-enum ProcessTapSetup {
+enum ProcessTapFactory {
 
     /// A created tap: its HAL object ID plus the UID needed to attach it to
     /// an aggregate device.
     struct Tap {
-        let id: AudioObjectID
+        let objectID: AudioObjectID
         let uid: String
     }
 
@@ -33,11 +33,11 @@ enum ProcessTapSetup {
         var tapID = AudioObjectID(kAudioObjectUnknown)
         let status = AudioHardwareCreateProcessTap(description, &tapID)
         guard status == noErr, tapID != kAudioObjectUnknown else {
-            throw CaptureError.streamSetupFailed("AudioHardwareCreateProcessTap: \(status)")
+            throw CaptureError.setupFailed("AudioHardwareCreateProcessTap: \(status)")
         }
         do {
             let uid = try tapUID(of: tapID)
-            return Tap(id: tapID, uid: uid)
+            return Tap(objectID: tapID, uid: uid)
         } catch {
             destroyTap(tapID)
             throw error
@@ -50,7 +50,7 @@ enum ProcessTapSetup {
     }
 
     /// Mimi's own HAL process object, for exclusion from the global tap.
-    static func ownProcessObject() throws(CaptureError) -> AudioObjectID {
+    static func currentProcessObject() throws(CaptureError) -> AudioObjectID {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -67,7 +67,7 @@ enum ProcessTapSetup {
             )
         }
         guard status == noErr, processID != kAudioObjectUnknown else {
-            throw CaptureError.streamSetupFailed("own process lookup: \(status)")
+            throw CaptureError.setupFailed("own process lookup: \(status)")
         }
         return processID
     }
@@ -85,7 +85,7 @@ enum ProcessTapSetup {
             AudioObjectGetPropertyData(tapID, &address, 0, nil, &size, uidPtr)
         }
         guard status == noErr, let ref = uidRef else {
-            throw CaptureError.streamSetupFailed("tap UID: \(status)")
+            throw CaptureError.setupFailed("tap UID: \(status)")
         }
         // kAudioTapPropertyUID returns a CFString the caller owns (+1), so
         // `takeRetainedValue` is the balanced release.
@@ -93,7 +93,7 @@ enum ProcessTapSetup {
     }
 
     /// The tap's stream format — the system mix's native ASBD.
-    static func format(of tapID: AudioObjectID) throws(CaptureError) -> AudioStreamBasicDescription {
+    static func tapFormat(of tapID: AudioObjectID) throws(CaptureError) -> AudioStreamBasicDescription {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioTapPropertyFormat,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -105,7 +105,7 @@ enum ProcessTapSetup {
             tapID, &address, 0, nil, &size, &asbd
         )
         guard status == noErr else {
-            throw CaptureError.streamSetupFailed("tap format: \(status)")
+            throw CaptureError.setupFailed("tap format: \(status)")
         }
         return asbd
     }
@@ -113,20 +113,20 @@ enum ProcessTapSetup {
     /// Private aggregate device with the tap as its only input; IO never
     /// reaches other apps, and `tapautostart` runs IO whenever the tapped
     /// mix produces audio.
-    static func createAggregateDevice(tapUID: String) throws(CaptureError) -> AudioDeviceID {
+    static func createAggregateDevice(for tap: Tap) throws(CaptureError) -> AudioDeviceID {
         let composition: [String: Any] = [
             kAudioAggregateDeviceNameKey: "Mimi System Audio Capture",
             kAudioAggregateDeviceUIDKey: "mimi.capture.\(UUID().uuidString)",
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceTapAutoStartKey: true,
-            kAudioAggregateDeviceTapListKey: [[kAudioSubTapUIDKey: tapUID]]
+            kAudioAggregateDeviceTapListKey: [[kAudioSubTapUIDKey: tap.uid]]
         ]
         var deviceID = AudioDeviceID(0)
         let status = AudioHardwareCreateAggregateDevice(
             composition as CFDictionary, &deviceID
         )
         guard status == noErr, deviceID != 0 else {
-            throw CaptureError.streamSetupFailed("AudioHardwareCreateAggregateDevice: \(status)")
+            throw CaptureError.setupFailed("AudioHardwareCreateAggregateDevice: \(status)")
         }
         return deviceID
     }

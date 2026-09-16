@@ -12,13 +12,13 @@ extension SystemAudioCapture {
     /// `mData`, a zero-frame buffer) returns an empty array so the caller
     /// ignores that cycle instead of ending the session.
     func extractMono(
-        bufferList abl: UnsafePointer<AudioBufferList>, asbd: AudioStreamBasicDescription
+        from abl: UnsafePointer<AudioBufferList>, format: AudioStreamBasicDescription
     ) -> [Float]? {
         onExtractionEntered?()
-        guard MemoryLayout<Float>.size == 4, asbd.mBitsPerChannel == 32,
-              asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0
+        guard MemoryLayout<Float>.size == 4, format.mBitsPerChannel == 32,
+              format.mFormatFlags & kAudioFormatFlagIsFloat != 0
         else {
-            print("unsupported tap audio format: \(asbd)")
+            print("unsupported tap audio format: \(format)")
             return nil
         }
 
