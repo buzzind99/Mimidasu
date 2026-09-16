@@ -15,6 +15,35 @@ protocol SecureKeyStoring: Sendable {
     func deleteKey(for providerID: String)
 }
 
+/// Raw `SecItem*` calls behind `KeychainStore`. Seamable so the error-mapping
+/// paths (an update or insert status other than success) can be exercised
+/// without a locked keychain; production uses `SystemKeychainItemOperations`.
+protocol KeychainItemOperations: Sendable {
+    func update(_ query: CFDictionary, attributes: CFDictionary) -> OSStatus
+    func add(_ query: CFDictionary) -> OSStatus
+    func copyMatching(_ query: CFDictionary, result: UnsafeMutablePointer<AnyObject?>?) -> OSStatus
+    func delete(_ query: CFDictionary) -> OSStatus
+}
+
+/// Production `KeychainItemOperations` backed by the Security framework.
+struct SystemKeychainItemOperations: KeychainItemOperations {
+    func update(_ query: CFDictionary, attributes: CFDictionary) -> OSStatus {
+        SecItemUpdate(query, attributes)
+    }
+
+    func add(_ query: CFDictionary) -> OSStatus {
+        SecItemAdd(query, nil)
+    }
+
+    func copyMatching(_ query: CFDictionary, result: UnsafeMutablePointer<AnyObject?>?) -> OSStatus {
+        SecItemCopyMatching(query, result)
+    }
+
+    func delete(_ query: CFDictionary) -> OSStatus {
+        SecItemDelete(query)
+    }
+}
+
 /// Keychain-backed `SecureKeyStoring` for provider API keys.
 ///
 /// Generic-password items keyed by (service, account = provider id), marked
@@ -31,11 +60,19 @@ struct KeychainStore: SecureKeyStoring {
     static let defaultService = "mimi.app.translation"
 
     private let service: String
+    private let operations: any KeychainItemOperations
 
-    /// - Parameter service: override for tests, which must use unique
-    ///   per-test service names so parallel suites never share items.
-    init(service: String = KeychainStore.defaultService) {
+    /// - Parameters:
+    ///   - service: override for tests, which must use unique per-test service
+    ///     names so parallel suites never share items.
+    ///   - operations: override for tests that need a raw status other than
+    ///     success; defaults to the live Security framework.
+    init(
+        service: String = KeychainStore.defaultService,
+        operations: any KeychainItemOperations = SystemKeychainItemOperations()
+    ) {
         self.service = service
+        self.operations = operations
     }
 
     func saveKey(_ key: String, for providerID: String) throws(KeychainStoreError) {
@@ -45,7 +82,7 @@ struct KeychainStore: SecureKeyStoring {
         ]
 
         // Update first: an existing item must be overwritten in place.
-        let updateStatus = SecItemUpdate(baseQuery(for: providerID) as CFDictionary, attributes as CFDictionary)
+        let updateStatus = operations.update(baseQuery(for: providerID) as CFDictionary, attributes: attributes as CFDictionary)
         if updateStatus == errSecSuccess {
             return
         }
@@ -57,7 +94,7 @@ struct KeychainStore: SecureKeyStoring {
         for (name, value) in attributes {
             addQuery[name] = value
         }
-        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+        let addStatus = operations.add(addQuery as CFDictionary)
         guard addStatus == errSecSuccess else {
             throw KeychainStoreError(status: addStatus)
         }
@@ -69,13 +106,13 @@ struct KeychainStore: SecureKeyStoring {
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var item: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        let status = operations.copyMatching(query as CFDictionary, result: &item)
         guard status == errSecSuccess, let data = item as? Data else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
     func deleteKey(for providerID: String) {
-        SecItemDelete(baseQuery(for: providerID) as CFDictionary)
+        _ = operations.delete(baseQuery(for: providerID) as CFDictionary)
     }
 
     private func baseQuery(for providerID: String) -> [String: Any] {
