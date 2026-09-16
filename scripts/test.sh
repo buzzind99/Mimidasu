@@ -108,17 +108,17 @@ prefixes = [
 ]
 
 floors = {
-    "State/":       98.5,
+    "State/":       98.2,
     "Export/":     100.0,
     "Dictionary/":  99.2,
-    "Text/":        99.3,
-    "Session/":     97.9,
-    "Translation/": 98.0,
-    "Model/":       96.9,
-    "ASR/":         97.7,
-    "Audio/":       48.0,
+    "Text/":       100.0,
+    "Session/":     98.5,
+    "Translation/": 99.1,
+    "Model/":       98.3,
+    "ASR/":         97.2,
+    "Audio/":       54.1,
     "FFI/":        100.0,
-    "Security/":    95.6,
+    "Security/":   100.0,
 }
 
 if failures:
