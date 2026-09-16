@@ -75,18 +75,31 @@ extension AppModel {
         reengageTranslation()
     }
 
-    /// Verifies a provider's stored key with a live connection probe and
-    /// records the outcome for the inline status row (`ConnectionTestResult`).
-    /// On success the provider becomes the selection — SettingsView's
-    /// `.onChange(of: selectedProvider)` re-attaches its engine — unless it's
-    /// already selected, in which case the engine re-attaches directly (the
-    /// key card's re-test path, not a switch, so no disclosure). Every fresh
-    /// activation of a cloud provider is held in `providerAwaitingDisclosure`
-    /// until the user confirms the off-machine disclosure
-    /// (`confirmCloudDisclosure`); there is no persisted acknowledgment, so
-    /// the sheet reappears on each switch to an external provider. Returns
-    /// whether the key verified.
+    /// Verifies a provider's stored key (`verifyKey`), then applies the
+    /// selection on success — SettingsView's `.onChange(of: selectedProvider)`
+    /// re-attaches the engine — unless it's already selected, in which case the
+    /// engine re-attaches directly (the key card's re-test path, not a switch,
+    /// so no disclosure). Every fresh activation of a cloud provider is held in
+    /// `providerAwaitingDisclosure` until the user confirms the off-machine
+    /// disclosure (`confirmCloudDisclosure`); there is no persisted
+    /// acknowledgment, so the sheet reappears on each switch to an external
+    /// provider. Returns whether the key verified.
     func verifyAndSelectTranslationProvider(_ provider: TranslationProvider) async -> Bool {
+        guard await verifyKey(for: provider) else { return false }
+        if translationSettings.selectedProvider == provider {
+            // Already selected: a re-test, not a switch — re-attach directly.
+            translationProviderDidChange()
+        } else if provider.isExternal {
+            providerAwaitingDisclosure = provider
+        } else {
+            translationSettings.select(provider)
+        }
+        return true
+    }
+
+    /// Probes a provider's stored key and records the outcome for the inline
+    /// status row (`ConnectionTestResult`). Returns whether the key verified.
+    private func verifyKey(for provider: TranslationProvider) async -> Bool {
         guard let key = translationSettings.key(for: provider) else {
             translationSettings.setTestResult(.failure("No API key configured"), for: provider)
             return false
@@ -100,14 +113,6 @@ extension AppModel {
             return false
         }
         translationSettings.setTestResult(.success, for: provider)
-        if translationSettings.selectedProvider == provider {
-            // Already selected: a re-test, not a switch — re-attach directly.
-            translationProviderDidChange()
-        } else if provider.isExternal {
-            providerAwaitingDisclosure = provider
-        } else {
-            translationSettings.select(provider)
-        }
         return true
     }
 
