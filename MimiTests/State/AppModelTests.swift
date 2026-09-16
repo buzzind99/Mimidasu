@@ -5,8 +5,8 @@ import Testing
 /// Tests `AppModel` session-control guards, translation wiring, and the
 /// session-controller callbacks on the main actor. The `start()`/`begin()`
 /// flow itself is covered over injected factories in `AppModelSessionTests`;
-/// the default factories (real TCC preflight + SCK) stay production-only
-/// here. Export delegation lives in `AppModelExportTests`.
+/// the default factories (real TCC preflight + live capture) stay
+/// production-only here. Export delegation lives in `AppModelExportTests`.
 @MainActor
 @Suite("AppModel session control")
 struct AppModelTests {
@@ -259,6 +259,27 @@ struct AppModelTests {
         let toast = model.toasts.toasts.first { toast in toast.key == ToastKey.asrWarning }
         #expect(toast?.style == .yellowAuto)
         #expect(toast?.body == "engine broke")
+    }
+
+    @Test("no-audio detection posts the audio.none warning with a settings action")
+    func onNoAudioDetectedPostsWarning() async {
+        let model = await makeSUT()
+
+        model.sessionController.onNoAudioDetected?()
+
+        let toast = model.toasts.toasts.first { toast in toast.key == ToastKey.noAudio }
+        #expect(toast?.style == .redPersistent)
+        #expect(toast?.action?.label == "Open System Settings")
+    }
+
+    @Test("audio detection dismisses the audio.none warning")
+    func onAudioDetectedDismissesWarning() async {
+        let model = await makeSUT()
+        model.sessionController.onNoAudioDetected?()
+
+        model.sessionController.onAudioDetected?()
+
+        #expect(!model.toasts.toasts.contains { toast in toast.key == ToastKey.noAudio })
     }
 
     @Test("stop clears all toasts")

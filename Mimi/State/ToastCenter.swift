@@ -7,6 +7,7 @@ enum ToastKey {
     static let translationFallback = "translation.fallback"
     static let translationUnavailable = "translation.unavailable"
     static let captureLost = "capture.lost"
+    static let noAudio = "audio.none"
     static let sessionFailed = "session.failed"
     static let asrWarning = "asr.warning"
     static let exportFailed = "export.failed"

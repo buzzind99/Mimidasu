@@ -11,6 +11,11 @@ final class SessionController {
     /// the quit-time watchdog budget in `AppDelegate`.
     static let translationDrainTimeout: TimeInterval = 5
 
+    /// Grace window after capture start before the no-audio warning fires:
+    /// the tap needs a beat to spin up, and a couple of seconds of silence is
+    /// otherwise indistinguishable from denied system-audio permission.
+    static let noAudioWarningDelay: Duration = .seconds(8)
+
     private let live: LivePartialState
     private let latency: LatencyState
     private let audioLevel: AudioLevelState
@@ -20,7 +25,6 @@ final class SessionController {
     private let translationQueue: TranslationQueue
     private let makeEngine: @Sendable (URL?, Bool) -> ASREngine?
     private let makeCapture: () -> any AudioCapturing
-    private let ensurePermission: () async -> Bool
     private let warmUpEnabled: () -> Bool
 
     /// A session is about to run: clear transcript state.
@@ -33,6 +37,12 @@ final class SessionController {
     var onEngineError: ((String) -> Void)?
     /// The capture stream died mid-session.
     var onCaptureError: ((String) -> Void)?
+    /// A fresh capture delivered no chunk above the silence floor within
+    /// `noAudioWarningDelay` — the denied-permission / muted-source case.
+    var onNoAudioDetected: (() -> Void)?
+    /// The first chunk above the silence floor arrived; lets the UI retire a
+    /// posted no-audio warning once capture starts working.
+    var onAudioDetected: (() -> Void)?
 
     /// Metadata captured at the start of the most recent session (export).
     private(set) var sessionMetadata: SessionMetadata?
@@ -42,6 +52,13 @@ final class SessionController {
     private var sentenceBuffer: SentenceBuffer?
     private var pollTimer: Timer?
     private var tickTimer: Timer?
+    /// One-shot silence watchdog for the current capture; cancelled on stop
+    /// and re-armed by every `startCapture`.
+    private var noAudioWatchdog: Task<Void, Never>?
+    /// True once the poll tick has reported the first audible chunk for the
+    /// current capture, so `onAudioDetected` fires exactly once.
+    private var didNotifyAudioDetected = false
+    private let noAudioWarningDelay: Duration
     /// Path of the model the warm-up last loaded (nil = none yet). Keyed on
     /// path so the warm-up re-arms when the user switches models: the new
     /// GGUF gets prepared in the background instead of loading synchronously
@@ -52,9 +69,9 @@ final class SessionController {
         private var debugIngressChunks = 0
     #endif
 
-    /// Injection seams for tests: engine, capture, and permission default to
-    /// the real implementations; tests inject doubles so `begin()` and the
-    /// event paths run without TCC, ScreenCaptureKit, or the native runtime.
+    /// Injection seams for tests: engine and capture default to the real
+    /// implementations; tests inject doubles so `begin()` and the event
+    /// paths run without the audio HAL or the native runtime.
     /// `makeEngine` receives `allowMock` (true from `begin`, false from the
     /// warm-up, which must never fall back to the mock). `warmUpEnabled`
     /// defaults to off inside a unit-test host: that app runs the real launch
@@ -70,12 +87,10 @@ final class SessionController {
             ASREngineFactory.makeEngine(modelURL: modelURL, allowMock: allowMock)
         },
         makeCapture: @escaping () -> any AudioCapturing = { SystemAudioCapture() },
-        ensurePermission: @escaping () async -> Bool = {
-            await SystemAudioCapture.ensurePermission()
-        },
         warmUpEnabled: @escaping () -> Bool = {
             ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
-        }
+        },
+        noAudioWarningDelay: Duration = SessionController.noAudioWarningDelay
     ) {
         self.live = live
         self.latency = latency
@@ -83,8 +98,8 @@ final class SessionController {
         self.translationQueue = translationQueue
         self.makeEngine = makeEngine
         self.makeCapture = makeCapture
-        self.ensurePermission = ensurePermission
         self.warmUpEnabled = warmUpEnabled
+        self.noAudioWarningDelay = noAudioWarningDelay
     }
 
     // MARK: - Warm-up
@@ -116,11 +131,12 @@ final class SessionController {
     /// resolved state (single resolve, no second verify on the start path);
     /// `modelID` is the active choice's id for session metadata.
     func begin(modelURL: URL?, modelID: String) async throws -> Bool {
-        // Screen Recording permission (TCC) covers SCK system-audio capture.
-        guard await ensurePermission() else {
-            throw CaptureError.permissionDenied
-        }
-
+        // No TCC preflight: the tap needs no Microphone permission — the
+        // system prompts for audio-capture access at the aggregate's first
+        // IO (driven by NSAudioCaptureUsageDescription). That first IO is the
+        // capture's `AudioDeviceStart`, which TCC blocks until the user
+        // answers (verified on device); an unpermitted start therefore throws
+        // from `startCapture` below instead of running silent.
         guard let engine = makeEngine(modelURL, true) else {
             return false
         }
@@ -164,7 +180,7 @@ final class SessionController {
     /// Builds, wires, and starts a new capture stream for `engine`. Shared
     /// by `begin()` and `restartCapture()`. The engine is captured strongly:
     /// a session owns exactly one engine, and chunks must not read
-    /// main-actor state from the SCK output queue. `capture.stop()` fences
+    /// main-actor state from the capture IO queue. `capture.stop()` fences
     /// chunks after teardown.
     private func startCapture(for engine: ASREngine) async throws {
         let capture = makeCapture()
@@ -177,10 +193,45 @@ final class SessionController {
         }
         self.capture = capture
 
+        // Reset the presence tracker for this stream before `start()`: IO
+        // callbacks can land the instant the device starts, and a chunk that
+        // beat the reset would be lost. A watchdog left over from a previous
+        // capture (restart path) is cancelled here instead of relying on the
+        // owner to re-arm it; the owner arms a fresh one once the phase is
+        // actually `.running`.
+        cancelNoAudioWatchdog()
+        stagedRMS.clear()
+        didNotifyAudioDetected = false
+
         #if DEBUG
-            print("[session] start: whole-system SCK audio capture")
+            print("[session] start: whole-system process-tap audio capture")
         #endif
         try await capture.start()
+    }
+
+    /// Starts the one-shot silence watchdog: after the grace window it fires
+    /// `onNoAudioDetected` unless a chunk above the silence floor has already
+    /// been staged. The owner calls this when the phase flips to `.running`,
+    /// not at capture start — a first-launch TCC prompt keeps the session in
+    /// `.starting`, and counting that wait as silence would warn before the
+    /// user can even grant access. TCC blocks the aggregate's first IO
+    /// (`AudioDeviceStart`) while the prompt is up (verified on device), so
+    /// the IO proc delivers no callbacks and stages no silence before the
+    /// `.running` arm point; silence observed after it is genuine. A prior
+    /// watchdog is cancelled first, so a restart re-arms cleanly.
+    func startAudioWatchdog() {
+        noAudioWatchdog?.cancel()
+        noAudioWatchdog = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(for: noAudioWarningDelay)
+            guard !Task.isCancelled, !stagedRMS.hasHeardAudio() else { return }
+            onNoAudioDetected?()
+        }
+    }
+
+    private func cancelNoAudioWatchdog() {
+        noAudioWatchdog?.cancel()
+        noAudioWatchdog = nil
     }
 
     /// Rebuilds the capture stream mid-session after the source died — the
@@ -210,6 +261,7 @@ final class SessionController {
         // drain wait plus a synchronous flush decode, a multi-second C call
         // whenever speech is in flight at Stop.
         capture?.stop()
+        cancelNoAudioWatchdog()
         if let engine {
             let drained = await Task.detached(priority: .userInitiated) { engine.finish() }.value
             for event in drained {
@@ -235,7 +287,7 @@ final class SessionController {
     private func handleCaptureChunk(_ chunk: AudioChunk, engine: ASREngine) {
         engine.push(chunk.samples)
         // Stage the per-chunk level for the sidebar AUDIO meter: this runs on
-        // the SCK output queue, so `AudioLevelState` (main-actor observable)
+        // the capture IO queue, so `AudioLevelState` (main-actor observable)
         // is fed by the poll tick instead of from here — same RMS metric the
         // debug ingress log samples every ~8 s.
         stagedRMS.stage(AudioLevels.rms(of: chunk.samples))
@@ -304,6 +356,10 @@ final class SessionController {
         if let rms = stagedRMS.take() {
             audioLevel.update(rms: rms)
         }
+        if !didNotifyAudioDetected, stagedRMS.hasHeardAudio() {
+            didNotifyAudioDetected = true
+            onAudioDetected?()
+        }
     }
 
     // MARK: - Event handling (main actor)
@@ -323,29 +379,50 @@ final class SessionController {
 }
 
 /// Single-slot handoff for the sidebar AUDIO meter: `handleCaptureChunk`
-/// stages the chunk's RMS from the SCK output queue; the main-actor poll
+/// stages the chunk's RMS from the capture IO queue; the main-actor poll
 /// tick drains the latest value into `AudioLevelState`. `Mutex`-guarded
 /// (same pattern as `SystemAudioCapture`/`DictionaryEngine`) — the slot only
 /// ever holds a `Float`, so the critical sections stay sub-microsecond.
 /// `take()` leaves the slot empty: with no new chunks (source lost), the
 /// poll tick simply doesn't re-publish and the meter freezes at its last
 /// level until `reset()`/`clear()`.
+///
+/// A sticky `heardAudio` flag rides alongside the level: it latches once any
+/// chunk rises above `AudioLevels.silenceFloorRMS` and only `clear()` resets
+/// it. The no-audio watchdog reads it to tell a denied/muted capture (silent
+/// or no chunks) from a live one, and the poll tick reads it to retire a
+/// posted warning once audio finally arrives.
 private final class StagedRMS: Sendable {
-    private let slot = Mutex<Float?>(nil)
+    private struct Staged {
+        var latest: Float?
+        var heardAudio = false
+    }
+
+    private let slot = Mutex(Staged())
 
     func stage(_ rms: Float) {
-        slot.withLock { value in value = rms }
+        slot.withLock { value in
+            value.latest = rms
+            if rms > AudioLevels.silenceFloorRMS {
+                value.heardAudio = true
+            }
+        }
     }
 
     func take() -> Float? {
         slot.withLock { value -> Float? in
-            let latest = value
-            value = nil
+            let latest = value.latest
+            value.latest = nil
             return latest
         }
     }
 
+    /// Sticky: true once any staged chunk has carried signal above the floor.
+    func hasHeardAudio() -> Bool {
+        slot.withLock { value in value.heardAudio }
+    }
+
     func clear() {
-        slot.withLock { value in value = nil }
+        slot.withLock { value in value = Staged() }
     }
 }

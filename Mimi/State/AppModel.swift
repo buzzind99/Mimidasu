@@ -128,6 +128,13 @@ final class AppModel {
     /// `AppModelTranslation.swift`.
     var activeExternalProvider: TranslationProvider?
 
+    /// A key-verified external provider whose selection is held behind the
+    /// one-time cloud disclosure: the Settings sheet confirms that transcript
+    /// sentences will be sent to this provider before it becomes the
+    /// selection. Nil when no disclosure is pending. Internal: managed from
+    /// `AppModelTranslation.swift`.
+    var pendingCloudDisclosure: TranslationProvider?
+
     /// The refresh spawned by the most recent `selectModel` (tracked so
     /// `adoptDownloadedModel` can await it instead of stacking passes).
     private var modelSelectionRefresh: Task<Void, Never>?
@@ -275,8 +282,43 @@ final class AppModel {
             guard let self, phase == .running || phase == .starting else { return }
             phase = .sourceLost
             captureLostAt = .now
+            toasts.dismiss(key: ToastKey.noAudio)
             postCaptureLost(body: message)
         }
+        sessionController.onNoAudioDetected = { [weak self] in
+            self?.postNoAudioWarning()
+        }
+        sessionController.onAudioDetected = { [weak self] in
+            // Capture is finally carrying signal: retire the warning.
+            self?.toasts.dismiss(key: ToastKey.noAudio)
+        }
+    }
+
+    /// The `audio.none` red card with the System Settings fix action. Posted
+    /// when a session's capture stays silent through its grace window —
+    /// denied system-audio permission or a muted source. The first audible
+    /// chunk dismisses it (`sessionController.onAudioDetected`).
+    private func postNoAudioWarning() {
+        toasts.post(
+            key: ToastKey.noAudio, style: .redPersistent,
+            title: "No audio detected",
+            body: "No audio detected since the session started. "
+                + "Make sure Mimi has audio recording permission in System Settings"
+                + ", and that audio is playing.",
+            action: ToastCenter.Action(
+                label: "Open System Settings",
+                handler: { [weak self] in self?.openAudioPrivacySettings() }
+            )
+        )
+    }
+
+    /// Opens the Privacy & Security pane that owns Mimi's system-audio
+    /// recording permission (the "Screen & System Audio Recording" list).
+    private func openAudioPrivacySettings() {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+        ) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     /// The `capture.lost` red card with the Restart-capture fix action;
@@ -394,6 +436,7 @@ final class AppModel {
                 // died mid-start would otherwise leave the endedAt anchor nil
                 // and the frozen path reading now − startedAt per render.
                 self.sessionEndedAt = .now
+                self.toasts.dismiss(key: ToastKey.noAudio)
                 self.toasts.post(
                     key: ToastKey.sessionFailed, style: .redPersistent,
                     title: "Session failed", body: error.localizedDescription
@@ -435,6 +478,13 @@ final class AppModel {
         activateTranslation()
 
         sessionController.startTimers()
+        // The silence watchdog starts counting now, not at capture start: a
+        // first-launch TCC prompt keeps the session `.starting` until access
+        // is granted. TCC blocks the aggregate's first IO until the prompt
+        // resolves (verified on device), so no callbacks — and no staged
+        // silence — occur during the wait; the `.running` flip is the first
+        // moment a genuinely silent capture can be observed.
+        sessionController.startAudioWatchdog()
     }
 
     func stop() {
@@ -518,6 +568,7 @@ final class AppModel {
                 phase = .running
                 captureLostAt = nil
                 toasts.dismiss(key: ToastKey.captureLost)
+                sessionController.startAudioWatchdog()
             } catch {
                 guard phase == .starting else { return }
                 phase = .sourceLost

@@ -135,7 +135,6 @@ struct SessionControllerRestartTests {
                 return engine
             },
             makeCapture: { capture },
-            ensurePermission: { true },
             warmUpEnabled: { false }
         )
         return SUT(controller: controller, engine: engine, capture: capture, log: log)
@@ -190,7 +189,6 @@ struct SessionControllerRestartTests {
                 return ScriptedASREngine(log: log)
             },
             makeCapture: { capture },
-            ensurePermission: { true },
             warmUpEnabled: { false }
         )
         _ = try await controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)

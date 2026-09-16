@@ -62,7 +62,7 @@ struct AppModelExportTests {
         func stop() {}
     }
 
-    /// A model whose session has begun (injected engine/capture/permission
+    /// A model whose session has begun (injected engine/capture
     /// doubles), so `sessionController.sessionMetadata` is populated for the
     /// JSON-export passthrough test.
     private func makeBeganModel() async throws -> AppModel {
@@ -74,7 +74,6 @@ struct AppModelExportTests {
                     live: live, latency: latency, translationQueue: translationQueue,
                     makeEngine: { _, _ in engine },
                     makeCapture: { capture },
-                    ensurePermission: { true },
                     warmUpEnabled: { false }
                 )
             },

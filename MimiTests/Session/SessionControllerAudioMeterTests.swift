@@ -3,7 +3,7 @@ import Foundation
 import Testing
 
 /// Tests the sidebar AUDIO-meter feed over the injected capture seam: chunks
-/// arrive on the (simulated) SCK output queue, so `handleCaptureChunk` must
+/// arrive on the (simulated) capture IO queue, so `handleCaptureChunk` must
 /// stage the RMS off-main and the 60 ms poll tick must drain it onto the
 /// main-actor `AudioLevelState` — never touch it directly.
 ///
@@ -28,7 +28,6 @@ struct SessionControllerAudioMeterTests {
             translationQueue: TranslationQueue(),
             makeEngine: { _, _ in engine },
             makeCapture: { capture },
-            ensurePermission: { true },
             warmUpEnabled: { false }
         )
         return SUT(controller: controller, audioLevel: audioLevel, capture: capture)

@@ -2,15 +2,15 @@ import Foundation
 @testable import Mimi
 import Testing
 
-/// Tests `SessionController` over the injected `makeEngine` / `makeCapture` /
-/// `ensurePermission` seams: `begin()` wiring and its failure arms, the
+/// Tests `SessionController` over the injected `makeEngine` / `makeCapture`
+/// seams: `begin()` wiring and its failure arms, the
 /// capture-chunk → engine-push path, the poll timer's event loop (latency
 /// readback, partial → live state, final → sentence pipeline), the
 /// engine/capture error callbacks, warm-up scheduling, and stop() teardown
 /// ordering.
 ///
-/// Excluded (TCC / ScreenCaptureKit): the real `SystemAudioCapture.start()`
-/// SCK stream setup, the real `ensurePermission()` TCC preflight, and the real
+/// Excluded (audio HAL): the real `SystemAudioCapture.start()` tap
+/// setup and the real
 /// engine runtime — all are bypassed by injection here, not exercised.
 @MainActor
 @Suite("SessionController")
@@ -71,7 +71,6 @@ struct SessionControllerTests {
     }
 
     private func makeSUT(
-        permissionGranted: Bool = true,
         resolveEngine: Bool = true,
         poll: [ASREvent] = [],
         finish: [ASREvent] = [],
@@ -89,7 +88,6 @@ struct SessionControllerTests {
                 return resolveEngine ? engine : nil
             },
             makeCapture: { capture },
-            ensurePermission: { permissionGranted },
             warmUpEnabled: { true }
         )
         return SUT(
@@ -282,7 +280,6 @@ struct SessionControllerTests {
             live: live, latency: latency, translationQueue: TranslationQueue(),
             makeEngine: { _, _ in engine },
             makeCapture: { capture },
-            ensurePermission: { true },
             warmUpEnabled: { false }
         )
 
@@ -302,19 +299,6 @@ struct SessionControllerTests {
 
         #expect(!started)
         #expect(sut.log.names == ["factory allowMock=true"])
-        #expect(sut.controller.sessionMetadata == nil)
-    }
-
-    @Test("begin throws permissionDenied without Screen Recording access")
-    func beginWithoutPermissionThrows() async throws {
-        let sut = makeSUT(permissionGranted: false)
-
-        let thrown = await #expect(throws: CaptureError.self) {
-            try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
-        }
-
-        #expect(thrown?.errorDescription == CaptureError.permissionDenied.errorDescription)
-        #expect(sut.log.names.isEmpty)
         #expect(sut.controller.sessionMetadata == nil)
     }
 

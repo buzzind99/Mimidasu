@@ -15,7 +15,7 @@ import Testing
 /// a dictionary (covered via injected closures in `AppModelDictionaryTests`);
 /// `start()`'s catch → `.failed` is exercised through the capture-start
 /// throw, which lands in the same catch. The real factories (TCC preflight,
-/// SCK stream) stay production-only.
+/// live capture stream) stay production-only.
 @MainActor
 @Suite(
     "AppModel session flow",
@@ -182,7 +182,6 @@ struct AppModelSessionTests {
                         return resolveEngine ? engine : nil
                     },
                     makeCapture: { capture },
-                    ensurePermission: { true },
                     // Keep the detached-warm-up interleave (fake engine, safe)
                     // that the ordered-subsequence log assertions account for.
                     warmUpEnabled: { true }
