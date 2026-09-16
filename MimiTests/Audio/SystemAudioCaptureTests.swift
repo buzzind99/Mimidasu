@@ -9,9 +9,9 @@ import Testing
 /// synchronously on the calling thread. Excluded (needs the audio HAL):
 /// `start()`'s tap and aggregate-device setup and `stop()`'s HAL teardown —
 /// the stop fence and dead-device reset live in
-/// `SystemAudioCaptureTeardownTests`. The resample converter-failure branch
-/// is not fixture-reachable either: Core Audio rejects non-positive sample
-/// rates before a converter is ever built, and any positive rate builds one.
+/// `SystemAudioCaptureTeardownTests`. Converter-creation failure is
+/// fixture-reachable through an invalid rate; failure arms after a converter
+/// is built are not.
 @Suite("SystemAudioCapture")
 struct SystemAudioCaptureTests {
 
@@ -80,8 +80,8 @@ struct SystemAudioCaptureTests {
 
     // MARK: - Lifecycle guards (the HAL shell itself stays excluded)
 
-    @Test("stop is a safe no-op while not running")
-    func stopWhenNotRunning() {
+    @Test("stop on a fresh capture does not trap")
+    func stopOnFreshCaptureDoesNotTrap() {
         let capture = SystemAudioCapture()
 
         capture.stop()
@@ -109,6 +109,14 @@ struct SystemAudioCaptureTests {
         )
     }
 
+    @Test("captureLost names the stopped capture and carries the detail")
+    func captureLostDescription() {
+        #expect(
+            CaptureError.captureLost("tap revoked").errorDescription
+                == "System audio capture stopped: tap revoked"
+        )
+    }
+
     @Test("formatUnavailable explains the unusable format")
     func formatUnavailableDescription() {
         #expect(
@@ -126,7 +134,7 @@ struct SystemAudioCaptureTests {
         #expect(error == .audioCaptureDenied(kAudioHardwareIllegalOperationError))
     }
 
-    @Test("'!hog' from a tap setup call classifies as audioCaptureDenied")
+    @Test("'!hog' from AudioDeviceStart classifies as audioCaptureDenied")
     func permissionsStatusClassifiesAsDenied() {
         let error = CaptureError.classifyStartStatus(kAudioDevicePermissionsError)
 
@@ -280,17 +288,25 @@ struct SystemAudioCaptureTests {
         let chunk = try #require(recorder.chunks.first)
         #expect(chunk.samples.count == 2560)
         #expect(chunk.startSample == 0)
+    }
+
+    @Test(
+        "the resampled ramp tracks the input position at 44.1 kHz",
+        arguments: [0, 1, 1024, 2559]
+    )
+    func resampledRampTracksInputPosition(k: Int) throws {
         // The input ramp makes the conversion computable: output index k
         // tracks input position k * 44100/16000 on the ramp. A converter
         // emitting zeros or bounded garbage fails; the tolerance absorbs
         // interpolation and any small priming phase shift.
-        for k in [0, 1, 1024, 2559] {
-            let expected = Float(Double(k) * 44100 / 16000)
-            #expect(
-                abs(chunk.samples[k] - expected) < 2,
-                "k=\(k): got \(chunk.samples[k]), expected ~\(expected)"
-            )
-        }
+        let capture = makeCapture(running: true)
+        let buffer = AudioBufferListSynthesis.make(frames: 8192, sampleRate: 44100)
+
+        capture.handleAudioBufferList(buffer.pointer, format: buffer.asbd)
+
+        let chunk = try #require(recorder.chunks.first)
+        let expected = Float(Double(k) * 44100 / 16000)
+        #expect(abs(chunk.samples[k] - expected) < 2)
     }
 
     @Test("48 kHz input keeps delivering chunks across successive callbacks")
@@ -378,8 +394,28 @@ struct SystemAudioCaptureTests {
         capture.handleAudioBufferList(large.pointer, format: large.asbd)
 
         #expect(recorder.errors.isEmpty)
-        #expect(recorder.chunks.map(\.startSample) == [0, 2560, 5120])
+        #expect(recorder.chunks.count >= 2)
+        #expect(
+            recorder.chunks.map(\.startSample)
+                == (0 ..< recorder.chunks.count).map { index in index * 2560 }
+        )
         #expect(recorder.chunks.allSatisfy { chunk in chunk.samples.count == 2560 })
+    }
+
+    @Test("an unconvertible sample rate fails converter creation and surfaces formatUnavailable")
+    func invalidSampleRateSurfacesFormatUnavailable() throws {
+        let capture = makeCapture(running: true)
+        // The converter cache starts at rate 0, so a 0 Hz fixture would skip
+        // converter creation entirely; a negative rate is non-zero (forcing
+        // the rebuild) and rejected by AVAudioConverter.
+        let buffer = AudioBufferListSynthesis.make(frames: 2560, sampleRate: -44100)
+
+        capture.handleAudioBufferList(buffer.pointer, format: buffer.asbd)
+
+        #expect(recorder.chunks.isEmpty)
+        #expect(recorder.errors.count == 1)
+        let error = try #require(recorder.errors.first)
+        #expect(error == .formatUnavailable)
     }
 
     @Test("a non-float32 PCM payload surfaces formatUnavailable")

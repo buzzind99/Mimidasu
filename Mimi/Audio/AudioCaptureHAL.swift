@@ -137,7 +137,7 @@ final class AudioCaptureHAL: @unchecked Sendable {
         }
     }
 
-    private static func deviceDiedError(_ description: String) -> NSError {
+    static func deviceDiedError(_ description: String) -> NSError {
         NSError(
             domain: NSOSStatusErrorDomain,
             code: Int(kAudioHardwareBadDeviceError),

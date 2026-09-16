@@ -7,7 +7,8 @@ import Testing
 /// (`handleAudioBufferList`/`handleDeviceDied`), split out of
 /// `SystemAudioCaptureTests` to keep both suites small. Callbacks either run
 /// synchronously on the calling thread or are parked on test-owned gates, so
-/// the interleavings are structural, not timed. No audio HAL involved.
+/// the interleavings are structural, not raced: the only timed assert is a
+/// lock-blocked liveness bound. No audio HAL involved.
 @Suite("SystemAudioCapture teardown")
 struct SystemAudioCaptureTeardownTests {
 
