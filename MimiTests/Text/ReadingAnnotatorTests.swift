@@ -35,31 +35,46 @@ struct ReadingAnnotatorGuardTests {
         #expect(describe(segments) == [["こんにちは", "こんにちは", nil]])
     }
 
-    @Test("caches segments: a repeated call returns the identical object")
+    @Test("caches segments: a repeated call replays the same values")
     func cacheIdentity() throws {
-        let annotator = makeAnnotator(tokens(["桜"], readings: ["さくら"]))
+        let calls = Mutex(0)
+        let canned = tokens(["桜"], readings: ["さくら"])
+        let annotator = ReadingAnnotator(tokenize: { _ in
+            calls.withLock { count in count += 1 }
+            return canned
+        })
 
-        let first = try #require(annotator.segments(for: "桜")?.first)
-        let second = annotator.segments(for: "桜")?.first
+        let first = try #require(annotator.segments(for: "桜"))
+        let second = try #require(annotator.segments(for: "桜"))
 
-        #expect(first === second)
+        #expect(describe(first) == [["桜", "sakura", "さくら"]])
+        #expect(describe(second) == describe(first))
+        #expect(calls.withLock { count in count } == 1)
     }
 
-    @Test("the static entry point routes through the shared annotator")
-    func staticEntryPoint() {
-        let segments = ReadingAnnotator.segments(for: "こんにちは")
+    @Test("the static entry point returns the shared annotator's annotations")
+    func staticEntryPointReturnsSharedAnnotations() throws {
+        let segments = try #require(ReadingAnnotator.segments(for: "こんにちは"))
 
-        #expect(segments != nil)
+        let expected: [[String?]] = LiveDictionaryRuntime.isAvailable
+            ? [["こんにちは", "konnichiwa", nil]]
+            : []
+
+        #expect(describe(segments) == expected)
     }
 
-    @Test("the static caching entry point routes through the shared annotator")
-    func staticCachingEntryPoint() {
-        let segments = ReadingAnnotator.segments(for: "こんにちは", caching: false)
+    @Test("the static uncached entry point skips the store and returns the same annotations")
+    func staticCachingEntryPointReturnsSharedAnnotations() throws {
+        let segments = try #require(ReadingAnnotator.segments(for: "こんにちは", caching: false))
 
-        #expect(segments != nil)
+        let expected: [[String?]] = LiveDictionaryRuntime.isAvailable
+            ? [["こんにちは", "konnichiwa", nil]]
+            : []
+
+        #expect(describe(segments) == expected)
     }
 
-    @Test("cached requests tokenize once and replay the identical segments")
+    @Test("cached requests tokenize once and replay the same segment values")
     func cachedPathTokenizesOnce() throws {
         let calls = Mutex(0)
         let canned = tokens(["桜"], readings: ["さくら"])
@@ -72,7 +87,7 @@ struct ReadingAnnotatorGuardTests {
         let second = try #require(annotator.segments(for: "桜"))
 
         #expect(calls.withLock { count in count } == 1)
-        #expect(first.first === second.first)
+        #expect(describe(first) == describe(second))
     }
 
     @Test("uncached requests re-run the pipeline and skip the store")
@@ -269,6 +284,27 @@ struct ReadingAnnotatorAnnotationTests {
         let segments = try #require(annotator.segments(for: "言っは"))
 
         #expect(describe(segments) == [["言っ", "itsu", "いっ"], ["は", "wa", nil]])
+    }
+
+    @Test("a sokuon before a numeral token stays stranded (no merge into the number)")
+    func sokuonBeforeNumeralDoesNotMerge() throws {
+        let annotator = makeAnnotator(tokens(["言っ", "六"], readings: ["いっ", "ろく"]))
+
+        let segments = try #require(annotator.segments(for: "言っ六"))
+
+        #expect(describe(segments) == [["言っ", "itsu", "いっ"], ["六", "roku", "ろく"]])
+    }
+
+    @Test("an overlapping token after a sokuon does not merge")
+    func sokuonWithOverlappingNextTokenDoesNotMerge() throws {
+        let annotator = makeAnnotator([
+            token("言っ", start: 0, reading: "いっ"),
+            token("って", start: 1, reading: "って")
+        ])
+
+        let segments = try #require(annotator.segments(for: "言って"))
+
+        #expect(describe(segments) == [["言っ", "itsu", "いっ"], ["って", "tte", nil]])
     }
 
     @Test("a sokuon merges across a whitespace gap (ASR word spacing)",
@@ -495,5 +531,36 @@ struct ReadingAnnotatorFallbackTests {
 
         #expect(describe(segments) == [["かな", "kana", nil]])
         #expect(!consulted.withLock { flag in flag })
+    }
+}
+
+// MARK: - Fallback reading cache
+
+@Suite("ReadingAnnotator fallback cache")
+struct ReadingAnnotatorFallbackCacheTests {
+
+    @Test("reports an untouched surface as not cached")
+    func untouchedSurfaceIsNotCached() {
+        let cache = ReadingAnnotator.ReadingFallbackCache()
+
+        #expect(cache.cachedReading(for: "圧") == .notCached)
+    }
+
+    @Test("replays a stored reading as a hit")
+    func storedReadingIsAHit() {
+        let cache = ReadingAnnotator.ReadingFallbackCache()
+
+        cache.store("あつ", for: "圧")
+
+        #expect(cache.cachedReading(for: "圧") == .hit("あつ"))
+    }
+
+    @Test("replays a stored miss as its own outcome")
+    func storedMissIsAMiss() {
+        let cache = ReadingAnnotator.ReadingFallbackCache()
+
+        cache.store(nil, for: "㐂")
+
+        #expect(cache.cachedReading(for: "㐂") == .miss)
     }
 }

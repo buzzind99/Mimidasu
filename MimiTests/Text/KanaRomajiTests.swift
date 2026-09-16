@@ -2,11 +2,11 @@
 import Testing
 
 /// Tests the kana → wapuro-romaji conversion through the public
-/// `KanaRomaji.romaji(fromKana:)` entry point. Expected values are the
-/// romaji strings the annotation suite pins (see `ReadingAnnotatorTests`);
-/// the legacy-corpus parameterization doubles as the round-trip spot check
-/// `KanaRomaji(legacy furigana/kana reading) == legacy romaji` for the
-/// shared counter/date/honorific corpus.
+/// `KanaRomaji.romaji(fromKana:)` entry point. Expected values are derived
+/// from the mapping tables; the legacy-corpus parameterization re-derives
+/// the legacy corpus's romaji from its kana readings
+/// (`KanaRomaji(legacy kana reading) == legacy romaji`) for the shared
+/// counter/date/honorific corpus.
 @Suite("Kana → romaji conversion")
 struct KanaRomajiTests {
 
@@ -88,9 +88,9 @@ struct KanaRomajiTests {
         #expect(KanaRomaji.romaji(fromKana: kana) == expected)
     }
 
-    // Defensive: no dictionary reading puts っ before a vowel or a kanji;
-    // the sokuon degrades to a spoken "tsu", and the unmappable mora that
-    // follows (or a trailing ー, see above) still fails the conversion.
+    // Defensive: a stranded sokuon (before a vowel, or at the end of a
+    // word) degrades to a spoken "tsu"; a following vowel still converts
+    // (っあ → "tsua").
     @Test("a stranded sokuon is spoken as standalone tsu", arguments: [
         ("おっ", "otsu"),
         ("っあ", "tsua"),
@@ -99,6 +99,8 @@ struct KanaRomajiTests {
         #expect(KanaRomaji.romaji(fromKana: kana) == expected)
     }
 
+    /// No dictionary reading puts っ before a kanji; the unmappable mora that
+    /// follows fails the conversion.
     @Test("a sokuon before an unmappable mora fails the conversion")
     func sokuonBeforeUnmappableFails() {
         #expect(KanaRomaji.romaji(fromKana: "あっ漢") == nil)
@@ -128,7 +130,7 @@ struct KanaRomajiTests {
         #expect(KanaRomaji.romaji(fromKana: kana) == expected)
     }
 
-    @Test("writes doubled n before vowel-initial syllables", arguments: [
+    @Test("writes doubled n before n-initial syllables", arguments: [
         ("あんない", "annai"),
         ("さんにん", "sannin"),
     ])
@@ -153,7 +155,7 @@ struct KanaRomajiTests {
         #expect(KanaRomaji.romaji(fromKana: kana) == expected)
     }
 
-    // MARK: - Legacy corpus round-trip
+    // MARK: - Legacy corpus
 
     @Test("matches the legacy counter/date/honorific corpus", arguments: [
         ("いっぽん", "ippon"),
@@ -195,5 +197,19 @@ struct KanaRomajiTests {
         let decomposedGaku = "か\u{3099}く"
 
         #expect(KanaRomaji.romaji(fromKana: decomposedGaku) == "gaku")
+    }
+
+    // MARK: - Gemination predicate
+
+    @Test("reports whether the reading's first mora can take a sokuon", arguments: [
+        ("か", true),
+        ("ちゃ", true),
+        ("ぱ", true),
+        ("あ", false),
+        ("ん", false),
+        ("", false),
+    ])
+    func geminates(kana: String, expected: Bool) {
+        #expect(KanaRomaji.geminates(fromKana: kana) == expected)
     }
 }

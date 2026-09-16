@@ -127,8 +127,8 @@ struct ReadingAnnotatorLiveTests {
         ])
     }
 
-    @Test("reads the segmented で+は context through the particle override (ならでは)")
-    func segmentedDewaContext() throws {
+    @Test("reads the single-entry conjunction では as dewa (ならでは)")
+    func singleEntryDewaConjunction() throws {
         let segments = try segments("ならでは")
 
         #expect(describe(segments) == [["なら", "nara", nil], ["では", "dewa", nil]])
@@ -402,7 +402,7 @@ struct ReadingAnnotatorLiveTests {
         #expect(describe(segments) == [["なっ ちゃっ てる", "nacchatteru", nil]])
     }
 
-    @Test("merges the stem + auxiliary across the ASR boundary (思って; the ASR-sanitized form — spaced 思 って leaves 思 unannotated)")
+    @Test("merges the stem + auxiliary (思って)")
     func omotteMerges() throws {
         let segments = try segments("思って")
 

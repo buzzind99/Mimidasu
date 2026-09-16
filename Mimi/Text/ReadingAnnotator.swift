@@ -324,7 +324,7 @@ final class ReadingAnnotator: @unchecked Sendable {
 
     // MARK: - Overrides
 
-    private enum CachedReading {
+    enum CachedReading: Equatable {
         case notCached
         case miss
         case hit(String)
@@ -335,7 +335,7 @@ final class ReadingAnnotator: @unchecked Sendable {
     /// thread-safe but not marked `Sendable`, so it hides behind this box.
     /// Misses are cached as a distinct outcome — names and rare kanji miss
     /// most often and would otherwise re-query every sentence.
-    private final class ReadingFallbackCache: @unchecked Sendable {
+    final class ReadingFallbackCache: @unchecked Sendable {
         private let cache = NSCache<NSString, NSString>()
 
         init() {
