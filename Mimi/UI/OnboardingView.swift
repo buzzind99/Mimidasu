@@ -77,21 +77,24 @@ struct OnboardingView: View {
         .frame(width: 56, height: 56)
     }
 
-    /// Screen-recording + model-download explainer rows inside a themed card.
+    /// Audio-recording + model-download explainer rows inside a themed card.
     private var permissionCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label {
                 Text("Mimi listens to the audio playing on your Mac so it can transcribe what you hear. "
-                    + "To allow this, macOS asks for Screen Recording access the first time you start; "
-                    + "Mimi never records your screen or uploads anything. Everything runs locally on your Mac.")
+                    + "To allow this, macOS asks for audio-recording access the first time you start; "
+                    + "Mimi never touches your screen or microphone. Audio is always processed locally "
+                    + "and never leaves your Mac. When a cloud translation provider is enabled "
+                    + "in Settings, only the transcribed text is transmitted to that provider. "
+                    + "You can revoke access anytime in System Settings → Privacy & Security.")
             } icon: {
-                Image(systemName: "display")
+                Image(systemName: "waveform")
                     .foregroundStyle(Theme.accentPink)
             }
             Label {
                 Text(
-                    "A speech model downloads once from Hugging Face and is stored in Application "
-                        + "Support. Pick a card below — Lite is the smaller default."
+                    "Audio Speech Recognition (ASR) model downloads once from Hugging Face and is stored "
+                        + "in Application Support. Pick a model below — Lite is the recommended default."
                 )
             } icon: {
                 Image(systemName: "arrow.down.circle")

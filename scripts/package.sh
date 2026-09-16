@@ -138,8 +138,8 @@ Mimi — real-time system audio transcriber/translator
 ${launch_notes}
 
 Compatibility: Apple Silicon, macOS 15+.
-First run: grant Screen Recording access (system audio capture via
-ScreenCaptureKit; no microphone is used); one-time
+First run: grant System Audio Recording access (system audio
+capture via a Core Audio process tap); one-time
 translation language-pack download prompt.
 
 $(cat "${REPO_ROOT}/THIRD_PARTY_NOTICES.md" 2>/dev/null || true)

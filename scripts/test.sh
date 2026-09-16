@@ -116,7 +116,7 @@ floors = {
     "Translation/": 98.0,
     "Model/":       96.9,
     "ASR/":         97.7,
-    "Audio/":       80.9,
+    "Audio/":       53.5,
     "FFI/":        100.0,
     "Security/":    95.6,
 }

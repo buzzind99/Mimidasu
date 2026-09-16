@@ -31,14 +31,26 @@ targets:
     platform: macOS
     sources:
       - path: Mimi
+    # NSAudioCaptureUsageDescription gates the system-audio-capture prompt
+    # the tap's aggregate triggers at first IO; it is not a recognized
+    # INFOPLIST_KEY_ build setting, so it must live in the plist itself.
+    info:
+      path: Config/Info.plist
+      properties:
+        NSAudioCaptureUsageDescription: "Mimi captures your Mac's system audio to transcribe it. Audio is always processed locally and never leaves your Mac. When a cloud translation provider is enabled in Settings, only the transcribed text is transmitted to that provider."
     settings:
       base:
         PRODUCT_NAME: Mimi
         PRODUCT_BUNDLE_IDENTIFIER: mimi.app
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         LD_RUNPATH_SEARCH_PATHS: "$(SRCROOT)/local/frameworks @executable_path/../Frameworks $(SRCROOT)/local/frameworks/crispasr @executable_path/../Frameworks/crispasr"
-        INFOPLIST_KEY_NSScreenCaptureUsageDescription: "Mimi captures your Mac's system audio (via ScreenCaptureKit) so it can transcribe and translate it locally on this Mac. Mimi never records or stores your screen. Audio never leaves your machine."
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.utilities"
+      configs:
+        Release:
+          # App Sandbox for every distributed artifact (DMG + MAS). Debug
+          # stays unsandboxed: the test host bundle reads repo-local
+          # dictionary data, which the sandbox container cannot reach.
+          CODE_SIGN_ENTITLEMENTS: Config/Mimi.entitlements
     scheme:
       gatherCoverageData: true
       testTargets:
