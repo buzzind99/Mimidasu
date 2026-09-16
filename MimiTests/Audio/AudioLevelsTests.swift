@@ -1,9 +1,10 @@
 @testable import Mimi
 import Testing
 
-/// Direct assertions for `AudioLevels.rms`, which otherwise only executes
-/// indirectly inside the capture hot path: pins the empty-input branch, the
-/// constant-amplitude identity, and the squaring that makes sign cancel.
+/// Direct assertions for `AudioLevels`: `rms`, which also executes indirectly
+/// in the `SessionController` meter handoff and the `MockASREngine` /
+/// `CrispASREngine` speech gates, and `silenceFloorRMS`, the no-audio
+/// watchdog's threshold.
 @Suite("AudioLevels")
 struct AudioLevelsTests {
 
@@ -20,5 +21,10 @@ struct AudioLevelsTests {
     @Test("rms squares before averaging, so sign cancels")
     func signCancels() {
         #expect(abs(AudioLevels.rms(of: [0.5, -0.5]) - 0.5) < 1e-6)
+    }
+
+    @Test("silence floor pins the -60 dBFS threshold")
+    func silenceFloorPinsThreshold() {
+        #expect(AudioLevels.silenceFloorRMS == 0.001)
     }
 }

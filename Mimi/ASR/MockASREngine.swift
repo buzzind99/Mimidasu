@@ -42,7 +42,7 @@ final class MockASREngine: ASREngine, @unchecked Sendable {
 
     func push(_ samples: [Float]) {
         totalSamples += samples.count
-        if AudioLevels.rms(of: samples) > 1e-3 {
+        if AudioLevels.rms(of: samples) > AudioLevels.silenceFloorRMS {
             speechChunksSeen += 1
         }
         if pendingFinal == nil, speechChunksSeen >= nextSentenceAt {
