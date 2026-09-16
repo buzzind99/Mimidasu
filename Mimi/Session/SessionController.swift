@@ -20,8 +20,12 @@ final class SessionController {
     private let latency: LatencyState
     private let audioLevel: AudioLevelState
     /// Chunk RMS staged off-main by `handleCaptureChunk`, drained onto
-    /// `audioLevel` by the 60 ms poll tick (see `StagedAudioLevel`).
-    private let stagedAudioLevel = StagedAudioLevel()
+    /// `audioLevel` by the 60 ms poll tick (see `MeterHandoff`).
+    private let meterHandoff = MeterHandoff()
+    /// Sticky audio-presence latch fed by the same chunks; read by the
+    /// no-audio watchdog and the one-shot `onAudioDetected` (see
+    /// `AudioPresenceHandoff`).
+    private let audioPresence = AudioPresenceHandoff()
     private let translationQueue: TranslationQueue
     private let makeEngine: @Sendable (URL?, Bool) -> ASREngine?
     private let makeCapture: () -> any AudioCapturing
@@ -122,9 +126,9 @@ final class SessionController {
 
     // MARK: - Session control
 
-    /// Brings up permission → engine → capture → buffer. Returns `false` when
-    /// no model is available (caller maps that to `.needsModel`); throws when
-    /// permission or capture setup fails. `modelURL` comes from the caller's
+    /// Brings up engine → capture → buffer. Returns `false` when no model is
+    /// available (caller maps that to `.needsModel`); throws when capture setup
+    /// fails. `modelURL` comes from the caller's
     /// resolved state (single resolve, no second verify on the start path);
     /// `modelID` is the active choice's id for session metadata.
     func begin(modelURL: URL?, modelID: String) async throws -> Bool {
@@ -147,7 +151,7 @@ final class SessionController {
         live.partial = ""
         latency.reset()
         audioLevel.reset()
-        stagedAudioLevel.clear()
+        clearAudioStaging()
 
         let buffer = SentenceBuffer()
         buffer.onSentence = { [weak self] sentence in
@@ -197,7 +201,7 @@ final class SessionController {
         // owner to re-arm it; the owner arms a fresh one once the phase is
         // actually `.running`.
         disarmNoAudioWatchdog()
-        stagedAudioLevel.clear()
+        clearAudioStaging()
 
         #if DEBUG
             print("[session] start: whole-system process-tap audio capture")
@@ -220,7 +224,7 @@ final class SessionController {
         noAudioWatchdog = Task { @MainActor [weak self] in
             guard let self else { return }
             try? await Task.sleep(for: silenceGracePeriod)
-            guard !Task.isCancelled, !stagedAudioLevel.hasHeardAudio() else { return }
+            guard !Task.isCancelled, !audioPresence.hasHeardAudio() else { return }
             onNoAudioDetected?()
         }
     }
@@ -228,6 +232,13 @@ final class SessionController {
     private func disarmNoAudioWatchdog() {
         noAudioWatchdog?.cancel()
         noAudioWatchdog = nil
+    }
+
+    /// Clears the staged meter level and the presence latch: a capture built
+    /// or torn down must not leak a stale level or latch into the next stream.
+    private func clearAudioStaging() {
+        meterHandoff.clear()
+        audioPresence.clear()
     }
 
     /// Rebuilds the capture stream mid-session after the source died — the
@@ -275,7 +286,7 @@ final class SessionController {
         _ = await translationQueue.drain(timeout: Self.translationDrainTimeout)
         live.partial = ""
         audioLevel.reset()
-        stagedAudioLevel.clear()
+        clearAudioStaging()
     }
 
     // MARK: - Capture (ASR queue)
@@ -286,7 +297,9 @@ final class SessionController {
         // the capture IO queue, so `AudioLevelState` (main-actor observable)
         // is fed by the poll tick instead of from here — same RMS metric the
         // debug ingress log samples every ~8 s.
-        stagedAudioLevel.stage(AudioLevels.rms(of: chunk.samples))
+        let rms = AudioLevels.rms(of: chunk.samples)
+        meterHandoff.stage(rms)
+        audioPresence.observe(rms)
         #if DEBUG
             logIngressEnergy(chunk)
         #endif
@@ -349,10 +362,10 @@ final class SessionController {
         latency.update(
             max(0, Double(engine.pushedSamples - engine.processedSamples) / SessionClock.sampleRate)
         )
-        if let rms = stagedAudioLevel.take() {
+        if let rms = meterHandoff.take() {
             audioLevel.update(rms: rms)
         }
-        if stagedAudioLevel.consumeFirstAudible() {
+        if audioPresence.consumeFirstAudible() {
             onAudioDetected?()
         }
     }
@@ -374,48 +387,52 @@ final class SessionController {
 }
 
 /// Single-slot handoff for the sidebar AUDIO meter: `handleCaptureChunk`
-/// stages the chunk's RMS from the capture IO queue; the main-actor poll
-/// tick drains the latest value into `AudioLevelState`. `Mutex`-guarded
-/// (same pattern as `SystemAudioCapture`/`DictionaryEngine`) — the slot only
-/// ever holds a `Float`, so the critical sections stay sub-microsecond.
-/// `take()` leaves the slot empty: with no new chunks (source lost), the
-/// poll tick simply doesn't re-publish and the meter freezes at its last
-/// level until `reset()`/`clear()`.
-///
-/// A sticky `heardAudio` flag rides alongside the level: it latches once any
-/// chunk rises above `AudioLevels.silenceFloorRMS` and only `clear()` resets
-/// it. The no-audio watchdog reads it to tell a denied/muted capture (silent
-/// or no chunks) from a live one. `consumeFirstAudible()` is the one-shot
-/// counterpart the poll tick uses to surface `onAudioDetected` exactly once
-/// per capture, so the presence latch lives here instead of in a second
-/// `SessionController` field.
-private final class StagedAudioLevel: Sendable {
-    private struct Staged {
-        var latest: Float?
-        var heardAudio = false
-        var notifiedAudible = false
-    }
-
-    private let slot = Mutex(Staged())
+/// stages the chunk's RMS from the capture IO queue; the main-actor poll tick
+/// drains the latest value into `AudioLevelState`. `Mutex`-guarded — the slot
+/// only ever holds a `Float?`, so the critical sections stay sub-microsecond.
+/// `take()` leaves the slot empty: with no new chunks (source lost), the poll
+/// tick simply doesn't re-publish and the meter freezes at its last level
+/// until `clear()`.
+private final class MeterHandoff: Sendable {
+    private let slot = Mutex<Float?>(nil)
 
     func stage(_ rms: Float) {
-        slot.withLock { value in
-            value.latest = rms
-            if rms > AudioLevels.silenceFloorRMS {
-                value.heardAudio = true
-            }
-        }
+        slot.withLock { value in value = rms }
     }
 
     func take() -> Float? {
         slot.withLock { value -> Float? in
-            let latest = value.latest
-            value.latest = nil
+            let latest = value
+            value = nil
             return latest
         }
     }
 
-    /// Sticky: true once any staged chunk has carried signal above the floor.
+    func clear() {
+        slot.withLock { value in value = nil }
+    }
+}
+
+/// Sticky audio-presence latch fed by the same chunk RMS as `MeterHandoff`:
+/// `heardAudio` latches once any chunk rises above
+/// `AudioLevels.silenceFloorRMS` and only `clear()` resets it. The no-audio
+/// watchdog reads it to tell a denied/muted capture (silent or no chunks)
+/// from a live one. `consumeFirstAudible()` is the one-shot counterpart the
+/// poll tick uses to surface `onAudioDetected` exactly once per capture.
+private final class AudioPresenceHandoff: Sendable {
+    private struct State {
+        var heardAudio = false
+        var notifiedAudible = false
+    }
+
+    private let slot = Mutex(State())
+
+    func observe(_ rms: Float) {
+        guard rms > AudioLevels.silenceFloorRMS else { return }
+        slot.withLock { value in value.heardAudio = true }
+    }
+
+    /// Sticky: true once any observed chunk has carried signal above the floor.
     func hasHeardAudio() -> Bool {
         slot.withLock { value in value.heardAudio }
     }
@@ -431,6 +448,6 @@ private final class StagedAudioLevel: Sendable {
     }
 
     func clear() {
-        slot.withLock { value in value = Staged() }
+        slot.withLock { value in value = State() }
     }
 }
