@@ -305,8 +305,8 @@ struct TranslationSettingsTests {
 
     // MARK: - Short keys
 
-    @Test("a key too short for a hint clears any stale hint")
-    func shortKeyClearsStaleHint() throws {
+    @Test("an empty key clears any stale hint")
+    func emptyKeyClearsStaleHint() throws {
         let (settings, _) = makeSUT()
         try settings.saveKey("sk-google-9999", for: .google)
         #expect(settings.keyHint(for: .google) == "9999")
@@ -315,6 +315,38 @@ struct TranslationSettingsTests {
 
         #expect(settings.keyHint(for: .google) == nil)
     }
+
+    @Test("a key shorter than four characters keeps its whole hint")
+    func shortKeyKeepsWholeHint() throws {
+        let (settings, _) = makeSUT()
+
+        try settings.saveKey("abc", for: .google)
+
+        #expect(settings.keyHint(for: .google) == "abc")
+    }
+
+    // MARK: - Debug key store
+
+    #if DEBUG
+        /// A DEBUG build's default key store is the dev no-op: saves are
+        /// discarded and reads always return nil, so dev builds pin to the
+        /// Apple on-device engine and never prompt for Keychain access.
+        @Test("the debug no-op key store discards saves and deletes")
+        func devNoopKeyStoreDiscardsSavesAndDeletes() throws {
+            let suiteName = "test.TranslationSettings.\(UUID().uuidString)"
+            let defaults = try #require(UserDefaults(suiteName: suiteName))
+            let settings = TranslationSettings(defaults: defaults)
+
+            try settings.saveKey("sk-google-1234", for: .google)
+            #expect(settings.key(for: .google) == nil, "the dev store never returns the saved key")
+
+            let reloaded = TranslationSettings(defaults: defaults)
+            #expect(!reloaded.hasKey(for: .google), "a reload re-checks the flag against the empty store")
+
+            settings.removeKey(for: .google)
+            #expect(settings.key(for: .google) == nil, "deleting is a safe no-op")
+        }
+    #endif
 
     // MARK: - Garbage persistence
 
