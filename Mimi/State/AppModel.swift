@@ -302,9 +302,9 @@ final class AppModel {
         toasts.post(
             key: ToastKey.noAudio, style: .redPersistent,
             title: "No audio detected",
-            body: "No audio detected since the session started. "
-                + "Make sure Mimi has audio recording permission in System Settings"
-                + ", and that audio is playing.",
+            body: "No audio has been detected since the session started. "
+                + "Check that audio is playing and that system audio recording "
+                + "is enabled for Mimi in System Settings.",
             action: ToastCenter.Action(
                 label: "Open System Settings",
                 handler: { [weak self] in self?.openAudioPrivacySettings() }
@@ -312,13 +312,15 @@ final class AppModel {
         )
     }
 
-    /// Opens the Privacy & Security pane that owns Mimi's system-audio
-    /// recording permission (the "Screen & System Audio Recording" list).
+    /// Deep link into the Privacy & Security pane that owns Mimi's
+    /// system-audio recording permission (the "Screen & System Audio
+    /// Recording" list).
+    private static let audioPrivacySettingsURL = URL(
+        string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+    )!
+
     private func openAudioPrivacySettings() {
-        guard let url = URL(
-            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
-        ) else { return }
-        NSWorkspace.shared.open(url)
+        NSWorkspace.shared.open(Self.audioPrivacySettingsURL)
     }
 
     /// The `capture.lost` red card with the Restart-capture fix action;
@@ -484,7 +486,7 @@ final class AppModel {
         // resolves (verified on device), so no callbacks — and no staged
         // silence — occur during the wait; the `.running` flip is the first
         // moment a genuinely silent capture can be observed.
-        sessionController.startAudioWatchdog()
+        sessionController.armNoAudioWatchdog()
     }
 
     func stop() {
@@ -568,7 +570,7 @@ final class AppModel {
                 phase = .running
                 captureLostAt = nil
                 toasts.dismiss(key: ToastKey.captureLost)
-                sessionController.startAudioWatchdog()
+                sessionController.armNoAudioWatchdog()
             } catch {
                 guard phase == .starting else { return }
                 phase = .sourceLost

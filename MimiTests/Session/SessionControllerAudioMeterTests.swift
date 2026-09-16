@@ -91,8 +91,8 @@ struct SessionControllerAudioMeterTests {
 
     /// A chunk staged by a previous session (e.g. pushed between its last
     /// poll and `stop()`) must never surface in the next session's meter.
-    @Test("a new begin clears any RMS staged by the previous session")
-    func beginClearsStagedRMSFromPreviousSession() async throws {
+    @Test("a new begin clears any level staged by the previous session")
+    func beginClearsStagedAudioLevelFromPreviousSession() async throws {
         let sut = makeSUT()
         _ = try await sut.controller.begin(modelURL: modelURL, modelID: "meter-test-GGUF")
         sut.capture.onChunk?(chunk)

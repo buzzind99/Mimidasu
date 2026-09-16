@@ -55,14 +55,14 @@ struct SessionControllerNoAudioTests {
 
     // MARK: - Helpers
 
-    private func makeSUT(noAudioWarningDelay: Duration) -> SUT {
+    private func makeSUT(silenceGracePeriod: Duration) -> SUT {
         let capture = ScriptedCapture()
         let controller = SessionController(
             live: LivePartialState(), latency: LatencyState(), translationQueue: TranslationQueue(),
             makeEngine: { _, _ in ScriptedASREngine() },
             makeCapture: { capture },
             warmUpEnabled: { false },
-            noAudioWarningDelay: noAudioWarningDelay
+            silenceGracePeriod: silenceGracePeriod
         )
         return SUT(controller: controller, capture: capture)
     }
@@ -75,19 +75,19 @@ struct SessionControllerNoAudioTests {
 
     @Test("silence through the grace window surfaces onNoAudioDetected")
     func silenceWarns() async throws {
-        let sut = makeSUT(noAudioWarningDelay: .milliseconds(20))
+        let sut = makeSUT(silenceGracePeriod: .milliseconds(20))
         var warned = false
         sut.controller.onNoAudioDetected = { warned = true }
         _ = try await sut.controller.begin(modelURL: modelURL, modelID: modelID)
 
-        sut.controller.startAudioWatchdog()
+        sut.controller.armNoAudioWatchdog()
 
         #expect(await pollUntil { warned }, "silence past the grace window warns")
     }
 
     @Test("the watchdog does not count the pre-running start phase as silence")
     func watchdogIdleUntilRunning() async throws {
-        let sut = makeSUT(noAudioWarningDelay: .milliseconds(30))
+        let sut = makeSUT(silenceGracePeriod: .milliseconds(30))
         var warned = false
         sut.controller.onNoAudioDetected = { warned = true }
 
@@ -99,27 +99,27 @@ struct SessionControllerNoAudioTests {
 
     @Test("a zero-amplitude chunk does not count as audio")
     func silentChunkStillWarns() async throws {
-        let sut = makeSUT(noAudioWarningDelay: .milliseconds(40))
+        let sut = makeSUT(silenceGracePeriod: .milliseconds(40))
         var warned = false
         sut.controller.onNoAudioDetected = { warned = true }
         _ = try await sut.controller.begin(modelURL: modelURL, modelID: modelID)
 
         sut.capture.onChunk?(chunk(of: silentSample))
-        sut.controller.startAudioWatchdog()
+        sut.controller.armNoAudioWatchdog()
 
         #expect(await pollUntil { warned }, "a zero-amplitude chunk is silence")
     }
 
     @Test("an audible chunk surfaces onAudioDetected and suppresses the warning")
     func audibleChunkSuppressesWarning() async throws {
-        let sut = makeSUT(noAudioWarningDelay: .milliseconds(200))
+        let sut = makeSUT(silenceGracePeriod: .milliseconds(200))
         var warned = false
         var heard = false
         sut.controller.onNoAudioDetected = { warned = true }
         sut.controller.onAudioDetected = { heard = true }
         _ = try await sut.controller.begin(modelURL: modelURL, modelID: modelID)
         sut.controller.startTimers()
-        sut.controller.startAudioWatchdog()
+        sut.controller.armNoAudioWatchdog()
 
         sut.capture.onChunk?(chunk(of: audibleSample))
         #expect(await pollUntil { heard }, "the first audible chunk surfaces")
@@ -130,12 +130,12 @@ struct SessionControllerNoAudioTests {
 
     @Test("stop cancels a pending watchdog")
     func stopCancelsWatchdog() async throws {
-        let sut = makeSUT(noAudioWarningDelay: .milliseconds(30))
+        let sut = makeSUT(silenceGracePeriod: .milliseconds(30))
         var warned = false
         sut.controller.onNoAudioDetected = { warned = true }
         _ = try await sut.controller.begin(modelURL: modelURL, modelID: modelID)
 
-        sut.controller.startAudioWatchdog()
+        sut.controller.armNoAudioWatchdog()
         await sut.controller.stop()
         try? await Task.sleep(for: .milliseconds(80))
 

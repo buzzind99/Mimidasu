@@ -20,8 +20,8 @@ final class SessionController {
     private let latency: LatencyState
     private let audioLevel: AudioLevelState
     /// Chunk RMS staged off-main by `handleCaptureChunk`, drained onto
-    /// `audioLevel` by the 60 ms poll tick (see `StagedRMS`).
-    private let stagedRMS = StagedRMS()
+    /// `audioLevel` by the 60 ms poll tick (see `StagedAudioLevel`).
+    private let stagedAudioLevel = StagedAudioLevel()
     private let translationQueue: TranslationQueue
     private let makeEngine: @Sendable (URL?, Bool) -> ASREngine?
     private let makeCapture: () -> any AudioCapturing
@@ -38,7 +38,7 @@ final class SessionController {
     /// The capture stream died mid-session.
     var onCaptureError: ((String) -> Void)?
     /// A fresh capture delivered no chunk above the silence floor within
-    /// `noAudioWarningDelay` — the denied-permission / muted-source case.
+    /// `silenceGracePeriod` — the denied-permission / muted-source case.
     var onNoAudioDetected: (() -> Void)?
     /// The first chunk above the silence floor arrived; lets the UI retire a
     /// posted no-audio warning once capture starts working.
@@ -55,10 +55,7 @@ final class SessionController {
     /// One-shot silence watchdog for the current capture; cancelled on stop
     /// and re-armed by every `startCapture`.
     private var noAudioWatchdog: Task<Void, Never>?
-    /// True once the poll tick has reported the first audible chunk for the
-    /// current capture, so `onAudioDetected` fires exactly once.
-    private var didNotifyAudioDetected = false
-    private let noAudioWarningDelay: Duration
+    private let silenceGracePeriod: Duration
     /// Path of the model the warm-up last loaded (nil = none yet). Keyed on
     /// path so the warm-up re-arms when the user switches models: the new
     /// GGUF gets prepared in the background instead of loading synchronously
@@ -90,7 +87,7 @@ final class SessionController {
         warmUpEnabled: @escaping () -> Bool = {
             ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
         },
-        noAudioWarningDelay: Duration = SessionController.noAudioWarningDelay
+        silenceGracePeriod: Duration = SessionController.noAudioWarningDelay
     ) {
         self.live = live
         self.latency = latency
@@ -99,7 +96,7 @@ final class SessionController {
         self.makeEngine = makeEngine
         self.makeCapture = makeCapture
         self.warmUpEnabled = warmUpEnabled
-        self.noAudioWarningDelay = noAudioWarningDelay
+        self.silenceGracePeriod = silenceGracePeriod
     }
 
     // MARK: - Warm-up
@@ -150,7 +147,7 @@ final class SessionController {
         live.partial = ""
         latency.reset()
         audioLevel.reset()
-        stagedRMS.clear()
+        stagedAudioLevel.clear()
 
         let buffer = SentenceBuffer()
         buffer.onSentence = { [weak self] sentence in
@@ -199,9 +196,8 @@ final class SessionController {
         // capture (restart path) is cancelled here instead of relying on the
         // owner to re-arm it; the owner arms a fresh one once the phase is
         // actually `.running`.
-        cancelNoAudioWatchdog()
-        stagedRMS.clear()
-        didNotifyAudioDetected = false
+        disarmNoAudioWatchdog()
+        stagedAudioLevel.clear()
 
         #if DEBUG
             print("[session] start: whole-system process-tap audio capture")
@@ -219,17 +215,17 @@ final class SessionController {
     /// the IO proc delivers no callbacks and stages no silence before the
     /// `.running` arm point; silence observed after it is genuine. A prior
     /// watchdog is cancelled first, so a restart re-arms cleanly.
-    func startAudioWatchdog() {
+    func armNoAudioWatchdog() {
         noAudioWatchdog?.cancel()
         noAudioWatchdog = Task { @MainActor [weak self] in
             guard let self else { return }
-            try? await Task.sleep(for: noAudioWarningDelay)
-            guard !Task.isCancelled, !stagedRMS.hasHeardAudio() else { return }
+            try? await Task.sleep(for: silenceGracePeriod)
+            guard !Task.isCancelled, !stagedAudioLevel.hasHeardAudio() else { return }
             onNoAudioDetected?()
         }
     }
 
-    private func cancelNoAudioWatchdog() {
+    private func disarmNoAudioWatchdog() {
         noAudioWatchdog?.cancel()
         noAudioWatchdog = nil
     }
@@ -261,7 +257,7 @@ final class SessionController {
         // drain wait plus a synchronous flush decode, a multi-second C call
         // whenever speech is in flight at Stop.
         capture?.stop()
-        cancelNoAudioWatchdog()
+        disarmNoAudioWatchdog()
         if let engine {
             let drained = await Task.detached(priority: .userInitiated) { engine.finish() }.value
             for event in drained {
@@ -279,7 +275,7 @@ final class SessionController {
         _ = await translationQueue.drain(timeout: Self.translationDrainTimeout)
         live.partial = ""
         audioLevel.reset()
-        stagedRMS.clear()
+        stagedAudioLevel.clear()
     }
 
     // MARK: - Capture (ASR queue)
@@ -290,7 +286,7 @@ final class SessionController {
         // the capture IO queue, so `AudioLevelState` (main-actor observable)
         // is fed by the poll tick instead of from here — same RMS metric the
         // debug ingress log samples every ~8 s.
-        stagedRMS.stage(AudioLevels.rms(of: chunk.samples))
+        stagedAudioLevel.stage(AudioLevels.rms(of: chunk.samples))
         #if DEBUG
             logIngressEnergy(chunk)
         #endif
@@ -353,11 +349,10 @@ final class SessionController {
         latency.update(
             max(0, Double(engine.pushedSamples - engine.processedSamples) / SessionClock.sampleRate)
         )
-        if let rms = stagedRMS.take() {
+        if let rms = stagedAudioLevel.take() {
             audioLevel.update(rms: rms)
         }
-        if !didNotifyAudioDetected, stagedRMS.hasHeardAudio() {
-            didNotifyAudioDetected = true
+        if stagedAudioLevel.consumeFirstAudible() {
             onAudioDetected?()
         }
     }
@@ -390,12 +385,15 @@ final class SessionController {
 /// A sticky `heardAudio` flag rides alongside the level: it latches once any
 /// chunk rises above `AudioLevels.silenceFloorRMS` and only `clear()` resets
 /// it. The no-audio watchdog reads it to tell a denied/muted capture (silent
-/// or no chunks) from a live one, and the poll tick reads it to retire a
-/// posted warning once audio finally arrives.
-private final class StagedRMS: Sendable {
+/// or no chunks) from a live one. `consumeFirstAudible()` is the one-shot
+/// counterpart the poll tick uses to surface `onAudioDetected` exactly once
+/// per capture, so the presence latch lives here instead of in a second
+/// `SessionController` field.
+private final class StagedAudioLevel: Sendable {
     private struct Staged {
         var latest: Float?
         var heardAudio = false
+        var notifiedAudible = false
     }
 
     private let slot = Mutex(Staged())
@@ -420,6 +418,16 @@ private final class StagedRMS: Sendable {
     /// Sticky: true once any staged chunk has carried signal above the floor.
     func hasHeardAudio() -> Bool {
         slot.withLock { value in value.heardAudio }
+    }
+
+    /// One-shot: true on the first call after an audible chunk, false
+    /// thereafter (and until `clear()`).
+    func consumeFirstAudible() -> Bool {
+        slot.withLock { value -> Bool in
+            guard value.heardAudio, !value.notifiedAudible else { return false }
+            value.notifiedAudible = true
+            return true
+        }
     }
 
     func clear() {
