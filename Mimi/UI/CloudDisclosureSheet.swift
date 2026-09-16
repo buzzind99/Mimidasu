@@ -21,7 +21,6 @@ struct CloudDisclosureSheet: View {
             Text(
                 "Sentences transcribed from your Mac's audio will be sent to "
                     + "\(provider.displayName) over the internet to be translated. "
-                    + "Transcription and the default on-device translation always stay on this Mac."
             )
             .font(.system(size: 12))
             .foregroundStyle(Palette.secondaryText)
