@@ -21,14 +21,20 @@
 #
 # Overrides:
 #   SIGN_IDENTITY   verbatim identity (must be a Developer ID Application cert)
-#   NOTARY_PROFILE  keychain profile name (default: mimidasu-notary)
+#   NOTARY_PROFILE  keychain profile name (default: mimidasu-notary; falls back
+#                   to the legacy "mimi-notary" profile when the default is absent)
 #   SKIP_PACKAGE=1  reuse the existing build/pkg/Mimidasu.dmg
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DMG="${REPO_ROOT}/build/pkg/Mimidasu.dmg"
-NOTARY_PROFILE="${NOTARY_PROFILE:-mimidasu-notary}"
+# The Mimi → Mimidasu rename changed the default profile name; a pre-rename
+# "mimi-notary" profile still works, so fall back to it when the new default
+# is absent (mirrors the legacy "Mimidasu Dev" signing fallback in bootstrap.sh).
+DEFAULT_NOTARY_PROFILE="mimidasu-notary"
+LEGACY_NOTARY_PROFILE="mimi-notary"
+NOTARY_PROFILE="${NOTARY_PROFILE:-${DEFAULT_NOTARY_PROFILE}}"
 
 cd "${REPO_ROOT}"
 
@@ -49,11 +55,18 @@ echo "==> Signing with ${SIGN_IDENTITY}"
 # 2. Notary credentials preflight — proves the profile (and network) work
 #    before spending minutes on the build. history is the cheapest call.
 if ! xcrun notarytool history --keychain-profile "${NOTARY_PROFILE}" >/dev/null 2>&1; then
-  echo "ERROR: notarytool credentials profile \"${NOTARY_PROFILE}\" not found or rejected." >&2
-  echo "  Store credentials with:" >&2
-  echo "    xcrun notarytool store-credentials ${NOTARY_PROFILE} --apple-id YOU@example.com --team-id TEAMID" >&2
-  echo "  (or override with: NOTARY_PROFILE=<profile> $0)" >&2
-  exit 1
+  # Only fall back when the caller did not name a profile explicitly.
+  if [[ "${NOTARY_PROFILE}" == "${DEFAULT_NOTARY_PROFILE}" ]] \
+      && xcrun notarytool history --keychain-profile "${LEGACY_NOTARY_PROFILE}" >/dev/null 2>&1; then
+    echo "==> Profile \"${DEFAULT_NOTARY_PROFILE}\" not found — using legacy \"${LEGACY_NOTARY_PROFILE}\"" >&2
+    NOTARY_PROFILE="${LEGACY_NOTARY_PROFILE}"
+  else
+    echo "ERROR: notarytool credentials profile \"${NOTARY_PROFILE}\" not found or rejected." >&2
+    echo "  Store credentials with:" >&2
+    echo "    xcrun notarytool store-credentials ${NOTARY_PROFILE} --apple-id YOU@example.com --team-id TEAMID" >&2
+    echo "  (or override with: NOTARY_PROFILE=<profile> $0)" >&2
+    exit 1
+  fi
 fi
 
 # 3. Build, stage, harden-sign, DMG — package.sh handles all of it once the
