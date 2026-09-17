@@ -37,6 +37,8 @@ if [[ "${SIGN_IDENTITY}" == "Developer ID Application:"* ]]; then
   echo "==> Developer ID identity — signing hardened (--options runtime --timestamp)" >&2
 fi
 
+source "${REPO_ROOT}/scripts/lib/staging.sh"
+
 cd "${REPO_ROOT}"
 
 command -v xcodegen >/dev/null || { echo "xcodegen required (brew install xcodegen)"; exit 1; }
@@ -64,58 +66,12 @@ build_app() {
 sign_app() {
   # Sign last: staging (dylibs, README) modifies the bundle after the build,
   # which would otherwise invalidate the seal. Nested dylibs are already
-  # signed by stage_runtime; this seals the outer bundle over them.
-  codesign --force --sign "${SIGN_IDENTITY}" ${CS_HARDEN[@]+"${CS_HARDEN[@]}"} "$1"
-}
-
-stage_runtime() {
-  local app="$1"
-  local fwdir="${app}/Contents/Frameworks"
-  mkdir -p "${fwdir}"
-  # Dictionary tokenizer dylib — independent of the ASR runtime. Without it
-  # the bundled dictionary model can never be decompressed, and session
-  # start (see AppModel.ensureDictionaryReady) fails — such a package is
-  # broken.
-  if [[ -f "${REPO_ROOT}/local/frameworks/libdictionary.dylib" ]]; then
-    cp -f "${REPO_ROOT}/local/frameworks/libdictionary.dylib" "${fwdir}/libdictionary.dylib"
-    codesign --force --sign "${SIGN_IDENTITY}" ${CS_HARDEN[@]+"${CS_HARDEN[@]}"} "${fwdir}/libdictionary.dylib"
-  else
-    echo "ERROR: dictionary runtime not built. Run scripts/build_dictionary.sh first." >&2
-    exit 1
-  fi
-  # Bundled dictionary model — decompressed once on first launch (never
-  # bundled decompressed, never downloaded). Without it session start fails
-  # with "Bundled system.dic.zst not found in the app bundle".
-  local resdir="${app}/Contents/Resources"
-  mkdir -p "${resdir}"
-  if [[ -f "${REPO_ROOT}/local/dictionaries/ipadic-mecab-2_7_0/system.dic.zst" ]]; then
-    cp -f "${REPO_ROOT}/local/dictionaries/ipadic-mecab-2_7_0/system.dic.zst" "${resdir}/system.dic.zst"
-  else
-    echo "ERROR: system.dic.zst not fetched. Run scripts/build_dictionary.sh first." >&2
-    exit 1
-  fi
-  # JMDict lookup DB — versioned by pin tag (Mimidasu/Dictionary/JMDictPin.swift,
-  # produced by scripts/build_jmdict.sh). The versioned filename is the
-  # staleness key: a new pin ships a new file; the stale one is inert.
-  local jmdict_tag
-  jmdict_tag="$(sed -n 's/.*static let releaseTag = "\(.*\)"/\1/p' "${REPO_ROOT}/Mimidasu/Dictionary/JMDictPin.swift" | head -1)"
-  if [[ -n "${jmdict_tag}" && -f "${REPO_ROOT}/local/dictionaries/jmdict-${jmdict_tag}.sqlite.zst" ]]; then
-    cp -f "${REPO_ROOT}/local/dictionaries/jmdict-${jmdict_tag}.sqlite.zst" "${resdir}/jmdict-${jmdict_tag}.sqlite.zst"
-  else
-    echo "ERROR: jmdict-${jmdict_tag:-<tag>}.sqlite.zst not built. Run scripts/build_jmdict.sh first." >&2
-    exit 1
-  fi
-  if [[ ! -d "${REPO_ROOT}/local/frameworks/crispasr" ]]; then
-    echo "WARNING: native runtime not built (scripts/build_runtime.sh); app will run in mock mode."
-    return
-  fi
-  # The CrispASR dylib set is self-contained (its dylibs resolve their own
-  # @rpath dependencies via a @loader_path RPATH), so it bundles as a plain
-  # subdirectory of Contents/Frameworks.
-  cp -R "${REPO_ROOT}/local/frameworks/crispasr" "${fwdir}/crispasr"
-  find "${fwdir}/crispasr" -type f \( -name "*.dylib" -o -name crispasr -o -name "*.gguf" \) | while read -r f; do
-    codesign --force --sign "${SIGN_IDENTITY}" ${CS_HARDEN[@]+"${CS_HARDEN[@]}"} "${f}"
-  done
+  # signed by stage_runtime; this seals the outer bundle over them. The
+  # entitlements must be re-applied here — `codesign --force` without
+  # --entitlements would silently drop the sandbox set the Release build
+  # embedded, shipping an unsandboxed app.
+  codesign --force --sign "${SIGN_IDENTITY}" ${CS_HARDEN[@]+"${CS_HARDEN[@]}"} \
+    --entitlements "${REPO_ROOT}/Config/Mimidasu.entitlements" "$1"
 }
 
 stage_readme() {
