@@ -51,6 +51,9 @@ if [[ -n "${identity}" ]]; then
 elif security find-identity -v -p codesigning 2>/dev/null | grep -qF "\"${PREFERRED_IDENTITY}\""; then
   identity="${PREFERRED_IDENTITY}"
   echo "==> Found \"${PREFERRED_IDENTITY}\" certificate — Screen Recording grants persist across rebuilds"
+elif security find-identity -v -p codesigning 2>/dev/null | grep -qF '"Mimidasu Dev"'; then
+  identity="Mimidasu Dev"
+  echo "==> Found legacy \"Mimidasu Dev\" certificate — Screen Recording grants persist across rebuilds"
 else
   identity="-"
   echo "==> No \"${PREFERRED_IDENTITY}\" certificate found — falling back to ad-hoc signing"
