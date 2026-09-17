@@ -10,7 +10,7 @@
 #   scripts/build_jmdict.sh --rebuild      # probe + rebuild DB even if built
 #
 # The pin (tag + asset + SHA-256) is recorded here AND in
-# Mimi/Dictionary/JMDictPin.swift; this script cross-checks the two and
+# Mimidasu/Dictionary/JMDictPin.swift; this script cross-checks the two and
 # hard-fails on drift, so a pin bump must touch both files or nothing builds.
 # The probe runs before every build and hard-fails on any mismatch with the
 # documented input contract — on a pin bump it is the tripwire against silent
@@ -35,7 +35,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DICT_DIR="${REPO_ROOT}/local/dictionaries"
 BUILD_DIR="${REPO_ROOT}/build"
 
-# --- Pin: keep in sync with Mimi/Dictionary/JMDictPin.swift -----------------
+# --- Pin: keep in sync with Mimidasu/Dictionary/JMDictPin.swift -----------------
 PIN_TAG="1.4.1-auto-release-2026-09-01"
 PIN_ASSET="jmdictExtended-2026-09-01.json.zip"
 # SHA-256 of the .zip asset, cross-checked against the digest GitHub publishes
@@ -80,7 +80,7 @@ echo "==> JMDict_Extended pin: ${PIN_TAG}"
 echo "    asset: ${PIN_ASSET}"
 
 # Cross-check the Swift pin constants (drift fails here, never silently).
-PIN_SWIFT="${REPO_ROOT}/Mimi/Dictionary/JMDictPin.swift"
+PIN_SWIFT="${REPO_ROOT}/Mimidasu/Dictionary/JMDictPin.swift"
 if [[ ! -f "${PIN_SWIFT}" ]]; then
   echo "ERROR: ${PIN_SWIFT} not found; the pin must exist in both the script and Swift." >&2
   exit 1
@@ -182,5 +182,5 @@ python3 "${REPO_ROOT}/scripts/jmdict_build.py" "${JSON_PATH}" "${RAW_DB}" "${ZST
 
 zstd -q -t "${ZST_PATH}"
 echo
-echo "Done. package.sh bundles ${ZST_NAME} into Mimi.app/Contents/Resources;"
+echo "Done. package.sh bundles ${ZST_NAME} into Mimidasu.app/Contents/Resources;"
 echo "DictionaryStore (Phase 5) stages/decompresses it to jmdict-<tag>.sqlite."

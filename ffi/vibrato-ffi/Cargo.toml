@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.85" # matches the vendored vibrato
 license = "Apache-2.0 OR MIT"
 publish = false
-description = "C ABI for Mimi's dictionary tokenizer, wrapping the vendored vibrato engine"
+description = "C ABI for Mimidasu's dictionary tokenizer, wrapping the vendored vibrato engine"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

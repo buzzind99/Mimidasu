@@ -164,7 +164,7 @@ fn live_spans_are_original_input_scalar_indices() {
 #[test]
 fn ffi_rejects_bad_input_fail_soft() {
     // Missing dictionary file.
-    let missing = CString::new("/nonexistent/mimi/ipadic.dic").unwrap();
+    let missing = CString::new("/nonexistent/mimidasu/ipadic.dic").unwrap();
     assert!(
         unsafe { dictionary_open(missing.as_ptr()) }.is_null(),
         "dictionary_open must return null for a missing file"

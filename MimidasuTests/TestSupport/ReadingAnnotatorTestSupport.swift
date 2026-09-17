@@ -1,0 +1,59 @@
+import Foundation
+@testable import Mimidasu
+import Testing
+
+// MARK: - Fixtures (shared by the ReadingAnnotator suites)
+
+/// A token spanning `text` at the scalar offset `start`, carrying the given
+/// surface reading (nil means unknown/unreadable).
+func token(
+    _ text: String, start: Int, reading: String? = nil,
+    base: String? = nil, pos: String? = nil
+) -> DictionaryToken {
+    DictionaryToken(
+        text: text,
+        start: start,
+        end: start + text.unicodeScalars.count,
+        reading: reading,
+        base: base,
+        pos: pos
+    )
+}
+
+/// Contiguous tokens laid out left-to-right across the concatenated surfaces.
+func tokens(
+    _ surfaces: [String], readings: [String?]
+) -> [DictionaryToken] {
+    var start = 0
+    return zip(surfaces, readings).map { surface, reading in
+        defer { start += surface.unicodeScalars.count }
+        return token(surface, start: start, reading: reading)
+    }
+}
+
+/// Tokens laid out across space-separated surfaces — ASR output spaces out
+/// words, and the contiguous `tokens` helper can't express those gaps.
+func spacedTokens(
+    _ surfaces: [String], readings: [String?]
+) -> [DictionaryToken] {
+    var start = 0
+    return zip(surfaces, readings).map { surface, reading in
+        defer { start += surface.unicodeScalars.count + 1 }
+        return token(surface, start: start, reading: reading)
+    }
+}
+
+/// An annotator that replays canned tokens, independent of the runtime.
+/// The reading fallback is inert by default so reading-less fixtures stay
+/// deterministically unannotated; fallback suites inject their own.
+func makeAnnotator(
+    _ canned: [DictionaryToken],
+    readingFallback: @escaping @Sendable (String) -> String? = { _ in nil }
+) -> ReadingAnnotator {
+    ReadingAnnotator(tokenize: { _ in canned }, readingFallback: readingFallback)
+}
+
+/// Compact [surface, romaji, furigana] rows for whole-segment assertions.
+func describe(_ segments: [ReadingSegment]?) -> [[String?]] {
+    segments?.map { segment in [segment.surface, segment.romaji, segment.furigana] } ?? []
+}

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Release DMG: package + notarize → build/pkg/Mimi.dmg
+# Release DMG: package + notarize → build/pkg/Mimidasu.dmg
 #
 #   scripts/release.sh
 #
@@ -14,21 +14,21 @@
 #      developer.apple.com → Certificates (the CSR's private key must stay
 #      in that keychain, or codesigning fails).
 #   2. Notary credentials profile:
-#        xcrun notarytool store-credentials mimi-notary \
+#        xcrun notarytool store-credentials mimidasu-notary \
 #          --apple-id YOU@example.com --team-id TEAMID
 #      (app-specific password from appleid.apple.com — or the App Store
 #      Connect API-key equivalent: --key/--key-id/--issuer)
 #
 # Overrides:
 #   SIGN_IDENTITY   verbatim identity (must be a Developer ID Application cert)
-#   NOTARY_PROFILE  keychain profile name (default: mimi-notary)
-#   SKIP_PACKAGE=1  reuse the existing build/pkg/Mimi.dmg
+#   NOTARY_PROFILE  keychain profile name (default: mimidasu-notary)
+#   SKIP_PACKAGE=1  reuse the existing build/pkg/Mimidasu.dmg
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DMG="${REPO_ROOT}/build/pkg/Mimi.dmg"
-NOTARY_PROFILE="${NOTARY_PROFILE:-mimi-notary}"
+DMG="${REPO_ROOT}/build/pkg/Mimidasu.dmg"
+NOTARY_PROFILE="${NOTARY_PROFILE:-mimidasu-notary}"
 
 cd "${REPO_ROOT}"
 

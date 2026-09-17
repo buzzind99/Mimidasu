@@ -1,4 +1,4 @@
-# SwiftLint configuration — tuned to match Mimi's existing style.
+# SwiftLint configuration — tuned to match Mimidasu's existing style.
 
 # Files/lints that shouldn't be checked.
 excluded:

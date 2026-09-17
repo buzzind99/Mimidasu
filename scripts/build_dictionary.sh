@@ -124,4 +124,4 @@ fi
 echo
 echo "Done. The app loads ${FRAMEWORKS_DIR}/libdictionary.dylib when run from"
 echo "this checkout; scripts/package.sh bundles the dylib into"
-echo "Mimi.app/Contents/Frameworks and system.dic.zst into Contents/Resources."
+echo "Mimidasu.app/Contents/Frameworks and system.dic.zst into Contents/Resources."

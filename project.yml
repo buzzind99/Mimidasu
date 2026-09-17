@@ -1,6 +1,6 @@
-name: Mimi
+name: Mimidasu
 options:
-  bundleIdPrefix: mimi
+  bundleIdPrefix: mimidasu
   deploymentTarget:
     macOS: "15.0"
   createIntermediateGroups: true
@@ -18,7 +18,7 @@ settings:
     ARCHS: arm64
 
 # Signing identity comes from local/signing.xcconfig (gitignored), written by
-# scripts/bootstrap.sh: "Mimi Dev" when that certificate exists, ad-hoc (-)
+# scripts/bootstrap.sh: "Mimidasu Dev" when that certificate exists, ad-hoc (-)
 # otherwise. project.yml deliberately does not set CODE_SIGN_IDENTITY —
 # explicit build settings would override the xcconfig.
 configFiles:
@@ -26,22 +26,22 @@ configFiles:
   Release: local/signing.xcconfig
 
 targets:
-  Mimi:
+  Mimidasu:
     type: application
     platform: macOS
     sources:
-      - path: Mimi
+      - path: Mimidasu
     # NSAudioCaptureUsageDescription gates the system-audio-capture prompt
     # the tap's aggregate triggers at first IO; it is not a recognized
     # INFOPLIST_KEY_ build setting, so it must live in the plist itself.
     info:
       path: Config/Info.plist
       properties:
-        NSAudioCaptureUsageDescription: "Mimi captures your Mac's system audio to transcribe it. Audio is always processed locally and never leaves your Mac. When a cloud translation provider is enabled in Settings, only the transcribed text is transmitted to that provider."
+        NSAudioCaptureUsageDescription: "Mimidasu captures your Mac's system audio to transcribe it. Audio is always processed locally and never leaves your Mac. When a cloud translation provider is enabled in Settings, only the transcribed text is transmitted to that provider."
     settings:
       base:
-        PRODUCT_NAME: Mimi
-        PRODUCT_BUNDLE_IDENTIFIER: mimi.app
+        PRODUCT_NAME: Mimidasu
+        PRODUCT_BUNDLE_IDENTIFIER: mimidasu.app
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         LD_RUNPATH_SEARCH_PATHS: "$(SRCROOT)/local/frameworks @executable_path/../Frameworks $(SRCROOT)/local/frameworks/crispasr @executable_path/../Frameworks/crispasr"
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.utilities"
@@ -50,20 +50,20 @@ targets:
           # App Sandbox for every distributed artifact (DMG + MAS). Debug
           # stays unsandboxed: the test host bundle reads repo-local
           # dictionary data, which the sandbox container cannot reach.
-          CODE_SIGN_ENTITLEMENTS: Config/Mimi.entitlements
+          CODE_SIGN_ENTITLEMENTS: Config/Mimidasu.entitlements
     scheme:
       gatherCoverageData: true
       testTargets:
-        - MimiTests
-  MimiTests:
+        - MimidasuTests
+  MimidasuTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - path: MimiTests
+      - path: MimidasuTests
     dependencies:
-      - target: Mimi
+      - target: Mimidasu
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: mimi.app.tests
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Mimi.app/Contents/MacOS/Mimi"
+        PRODUCT_BUNDLE_IDENTIFIER: mimidasu.app.tests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Mimidasu.app/Contents/MacOS/Mimidasu"
         BUNDLE_LOADER: "$(TEST_HOST)"

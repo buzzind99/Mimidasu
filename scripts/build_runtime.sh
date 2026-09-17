@@ -9,7 +9,7 @@
 # Outputs:
 #   local/install/crispasr/                          SDK prefix (libs, headers, CLI)
 #   local/frameworks/crispasr/libcrispasr.dylib + ggml companions
-#   Mimi/native/include/crispasr/crispasr_session.h  refreshed stable header
+#   Mimidasu/native/include/crispasr/crispasr_session.h  refreshed stable header
 #
 # The dylib set is isolated in a `crispasr/` subdirectory (ids and load
 # commands use @loader_path/@rpath into that directory).
@@ -51,7 +51,7 @@ git submodule update --init --recursive
 
 # Homebrew's libsentencepiece links abseil without re-exporting its symbols,
 # which breaks the final link of libcrispasr. It is only used by the
-# irodori-tts backend (TTS — unused by Mimi), so drop the optional link and
+# irodori-tts backend (TTS — unused by Mimidasu), so drop the optional link and
 # let that backend fall back to its built-in tokenizer.
 perl -0pi -e 's/find_library\(SENTENCEPIECE_LIB sentencepiece\)\nif\(SENTENCEPIECE_LIB\)\n.*?\nendif\(\)\n//s' \
   src/CMakeLists.txt
@@ -114,10 +114,10 @@ cp -f "${SDK_DIR}/bin/crispasr" "${FRAMEWORKS_DIR}/crispasr"
 strip_rpaths "${FRAMEWORKS_DIR}/crispasr"
 
 # 5. Refresh the vendored stable headers used by the engine.
-mkdir -p "${REPO_ROOT}/Mimi/native/include/crispasr"
+mkdir -p "${REPO_ROOT}/Mimidasu/native/include/crispasr"
 cp -f "${SDK_DIR}/include/crispasr/crispasr.h" \
       "${SDK_DIR}/include/crispasr/crispasr_session.h" \
-      "${REPO_ROOT}/Mimi/native/include/crispasr/"
+      "${REPO_ROOT}/Mimidasu/native/include/crispasr/"
 
 # 6. Fetch the FireRedVAD model used for speech endpointing (2.4 MB). The
 #    dylib dispatches on the basename, so it must keep this exact name;
@@ -151,4 +151,4 @@ done
 
 echo
 echo "Done. The app picks up the runtime from ${FRAMEWORKS_DIR} when run from"
-echo "this checkout; scripts/package.sh bundles it into Mimi.app/Contents/Frameworks."
+echo "this checkout; scripts/package.sh bundles it into Mimidasu.app/Contents/Frameworks."

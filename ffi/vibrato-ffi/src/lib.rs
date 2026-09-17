@@ -1,4 +1,4 @@
-//! C ABI for Mimi's dictionary tokenizer.
+//! C ABI for Mimidasu's dictionary tokenizer.
 //!
 //! Wraps the vendored vibrato engine (`vendor/vibrato`, Apache-2.0 OR MIT)
 //! behind five generic `dictionary_*` exports. This crate owns the entire FFI

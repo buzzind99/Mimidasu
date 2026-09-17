@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
 # Package release DMG:
-#   build/pkg/Mimi.dmg   (~40–60 MB; IPADIC model + JMDict lookup DB bundled,
+#   build/pkg/Mimidasu.dmg   (~40–60 MB; IPADIC model + JMDict lookup DB bundled,
 #                        ASR model downloaded on first launch)
 #
-# Signed with the local self-signed "Mimi Dev" certificate (when present) so
+# Signed with the local self-signed "Mimidasu Dev" certificate (when present) so
 # TCC permission grants (Screen Recording) persist across rebuilds; falls
 # back to ad-hoc signing otherwise, like scripts/bootstrap.sh. When the
 # SIGN_IDENTITY override names a "Developer ID Application" certificate, all
@@ -17,7 +17,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${REPO_ROOT}/build/pkg"
-PREFERRED_IDENTITY="Mimi Dev"
+PREFERRED_IDENTITY="Mimidasu Dev"
 if [[ -n "${SIGN_IDENTITY:-}" ]]; then
   : # explicit override wins
 elif security find-identity -v -p codesigning 2>/dev/null | grep -qF "\"${PREFERRED_IDENTITY}\""; then
@@ -45,7 +45,7 @@ xcodegen generate
 build_app() {
   local scheme="$1" config="$2" out="$3"
   echo "==> Building ${scheme} (${config})"
-  xcodebuild -project Mimi.xcodeproj -scheme "${scheme}" \
+  xcodebuild -project Mimidasu.xcodeproj -scheme "${scheme}" \
     -configuration "${config}" -destination "generic/platform=macOS" \
     -derivedDataPath "${BUILD_DIR}/derived" build
   local built
@@ -94,11 +94,11 @@ stage_runtime() {
     echo "ERROR: system.dic.zst not fetched. Run scripts/build_dictionary.sh first." >&2
     exit 1
   fi
-  # JMDict lookup DB — versioned by pin tag (Mimi/Dictionary/JMDictPin.swift,
+  # JMDict lookup DB — versioned by pin tag (Mimidasu/Dictionary/JMDictPin.swift,
   # produced by scripts/build_jmdict.sh). The versioned filename is the
   # staleness key: a new pin ships a new file; the stale one is inert.
   local jmdict_tag
-  jmdict_tag="$(sed -n 's/.*static let releaseTag = "\(.*\)"/\1/p' "${REPO_ROOT}/Mimi/Dictionary/JMDictPin.swift" | head -1)"
+  jmdict_tag="$(sed -n 's/.*static let releaseTag = "\(.*\)"/\1/p' "${REPO_ROOT}/Mimidasu/Dictionary/JMDictPin.swift" | head -1)"
   if [[ -n "${jmdict_tag}" && -f "${REPO_ROOT}/local/dictionaries/jmdict-${jmdict_tag}.sqlite.zst" ]]; then
     cp -f "${REPO_ROOT}/local/dictionaries/jmdict-${jmdict_tag}.sqlite.zst" "${resdir}/jmdict-${jmdict_tag}.sqlite.zst"
   else
@@ -123,17 +123,17 @@ stage_readme() {
   local launch_notes
   if [[ "${SIGN_IDENTITY}" == "Developer ID Application:"* ]]; then
     launch_notes='This app is signed with a Developer ID certificate and notarized
-(distributed via scripts/release.sh). Just double-click Mimi.app to
+(distributed via scripts/release.sh). Just double-click Mimidasu.app to
 install — no security workarounds needed.'
   else
-    launch_notes='This app is signed with a self-signed local certificate ("Mimi Dev").
+    launch_notes='This app is signed with a self-signed local certificate ("Mimidasu Dev").
 First launch may be blocked by macOS:
-  1. Double-click Mimi.app once.
+  1. Double-click Mimidasu.app once.
   2. Open System Settings → Privacy & Security → scroll to "Open Anyway".
-  3. Or run:  xattr -cr /Applications/Mimi.app'
+  3. Or run:  xattr -cr /Applications/Mimidasu.app'
   fi
-  cat > "/tmp/mimi-launch-notes.txt" <<EOF
-Mimi — real-time system audio transcriber/translator
+  cat > "/tmp/mimidasu-launch-notes.txt" <<EOF
+Mimidasu — real-time system audio transcriber/translator
 
 ${launch_notes}
 
@@ -145,7 +145,7 @@ translation language-pack download prompt.
 $(cat "${REPO_ROOT}/THIRD_PARTY_NOTICES.md" 2>/dev/null || true)
 EOF
   mkdir -p "${app}/Contents/Resources"
-  cp "/tmp/mimi-launch-notes.txt" "${app}/Contents/Resources/README.txt"
+  cp "/tmp/mimidasu-launch-notes.txt" "${app}/Contents/Resources/README.txt"
 }
 
 make_dmg() {
@@ -160,13 +160,13 @@ make_dmg() {
 }
 
 # --- app ---
-build_app Mimi Release "${BUILD_DIR}/Mimi.app"
-stage_runtime "${BUILD_DIR}/Mimi.app"
-stage_readme "${BUILD_DIR}/Mimi.app"
-sign_app "${BUILD_DIR}/Mimi.app"
-make_dmg "${BUILD_DIR}/Mimi.app" "Mimi"
+build_app Mimidasu Release "${BUILD_DIR}/Mimidasu.app"
+stage_runtime "${BUILD_DIR}/Mimidasu.app"
+stage_readme "${BUILD_DIR}/Mimidasu.app"
+sign_app "${BUILD_DIR}/Mimidasu.app"
+make_dmg "${BUILD_DIR}/Mimidasu.app" "Mimidasu"
 
 echo
 echo "Artifacts in ${BUILD_DIR}:"
 ls -lh "${BUILD_DIR}" | grep dmg || true
-echo "Launch ${BUILD_DIR}/Mimi.app (or install the DMG) — not the derived build output."
+echo "Launch ${BUILD_DIR}/Mimidasu.app (or install the DMG) — not the derived build output."

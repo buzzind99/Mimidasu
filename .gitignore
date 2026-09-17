@@ -15,7 +15,7 @@ build/
 
 # XcodeGen regenerates the project from project.yml
 # (covered by *.xcodeproj above; kept here for clarity)
-# Mimi.xcodeproj/
+# Mimidasu.xcodeproj/
 
 # Models (large GGUF files — never commit)
 models/

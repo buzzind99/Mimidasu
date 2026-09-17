@@ -45,8 +45,8 @@ set +e
 # `${arr[@]+"${arr[@]}"}` expands to nothing (not an error) when the array is
 # empty — plain `"${arr[@]}"` trips zsh's `set -u` on empty arrays.
 xcodebuild test \
-  -project Mimi.xcodeproj \
-  -scheme Mimi \
+  -project Mimidasu.xcodeproj \
+  -scheme Mimidasu \
   -destination 'platform=macOS,arch=arm64' \
   ${coverage_args[@]+"${coverage_args[@]}"} \
   -resultBundlePath "$RESULT_BUNDLE" \
@@ -92,19 +92,19 @@ failures = (tests or {}).get("testFailures") or []
 t_parse = time.time()
 
 prefixes = [
-    ("State/",       "Mimi/State/"),
-    ("Export/",      "Mimi/Export/"),
-    ("Dictionary/",  "Mimi/Dictionary/"),
-    ("Text/",        "Mimi/Text/"),
-    ("Session/",     "Mimi/Session/"),
-    ("Translation/", "Mimi/Translation/"),
-    ("Model/",       "Mimi/Model/"),
-    ("ASR/",         "Mimi/ASR/"),
-    ("Audio/",       "Mimi/Audio/"),
-    ("FFI/",         "Mimi/FFI/"),
-    ("Security/",    "Mimi/Security/"),
-    ("App/",         "Mimi/App/"),
-    ("UI/",          "Mimi/UI/"),
+    ("State/",       "Mimidasu/State/"),
+    ("Export/",      "Mimidasu/Export/"),
+    ("Dictionary/",  "Mimidasu/Dictionary/"),
+    ("Text/",        "Mimidasu/Text/"),
+    ("Session/",     "Mimidasu/Session/"),
+    ("Translation/", "Mimidasu/Translation/"),
+    ("Model/",       "Mimidasu/Model/"),
+    ("ASR/",         "Mimidasu/ASR/"),
+    ("Audio/",       "Mimidasu/Audio/"),
+    ("FFI/",         "Mimidasu/FFI/"),
+    ("Security/",    "Mimidasu/Security/"),
+    ("App/",         "Mimidasu/App/"),
+    ("UI/",          "Mimidasu/UI/"),
 ]
 
 floors = {
@@ -162,7 +162,7 @@ else:
         path for path in subprocess.run(
             [xccov, "view", "--archive", "--file-list", "build/cov.xcresult"],
             capture_output=True, text=True, check=True).stdout.splitlines()
-        if "/Mimi/" in path and "/MimiTests/" not in path
+        if "/Mimidasu/" in path and "/MimidasuTests/" not in path
     ]
     with ThreadPoolExecutor(max_workers=min(8, len(paths) or 1)) as pool:
         records = list(pool.map(read_file_cov, paths))

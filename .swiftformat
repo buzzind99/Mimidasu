@@ -1,4 +1,4 @@
-# SwiftFormat configuration — matches Mimi's existing style.
+# SwiftFormat configuration — matches Mimidasu's existing style.
 # Run `swiftformat --lint .` (or scripts/lint.sh) in CI / before commit.
 
 --swiftversion 6.0

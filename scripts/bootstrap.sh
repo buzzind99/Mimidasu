@@ -7,8 +7,8 @@
 #   scripts/bootstrap.sh --skip-generate  # only (re)write local/signing.xcconfig
 #
 # Identity resolution (also honored by scripts/package.sh):
-#   1. MIMI_SIGN_IDENTITY env override (verbatim, e.g. "-" for ad-hoc)
-#   2. the "Mimi Dev" certificate, when present in the keychain — keeps TCC
+#   1. MIMIDASU_SIGN_IDENTITY env override (verbatim, e.g. "-" for ad-hoc)
+#   2. the "Mimidasu Dev" certificate, when present in the keychain — keeps TCC
 #      grants (Screen Recording) stable across rebuilds
 #   3. ad-hoc signing ("-") — builds everywhere; macOS re-asks for Screen
 #      Recording access after each rebuild
@@ -26,7 +26,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 XCCONFIG="${REPO_ROOT}/local/signing.xcconfig"
-PREFERRED_IDENTITY="Mimi Dev"
+PREFERRED_IDENTITY="Mimidasu Dev"
 GENERATE=1
 if [[ "${1:-}" == "--skip-generate" ]]; then
   GENERATE=0
@@ -45,9 +45,9 @@ for tool in cmake ninja cargo; do
 done
 
 # 2. Resolve the signing identity.
-identity="${MIMI_SIGN_IDENTITY:-}"
+identity="${MIMIDASU_SIGN_IDENTITY:-}"
 if [[ -n "${identity}" ]]; then
-  echo "==> Using MIMI_SIGN_IDENTITY (${identity})"
+  echo "==> Using MIMIDASU_SIGN_IDENTITY (${identity})"
 elif security find-identity -v -p codesigning 2>/dev/null | grep -qF "\"${PREFERRED_IDENTITY}\""; then
   identity="${PREFERRED_IDENTITY}"
   echo "==> Found \"${PREFERRED_IDENTITY}\" certificate — Screen Recording grants persist across rebuilds"
@@ -74,5 +74,5 @@ fi
 echo
 echo "Done. Signed with: ${identity}  (${XCCONFIG})"
 if [[ "${GENERATE}" -eq 1 ]]; then
-  echo "Open Mimi.xcodeproj and run the \"Mimi\" scheme (⌘R)."
+  echo "Open Mimidasu.xcodeproj and run the \"Mimidasu\" scheme (⌘R)."
 fi

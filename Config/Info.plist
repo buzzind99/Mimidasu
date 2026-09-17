@@ -19,6 +19,6 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>Mimi captures your Mac's system audio to transcribe it. Audio is always processed locally and never leaves your Mac. When a cloud translation provider is enabled in Settings, only the transcribed text is transmitted to that provider.</string>
+	<string>Mimidasu captures your Mac's system audio to transcribe it. Audio is always processed locally and never leaves your Mac. When a cloud translation provider is enabled in Settings, only the transcribed text is transmitted to that provider.</string>
 </dict>
 </plist>
