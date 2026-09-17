@@ -37,6 +37,15 @@ targets:
     info:
       path: Config/Info.plist
       properties:
+        CFBundleDisplayName: Mimidasu
+        # Version keys resolve through build settings so the MAS packaging step
+        # can pass a fresh CURRENT_PROJECT_VERSION without editing this file.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        # HTTPS-only + Apple crypto: qualifies for the export-compliance
+        # exemption; declaring it skips the per-build App Store Connect question.
+        ITSAppUsesNonExemptEncryption: false
+        NSHumanReadableCopyright: "Copyright © 2026 Aulia Sufian Adi. All rights reserved."
         NSAudioCaptureUsageDescription: "Mimidasu captures your Mac's system audio to transcribe it. Audio is always processed locally and never leaves your Mac. When a cloud translation provider is enabled in Settings, only the transcribed text is transmitted to that provider."
     settings:
       base:

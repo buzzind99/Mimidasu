@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Mimidasu</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,10 +17,14 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Mimidasu captures your Mac's system audio to transcribe it. Audio is always processed locally and never leaves your Mac. When a cloud translation provider is enabled in Settings, only the transcribed text is transmitted to that provider.</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 Aulia Sufian Adi. All rights reserved.</string>
 </dict>
 </plist>
