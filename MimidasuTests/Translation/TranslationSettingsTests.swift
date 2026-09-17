@@ -242,6 +242,9 @@ struct TranslationSettingsTests {
 
         try settings.saveKey("sk-openrouter", for: .openrouter)
         settings.select(.openrouter)
+
+        #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenRouter · \(OpenRouterEngine.defaultModel)")
+
         settings.openRouterModel = "tencent/hy-mt2-30b-a3b"
 
         #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenRouter · tencent/hy-mt2-30b-a3b")

@@ -282,7 +282,7 @@ final class TranslationSettings {
         case .deepl:
             deeplIsFreeTier ? "DeepL (Free)" : "DeepL (Pro)"
         case .openrouter:
-            openRouterModel.isEmpty ? "OpenRouter" : "OpenRouter · \(openRouterModel)"
+            "OpenRouter · \(effectiveOpenRouterModel)"
         }
         if fallbackActive, provider.isExternal {
             label += " — fallback active"
