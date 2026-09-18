@@ -135,7 +135,13 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
     }
 
     func cancel() {
-        guard let task else { return } // idle/terminal: nothing in flight
+        guard let task else {
+            // No transfer in flight, but a session may still exist (e.g.
+            // begin() ran with a nil task); it strongly retains its
+            // delegate, so invalidate to break the cycle anyway.
+            invalidateSession()
+            return
+        }
         self.task = nil
         task.cancel(byProducingResumeData: { [weak self] data in
             guard let self else { return }
