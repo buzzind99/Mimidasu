@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Package release DMG:
-#   build/pkg/Mimidasu.dmg   (~40–60 MB; IPADIC model + JMDict lookup DB bundled,
+#   build/pkg/Mimidasu.dmg   (~35–40 MB; IPADIC model + JMDict lookup DB bundled,
 #                        ASR model downloaded on first launch)
 #
 # Signed with the local self-signed "Mimidasu Dev" certificate (when present) so
@@ -111,8 +111,10 @@ make_dmg() {
   mkdir -p "${staging}"
   cp -R "${app}" "${staging}/"
   ln -s /Applications "${staging}/Applications"
+  # ULMO (lzma) over UDZO (zlib): smaller (~8%) download for the
+  # bundled dictionaries + runtime dylibs; mountable on macOS 10.15+.
   hdiutil create -volname "${name}" -srcfolder "${staging}" \
-    -format UDZO -ov "${BUILD_DIR}/${name}.dmg"
+    -format ULMO -ov "${BUILD_DIR}/${name}.dmg"
 }
 
 # --- app ---
