@@ -580,8 +580,10 @@ fn prepare_dictionary_rejects_bad_zstd_without_partial_file() {
 fn prepare_dictionary_decodes_ultra_22_frame() {
     // The bundled JMDict artifact compresses with `zstd --ultra -22`; this
     // checked-in frame comes from that exact invocation, so ruzstd must keep
-    // decoding level-22 windows across decoder bumps (the live artifact is
-    // too big to commit — this small twin guards the same code path).
+    // decoding ultra-22 frame formats across decoder bumps. (It pins the
+    // frame format only: the CLI shrinks the window to the content size, so
+    // a small twin cannot exercise the large-window path the multi-GB live
+    // artifact relies on.)
     let dir = tempfile::tempdir().unwrap();
     let zst = dir.path().join("ultra22_sample.txt.zst");
     let out = dir.path().join("ultra22_sample.txt");
