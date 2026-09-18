@@ -3,7 +3,7 @@ import Foundation
 /// Resolves the ASR GGUF for a chosen `ASRModelChoice` in priority order:
 ///   1. Bundled: `Bundle.main` → `models/` (downloader skipped)
 ///   2. Downloaded: `~/Library/Application Support/Mimidasu/models/`
-///   3. Dev checkout: `<cwd>/models/` (DEBUG only)
+///   3. Dev checkout: `<repo>/models/` (DEBUG only)
 /// Both choices live side-by-side in the shared models directory.
 enum ModelLocator {
     static var modelsDirectory: URL {
@@ -21,11 +21,17 @@ enum ModelLocator {
     }
 
     /// Development checkout candidate: the dev GGUF is downloaded manually
-    /// into <repo>/models/; Xcode runs the app with that as working
-    /// directory. Debug-only so release never depends on the cwd.
+    /// into <repo>/models/. Debug-only so release never depends on the
+    /// checkout; anchored to the repo root rather than the cwd because the
+    /// working directory is not the checkout under `xcodebuild test` —
+    /// mirrors `DictionaryStore.debugRepoURL` (same directory depth).
     static func devCheckoutURL(for choice: ASRModelChoice) -> URL? {
         #if DEBUG
-            return URL(fileURLWithPath: "models/\(choice.ggufFileName)")
+            let repoRoot = URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent() // Model/
+                .deletingLastPathComponent() // Mimidasu/
+                .deletingLastPathComponent() // checkout root
+            return repoRoot.appendingPathComponent("models/\(choice.ggufFileName)")
         #else
             return nil
         #endif
