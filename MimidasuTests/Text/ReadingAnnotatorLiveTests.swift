@@ -345,8 +345,9 @@ struct ReadingAnnotatorLiveTests {
         ])
     }
 
-    /// Names beyond IPADIC's person-name list still degrade to unknown —
-    /// JMnedict proper-noun coverage is out of scope.
+    /// Annotation itself stays IPADIC-sourced; name readings beyond IPADIC's
+    /// person-name list resolve lookup-side, through the JMnedict rows the
+    /// dictionary database carries (the JMDict reading fallback).
     @Test("annotates the name with its IPADIC person-name entry (田中さん; old suite degraded per-kanji)")
     func nameAnnotates() throws {
         let segments = try segments("田中さん")

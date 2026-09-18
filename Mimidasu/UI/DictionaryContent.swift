@@ -53,12 +53,36 @@ enum DictionaryContent {
         entry.reb.flatMap { reb in KanaRomaji.romaji(fromKana: reb) }
     }
 
-    /// First tag of the stored comma-joined POS string.
+    /// First tag of the stored comma-joined POS string, rendered through the
+    /// JMnedict name-type badges: name entries store their entity types
+    /// (`surname`, `place`, …) in `pos` and show friendly uppercase labels;
+    /// JMDict POS tags and unknown values render verbatim. Multi-type
+    /// senses take the first token.
     static func posLabel(_ pos: String?) -> String? {
         guard let pos, !pos.isEmpty else { return nil }
-        return pos.components(separatedBy: ",").first?
+        let tag = pos.components(separatedBy: ",").first?
             .trimmingCharacters(in: .whitespaces)
+        guard let tag, !tag.isEmpty else { return nil }
+        return nameTypeBadges[tag] ?? tag
     }
+
+    /// JMnedict name type → badge label. The mapped rows cover the common
+    /// upstream vocabulary; the rare types (`char`, `serv`, `fict`, …) fall
+    /// through verbatim. JMDict POS tags never collide with these tokens.
+    private static let nameTypeBadges = [
+        "surname": "SURNAME",
+        "given": "GIVEN NAME",
+        "fem": "GIVEN NAME",
+        "masc": "GIVEN NAME",
+        "person": "NAME",
+        "place": "PLACE NAME",
+        "organization": "ORGANIZATION",
+        "company": "COMPANY NAME",
+        "station": "STATION",
+        "product": "PRODUCT",
+        "work": "WORK",
+        "unclass": "NAME"
+    ]
 
     /// Prefix of `items` capped at `limit` (nil = every item), with the
     /// hidden count for the "+ N more" footer. Shared by the sense and gloss

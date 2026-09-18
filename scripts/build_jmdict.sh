@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Fetch + verify the pinned JMDict_Extended release asset, probe its format,
-# and emit the bundled lookup DB from it. The probe and build implementations
-# live in jmdict_probe.py and jmdict_build.py (same directory); this script
-# is the orchestrator and the only supported entrypoint.
+# Fetch + verify the pinned JMDict_Extended and JMnedict release assets, probe
+# their formats, and emit the bundled lookup DB from them. The probe and build
+# implementations live in jmdict_probe.py and jmdict_build.py (same directory);
+# this script is the orchestrator and the only supported entrypoint.
 #
 #   scripts/build_jmdict.sh                # probe (tripwire) + build DB (skips if built)
 #   scripts/build_jmdict.sh --probe-only   # probe only, no DB emitted
@@ -21,13 +21,19 @@
 # --rebuild forces the full path.)
 #
 # Artifacts (gitignored, under local/ and build/):
-#   local/dictionaries/jmdictExtended-<date>.json.zip   pinned release asset
-#   local/dictionaries/jmdictExtended-<date>.json       unzipped input
+#   local/dictionaries/jmdictExtended-<date>.json.zip   pinned JMDict release asset
+#   local/dictionaries/jmdictExtended-<date>.json       unzipped JMDict input
+#   local/dictionaries/jmnedict-all-<date>.json.zip     pinned JMnedict (names) asset
+#   local/dictionaries/jmnedict-all-<version>.json      unzipped names input
 #   local/dictionaries/jmdict-<tag>.sqlite.zst          bundled lookup DB
 #                                                       (package.sh -> Contents/Resources)
 #   build/jmdict-<tag>.sqlite                           uncompressed intermediate
 #   build/jmdict-probe.log                              full probe report
 #   build/jmdict-build.log                              full build log
+#
+# The bundled artifact name is keyed on the JMDict tag alone (the names
+# release rides inside it), so a names-only pin bump skips as up-to-date and
+# needs `--rebuild` to take effect.
 
 set -euo pipefail
 
@@ -42,10 +48,21 @@ PIN_ASSET="jmdictExtended-2026-09-01.json.zip"
 # on the release asset page.
 PIN_SHA256="4bee23eb7bd088d0a9c48301d0d25964b8ac9ecd6465c91b40adf8191d4b040a"
 PIN_URL="https://github.com/Bluskyo/JMDict_Extended/releases/download/${PIN_TAG}/${PIN_ASSET}"
-# ----------------------------------------------------------------------------
+
+# --- Names pin: JMnedict proper nouns, ingested into the same DB ----------------
+# Source is scriptin/jmdict-simplified (the JMDict pin above stays on
+# Bluskyo/JMDict_Extended); the two bump independently.
+NAME_PIN_TAG="3.6.2+20260914172325"
+NAME_PIN_ASSET="jmnedict-all-3.6.2+20260914172325.json.zip"
+NAME_PIN_SHA256="843470cd19284d6caea54e6027df1791402766bd90ba70d36dba0cd787aeaa2a"
+NAME_PIN_URL="https://github.com/scriptin/jmdict-simplified/releases/download/${NAME_PIN_TAG}/${NAME_PIN_ASSET}"
+# -------------------------------------------------------------------------------
 
 ZIP_PATH="${DICT_DIR}/${PIN_ASSET}"
 JSON_PATH="${DICT_DIR}/${PIN_ASSET%.zip}"
+# The names zip's inner file drops the +build-timestamp suffix.
+NAME_ZIP_PATH="${DICT_DIR}/${NAME_PIN_ASSET}"
+NAME_JSON_PATH="${DICT_DIR}/jmnedict-all-${NAME_PIN_TAG%%+*}.json"
 PROBE_LOG="${BUILD_DIR}/jmdict-probe.log"
 PREPARED_NAME="jmdict-${PIN_TAG}.sqlite"
 ZST_NAME="${PREPARED_NAME}.zst"
@@ -78,6 +95,8 @@ fi
 
 echo "==> JMDict_Extended pin: ${PIN_TAG}"
 echo "    asset: ${PIN_ASSET}"
+echo "==> JMnedict names pin: ${NAME_PIN_TAG}"
+echo "    asset: ${NAME_PIN_ASSET}"
 
 # Cross-check the Swift pin constants (drift fails here, never silently).
 PIN_SWIFT="${REPO_ROOT}/Mimidasu/Dictionary/JMDictPin.swift"
@@ -102,13 +121,24 @@ CHECKEOF
 check_pin_constant releaseTag "${PIN_TAG}"
 check_pin_constant sourceAssetFileName "${PIN_ASSET}"
 check_pin_constant sourceSHA256 "${PIN_SHA256}"
+check_pin_constant nameReleaseTag "${NAME_PIN_TAG}"
+check_pin_constant nameSourceAssetFileName "${NAME_PIN_ASSET}"
+check_pin_constant nameSourceSHA256 "${NAME_PIN_SHA256}"
 
 # The produced artifact filename must match the Swift pin constants — the
 # versioned name is the staleness key (§0.1 item 4). preparedFileName is
 # interpolated in Swift, so guard the derivation expressions themselves
 # (releaseTag is already cross-checked above, which pins the concrete name).
-if ! grep -Fq 'static let preparedFileName = "jmdict-\(releaseTag).sqlite"' "${PIN_SWIFT}"; then
-  echo "ERROR: JMDictPin.preparedFileName no longer derives as \"jmdict-\\(releaseTag).sqlite\"; update this drift guard." >&2
+if ! grep -Fq 'static let preparedFileName = "\(artifactPrefix)\(releaseTag).\(artifactExtension)"' "${PIN_SWIFT}"; then
+  echo "ERROR: JMDictPin.preparedFileName no longer derives from artifactPrefix + releaseTag + artifactExtension; update this drift guard." >&2
+  exit 1
+fi
+if ! grep -Fq 'static let artifactPrefix = "jmdict-"' "${PIN_SWIFT}"; then
+  echo "ERROR: JMDictPin.artifactPrefix is no longer \"jmdict-\"; update this drift guard." >&2
+  exit 1
+fi
+if ! grep -Fq 'static let artifactExtension = "sqlite"' "${PIN_SWIFT}"; then
+  echo "ERROR: JMDictPin.artifactExtension is no longer \"sqlite\"; update this drift guard." >&2
   exit 1
 fi
 if ! grep -Fq 'bundledFileName = preparedFileName + ".zst"' "${PIN_SWIFT}"; then
@@ -153,10 +183,30 @@ if [[ ! -f "${JSON_PATH}" ]]; then
   unzip -o -q "${ZIP_PATH}" -d "${DICT_DIR}"
 fi
 
+# Names asset: download once, verify the digest on every run (same pattern).
+if [[ ! -f "${NAME_ZIP_PATH}" ]]; then
+  echo "==> Downloading ${NAME_PIN_URL}"
+  curl -fL --retry 3 -o "${NAME_ZIP_PATH}" "${NAME_PIN_URL}"
+fi
+echo "==> Verifying names asset SHA-256"
+actual="$(shasum -a 256 "${NAME_ZIP_PATH}" | awk '{print $1}')"
+if [[ "${actual}" != "${NAME_PIN_SHA256}" ]]; then
+  echo "ERROR: names asset SHA-256 mismatch" >&2
+  echo "  expected ${NAME_PIN_SHA256}" >&2
+  echo "  got      ${actual}" >&2
+  rm -f "${NAME_ZIP_PATH}"
+  exit 1
+fi
+
+if [[ ! -f "${NAME_JSON_PATH}" ]]; then
+  echo "==> Unzipping to ${NAME_JSON_PATH}"
+  unzip -o -q "${NAME_ZIP_PATH}" -d "${DICT_DIR}"
+fi
+
 # Probe on every run that proceeds past the up-to-date skip — build mode
 # only continues past a passing probe.
 echo "==> Probing format (full report: ${PROBE_LOG})"
-python3 "${REPO_ROOT}/scripts/jmdict_probe.py" "${JSON_PATH}" "${PROBE_LOG}"
+python3 "${REPO_ROOT}/scripts/jmdict_probe.py" "${JSON_PATH}" "${NAME_JSON_PATH}" "${PROBE_LOG}"
 if [[ "${MODE}" == "probe" ]]; then
   echo
   echo "Probe passed. The pinned asset matches the documented contract."
@@ -177,8 +227,9 @@ BUILD_LOG="${BUILD_DIR}/jmdict-build.log"
 echo "==> Building ${PREPARED_NAME} (log: ${BUILD_LOG})"
 rm -f "${RAW_DB}" "${ZST_PATH}"
 
-python3 "${REPO_ROOT}/scripts/jmdict_build.py" "${JSON_PATH}" "${RAW_DB}" "${ZST_PATH}" \
-  "${PROBE_LOG}" "${PIN_TAG}" "${PIN_SHA256}" "${PIN_ASSET}" 2>&1 | tee "${BUILD_LOG}"
+python3 "${REPO_ROOT}/scripts/jmdict_build.py" "${JSON_PATH}" "${NAME_JSON_PATH}" "${RAW_DB}" "${ZST_PATH}" \
+  "${PROBE_LOG}" "${PIN_TAG}" "${PIN_SHA256}" "${PIN_ASSET}" \
+  "${NAME_PIN_TAG}" "${NAME_PIN_SHA256}" "${NAME_PIN_ASSET}" 2>&1 | tee "${BUILD_LOG}"
 
 zstd -q -t "${ZST_PATH}"
 echo

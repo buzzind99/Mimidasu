@@ -15,6 +15,19 @@ enum JMDictPin {
     /// publishes on the release asset at build time.
     static let sourceSHA256 = "4bee23eb7bd088d0a9c48301d0d25964b8ac9ecd6465c91b40adf8191d4b040a"
 
+    /// Full upstream release tag of the pinned JMnedict names asset — never
+    /// the date alone. The names source is scriptin/jmdict-simplified while
+    /// the JMDict source above stays Bluskyo/JMDict_Extended; the two bump
+    /// independently.
+    static let nameReleaseTag = "3.6.2+20260914172325"
+
+    /// Upstream release asset the names pin points at.
+    static let nameSourceAssetFileName = "jmnedict-all-3.6.2+20260914172325.json.zip"
+
+    /// SHA-256 of the zipped names asset, cross-checked against the digest
+    /// GitHub publishes on the release asset at build time.
+    static let nameSourceSHA256 = "843470cd19284d6caea54e6027df1791402766bd90ba70d36dba0cd787aeaa2a"
+
     /// Artifact-family naming. The versioned filename below is derived from
     /// it, and the store's stale-artifact sweep keys on the prefix/extension
     /// rather than the versioned name, so a pin bump keeps matching.

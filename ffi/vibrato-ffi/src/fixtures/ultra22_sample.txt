@@ -1,0 +1,8 @@
+Mimidasu dictionary-prepare fixture.
+Compressed with `zstd --ultra -22` (plain, single-thread) — the invocation
+the bundled JMDict artifact ships with — so the ruzstd decoder must accept
+the level-22 frames the app decompresses on first launch.
+学生 がくせい student
+木村 きむら Kimura
+日本 にほん Japan
+辞書 じしょ dictionary

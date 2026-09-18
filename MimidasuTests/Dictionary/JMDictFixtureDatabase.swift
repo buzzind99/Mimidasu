@@ -7,8 +7,10 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// (`Fixtures/jmdict-extended-sample.json`) for offline lookup tests. The
 /// column mapping mirrors `scripts/build_jmdict.sh` exactly — JSON-encoded
 /// `skeb`/`sreb` restriction lists (`*` → NULL), `"; "`-joined glosses,
-/// `,`-joined POS, `", "`-joined misc — so the tests exercise the same data
-/// shapes the shipped database carries.
+/// `,`-joined POS, `", "`-joined misc — and the schema mirrors the build's
+/// WITHOUT ROWID tables (headwords keyed `(text, entry_id, kind)`, senses
+/// keyed `(entry_id, ord)`), so the tests exercise the same data shapes and
+/// row ordering the shipped database carries.
 ///
 /// Three synthetic entries are appended for coverage the real fixture lacks:
 /// `9990010` 仮語/かご — uncommon entry whose senses exercise the
@@ -34,7 +36,21 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// `9990090` 呂敷/ろしき — a hit for the substring of 風呂敷 that crosses
 /// the 風呂+敷 segment boundary, so the expansion suite can pin the
 /// joined-text split fallback (tap 風呂: the join 風呂敷 displays, the
-/// boundary-crossing 呂敷 split trails in "also").
+/// boundary-crossing 呂敷 split trails in "also");
+/// `9990110` カタ語/カタ語 — kanji and kana spellings coincide, each
+/// carrying different JLPT/pitch metadata, so the first-row-wins metadata
+/// pickup is pinned to the keb row ('keb' sorts before 'reb' under the
+/// WITHOUT ROWID primary key, whatever the insertion order was).
+///
+/// Two JMnedict-shaped name entries ride the offset ent_seq range the build
+/// maps `int(id) + 10_000_000` into (JMnedict ids 5668306/5668307 →
+/// 15668306/15668307): common=0, one flattened sense per entry, every name
+/// type joined into `pos` —
+/// `15668306` 木村/きむら — `place,surname` with the flattened gloss
+/// "Kimura" (the real 木村 shape);
+/// `15668307` 雨村/あめむら — `surname`, homograph of the common JMDict
+/// entry `9990100` 雨村/あめむら, so the pager ranking can pin a common
+/// entry leading while the name entry stays retained.
 enum JMDictFixtureDatabase {
     /// The built database plus the directory it owns — `remove()` deletes
     /// both (test suites call it from `deinit`).
@@ -76,9 +92,11 @@ enum JMDictFixtureDatabase {
         try exec(db, """
         CREATE TABLE entries(ent_seq INTEGER PRIMARY KEY, keb TEXT, reb TEXT, common INTEGER NOT NULL);
         CREATE TABLE senses(entry_id INTEGER NOT NULL REFERENCES entries(ent_seq),
-          ord INTEGER NOT NULL, pos TEXT, gloss TEXT NOT NULL, misc TEXT, skeb TEXT, sreb TEXT);
+          ord INTEGER NOT NULL, pos TEXT, gloss TEXT NOT NULL, misc TEXT, skeb TEXT, sreb TEXT,
+          PRIMARY KEY(entry_id, ord)) WITHOUT ROWID;
         CREATE TABLE headwords(entry_id INTEGER NOT NULL REFERENCES entries(ent_seq),
-          text TEXT NOT NULL, kind TEXT NOT NULL, jlpt INTEGER, hatsuon TEXT, acc TEXT, zo TEXT);
+          text TEXT NOT NULL, kind TEXT NOT NULL, jlpt INTEGER, hatsuon TEXT, acc TEXT, zo TEXT,
+          PRIMARY KEY(text, entry_id, kind)) WITHOUT ROWID;
         CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
         """)
         for word in fixture.words + syntheticWords {
@@ -144,6 +162,12 @@ enum JMDictFixtureDatabase {
         let hatsuon: String?
         let accPatts: String?
         let zoPatts: String?
+
+        init(hatsuon: String?, accPatts: String?, zoPatts: String?) {
+            self.hatsuon = hatsuon
+            self.accPatts = accPatts
+            self.zoPatts = zoPatts
+        }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.singleValueContainer()
@@ -308,6 +332,67 @@ private extension JMDictFixtureDatabase {
                     FixtureSense(
                         partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
                         gloss: [FixtureGloss(lang: "eng", text: "boundary-crossing split hit")]
+                    )
+                ]
+            ),
+            FixtureWord(
+                id: "9990100",
+                kanji: [FixtureKanji(text: "雨村", common: true, jlptLevel: nil, pitchAccent: nil)],
+                kana: [FixtureKana(
+                    text: "あめむら", common: true, appliesToKanji: ["*"], jlptLevel: nil,
+                    pitchAccent: nil
+                )],
+                sense: [
+                    FixtureSense(
+                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
+                        gloss: [FixtureGloss(lang: "eng", text: "village rain")]
+                    )
+                ]
+            ),
+            FixtureWord(
+                id: "9990110",
+                kanji: [FixtureKanji(
+                    text: "カタ語", common: false, jlptLevel: 2,
+                    pitchAccent: FixturePitch(hatsuon: "かた'ご", accPatts: "2", zoPatts: "HH")
+                )],
+                kana: [FixtureKana(
+                    text: "カタ語", common: false, appliesToKanji: ["*"], jlptLevel: nil,
+                    pitchAccent: FixturePitch(hatsuon: nil, accPatts: nil, zoPatts: "LL")
+                )],
+                sense: [
+                    FixtureSense(
+                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
+                        gloss: [FixtureGloss(lang: "eng", text: "coincident spelling")]
+                    )
+                ]
+            ),
+            FixtureWord(
+                id: "15668306",
+                kanji: [FixtureKanji(text: "木村", common: false, jlptLevel: nil, pitchAccent: nil)],
+                kana: [FixtureKana(
+                    text: "きむら", common: false, appliesToKanji: ["*"], jlptLevel: nil,
+                    pitchAccent: nil
+                )],
+                sense: [
+                    FixtureSense(
+                        partOfSpeech: ["place", "surname"], appliesToKanji: nil, appliesToKana: nil,
+                        misc: nil,
+                        gloss: [FixtureGloss(lang: "eng", text: "Kimura")]
+                    )
+                ]
+            ),
+            FixtureWord(
+                id: "15668307",
+                kanji: [FixtureKanji(text: "雨村", common: false, jlptLevel: nil, pitchAccent: nil)],
+                kana: [FixtureKana(
+                    text: "あめむら", common: false, appliesToKanji: ["*"], jlptLevel: nil,
+                    pitchAccent: nil
+                )],
+                sense: [
+                    FixtureSense(
+                        partOfSpeech: ["surname"], appliesToKanji: nil, appliesToKana: nil,
+                        misc: nil,
+                        gloss: [FixtureGloss(lang: "eng", text: "Amemura (surname)")]
                     )
                 ]
             )

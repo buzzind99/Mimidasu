@@ -575,3 +575,28 @@ fn prepare_dictionary_rejects_bad_zstd_without_partial_file() {
         .unwrap()
         .all(|entry| entry.unwrap().file_name() != "out.dic.part"));
 }
+
+#[test]
+fn prepare_dictionary_decodes_ultra_22_frame() {
+    // The bundled JMDict artifact compresses with `zstd --ultra -22`; this
+    // checked-in frame comes from that exact invocation, so ruzstd must keep
+    // decoding level-22 windows across decoder bumps (the live artifact is
+    // too big to commit — this small twin guards the same code path).
+    let dir = tempfile::tempdir().unwrap();
+    let zst = dir.path().join("ultra22_sample.txt.zst");
+    let out = dir.path().join("ultra22_sample.txt");
+    std::fs::write(&zst, include_bytes!("fixtures/ultra22_sample.txt.zst")).unwrap();
+
+    prepare_dictionary(&zst, &out).unwrap();
+
+    assert_eq!(
+        std::fs::read(&out).unwrap(),
+        include_bytes!("fixtures/ultra22_sample.txt")
+    );
+    // No partial artifact beside the output either.
+    assert!(dir
+        .path()
+        .read_dir()
+        .unwrap()
+        .all(|entry| entry.unwrap().file_name() != "ultra22_sample.txt.part"));
+}

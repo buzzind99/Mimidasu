@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Format probe for the pinned JMDict_Extended asset.
+"""Format probe for the pinned JMDict_Extended + JMnedict assets.
 
-Stream-parses the compiled JMDict_Extended JSON and hard-fails on any
-mismatch with the documented input contract — the tripwire against silent
-upstream format drift (run before every DB build; also usable standalone
-via `scripts/build_jmdict.sh --probe-only`).
+Stream-parses the compiled JMDict_Extended JSON and the JMnedict names JSON
+and hard-fails on any mismatch with the documented input contracts — the
+tripwire against silent upstream format drift (run before every DB build;
+also usable standalone via `scripts/build_jmdict.sh --probe-only`).
 
-Usage: jmdict_probe.py <json_path> <log_path>
+Usage: jmdict_probe.py <jmdict_json_path> <names_json_path> <log_path>
 Exit 0 = PASS, 1 = FAIL. Full report goes to <log_path>, compact summary
 to stdout.
 """
@@ -16,8 +16,24 @@ import re
 import sys
 from collections import Counter
 
+# JMnedict name-type vocabulary (entity tokens). Unknown values are format
+# drift and fail the probe.
+NAME_TYPES = {
+    "place", "surname", "unclass", "fem", "given", "person", "masc",
+    "station", "organization", "company", "work", "product", "char",
+    "serv", "fict", "ev", "group", "dei", "obj", "myth", "doc", "creat",
+    "ship", "leg", "relig",
+}
+# Ingest scope: keep an entry when at least one type is outside this set.
+NAME_SCOPE_EXCLUDED = {"unclass", "place"}
+# Measured reference counts for the pinned names asset; a names pin bump
+# must re-measure and update these.
+NAME_REF_ENTRIES = 403272
+NAME_REF_HEADWORDS = 790805
+NAME_REF_ID_MAX = 9_999_990
 
-def main(json_path, log_path):
+
+def main(json_path, names_json_path, log_path):
     errors = []
     def fail(msg):
         errors.append(msg)
@@ -368,6 +384,218 @@ def main(json_path, log_path):
         f"empty {applies_kana_empty})")
     out(f"glosses: {gloss_count}, langs: {dict(gloss_langs.most_common(10))}")
     out()
+
+    # --- JMnedict names section ----------------------------------------------
+    # Same tripwire job for the names asset. Layout differences from JMDict:
+    # header keys at column 0, and the LAST entry line carries the
+    # array-closing "]" glued on after the entry's "}" ("...}]"), followed by
+    # a final "}" line.
+    def probe_names(path):
+        try:
+            names_text = open(path, encoding="utf-8-sig")
+        except OSError as exc:
+            fail(f"names file unreadable: {exc}")
+            return 0, 0
+
+        out("=== JMnedict NAMES ===")
+
+        name_header = {}
+        name_line_no = 0
+        words_line = None
+        words_remainder = ""
+        for line in names_text:
+            name_line_no += 1
+            stripped = line.strip()
+            if stripped.startswith('"words"'):
+                words_line = name_line_no
+                words_remainder = stripped.split("[", 1)[1] if "[" in stripped else ""
+                break
+            m = re.match(r'"([A-Za-z]+)"\s*:\s*(.*?),?\s*$', stripped)
+            if m:
+                name_header[m.group(1)] = m.group(2)
+            elif stripped in ("{", "}"):
+                continue
+            else:
+                fail(f"names header line {name_line_no}: unrecognized layout: {stripped[:80]!r}")
+
+        require("version" in name_header, "names header missing required key 'version'")
+        require("dictDate" in name_header, "names header missing required key 'dictDate'")
+        require(words_line is not None, "names 'words': [ line not found")
+        out(f"version={name_header.get('version')} dictDate={name_header.get('dictDate')} "
+            f"keys={sorted(name_header)}")
+        if words_line is None:
+            return 0, 0
+
+        def name_chunks(fobj, first):
+            if first.strip():
+                yield first
+            for raw in fobj:
+                s = raw.strip()
+                if not s:
+                    continue
+                if s in ("}", "]"):
+                    return
+                if s.endswith("}]"):
+                    yield s[:-1]
+                    return
+                if s.endswith(","):
+                    s = s[:-1]
+                if s:
+                    yield s
+
+        entries_total = 0
+        kanji_objs = 0
+        kana_objs = 0
+        kept = 0
+        kept_headwords = 0
+        kept_id_max = 0
+        id_parse_failures = 0
+        id_range_failures = 0
+        no_kana = 0
+        common_true = 0
+        trans_missing_keys = Counter()
+        trans_empty = 0
+        typeless_trans = 0
+        gloss_missing_keys = Counter()
+        non_eng_glosses = 0
+        gloss_objs = 0
+        unknown_types = Counter()
+        type_domain = Counter()
+        spot_kimura = []
+
+        for stripped in name_chunks(names_text, words_remainder):
+            name_line_no += 1
+            if not stripped:
+                continue
+            if not (stripped.startswith("{") and stripped.endswith("}")):
+                fail(f"names line {name_line_no}: not a single entry object: {stripped[:80]!r}")
+                break
+            try:
+                w = json.loads(stripped)
+            except Exception as exc:
+                fail(f"names line {name_line_no}: entry JSON failed to parse: {exc}")
+                break
+
+            entries_total += 1
+            try:
+                nid = int(w["id"])
+            except (KeyError, ValueError, TypeError):
+                id_parse_failures += 1
+                nid = None
+            if nid is not None and not 5_000_000 <= nid <= 9_999_990:
+                id_range_failures += 1
+
+            kobjs = w.get("kanji") or []
+            robjs = w.get("kana") or []
+            kanji_objs += len(kobjs)
+            kana_objs += len(robjs)
+            if not robjs:
+                no_kana += 1
+            for obj in list(kobjs) + list(robjs):
+                if obj.get("common") is True:
+                    common_true += 1
+
+            types = []
+            for t in w.get("translation") or []:
+                if not isinstance(t, dict):
+                    fail(f"names entry {w.get('id')}: translation object is not a dict")
+                    continue
+                if "type" not in t:
+                    trans_missing_keys["type"] += 1
+                else:
+                    tt = t.get("type")
+                    if not isinstance(tt, list):
+                        fail(f"names entry {w.get('id')}: translation type is not a list: {tt!r}")
+                    else:
+                        # Empty type arrays exist upstream (5 entries); such
+                        # entries fall to the scope filter's skip side.
+                        if not tt:
+                            typeless_trans += 1
+                        for v in tt:
+                            if not isinstance(v, str):
+                                fail(f"names entry {w.get('id')}: non-string name type {v!r}")
+                                continue
+                            type_domain[v] += 1
+                            if v not in NAME_TYPES:
+                                unknown_types[v] += 1
+                            types.append(v)
+                if "translation" not in t:
+                    trans_missing_keys["translation"] += 1
+                else:
+                    gl = t.get("translation")
+                    if not isinstance(gl, list) or not gl:
+                        trans_empty += 1
+                    else:
+                        for g in gl:
+                            if not isinstance(g, dict):
+                                fail(f"names entry {w.get('id')}: gloss object is not a dict")
+                                continue
+                            gloss_objs += 1
+                            for key in ("lang", "text"):
+                                if key not in g:
+                                    gloss_missing_keys[key] += 1
+                            if g.get("lang") != "eng":
+                                non_eng_glosses += 1
+
+            if any(v not in NAME_SCOPE_EXCLUDED for v in types):
+                kept += 1
+                kept_headwords += len(kobjs) + len(robjs)
+                if nid is not None and nid > kept_id_max:
+                    kept_id_max = nid
+
+            if any(o.get("text") == "木村" for o in kobjs) and len(spot_kimura) < 4:
+                spot_kimura.append(w)
+
+        out(f"entries total: {entries_total} "
+            f"(kanji objs {kanji_objs}, kana objs {kana_objs}, gloss objs {gloss_objs})")
+        out(f"translation objects with empty type array: {typeless_trans} "
+            f"(upstream data; such entries fall to the scope filter's skip side)")
+        out(f"type occurrences over ALL entries: {dict(type_domain.most_common())}")
+        out(f"name entries: {kept}")
+        out(f"name headword rows (kanji+kana objects): {kept_headwords}")
+        out(f"name id max: {kept_id_max}")
+        out(f"name types: {','.join(sorted(type_domain))}")
+        out("-- spot: 木村 --")
+        for w in spot_kimura:
+            kebs = [o.get("text") for o in w.get("kanji") or []]
+            rebs = [o.get("text") for o in w.get("kana") or []]
+            tps = [t.get("type") for t in w.get("translation") or []]
+            gls = [g.get("text") for t in w.get("translation") or []
+                   for g in (t.get("translation") or [])]
+            out(f"  id={w.get('id')} keb={kebs} reb={rebs} types={tps} gloss={gls}")
+
+        if id_parse_failures:
+            fail(f"names: {id_parse_failures} ids failed to parse as int")
+        if id_range_failures:
+            fail(f"names: {id_range_failures} ids outside 5000000..9999990")
+        if no_kana:
+            fail(f"names: {no_kana} entries without any kana reading")
+        if common_true:
+            fail(f"names: {common_true} kanji/kana objects with common=true "
+                 f"(expected absent — ingest hardcodes common=0)")
+        if trans_missing_keys:
+            fail(f"names: translation objects missing keys: {dict(trans_missing_keys)}")
+        if trans_empty:
+            fail(f"names: {trans_empty} translation objects with empty/missing translation (gloss) array")
+        if gloss_missing_keys:
+            fail(f"names: glosses missing keys: {dict(gloss_missing_keys)}")
+        if non_eng_glosses:
+            fail(f"names: {non_eng_glosses} non-eng glosses (gloss join assumes eng-only)")
+        if unknown_types:
+            fail(f"names: unknown name types (extend NAME_TYPES): {dict(unknown_types)}")
+        if kept != NAME_REF_ENTRIES:
+            fail(f"names: kept entries {kept} != pinned-asset reference {NAME_REF_ENTRIES} "
+                 f"(re-measure the references on a names pin bump)")
+        if kept_headwords != NAME_REF_HEADWORDS:
+            fail(f"names: kept headword rows {kept_headwords} != pinned-asset reference "
+                 f"{NAME_REF_HEADWORDS} (re-measure the references on a names pin bump)")
+        if kept_id_max != NAME_REF_ID_MAX:
+            fail(f"names: kept id max {kept_id_max} != pinned-asset reference {NAME_REF_ID_MAX}")
+        return kept, kept_headwords
+
+    names_kept, names_headwords = probe_names(names_json_path)
+    out()
+
     if id_parse_failures:
         fail(f"{id_parse_failures} ids failed to parse as int")
     if word_key_missing:
@@ -406,11 +634,13 @@ def main(json_path, log_path):
               f"pitch: {pitch_entries/total:.1%}")
         print(f"    accPatts distinct: {len(acc_patts_domain)}  jlpt values: "
               f"{sorted(jlpt_domain, key=str)}  gloss langs: {list(gloss_langs)}")
+        print(f"    names: entries {names_kept}  headwords {names_headwords}")
         print("    PASS")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("usage: jmdict_probe.py <json_path> <log_path>", file=sys.stderr)
+    if len(sys.argv) != 4:
+        print("usage: jmdict_probe.py <jmdict_json_path> <names_json_path> <log_path>",
+              file=sys.stderr)
         sys.exit(2)
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1], sys.argv[2], sys.argv[3])

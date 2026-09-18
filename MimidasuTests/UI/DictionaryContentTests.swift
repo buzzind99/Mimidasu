@@ -67,6 +67,32 @@ struct DictionaryContentTests {
         #expect(DictionaryContent.posLabel("") == nil)
     }
 
+    @Test("JMnedict name types render friendly badges")
+    func nameTypeBadges() {
+        #expect(DictionaryContent.posLabel("surname") == "SURNAME")
+        #expect(DictionaryContent.posLabel("given") == "GIVEN NAME")
+        #expect(DictionaryContent.posLabel("fem") == "GIVEN NAME")
+        #expect(DictionaryContent.posLabel("masc") == "GIVEN NAME")
+        #expect(DictionaryContent.posLabel("person") == "NAME")
+        #expect(DictionaryContent.posLabel("place") == "PLACE NAME")
+        #expect(DictionaryContent.posLabel("organization") == "ORGANIZATION")
+        #expect(DictionaryContent.posLabel("company") == "COMPANY NAME")
+        #expect(DictionaryContent.posLabel("station") == "STATION")
+        #expect(DictionaryContent.posLabel("product") == "PRODUCT")
+        #expect(DictionaryContent.posLabel("work") == "WORK")
+        #expect(DictionaryContent.posLabel("unclass") == "NAME")
+    }
+
+    @Test("multi-type name senses take the first token; unknown types pass through verbatim")
+    func nameBadgeFirstTokenAndPassthrough() {
+        #expect(DictionaryContent.posLabel("place,surname") == "PLACE NAME")
+        #expect(DictionaryContent.posLabel("char,surname") == "char")
+        // The rare upstream types and JMDict POS tags never map.
+        #expect(DictionaryContent.posLabel("char") == "char")
+        #expect(DictionaryContent.posLabel("relig") == "relig")
+        #expect(DictionaryContent.posLabel("v1,vt") == "v1")
+    }
+
     // MARK: - Pitch pill
 
     @Test("clean hatsuon renders verbatim alongside the verbatim zoPatts")
