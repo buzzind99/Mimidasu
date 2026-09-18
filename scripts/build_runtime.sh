@@ -97,7 +97,7 @@ cp -f "${VENDOR_DIR}/include/crispasr.h" \
 echo "==> Staging into ${FRAMEWORKS_DIR}"
 strip_rpaths() {
   local f="$1" path
-  for path in $(otool -l "$f" | awk '/LC_RPATH/{getline; print $2}'); do
+  for path in $(otool -l "$f" | awk '/LC_RPATH/{getline; getline; print $2}'); do
     install_name_tool -delete_rpath "$path" "$f" 2>/dev/null || true
   done
   install_name_tool -add_rpath "@loader_path" "$f" 2>/dev/null || true
