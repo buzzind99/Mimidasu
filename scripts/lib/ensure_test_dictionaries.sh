@@ -22,7 +22,6 @@ PREPARED="build/prepared/dictionaries"
 PIN_SWIFT="Mimidasu/Dictionary/JMDictPin.swift"
 PIN_TAG=$(python3 -c 'import re, sys; print(re.search(r"releaseTag\s*=\s*\"([^\"]+)\"", open(sys.argv[1]).read()).group(1))' "$PIN_SWIFT")
 JMDICT_ZST="local/dictionaries/jmdict-${PIN_TAG}.sqlite.zst"
-JMDICT_SQLITE="local/dictionaries/jmdict-${PIN_TAG}.sqlite"
 
 if [[ ! -f "$DYLIB" || ! -f "$MODEL_ZST" ]]; then
   echo "  building dictionary runtime + model (scripts/build_dictionary.sh)"

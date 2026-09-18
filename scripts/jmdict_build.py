@@ -44,6 +44,7 @@ def open_word_stream(path):
         elif s in ("{", "}"):
             continue
         else:
+            f.close()
             print(f"ERROR: unrecognized header line in {path}: {s[:80]!r}", file=sys.stderr)
             sys.exit(1)
     return f, header, first
@@ -172,6 +173,7 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
         counts["senses"] += len(w.get("sense") or [])
         if len(entries_batch) >= BATCH:
             flush()
+    f.close()
 
     # --- JMnedict names — same tables, +10M ent_seq offset -----------------------
     # Names layout: one entry per line, every line comma-terminated except the
@@ -182,8 +184,20 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
     name_dict_date = name_header.get("dictDate", "?").strip('"')
 
     def name_chunks(fobj, first):
-        if first.strip():
-            yield first
+        # The first chunk (remainder after the '"words": [' line) gets the
+        # same trailing-comma / glued-']' treatment as every later line, so
+        # an upstream layout change cannot smuggle a raw chunk through.
+        s = first.strip()
+        if s:
+            if s in ("}", "]"):
+                return
+            if s.endswith("}]"):
+                yield s[:-1]
+                return
+            if s.endswith(","):
+                s = s[:-1]
+            if s:
+                yield s
         for raw in fobj:
             s = raw.strip()
             if not s:
@@ -210,21 +224,27 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
 
         # First-occurrence-deduped types across all translation[] objects; a
         # kept entry records every type (e.g. place,surname), never just the
-        # one that kept it.
-        types = []
-        glosses = []
-        seen = set()
-        for t in w.get("translation") or []:
-            for v in t.get("type") or []:
-                if v not in seen:
-                    seen.add(v)
-                    types.append(v)
-            for g in t.get("translation") or []:
-                glosses.append(g.get("text") or "")
-        if all(v in NAME_EXCLUDED_TYPES for v in types):
-            continue
+        # one that kept it. English glosses only, mirroring the JMDict path
+        # (the probe hard-fails on any non-eng gloss first).
+        try:
+            types = []
+            glosses = []
+            seen = set()
+            for t in w.get("translation") or []:
+                for v in t.get("type") or []:
+                    if v not in seen:
+                        seen.add(v)
+                        types.append(v)
+                for g in t.get("translation") or []:
+                    if g.get("lang") == "eng":
+                        glosses.append(g.get("text") or "")
+            if all(v in NAME_EXCLUDED_TYPES for v in types):
+                continue
 
-        ent_seq = int(w["id"]) + NAME_SEQ_OFFSET
+            ent_seq = int(w["id"]) + NAME_SEQ_OFFSET
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            fail(f"names entry has an unexpected shape: {exc}: {stripped[:120]!r}")
+            break
         kobjs = w.get("kanji") or []
         robjs = w.get("kana") or []
         # JMnedict has no common marking at all: names always rank below

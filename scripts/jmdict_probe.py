@@ -392,12 +392,15 @@ def main(json_path, names_json_path, log_path):
     # a final "}" line.
     def probe_names(path):
         try:
-            names_text = open(path, encoding="utf-8-sig")
+            with open(path, "rb") as raw:
+                names_has_bom = raw.read(3) == b"\xef\xbb\xbf"
+            names_text = open(path, encoding="utf-8-sig" if names_has_bom else "utf-8")
         except OSError as exc:
             fail(f"names file unreadable: {exc}")
             return 0, 0
 
         out("=== JMnedict NAMES ===")
+        out(f"names BOM: {'yes (UTF-8)' if names_has_bom else 'NO'}")
 
         name_header = {}
         name_line_no = 0
@@ -426,22 +429,38 @@ def main(json_path, names_json_path, log_path):
         if words_line is None:
             return 0, 0
 
-        def name_chunks(fobj, first):
-            if first.strip():
-                yield first
+        def name_chunks(fobj, first, start_line):
+            # Yields (line_no, chunk) so failure messages cite the real
+            # physical line: the first chunk rides the '"words": [' line
+            # itself, and blank lines the generator skips still count. The
+            # first chunk gets the same trailing-comma / glued-']' treatment
+            # as every later line, matching the build's tolerance.
+            line_no = start_line
+            s = first.strip()
+            if s:
+                if s in ("}", "]"):
+                    return
+                if s.endswith("}]"):
+                    yield line_no, s[:-1]
+                    return
+                if s.endswith(","):
+                    s = s[:-1]
+                if s:
+                    yield line_no, s
             for raw in fobj:
+                line_no += 1
                 s = raw.strip()
                 if not s:
                     continue
                 if s in ("}", "]"):
                     return
                 if s.endswith("}]"):
-                    yield s[:-1]
+                    yield line_no, s[:-1]
                     return
                 if s.endswith(","):
                     s = s[:-1]
                 if s:
-                    yield s
+                    yield line_no, s
 
         entries_total = 0
         kanji_objs = 0
@@ -463,17 +482,14 @@ def main(json_path, names_json_path, log_path):
         type_domain = Counter()
         spot_kimura = []
 
-        for stripped in name_chunks(names_text, words_remainder):
-            name_line_no += 1
-            if not stripped:
-                continue
+        for chunk_line, stripped in name_chunks(names_text, words_remainder, name_line_no):
             if not (stripped.startswith("{") and stripped.endswith("}")):
-                fail(f"names line {name_line_no}: not a single entry object: {stripped[:80]!r}")
+                fail(f"names line {chunk_line}: not a single entry object: {stripped[:80]!r}")
                 break
             try:
                 w = json.loads(stripped)
             except Exception as exc:
-                fail(f"names line {name_line_no}: entry JSON failed to parse: {exc}")
+                fail(f"names line {chunk_line}: entry JSON failed to parse: {exc}")
                 break
 
             entries_total += 1

@@ -23,7 +23,7 @@
 # Artifacts (gitignored, under local/ and build/):
 #   local/dictionaries/jmdictExtended-<date>.json.zip   pinned JMDict release asset
 #   local/dictionaries/jmdictExtended-<date>.json       unzipped JMDict input
-#   local/dictionaries/jmnedict-all-<date>.json.zip     pinned JMnedict (names) asset
+#   local/dictionaries/jmnedict-all-<version+ts>.json.zip  pinned JMnedict (names) asset
 #   local/dictionaries/jmnedict-all-<version>.json      unzipped names input
 #   local/dictionaries/jmdict-<tag>.sqlite.zst          bundled lookup DB
 #                                                       (package.sh -> Contents/Resources)
@@ -182,11 +182,18 @@ if [[ ! -f "${JSON_PATH}" ]]; then
   echo "==> Unzipping to ${JSON_PATH}"
   unzip -o -q "${ZIP_PATH}" -d "${DICT_DIR}"
 fi
+if [[ ! -f "${JSON_PATH}" ]]; then
+  echo "ERROR: expected JMDict member not produced by unzip: ${JSON_PATH}" >&2
+  echo "  (the release asset's inner file may have been renamed; check: unzip -l \"${ZIP_PATH}\")" >&2
+  exit 1
+fi
 
 # Names asset: download once, verify the digest on every run (same pattern).
+NAME_ZIP_FRESH=0
 if [[ ! -f "${NAME_ZIP_PATH}" ]]; then
   echo "==> Downloading ${NAME_PIN_URL}"
   curl -fL --retry 3 -o "${NAME_ZIP_PATH}" "${NAME_PIN_URL}"
+  NAME_ZIP_FRESH=1
 fi
 echo "==> Verifying names asset SHA-256"
 actual="$(shasum -a 256 "${NAME_ZIP_PATH}" | awk '{print $1}')"
@@ -198,9 +205,18 @@ if [[ "${actual}" != "${NAME_PIN_SHA256}" ]]; then
   exit 1
 fi
 
-if [[ ! -f "${NAME_JSON_PATH}" ]]; then
+# A freshly downloaded zip must (re-)extract: the unzipped name keys on the
+# version only, so a same-version re-cut at a new build timestamp would
+# otherwise keep feeding the stale JSON to a build that records the new pin.
+if [[ "${NAME_ZIP_FRESH}" == "1" || ! -f "${NAME_JSON_PATH}" ]]; then
   echo "==> Unzipping to ${NAME_JSON_PATH}"
+  rm -f "${NAME_JSON_PATH}"
   unzip -o -q "${NAME_ZIP_PATH}" -d "${DICT_DIR}"
+fi
+if [[ ! -f "${NAME_JSON_PATH}" ]]; then
+  echo "ERROR: expected names member not produced by unzip: ${NAME_JSON_PATH}" >&2
+  echo "  (the release asset's inner file may have been renamed; check: unzip -l \"${NAME_ZIP_PATH}\")" >&2
+  exit 1
 fi
 
 # Probe on every run that proceeds past the up-to-date skip — build mode
