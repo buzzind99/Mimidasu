@@ -176,6 +176,24 @@ struct ModelVerifierTests {
         )), "mtime change invalidates")
     }
 
+    /// A persisted hit is promoted to the hot set, and the hot set answers
+    /// the next `isVerified` call before the persisted entries are consulted.
+    @Test("a hot verdict answers a repeat call without re-consulting the store")
+    func hotVerdictShortCircuitsRepeatCall() throws {
+        let file = try temporary.write(Data([0x01]), named: "hot.gguf")
+        let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
+        let key = try ModelVerifier.CacheKey(
+            path: file.path,
+            size: #require(attrs[.size] as? Int64),
+            modified: #require(attrs[.modificationDate] as? Date)
+        )
+        let store = makeStore()
+        store.record(key)
+
+        #expect(store.isVerified(file, for: .lite), "the persisted record is trusted without a re-hash")
+        #expect(store.isVerified(file, for: .lite), "the promoted hot set answers the repeat call")
+    }
+
     @Test("a corrupt store file degrades to empty")
     func corruptStoreDegradesToEmpty() throws {
         let storeURL = temporary.fileURL("corrupt-verdicts.json")

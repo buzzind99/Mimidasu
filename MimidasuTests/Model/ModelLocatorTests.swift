@@ -187,6 +187,25 @@ struct ModelLocatorTests {
         #expect(resolved == nil)
     }
 
+    /// Skipping the bundled and dev candidates drives the default
+    /// verification gate against the real downloaded-model candidate: a
+    /// missing/uninstalled file fails the pinned-digest check, so only an
+    /// authentic installed model can win.
+    @Test("the default verification gate consults the real verifier")
+    func defaultIsVerifiedGateConsultsRealVerifier() {
+        let resolved = ModelLocator.resolve(
+            for: .full,
+            bundled: { _ in URL(fileURLWithPath: "/tmp/mimidasu-missing.gguf") },
+            dev: { _ in nil },
+            fileExists: { _ in true }
+        )
+
+        #expect(
+            resolved == nil || resolved == ModelLocator.downloadedURL(for: .full),
+            "only the real downloaded model can pass the default verification gate"
+        )
+    }
+
     @Test("the dev checkout points at the repo-relative models directory")
     func devCheckoutURLIsRepoRelative() {
         for choice in ASRModelChoice.allCases {

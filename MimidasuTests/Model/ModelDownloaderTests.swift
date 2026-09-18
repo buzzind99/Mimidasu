@@ -3,17 +3,17 @@ import Foundation
 import Synchronization
 import Testing
 
-/// Tests `ModelDownloader` state transitions by invoking the
-/// `URLSessionDownloadDelegate` callbacks directly (no network). `begin()`'s
-/// file arms run over injected transports — a temp destination plus a no-op
-/// or suspended task factory, so nothing touches the network or the real
-/// installed model. The live download path — the resume-data arm, a real
-/// transfer in flight, and the session/task wiring against HuggingFace —
-/// needs a real HuggingFace transfer and stays excluded. The
-/// `didFinishDownloadingTo` success path uses a clone of the repo's dev GGUF
-/// (digest matches the pin; skipped when absent) and moves it to an injected
-/// temporary destination. Verdict stores are injected too, so no test writes
-/// to the production `VerdictStore.shared` cache.
+/// Tests `ModelDownloader`'s start/cancel lifecycle over injected
+/// transports — a temp destination plus a no-op or suspended task factory,
+/// so nothing touches the network or the real installed model. The live
+/// download path — the resume-data arm, a real transfer in flight, and the
+/// session/task wiring against HuggingFace — needs a real HuggingFace
+/// transfer and stays excluded. The already-verified arms use a clone of
+/// the repo's dev GGUF or a recorded verdict (skipped via `.enabled(if:)`
+/// when the fixture is absent — see `ModelTestFixtures`). Delegate-callback
+/// behavior (progress, verification, completion) lives in
+/// `ModelDownloaderDelegateTests`. Verdict stores are injected, so no test
+/// writes to the production `VerdictStore.shared` cache.
 @MainActor
 @Suite("ModelDownloader")
 struct ModelDownloaderTests {
@@ -135,6 +135,64 @@ struct ModelDownloaderTests {
         #expect(downloader.state == .done(file))
     }
 
+    /// A recorded verdict lets `begin()` finish done for a file the pin
+    /// cannot match — the persisted store is trusted without a re-hash — so
+    /// the already-done short-circuit in `start()` runs offline.
+    @Test("start after done is a no-op via the persisted-verdict arm")
+    func startWhenAlreadyDoneIsNoOp() async throws {
+        let file = try temporary.write(Data([0x00]), named: "installed.gguf")
+        let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
+        let key = try ModelVerifier.CacheKey(
+            path: file.path,
+            size: #require(attrs[.size] as? Int64),
+            modified: #require(attrs[.modificationDate] as? Date)
+        )
+        let store = makeStore()
+        store.record(key)
+
+        let downloader = makeOfflineTransport(destination: file, verdictStore: store)
+        downloader.start()
+        #expect(
+            await pollUntil(timeout: 5) {
+                if case .done = downloader.state {
+                    return true
+                }
+                return false
+            },
+            "the recorded verdict finishes done without a re-hash"
+        )
+
+        let emissions = ObservedValuesRecorder(read: { downloader.state })
+        downloader.start()
+        await flushObservations()
+
+        #expect(emissions.values.isEmpty, "start() once .done must be a no-op")
+    }
+
+    /// Omitting the session factory exercises the production default: a real
+    /// `URLSession` wired to the downloader. The nil task keeps the transfer
+    /// from ever starting.
+    @Test("the default session factory runs begin() over a real session without a transfer")
+    func defaultSessionFactoryRunsBeginWithoutNetwork() async {
+        let downloader = ModelDownloader(
+            destination: temporary.fileURL("default-session.gguf"),
+            verdictStore: makeStore(),
+            makeTask: { _ in nil }
+        )
+
+        downloader.start()
+        #expect(
+            await pollUntil(timeout: 5) {
+                if case .downloading = downloader.state {
+                    return true
+                }
+                return false
+            },
+            "begin() runs over the production default session with a nil task"
+        )
+        #expect(downloader.state == .downloading(progress: 0, bytes: 0, total: nil))
+    }
+
     @Test("start removes an unverified file at the destination and creates the download task")
     func startRemovesUnverifiedDestination() async throws {
         let file = try temporary.write(Data([0x00, 0x01, 0x02]), named: ASRModelChoice.lite.ggufFileName)
@@ -210,80 +268,6 @@ struct ModelDownloaderTests {
 
     // MARK: - didWriteData
 
-    @Test("didWriteData publishes fractional progress for a known total")
-    func didWriteDataPublishesFractionalProgress() async throws {
-        let downloader = ModelDownloader()
-        let task = try makeDownloadTask()
-
-        downloader.urlSession(
-            .shared, downloadTask: task,
-            didWriteData: 250, totalBytesWritten: 250, totalBytesExpectedToWrite: 1000
-        )
-        #expect(
-            await pollUntil { downloader.state == .downloading(progress: 0.25, bytes: 250, total: 1000) }
-        )
-    }
-
-    @Test("didWriteData publishes zero progress and nil total for an unknown total")
-    func didWriteDataPublishesZeroProgressForUnknownTotal() async throws {
-        let downloader = ModelDownloader()
-        let task = try makeDownloadTask()
-
-        downloader.urlSession(
-            .shared, downloadTask: task,
-            didWriteData: 100, totalBytesWritten: 300, totalBytesExpectedToWrite: 0
-        )
-        #expect(
-            await pollUntil { downloader.state == .downloading(progress: 0, bytes: 300, total: nil) }
-        )
-    }
-
-    @Test("didWriteData throttles a sub-0.5% progress delta within the publish interval")
-    func didWriteDataThrottlesSmallDeltas() async throws {
-        let downloader = ModelDownloader()
-        let task = try makeDownloadTask()
-
-        // First callback always publishes (0.25 ≥ the delta threshold from
-        // the -1 seed); the second (0.251, +0.1%) is throttled.
-        downloader.urlSession(
-            .shared, downloadTask: task,
-            didWriteData: 250, totalBytesWritten: 250, totalBytesExpectedToWrite: 1000
-        )
-        downloader.urlSession(
-            .shared, downloadTask: task,
-            didWriteData: 1, totalBytesWritten: 251, totalBytesExpectedToWrite: 1000
-        )
-        #expect(
-            await pollUntil { downloader.state == .downloading(progress: 0.25, bytes: 250, total: 1000) }
-        )
-    }
-
-    @Test("didWriteData republishes after the publish interval despite a sub-threshold delta")
-    func didWriteDataRepublishesAfterPublishInterval() async throws {
-        let downloader = ModelDownloader()
-        let task = try makeDownloadTask()
-
-        downloader.urlSession(
-            .shared, downloadTask: task,
-            didWriteData: 250, totalBytesWritten: 250, totalBytesExpectedToWrite: 1000
-        )
-        #expect(
-            await pollUntil { downloader.state == .downloading(progress: 0.25, bytes: 250, total: 1000) },
-            "the first publish seeds the interval clock"
-        )
-
-        try await Task.sleep(for: .milliseconds(200))
-        // Same +0.1% delta as the throttle test, but past the 100 ms publish
-        // interval, so the time arm (not the delta arm) republishes.
-        downloader.urlSession(
-            .shared, downloadTask: task,
-            didWriteData: 1, totalBytesWritten: 251, totalBytesExpectedToWrite: 1000
-        )
-        #expect(
-            await pollUntil { downloader.state == .downloading(progress: 0.251, bytes: 251, total: 1000) }
-        )
-    }
-
     @Test("a restart republishes the remembered expected total")
     func restartRepublishesRememberedTotal() async throws {
         let downloader = makeOfflineTransport(
@@ -309,96 +293,7 @@ struct ModelDownloaderTests {
         )
     }
 
-    // MARK: - didFinishDownloadingTo
-
-    @Test("didFinishDownloadingTo fails on a digest mismatch and removes the temp file")
-    func didFinishDownloadingToDigestMismatch() async throws {
-        let downloader = ModelDownloader()
-        let tempFile = try temporary.write(Data([0x01, 0x02, 0x03]), named: "bad-digest.gguf")
-        let task = try makeDownloadTask()
-        let destination = ModelLocator.downloadedURL(for: .lite)
-        let destinationExisted = FileManager.default.fileExists(atPath: destination.path)
-        let mismatch = ModelVerifier.VerificationError(message: ModelVerifier.checksumMismatchMessage)
-
-        downloader.urlSession(.shared, downloadTask: task, didFinishDownloadingTo: tempFile)
-        #expect(
-            await pollUntil {
-                downloader.state == .failed(ModelDownloader.verificationFailureMessage(mismatch))
-            }
-        )
-        #expect(!FileManager.default.fileExists(atPath: tempFile.path), "temp file must be removed")
-        #expect(
-            FileManager.default.fileExists(atPath: destination.path) == destinationExisted,
-            "a failed verification must never touch the model destination"
-        )
-    }
-
-    @Test(
-        "didFinishDownloadingTo moves a digest-matching file into place and finishes",
-        .enabled(if: TestEnvironment.repoDevModelInstalled)
-    )
-    func didFinishDownloadingToDigestMatch() async throws {
-        let tempFile = try #require(try ModelTestFixtures.cloneRepoModel())
-        let destination = temporary.fileURL("installed.gguf")
-        let downloader = ModelDownloader(destination: destination, verdictStore: makeStore())
-        let task = try makeDownloadTask()
-
-        downloader.urlSession(.shared, downloadTask: task, didFinishDownloadingTo: tempFile)
-        #expect(
-            await pollUntil(timeout: 30) {
-                if case .done = downloader.state {
-                    return true
-                }
-                return false
-            },
-            "state should reach .done after verification and move"
-        )
-        #expect(downloader.state == .done(destination))
-        #expect(FileManager.default.fileExists(atPath: destination.path))
-        #expect(!FileManager.default.fileExists(atPath: tempFile.path), "temp file is consumed by the move")
-    }
-
-    // MARK: - didCompleteWithError
-
-    @Test("didCompleteWithError with a nil error stays idle")
-    func didCompleteWithErrorNilStaysIdle() async throws {
-        let downloader = ModelDownloader()
-        let task = try makeDownloadTask()
-
-        downloader.urlSession(.shared, task: task, didCompleteWithError: nil)
-        await flushObservations()
-
-        #expect(downloader.state == .idle, "success is handled by didFinishDownloadingTo")
-    }
-
-    @Test("didCompleteWithError with a cancelled error stays idle")
-    func didCompleteWithErrorCancelledStaysIdle() async throws {
-        let downloader = ModelDownloader()
-        let task = try makeDownloadTask()
-        let error = NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
-
-        downloader.urlSession(.shared, task: task, didCompleteWithError: error)
-        await flushObservations()
-
-        #expect(downloader.state == .idle, "cancel() already published the idle state")
-    }
-
-    @Test("didCompleteWithError with a failure publishes the failed message")
-    func didCompleteWithErrorPublishesFailure() async throws {
-        let downloader = ModelDownloader()
-        let task = try makeDownloadTask()
-        let error = NSError(
-            domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet,
-            userInfo: [NSLocalizedDescriptionKey: "offline"]
-        )
-
-        downloader.urlSession(.shared, task: task, didCompleteWithError: error)
-        #expect(
-            await pollUntil {
-                downloader.state == .failed(ModelDownloader.downloadFailureMessage(error))
-            }
-        )
-    }
+    // MARK: - default construction
 
     @Test("default construction derives the .lite destination from the default choice")
     func defaultConstruction() {
