@@ -70,12 +70,27 @@ stage_runtime() {
 
   # The CrispASR dylib set is self-contained (its dylibs resolve their own
   # @rpath dependencies via a @loader_path RPATH), so it bundles as a plain
-  # subdirectory of Contents/Frameworks.
-  cp -R "${REPO_ROOT}/local/frameworks/crispasr" "${fwdir}/crispasr"
-  # The upstream `crispasr` CLI is never exec'd by the app and links Homebrew
-  # dylibs (/opt/homebrew/…) that are not bundled — drop it so no shipped
-  # binary carries an absolute external dependency.
-  rm -f "${fwdir}/crispasr/crispasr"
+  # subdirectory of Contents/Frameworks — found at release time via the app's
+  # `@executable_path/../Frameworks/crispasr` rpath (project.yml). Ship only
+  # what the load commands name: the app dlopens `libcrispasr.dylib` and the
+  # set loads the `.0` ggml names — the dev prefix additionally carries
+  # versioned alias copies (`.1`, `.0.17.0`, `.0.8.30`, unversioned) and an
+  # unused `libwhisper.dylib`/CLI that would double the bundle for no benefit.
+  local crispasr_dir="${fwdir}/crispasr"
+  mkdir -p "${crispasr_dir}"
+  local shipped
+  for shipped in libcrispasr.dylib libggml.0.dylib libggml-base.0.dylib \
+    libggml-cpu.0.dylib libggml-metal.0.dylib libggml-blas.0.dylib \
+    firered-vad.gguf; do
+    if [[ ! -f "${REPO_ROOT}/local/frameworks/crispasr/${shipped}" ]]; then
+      echo "ERROR: ${shipped} missing from local/frameworks/crispasr. Run scripts/build_runtime.sh first." >&2
+      if [[ "${shipped}" == libggml-metal.0.dylib ]]; then
+        echo "       (--cpu runtime builds don't produce it — package with the default Metal build)" >&2
+      fi
+      exit 1
+    fi
+    cp -f "${REPO_ROOT}/local/frameworks/crispasr/${shipped}" "${crispasr_dir}/${shipped}"
+  done
 
   # Sign nested code with SIGN_IDENTITY. Everything under Contents/Frameworks
   # is a code location, so `codesign --deep`/App Store validation treats even
