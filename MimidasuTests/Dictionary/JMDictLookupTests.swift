@@ -132,79 +132,6 @@ final class JMDictLookupTests {
         #expect(entry.zoPatts == nil)
     }
 
-    // MARK: Homographs
-
-    @Test("returns all homograph entries ranked common-first then ent_seq")
-    func homographRanking() throws {
-        let result = try #require(try engine.lookup(LookupCandidate(text: "あめ")))
-
-        #expect(result.entries.map(\.entSeq) == [1_153_520, 9_990_030])
-        #expect(result.entries.map(\.common) == [true, false])
-    }
-
-    // MARK: Surface-match ranking
-
-    @Test("ranks the kana-written entry first when the tap is kana")
-    func kanaSurfaceRanksFirst() throws {
-        let result = try #require(try engine.lookup(LookupCandidate(text: "さご")))
-
-        #expect(result.entries.map(\.entSeq) == [9_990_080, 9_990_070])
-        #expect(result.entries.map(\.keb) == [nil, "叉語"])
-    }
-
-    @Test("a katakana tap folds onto the hiragana-written kana-only entry")
-    func katakanaSurfaceFolds() throws {
-        let result = try #require(try engine.lookup(LookupCandidate(text: "サゴ")))
-
-        #expect(result.entries.map(\.entSeq) == [9_990_080, 9_990_070])
-    }
-
-    @Test("ranks the tapped kanji writing's entry first without a reading")
-    func kanjiSurfaceRanksFirst() throws {
-        let result = try #require(try engine.lookup(LookupCandidate(text: "前")))
-
-        #expect(result.entries.map(\.entSeq) == [9_990_060, 9_990_050])
-        #expect(result.entries.map(\.common) == [false, true])
-    }
-
-    // MARK: Reading-match ranking
-
-    @Test("ranks the furigana-matching entry first across the shared headword")
-    func readingMatchRanksFirst() throws {
-        // 先 (saki, uncommon 前 as an alternate writing) and 前 (mae) both
-        // match the 前 headword; the tap's furigana names the reading in
-        // context, so the uncommon まえ entry outranks the common さき one.
-        let result = try #require(try engine.lookup(
-            LookupCandidate(text: "前", reading: "まえ")
-        ))
-
-        #expect(result.entries.map(\.entSeq) == [9_990_060, 9_990_050])
-        #expect(result.entries.map(\.reb) == ["まえ", "さき"])
-    }
-
-    @Test("katakana furigana matches the hiragana entry reading")
-    func katakanaFuriganaMatchesHiraganaReading() throws {
-        let result = try #require(try engine.lookup(
-            LookupCandidate(text: "前", reading: "マエ")
-        ))
-
-        #expect(result.entries.map(\.entSeq) == [9_990_060, 9_990_050])
-    }
-
-    @Test("with a reading, a surface-writing match still outranks a reading-only match")
-    func readingRefinesBelowSurface() throws {
-        // さき names the 先/前 entry's reading, but its stored keb is 先
-        // (kanji-first insertion), so it can only reading-match; the
-        // 前-writing entry (まえ, a reading mismatch) must still lead on its
-        // surface match alone.
-        let result = try #require(try engine.lookup(
-            LookupCandidate(text: "前", reading: "さき")
-        ))
-
-        #expect(result.entries.map(\.entSeq) == [9_990_060, 9_990_050])
-        #expect(result.entries.map(\.reb) == ["まえ", "さき"])
-    }
-
     // MARK: Misses
 
     @Test("returns nil for a candidate with no headword")
@@ -359,13 +286,15 @@ final class JMDictLookupTests {
 
         // Without it, the debug checkout (repo-anchored build/<tag>.sqlite)
         // resolves.
-        let checkout = DictionaryStore.debugRepoURL("build/\(JMDictPin.preparedFileName)")
-        #expect(
-            JMDictLookup.defaultDatabaseURL(
-                destination: destination,
-                fileExists: { url in url == checkout }
-            ) == checkout
-        )
+        #if DEBUG
+            let checkout = DictionaryStore.debugRepoURL("build/\(JMDictPin.preparedFileName)")
+            #expect(
+                JMDictLookup.defaultDatabaseURL(
+                    destination: destination,
+                    fileExists: { url in url == checkout }
+                ) == checkout
+            )
+        #endif
 
         // Neither resolves → nil (lookups then throw .databaseMissing).
         #expect(

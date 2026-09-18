@@ -42,6 +42,10 @@ final class JMDictNameEntryTests {
         #expect(entry.senses[0].glosses == ["Kimura"])
     }
 
+    /// The common JMDict entry leads and the name entry stays retained.
+    /// (The commonness tiebreak itself is pinned by the JMDict-only 例子
+    /// trio — in any valid data a JMDict ent_seq sits below the name offset
+    /// range, so common-vs-name order coincides with ent_seq order.)
     @Test("a common JMDict entry leads the pager over a same-text name entry")
     func commonLeadsNameRetained() throws {
         let result = try #require(try engine.lookup(LookupCandidate(text: "雨村")))

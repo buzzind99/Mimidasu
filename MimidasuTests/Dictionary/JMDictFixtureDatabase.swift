@@ -12,7 +12,7 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// keyed `(entry_id, ord)`), so the tests exercise the same data shapes and
 /// row ordering the shipped database carries.
 ///
-/// Three synthetic entries are appended for coverage the real fixture lacks:
+/// Fourteen synthetic entries are appended for coverage the real fixture lacks:
 /// `9990010` 仮語/かご — uncommon entry whose senses exercise the
 /// kanji-restriction rules (restricted to another writing, empty list =
 /// matches none, unrestricted);
@@ -37,10 +37,18 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// the 風呂+敷 segment boundary, so the expansion suite can pin the
 /// joined-text split fallback (tap 風呂: the join 風呂敷 displays, the
 /// boundary-crossing 呂敷 split trails in "also");
+/// `9990100` 雨村/あめむら — common, homograph of the JMnedict-shaped
+/// entry `15668307` below, so the pager ranking can pin a common entry
+/// leading while the name entry stays retained;
 /// `9990110` カタ語/カタ語 — kanji and kana spellings coincide, each
 /// carrying different JLPT/pitch metadata, so the first-row-wins metadata
 /// pickup is pinned to the keb row ('keb' sorts before 'reb' under the
-/// WITHOUT ROWID primary key, whatever the insertion order was).
+/// WITHOUT ROWID primary key, whatever the insertion order was);
+/// `9990120`–`9990140` 例子/れいし — a three-way homograph isolating the
+/// commonness and ent_seq tiebreaks: the common `9990130` carries the
+/// *highest* ent_seq, so common-first is observable only through the
+/// commonness tier, and the two uncommon entries pin ent_seq-ascending
+/// order within a tier (`9990120` < `9990140`).
 ///
 /// Two JMnedict-shaped name entries ride the offset ent_seq range the build
 /// maps `int(id) + 10_000_000` into (JMnedict ids 5668306/5668307 →
@@ -363,6 +371,48 @@ private extension JMDictFixtureDatabase {
                     FixtureSense(
                         partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
                         gloss: [FixtureGloss(lang: "eng", text: "coincident spelling")]
+                    )
+                ]
+            ),
+            FixtureWord(
+                id: "9990120",
+                kanji: [FixtureKanji(text: "例子", common: false, jlptLevel: nil, pitchAccent: nil)],
+                kana: [FixtureKana(
+                    text: "れいし", common: false, appliesToKanji: ["*"], jlptLevel: nil,
+                    pitchAccent: nil
+                )],
+                sense: [
+                    FixtureSense(
+                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
+                        gloss: [FixtureGloss(lang: "eng", text: "uncommon homograph, lower seq")]
+                    )
+                ]
+            ),
+            FixtureWord(
+                id: "9990130",
+                kanji: [FixtureKanji(text: "例子", common: true, jlptLevel: nil, pitchAccent: nil)],
+                kana: [FixtureKana(
+                    text: "れいし", common: true, appliesToKanji: ["*"], jlptLevel: nil,
+                    pitchAccent: nil
+                )],
+                sense: [
+                    FixtureSense(
+                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
+                        gloss: [FixtureGloss(lang: "eng", text: "common homograph, higher seq")]
+                    )
+                ]
+            ),
+            FixtureWord(
+                id: "9990140",
+                kanji: [FixtureKanji(text: "例子", common: false, jlptLevel: nil, pitchAccent: nil)],
+                kana: [FixtureKana(
+                    text: "れいし", common: false, appliesToKanji: ["*"], jlptLevel: nil,
+                    pitchAccent: nil
+                )],
+                sense: [
+                    FixtureSense(
+                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
+                        gloss: [FixtureGloss(lang: "eng", text: "uncommon homograph, higher seq")]
                     )
                 ]
             ),
