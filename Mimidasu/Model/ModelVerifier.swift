@@ -127,6 +127,14 @@ enum ModelVerifier {
             return true
         }
 
+        /// True only when the in-process hot set holds the key — the tier
+        /// consulted before the persisted entries. Test observability: the
+        /// hot set is otherwise indistinguishable from a persisted hit,
+        /// since both answer `isVerified` with `true`.
+        func hotContains(_ key: CacheKey) -> Bool {
+            state.withLock { state in state.hot.contains(key) }
+        }
+
         /// True when the store holds a verdict for exactly this key
         /// (path, size, and modification date all match).
         func contains(_ key: CacheKey) -> Bool {

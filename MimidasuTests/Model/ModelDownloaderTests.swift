@@ -9,8 +9,8 @@ import Testing
 /// download path — the resume-data arm, a real transfer in flight, and the
 /// session/task wiring against HuggingFace — needs a real HuggingFace
 /// transfer and stays excluded. The already-verified arms use a clone of
-/// the repo's dev GGUF or a recorded verdict (skipped via `.enabled(if:)`
-/// when the fixture is absent — see `ModelTestFixtures`). Delegate-callback
+/// the repo's dev GGUF (`.enabled(if:)`-gated — see `ModelTestFixtures`)
+/// or a recorded verdict. Delegate-callback
 /// behavior (progress, verification, completion) lives in
 /// `ModelDownloaderDelegateTests`. Verdict stores are injected, so no test
 /// writes to the production `VerdictStore.shared` cache.
@@ -191,6 +191,12 @@ struct ModelDownloaderTests {
             "begin() runs over the production default session with a nil task"
         )
         #expect(downloader.state == .downloading(progress: 0, bytes: 0, total: nil))
+
+        // The session strongly retains its delegate, and with a nil task
+        // no terminal state ever triggers `invalidateSession()` — cancel
+        // (which invalidates even without an in-flight task) breaks the
+        // cycle so the pair does not leak for the rest of the process.
+        downloader.cancel()
     }
 
     @Test("start removes an unverified file at the destination and creates the download task")

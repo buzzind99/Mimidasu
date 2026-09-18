@@ -189,9 +189,15 @@ struct ModelLocatorTests {
 
     /// Skipping the bundled and dev candidates drives the default
     /// verification gate against the real downloaded-model candidate: a
-    /// missing/uninstalled file fails the pinned-digest check, so only an
-    /// authentic installed model can win.
-    @Test("the default verification gate consults the real verifier")
+    /// missing/uninstalled file fails the pinned-digest check, so nothing
+    /// resolves. Machines with an authentic installed `.full` model skip —
+    /// there the downloaded arm legitimately wins.
+    @Test(
+        "the default verification gate consults the real verifier",
+        .enabled(if: !ModelVerifier.isVerified(
+            ModelLocator.downloadedURL(for: .full), for: .full, store: .sharedReadOnly
+        ))
+    )
     func defaultIsVerifiedGateConsultsRealVerifier() {
         let resolved = ModelLocator.resolve(
             for: .full,
@@ -200,10 +206,7 @@ struct ModelLocatorTests {
             fileExists: { _ in true }
         )
 
-        #expect(
-            resolved == nil || resolved == ModelLocator.downloadedURL(for: .full),
-            "only the real downloaded model can pass the default verification gate"
-        )
+        #expect(resolved == nil, "only an authentic model passes the default gate")
     }
 
     @Test("the dev checkout points at the repo-relative models directory")

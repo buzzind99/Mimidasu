@@ -191,6 +191,7 @@ struct ModelVerifierTests {
         store.record(key)
 
         #expect(store.isVerified(file, for: .lite), "the persisted record is trusted without a re-hash")
+        #expect(store.hotContains(key), "the persisted hit was promoted to the hot set")
         #expect(store.isVerified(file, for: .lite), "the promoted hot set answers the repeat call")
     }
 
