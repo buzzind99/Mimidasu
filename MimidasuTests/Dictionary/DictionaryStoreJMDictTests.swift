@@ -91,7 +91,13 @@ extension DictionaryStoreTests {
     func defaultJMDictPath() {
         let path = DictionaryStore.defaultJMDictURL.path
 
-        #expect(path.hasSuffix("Mimidasu/dictionaries/\(JMDictPin.preparedFileName)"))
+        #if DEBUG
+            // Debug checkouts prepare inside the repo; the user's home
+            // directory stays untouched.
+            #expect(path.hasSuffix("build/prepared/dictionaries/\(JMDictPin.preparedFileName)"))
+        #else
+            #expect(path.hasSuffix("Mimidasu/dictionaries/\(JMDictPin.preparedFileName)"))
+        #endif
     }
 
     // MARK: prepareJMDict (fake runtime)

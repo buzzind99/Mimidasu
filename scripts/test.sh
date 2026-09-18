@@ -22,6 +22,9 @@ for arg in "$@"; do
   if [[ "$arg" == "--fast" ]]; then FAST=1; else args+=("$arg"); fi
 done
 
+echo "==> dictionary artifacts"
+scripts/lib/ensure_test_dictionaries.sh
+
 t_start=$(python3 -c 'import time; print(time.time())')
 
 RESULT_BUNDLE="build/cov.xcresult"

@@ -19,10 +19,10 @@ final class JMDictLookup: Sendable {
     private let state: Mutex<State>
     private let resolveDatabase: @Sendable () -> URL?
 
-    /// Where the prepared JMDict database lives: the Application Support
-    /// location `DictionaryStore` promotes into, or — debug checkouts only —
-    /// the uncompressed intermediate `scripts/build_jmdict.sh` leaves in
-    /// `build/` before compressing.
+    /// Where the prepared JMDict database lives: the location `DictionaryStore`
+    /// promotes into (repo-local `build/prepared/` in debug checkouts,
+    /// Application Support in release), or — debug checkouts only — the
+    /// uncompressed intermediate `scripts/build_jmdict.sh` leaves in `build/`.
     static var defaultDatabaseURL: URL? {
         defaultDatabaseURL(
             destination: DictionaryStore.defaultDestinationDirectory,
@@ -40,7 +40,7 @@ final class JMDictLookup: Sendable {
             return prepared
         }
         #if DEBUG
-            let checkout = URL(fileURLWithPath: JMDictPin.debugCheckoutPath)
+            let checkout = DictionaryStore.debugRepoURL(JMDictPin.debugCheckoutPath)
             if fileExists(checkout) {
                 return checkout
             }

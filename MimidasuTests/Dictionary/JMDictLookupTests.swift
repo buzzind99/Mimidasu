@@ -357,8 +357,9 @@ final class JMDictLookupTests {
                 == prepared
         )
 
-        // Without it, the debug checkout (build/<tag>.sqlite) resolves.
-        let checkout = URL(fileURLWithPath: "build/\(JMDictPin.preparedFileName)")
+        // Without it, the debug checkout (repo-anchored build/<tag>.sqlite)
+        // resolves.
+        let checkout = DictionaryStore.debugRepoURL("build/\(JMDictPin.preparedFileName)")
         #expect(
             JMDictLookup.defaultDatabaseURL(
                 destination: destination,

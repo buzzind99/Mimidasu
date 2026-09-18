@@ -44,9 +44,34 @@ final class DictionaryStore: Sendable {
 
     static let dictionaryFileName = "ipadic.dic"
 
+    #if DEBUG
+        /// Anchors the scripts' checkout-relative artifacts (`local/`,
+        /// `build/`, `models/`) to the repo root. The process working
+        /// directory is not the checkout under `xcodebuild test`, so plain
+        /// CWD-relative fallbacks silently miss there; `#filePath` is the
+        /// compiled source path, which for a debug checkout lives inside the
+        /// repo. Release never consults this — it sees app-bundle paths only.
+        private static let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // Dictionary/
+            .deletingLastPathComponent() // Mimidasu/
+            .deletingLastPathComponent() // checkout root
+
+        static func debugRepoURL(_ checkoutRelativePath: String) -> URL {
+            repoRoot.appendingPathComponent(checkoutRelativePath)
+        }
+    #endif
+
+    /// Where prepared artifacts land. Debug checkouts keep everything inside
+    /// the repo's gitignored `build/` — tests and dev runs never write to the
+    /// user's home directory; release builds use the per-user Application
+    /// Support location.
     static var defaultDestinationDirectory: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("Mimidasu/dictionaries", isDirectory: true)
+        #if DEBUG
+            debugRepoURL("build/prepared/dictionaries")
+        #else
+            let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            return base.appendingPathComponent("Mimidasu/dictionaries", isDirectory: true)
+        #endif
     }
 
     static var defaultDictionaryURL: URL {
@@ -63,8 +88,9 @@ final class DictionaryStore: Sendable {
 
     /// The bundled compressed tokenizer dictionary. Release builds look in
     /// the app bundle only; debug checkouts fall back to the copy fetched by
-    /// `scripts/build_dictionary.sh` (Xcode runs with the checkout as working
-    /// directory) so first-launch can be exercised before bundling lands.
+    /// `scripts/build_dictionary.sh` under `local/dictionaries/` (anchored to
+    /// the checkout root) so first-launch can be exercised before bundling
+    /// lands.
     static var defaultBundledSource: URL? {
         bundledOrDebug(
             resource: "system", ext: "dic.zst",
@@ -83,7 +109,8 @@ final class DictionaryStore: Sendable {
 
     /// Bundled-resource lookup with the shared debug-checkout fallback:
     /// release builds see the app bundle only, debug checkouts fall back to
-    /// the copy the build scripts leave under `local/dictionaries/`.
+    /// the copy the build scripts leave under `local/dictionaries/`, anchored
+    /// to the checkout root (see `repoRoot`).
     private static func bundledOrDebug(
         resource: String, ext: String, debugPath: String
     ) -> URL? {
@@ -91,7 +118,7 @@ final class DictionaryStore: Sendable {
             return bundled
         }
         #if DEBUG
-            return URL(fileURLWithPath: debugPath)
+            return debugRepoURL(debugPath)
         #else
             return nil
         #endif
@@ -151,7 +178,7 @@ final class DictionaryStore: Sendable {
         #endif
         candidates.append(defaultURL)
         #if DEBUG
-            candidates.append(URL(fileURLWithPath: debugCheckoutPath))
+            candidates.append(debugRepoURL(debugCheckoutPath))
         #endif
         return candidates.first(where: fileExists)
     }

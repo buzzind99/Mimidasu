@@ -337,7 +337,13 @@ final class DictionaryStoreTests {
     func defaultDictionaryPath() {
         let path = DictionaryStore.defaultDictionaryURL.path
 
-        #expect(path.hasSuffix("Mimidasu/dictionaries/ipadic.dic"))
+        #if DEBUG
+            // Debug checkouts prepare inside the repo; the user's home
+            // directory stays untouched.
+            #expect(path.hasSuffix("build/prepared/dictionaries/ipadic.dic"))
+        #else
+            #expect(path.hasSuffix("Mimidasu/dictionaries/ipadic.dic"))
+        #endif
     }
 
     #if DEBUG
