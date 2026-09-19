@@ -9,7 +9,7 @@
 # back to ad-hoc signing otherwise, like scripts/bootstrap.sh. When the
 # SIGN_IDENTITY override names a "Developer ID Application" certificate, all
 # code is hardened-runtime signed with a trusted timestamp — the notarizable
-# shape used by scripts/release.sh.
+# shape used by scripts/notarize.sh.
 # Launch locally after "Open Anyway" / xattr -cr.
 # Usage: scripts/package.sh
 
@@ -79,7 +79,7 @@ stage_readme() {
   local launch_notes
   if [[ "${SIGN_IDENTITY}" == "Developer ID Application:"* ]]; then
     launch_notes='This app is signed with a Developer ID certificate and notarized
-(distributed via scripts/release.sh). Just double-click Mimidasu.app to
+(distributed via scripts/notarize.sh). Just double-click Mimidasu.app to
 install — no security workarounds needed.'
   else
     launch_notes='This app is signed with a self-signed local certificate ("Mimidasu Dev").
@@ -93,13 +93,17 @@ Mimidasu — real-time system audio transcriber/translator
 
 ${launch_notes}
 
-Compatibility: Apple Silicon, macOS 15+.
+Compatibility: Apple Silicon, macOS 15.5+.
 First run: grant System Audio Recording access (system audio
 capture via a Core Audio process tap); one-time
 translation language-pack download prompt.
 
 $(cat "${REPO_ROOT}/THIRD_PARTY_NOTICES.md" 2>/dev/null || true)
 EOF
+  # Append the AGPL text after the heredoc so shell expansion can't touch
+  # the license text.
+  printf '\n' >> "/tmp/mimidasu-launch-notes.txt"
+  cat "${REPO_ROOT}/LICENSE.md" >> "/tmp/mimidasu-launch-notes.txt"
   mkdir -p "${app}/Contents/Resources"
   cp "/tmp/mimidasu-launch-notes.txt" "${app}/Contents/Resources/README.txt"
 }
@@ -120,6 +124,7 @@ make_dmg() {
 # --- app ---
 build_app Mimidasu Release "${BUILD_DIR}/Mimidasu.app"
 stage_runtime "${BUILD_DIR}/Mimidasu.app"
+stage_notices "${BUILD_DIR}/Mimidasu.app" LICENSE.md
 stage_readme "${BUILD_DIR}/Mimidasu.app"
 sign_app "${BUILD_DIR}/Mimidasu.app"
 make_dmg "${BUILD_DIR}/Mimidasu.app" "Mimidasu"

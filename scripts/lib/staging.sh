@@ -23,16 +23,16 @@ jmdict_pin_tag() {
 require_runtime_artifacts() {
   local ok=1 tag
   if [[ ! -f "${REPO_ROOT}/local/frameworks/libdictionary.dylib" ]]; then
-    echo "ERROR: dictionary runtime not built. Run scripts/build_dictionary.sh first." >&2
+    echo "ERROR: dictionary runtime not built. Run scripts/build_tokenizer.sh first." >&2
     ok=0
   fi
   if [[ ! -f "${REPO_ROOT}/local/dictionaries/ipadic-mecab-2_7_0/system.dic.zst" ]]; then
-    echo "ERROR: system.dic.zst not fetched. Run scripts/build_dictionary.sh first." >&2
+    echo "ERROR: system.dic.zst not fetched. Run scripts/build_tokenizer.sh first." >&2
     ok=0
   fi
   tag="$(jmdict_pin_tag)"
   if [[ -z "${tag}" || ! -f "${REPO_ROOT}/local/dictionaries/jmdict-${tag}.sqlite.zst" ]]; then
-    echo "ERROR: jmdict-${tag:-<tag>}.sqlite.zst not built. Run scripts/build_jmdict.sh first." >&2
+    echo "ERROR: jmdict-${tag:-<tag>}.sqlite.zst not built. Run scripts/build_dictionary.sh first." >&2
     ok=0
   fi
   if [[ ! -d "${REPO_ROOT}/local/frameworks/crispasr" ]]; then
@@ -62,7 +62,7 @@ stage_runtime() {
   cp -f "${REPO_ROOT}/local/dictionaries/ipadic-mecab-2_7_0/system.dic.zst" "${resdir}/system.dic.zst"
 
   # JMDict lookup DB — versioned by pin tag (Mimidasu/Dictionary/JMDictPin.swift,
-  # produced by scripts/build_jmdict.sh). The versioned filename is the
+  # produced by scripts/build_dictionary.sh). The versioned filename is the
   # staleness key: a new pin ships a new file; the stale one is inert.
   local jmdict_tag
   jmdict_tag="$(jmdict_pin_tag)"
@@ -104,10 +104,13 @@ stage_runtime() {
   done < <(find "${fwdir}/crispasr" -type f \( -name "*.dylib" -o -name "*.gguf" \) -print0)
 }
 
-# Ship the third-party license notices next to the bundled data.
+# Ship the third-party license notices next to the bundled data, plus the
+# license governing this channel: DMG builds ship AGPL (LICENSE.md), App
+# Store builds ship the Apple Standard EULA notice (LICENSE-MAS.md).
 stage_notices() {
-  local app="$1"
+  local app="$1" license="$2"
   local resdir="${app}/Contents/Resources"
   mkdir -p "${resdir}"
   cp -f "${REPO_ROOT}/THIRD_PARTY_NOTICES.md" "${resdir}/THIRD_PARTY_NOTICES.txt"
+  cp -f "${REPO_ROOT}/${license}" "${resdir}/${license%.md}.txt"
 }

@@ -125,7 +125,7 @@ SIGN_IDENTITY="${MAS_IDENTITY}"
 CS_HARDEN=(--timestamp)
 echo "==> Staging runtime"
 stage_runtime "${APP}"
-stage_notices "${APP}"
+stage_notices "${APP}" LICENSE-MAS.md
 
 # The embedded profile authorizes the sandbox entitlements at launch; it must
 # be in place before the outer bundle is sealed.
