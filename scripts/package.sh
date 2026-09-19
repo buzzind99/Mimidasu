@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # Package release DMG:
-#   build/pkg/Mimidasu.dmg   (~35–40 MB; IPADIC model + JMDict lookup DB bundled,
-#                        ASR model downloaded on first launch)
+#   build/pkg/Mimidasu-<version>.dmg   (~35–40 MB; IPADIC model + JMDict lookup
+#                        DB bundled, ASR model downloaded on first launch)
 #
 # Signed with the local self-signed "Mimidasu Dev" certificate (when present) so
 # TCC permission grants (Screen Recording) persist across rebuilds; falls
@@ -12,6 +12,14 @@
 # shape used by scripts/notarize.sh.
 # Launch locally after "Open Anyway" / xattr -cr.
 # Usage: scripts/package.sh
+#
+# Overrides:
+#   APP_VERSION     version in the DMG filename (default: MARKETING_VERSION
+#                   parsed from project.yml — when not overridden, the same
+#                   value the app's Info.plist resolves, so name and bundle
+#                   stay in sync)
+#   BUILD_NUMBER    CFBundleVersion baked into the build (default: commit
+#                   count; falls back to "1" outside a git repo)
 
 set -euo pipefail
 
@@ -37,19 +45,42 @@ if [[ "${SIGN_IDENTITY}" == "Developer ID Application:"* ]]; then
   echo "==> Developer ID identity — signing hardened (--options runtime --timestamp)" >&2
 fi
 
+# DMG name carries the marketing version; hard-fail rather than ship a
+# mislabeled artifact when project.yml cannot be parsed.
+APP_VERSION="${APP_VERSION:-$(sed -n 's/^ *MARKETING_VERSION: *"\([^"]*\)".*/\1/p' "${REPO_ROOT}/project.yml" | head -1 || true)}"
+if [[ -z "${APP_VERSION}" ]]; then
+  echo "ERROR: could not read MARKETING_VERSION from project.yml (or override with APP_VERSION)" >&2
+  exit 1
+fi
+DMG_NAME="Mimidasu-${APP_VERSION}"
+echo "==> Version ${APP_VERSION} (DMG: ${DMG_NAME}.dmg)" >&2
+
+# Commit count keeps CFBundleVersion increasing without a state file; "1"
+# outside a git repo (package_mas.sh falls back to a timestamp instead).
+BUILD_NUMBER="${BUILD_NUMBER:-$(git -C "${REPO_ROOT}" rev-list --count HEAD 2>/dev/null || echo 1)}"
+
 source "${REPO_ROOT}/scripts/lib/staging.sh"
 
 cd "${REPO_ROOT}"
 
 command -v xcodegen >/dev/null || { echo "xcodegen required (brew install xcodegen)"; exit 1; }
+# Dev hygiene, not a packaging gate (the build below passes its own
+# CURRENT_PROJECT_VERSION): a pre-commit-count xcconfig leaves bare Xcode
+# builds with a blank CFBundleVersion until bootstrap rewrites it.
+if ! grep -qs '^ *CURRENT_PROJECT_VERSION' "${REPO_ROOT}/local/signing.xcconfig"; then
+  echo "WARNING: local/signing.xcconfig does not set CURRENT_PROJECT_VERSION —" >&2
+  echo "  dev builds get a blank CFBundleVersion. Re-run: scripts/bootstrap.sh --skip-generate" >&2
+fi
 xcodegen generate
 
 build_app() {
   local scheme="$1" config="$2" out="$3"
-  echo "==> Building ${scheme} (${config})"
+  echo "==> Building ${scheme} (${config}, build ${BUILD_NUMBER})"
   xcodebuild -project Mimidasu.xcodeproj -scheme "${scheme}" \
     -configuration "${config}" -destination "generic/platform=macOS" \
-    -derivedDataPath "${BUILD_DIR}/derived" build
+    -derivedDataPath "${BUILD_DIR}/derived" \
+    CURRENT_PROJECT_VERSION="${BUILD_NUMBER}" \
+    build
   local built
   built="$(find "${BUILD_DIR}/derived/Build/Products/${config}" -maxdepth 1 -name '*.app' | head -1)"
   rm -rf "${out}"
@@ -127,7 +158,7 @@ stage_runtime "${BUILD_DIR}/Mimidasu.app"
 stage_notices "${BUILD_DIR}/Mimidasu.app" LICENSE.md
 stage_readme "${BUILD_DIR}/Mimidasu.app"
 sign_app "${BUILD_DIR}/Mimidasu.app"
-make_dmg "${BUILD_DIR}/Mimidasu.app" "Mimidasu"
+make_dmg "${BUILD_DIR}/Mimidasu.app" "${DMG_NAME}"
 
 echo
 echo "Artifacts in ${BUILD_DIR}:"

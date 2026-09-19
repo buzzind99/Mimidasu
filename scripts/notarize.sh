@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Release DMG: package + notarize → build/pkg/Mimidasu.dmg
+# Release DMG: package + notarize → build/pkg/Mimidasu-<version>.dmg
 #
 #   scripts/notarize.sh
 #
@@ -23,12 +23,22 @@
 #   SIGN_IDENTITY   verbatim identity (must be a Developer ID Application cert)
 #   NOTARY_PROFILE  keychain profile name (default: mimidasu-notary; falls back
 #                   to the legacy "mimi-notary" profile when the default is absent)
-#   SKIP_PACKAGE=1  reuse the existing build/pkg/Mimidasu.dmg
+#   APP_VERSION     version in the DMG filename (default: MARKETING_VERSION
+#                   parsed from project.yml — forwarded to scripts/package.sh)
+#   SKIP_PACKAGE=1  reuse the existing build/pkg/Mimidasu-<version>.dmg
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DMG="${REPO_ROOT}/build/pkg/Mimidasu.dmg"
+# package.sh names the DMG after the marketing version; resolve the same value
+# here (and forward it) so SKIP_PACKAGE=1 finds the artifact package.sh made.
+APP_VERSION="${APP_VERSION:-$(sed -n 's/^ *MARKETING_VERSION: *"\([^"]*\)".*/\1/p' "${REPO_ROOT}/project.yml" | head -1 || true)}"
+if [[ -z "${APP_VERSION}" ]]; then
+  echo "ERROR: could not read MARKETING_VERSION from project.yml (or override with APP_VERSION)" >&2
+  exit 1
+fi
+export APP_VERSION
+DMG="${REPO_ROOT}/build/pkg/Mimidasu-${APP_VERSION}.dmg"
 # The Mimi → Mimidasu rename changed the default profile name; a pre-rename
 # "mimi-notary" profile still works, so fall back to it when the new default
 # is absent (mirrors the legacy "Mimidasu Dev" signing fallback in bootstrap.sh).

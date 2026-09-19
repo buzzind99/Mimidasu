@@ -13,8 +13,11 @@ settings:
     CODE_SIGN_STYLE: Manual
     DEVELOPMENT_TEAM: ""
     GENERATE_INFOPLIST_FILE: YES
-    CURRENT_PROJECT_VERSION: 1
-    MARKETING_VERSION: "1.0"
+    # CURRENT_PROJECT_VERSION lives in local/signing.xcconfig (commit count,
+    # written by scripts/bootstrap.sh): an explicit project-level setting here
+    # would take precedence over the xcconfig. Packaging scripts pass their own
+    # value on the xcodebuild command line.
+    MARKETING_VERSION: "1.0.0"
     ARCHS: arm64
 
 # Signing identity comes from local/signing.xcconfig (gitignored), written by

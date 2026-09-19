@@ -23,7 +23,7 @@
 # Overrides:
 #   MAS_IDENTITY   verbatim "Apple Distribution: …" identity
 #   MAS_PROFILE    path to the .provisionprofile
-#   BUILD_NUMBER   CFBundleVersion for this upload (default: UTC timestamp)
+#   BUILD_NUMBER   CFBundleVersion for this upload (default: commit count)
 #   SKIP_PKG=1     stop after the signed .app
 
 set -euo pipefail
@@ -36,9 +36,13 @@ BUNDLE_ID="mimidasu.app"
 ENTITLEMENTS="${REPO_ROOT}/Config/Mimidasu.entitlements"
 MAS_PROFILE="${MAS_PROFILE:-${REPO_ROOT}/local/profiles/Mimidasu_AppStore.provisionprofile}"
 
-# App Store Connect rejects re-uploads of the same CFBundleVersion, so default
-# to a UTC timestamp and let the caller pin an explicit number.
-BUILD_NUMBER="${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M)}"
+# App Store Connect rejects re-uploads of the same CFBundleVersion and wants
+# increasing integers; the commit count is monotonic without a state file
+# (UTC-timestamp fallback outside a git repo). Uploads before 2026-09 used a
+# timestamp default: if any of those reached App Store Connect, pin an
+# explicit BUILD_NUMBER greater than the old value until the count catches
+# up. History rewrites regress the count too — pin one after those.
+BUILD_NUMBER="${BUILD_NUMBER:-$(git -C "${REPO_ROOT}" rev-list --count HEAD 2>/dev/null || date -u +%Y%m%d%H%M)}"
 
 source "${REPO_ROOT}/scripts/lib/staging.sh"
 
