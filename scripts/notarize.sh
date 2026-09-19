@@ -91,27 +91,56 @@ fi
 fetch_notary_log() {
   # Pull the per-file violation report for a failed submission, so the
   # reason ("invalid signature", "hardened runtime missing", …) is visible.
-  local id
-  id="$(printf '%s' "$1" | grep -o '"id" *: *"[^"]*"' | head -1 | sed 's/.*"id" *: *"//;s/"$//' || true)"
+  local id="$1"
   if [[ -n "${id}" ]]; then
     echo "==> Fetching notary log ${id}" >&2
     xcrun notarytool log "${id}" --keychain-profile "${NOTARY_PROFILE}" >&2 || true
   fi
 }
 
-# 4. Submit and wait for the verdict (minutes; progress streams on stderr).
+poll_notary_status() {
+  # {"status": "..."} from the submission-info call; empty when the poll
+  # itself failed (transient network hiccups happen — callers retry).
+  xcrun notarytool info "$1" --keychain-profile "${NOTARY_PROFILE}" \
+    --output-format json 2>/dev/null \
+    | grep -o '"status" *: *"[^"]*"' | head -1 \
+    | sed 's/.*"status" *: *"//;s/"$//' || true
+}
+
+# 4. Submit, then poll for the verdict. notarytool --wait is fully silent
+#    while Apple processes (often 5–30 minutes), so submit for an id up
+#    front and poll the status with visible elapsed-time progress.
 echo "==> Notarizing ${DMG}"
+echo "==> Uploading to Apple (no output until the upload finishes)"
 submit_json=""
 if ! submit_json="$(xcrun notarytool submit "${DMG}" \
-    --keychain-profile "${NOTARY_PROFILE}" --wait --output-format json)"; then
+    --keychain-profile "${NOTARY_PROFILE}" --output-format json)"; then
   echo "ERROR: notarization submission failed." >&2
-  fetch_notary_log "${submit_json}"
+  printf '  %s\n' "${submit_json}" >&2
   exit 1
 fi
-if ! printf '%s' "${submit_json}" | grep -q '"status" *: *"Accepted"'; then
-  echo "ERROR: notarization was not accepted:" >&2
+SUBMISSION_ID="$(printf '%s' "${submit_json}" | grep -o '"id" *: *"[^"]*"' | head -1 | sed 's/.*"id" *: *"//;s/"$//' || true)"
+if [[ -z "${SUBMISSION_ID}" ]]; then
+  echo "ERROR: notarytool returned no submission id:" >&2
   printf '  %s\n' "${submit_json}" >&2
-  fetch_notary_log "${submit_json}"
+  exit 1
+fi
+echo "==> Submission ${SUBMISSION_ID} — waiting for Apple (polling every 30s)"
+STATUS=""
+WAIT_SECONDS=0
+while :; do
+  STATUS="$(poll_notary_status "${SUBMISSION_ID}")"
+  case "${STATUS}" in
+    Accepted | Rejected | Invalid) break ;;
+    "") printf '  (status poll failed, retrying)\n' >&2 ;;
+  esac
+  sleep 30
+  WAIT_SECONDS=$((WAIT_SECONDS + 30))
+  printf '  in progress (%dm%02ds elapsed)\n' $((WAIT_SECONDS / 60)) $((WAIT_SECONDS % 60)) >&2
+done
+if [[ "${STATUS}" != "Accepted" ]]; then
+  echo "ERROR: notarization was not accepted (status: ${STATUS:-unknown})." >&2
+  fetch_notary_log "${SUBMISSION_ID}"
   exit 1
 fi
 
