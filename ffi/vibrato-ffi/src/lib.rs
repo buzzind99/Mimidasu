@@ -4,7 +4,7 @@
 //! behind five generic `dictionary_*` exports. This crate owns the entire FFI
 //! surface, so the vendored engine is never patched upstream. The staged
 //! artifact is `local/frameworks/libdictionary.dylib`, built and signed by
-//! `scripts/build_dictionary.sh`.
+//! `scripts/build_tokenizer.sh`.
 //!
 //! # Contract
 //!

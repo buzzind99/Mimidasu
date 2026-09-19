@@ -7,8 +7,8 @@
 # the gitignored build/ tree):
 #
 #   1. local/ runtime artifacts: builds whatever is missing via
-#      build_dictionary.sh (libdictionary.dylib + tokenizer model) and
-#      build_jmdict.sh (pinned JMDict database).
+#      build_tokenizer.sh (libdictionary.dylib + tokenizer model) and
+#      build_dictionary.sh (pinned JMDict database).
 #   2. build/prepared/dictionaries: seeds the prepared artifacts debug
 #      builds resolve, decompressing through the same dylib FFI the app
 #      uses. Without the seed the first test run would race the test host
@@ -24,12 +24,12 @@ PIN_TAG=$(python3 -c 'import re, sys; print(re.search(r"releaseTag\s*=\s*\"([^\"
 JMDICT_ZST="local/dictionaries/jmdict-${PIN_TAG}.sqlite.zst"
 
 if [[ ! -f "$DYLIB" || ! -f "$MODEL_ZST" ]]; then
-  echo "  building dictionary runtime + model (scripts/build_dictionary.sh)"
-  scripts/build_dictionary.sh
+  echo "  building dictionary runtime + model (scripts/build_tokenizer.sh)"
+  scripts/build_tokenizer.sh
 fi
 if [[ ! -f "$JMDICT_ZST" ]]; then
-  echo "  building JMDict database (scripts/build_jmdict.sh)"
-  scripts/build_jmdict.sh
+  echo "  building JMDict database (scripts/build_dictionary.sh)"
+  scripts/build_dictionary.sh
 fi
 
 # Decompresses a .zst artifact through the staged dictionary runtime — the

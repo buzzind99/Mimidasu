@@ -1,5 +1,5 @@
 //! Integration test against the real IPADIC model — gated on the artifact
-//! `scripts/build_dictionary.sh` fetches into
+//! `scripts/build_tokenizer.sh` fetches into
 //! `local/dictionaries/ipadic-mecab-2_7_0/`. Each test skips visibly (with a
 //! hint to run the script) when the model is absent, so `cargo test` stays
 //! green on a fresh clone before the fetch.
@@ -45,7 +45,7 @@ fn skip_unless_model() -> Option<PathBuf> {
         Some(path) => Some(path),
         None => {
             eprintln!(
-                "skipping: model not found — run scripts/build_dictionary.sh first \
+                "skipping: model not found — run scripts/build_tokenizer.sh first \
                  (or set VIBRATO_FFI_MODEL_ZST)"
             );
             None

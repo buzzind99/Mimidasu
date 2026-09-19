@@ -15,7 +15,7 @@ csv-core = "0.1.10" # same engine vibrato uses for feature rows
 ruzstd = "0.8"      # pure-Rust zstd decoder for the first-launch decompress
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# The vendored engine (gitignored; scripts/build_dictionary.sh clones it at a
+# The vendored engine (gitignored; scripts/build_tokenizer.sh clones it at a
 # pinned ref); `train` (trainer + rucrf) is tokenizer-irrelevant.
 vibrato = { path = "../../vendor/vibrato/vibrato", default-features = false }
 

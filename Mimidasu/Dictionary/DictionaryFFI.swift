@@ -5,7 +5,7 @@ import Foundation
 /// runtime exports exactly five generic `dictionary_*` symbols; the string
 /// literals below must match that ABI exactly. The C surface is owned by the
 /// tracked `ffi/vibrato-ffi` crate; the vibrato engine behind the dylib is
-/// vendored under `vendor/` at the ref pinned in `scripts/build_dictionary.sh`,
+/// vendored under `vendor/` at the ref pinned in `scripts/build_tokenizer.sh`,
 /// so the engine can be swapped without touching this file.
 ///
 /// All loading is injectable (`load(openLibrary:symbol:)`) so tests can drive

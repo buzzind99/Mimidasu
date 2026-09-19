@@ -404,7 +404,7 @@ final class JMDictLookupTests {
 
 /// Exercises the real prepared JMDict database when one resolves (the
 /// Application Support location, or — debug checkouts — the uncompressed
-/// intermediate `scripts/build_jmdict.sh` leaves in `build/`). Opt-in like
+/// intermediate `scripts/build_dictionary.sh` leaves in `build/`). Opt-in like
 /// the other `Live*` suites: it re-runs at every pin bump and pins the
 /// spot entries against the shipped data shape.
 /// Same resolution chain as `JMDictLookup.defaultDatabaseURL`, with a

@@ -4,7 +4,7 @@
 Stream-parses the compiled JMDict_Extended JSON and the JMnedict names JSON
 and hard-fails on any mismatch with the documented input contracts — the
 tripwire against silent upstream format drift (run before every DB build;
-also usable standalone via `scripts/build_jmdict.sh --probe-only`).
+also usable standalone via `scripts/build_dictionary.sh --probe-only`).
 
 Usage: jmdict_probe.py <jmdict_json_path> <names_json_path> <log_path>
 Exit 0 = PASS, 1 = FAIL. Full report goes to <log_path>, compact summary

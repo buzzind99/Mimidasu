@@ -2,7 +2,7 @@
 #
 # Release DMG: package + notarize → build/pkg/Mimidasu.dmg
 #
-#   scripts/release.sh
+#   scripts/notarize.sh
 #
 # Runs scripts/package.sh with a "Developer ID Application" identity (all
 # code hardened-runtime signed with a trusted timestamp), submits the DMG to

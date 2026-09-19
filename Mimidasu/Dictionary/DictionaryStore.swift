@@ -80,7 +80,7 @@ final class DictionaryStore: Sendable {
 
     /// The prepared JMDict database. The versioned filename comes straight
     /// from the pin constants (`JMDictPin.preparedFileName`) — the same
-    /// constants `scripts/build_jmdict.sh` asserts against, so the two can
+    /// constants `scripts/build_dictionary.sh` asserts against, so the two can
     /// never silently drift.
     static var defaultJMDictURL: URL {
         defaultDestinationDirectory.appendingPathComponent(JMDictPin.preparedFileName)
@@ -88,7 +88,7 @@ final class DictionaryStore: Sendable {
 
     /// The bundled compressed tokenizer dictionary. Release builds look in
     /// the app bundle only; debug checkouts fall back to the copy fetched by
-    /// `scripts/build_dictionary.sh` under `local/dictionaries/` (anchored to
+    /// `scripts/build_tokenizer.sh` under `local/dictionaries/` (anchored to
     /// the checkout root) so first-launch can be exercised before bundling
     /// lands.
     static var defaultBundledSource: URL? {
@@ -99,7 +99,7 @@ final class DictionaryStore: Sendable {
     }
 
     /// The bundled compressed JMDict artifact, same split as
-    /// `defaultBundledSource` but from `scripts/build_jmdict.sh`'s output.
+    /// `defaultBundledSource` but from `scripts/build_dictionary.sh`'s output.
     static var defaultBundledJMDictSource: URL? {
         bundledOrDebug(
             resource: JMDictPin.preparedFileName, ext: "zst",

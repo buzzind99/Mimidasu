@@ -2,7 +2,7 @@ import Foundation
 
 /// The pinned JMDict_Extended input. One release, never floating: the app
 /// ships dictionary data derived from exactly this asset, and
-/// `scripts/build_jmdict.sh` asserts its own copy of these constants matches
+/// `scripts/build_dictionary.sh` asserts its own copy of these constants matches
 /// before doing any work — a pin bump must touch both or nothing builds.
 enum JMDictPin {
     /// Full upstream release tag — never the date alone.
@@ -40,7 +40,7 @@ enum JMDictPin {
     static let preparedFileName = "\(artifactPrefix)\(releaseTag).\(artifactExtension)"
     static let bundledFileName = preparedFileName + ".zst"
 
-    /// The uncompressed intermediate `scripts/build_jmdict.sh` leaves in the
+    /// The uncompressed intermediate `scripts/build_dictionary.sh` leaves in the
     /// checkout's `build/` before compressing; debug-only discovery path.
     static let debugCheckoutPath = "build/\(preparedFileName)"
 }

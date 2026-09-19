@@ -20,7 +20,7 @@
 #
 # Prereqs: xcode-select --install; brew install xcodegen
 #          (cmake + ninja for scripts/build_runtime.sh,
-#           rustup/cargo for scripts/build_dictionary.sh)
+#           rustup/cargo for scripts/build_tokenizer.sh)
 
 set -euo pipefail
 
@@ -40,7 +40,7 @@ if ! command -v xcodegen >/dev/null 2>&1; then
 fi
 for tool in cmake ninja cargo; do
   if ! command -v "${tool}" >/dev/null 2>&1; then
-    echo "WARNING: ${tool} not found — needed by scripts/build_runtime.sh / build_dictionary.sh" >&2
+    echo "WARNING: ${tool} not found — needed by scripts/build_runtime.sh / build_tokenizer.sh" >&2
   fi
 done
 

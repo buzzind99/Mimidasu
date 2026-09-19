@@ -5,7 +5,7 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 
 /// Builds a throwaway JMDict database from the committed fixture
 /// (`Fixtures/jmdict-extended-sample.json`) for offline lookup tests. The
-/// column mapping mirrors `scripts/build_jmdict.sh` exactly — JSON-encoded
+/// column mapping mirrors `scripts/build_dictionary.sh` exactly — JSON-encoded
 /// `skeb`/`sreb` restriction lists (`*` → NULL), `"; "`-joined glosses,
 /// `,`-joined POS, `", "`-joined misc — and the schema mirrors the build's
 /// WITHOUT ROWID tables (headwords keyed `(text, entry_id, kind)`, senses

@@ -1,127 +1,253 @@
 #!/usr/bin/env bash
 #
-# Build the dictionary tokenizer dylib (one-time, dev machine), stage it into
-# the repo so the app can load it, and fetch the pinned IPADIC model.
+# Fetch + verify the pinned JMDict_Extended and JMnedict release assets, probe
+# their formats, and emit the bundled lookup DB from them. The probe and build
+# implementations live in jmdict_probe.py and jmdict_build.py (same directory);
+# this script is the orchestrator and the only supported entrypoint.
 #
-#   scripts/build_dictionary.sh
+#   scripts/build_dictionary.sh            # probe (tripwire) + build DB (skips if built)
+#   scripts/build_dictionary.sh --probe-only   # probe only, no DB emitted
+#   scripts/build_dictionary.sh --rebuild      # probe + rebuild DB even if built
 #
-# Outputs:
-#   local/frameworks/libdictionary.dylib    FFI dylib (tokenizer core compiled
-#                                           in; no companion dylibs)
-#   local/dictionaries/ipadic-mecab-2_7_0/  pinned model: system.dic.zst
-#                                           (bundled into the app by
-#                                           package.sh) + COPYING + NOTICE
+# The pin (tag + asset + SHA-256) is recorded here AND in
+# Mimidasu/Dictionary/JMDictPin.swift; this script cross-checks the two and
+# hard-fails on drift, so a pin bump must touch both files or nothing builds.
+# The probe runs before every build and hard-fails on any mismatch with the
+# documented input contract — on a pin bump it is the tripwire against silent
+# upstream format drift, and the DB is only ever built from a probed-pass
+# asset. (The only exception is the up-to-date skip: when the versioned
+# artifact for this pin already exists and passes `zstd -t`, plain
+# invocations exit early without re-downloading, re-probing, or rebuilding;
+# --rebuild forces the full path.)
 #
-# The tokenizer core is the vendored daac-tools/vibrato (vendor/vibrato,
-# cloned on first run at the pinned ref). The C ABI lives in our own
-# ffi/vibrato-ffi crate (tracked in git) — a path dependency on the vendored
-# lib — so nothing is patched upstream, and the exported symbols use the
-# generic dictionary_ prefix. To move to a newer vibrato: update VIBRATO_REF
-# (and the model digest if the release assets change), delete vendor/vibrato,
-# re-run.
+# Artifacts (gitignored, under local/ and build/):
+#   local/dictionaries/jmdictExtended-<date>.json.zip   pinned JMDict release asset
+#   local/dictionaries/jmdictExtended-<date>.json       unzipped JMDict input
+#   local/dictionaries/jmnedict-all-<version+ts>.json.zip  pinned JMnedict (names) asset
+#   local/dictionaries/jmnedict-all-<version>.json      unzipped names input
+#   local/dictionaries/jmdict-<tag>.sqlite.zst          bundled lookup DB
+#                                                       (package.sh -> Contents/Resources)
+#   build/jmdict-<tag>.sqlite                           uncompressed intermediate
+#   build/jmdict-probe.log                              full probe report
+#   build/jmdict-build.log                              full build log
 #
-# Prereqs: xcode-select --install; rustup/cargo
+# The bundled artifact name is keyed on the JMDict tag alone (the names
+# release rides inside it), so a names-only pin bump skips as up-to-date and
+# needs `--rebuild` to take effect.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VENDOR_DIR="${REPO_ROOT}/vendor/vibrato"
-FFI_DIR="${REPO_ROOT}/ffi/vibrato-ffi"
-FRAMEWORKS_DIR="${REPO_ROOT}/local/frameworks"
-UPSTREAM="https://github.com/daac-tools/vibrato.git"
-VIBRATO_REF="${VIBRATO_REF:-7462fa07a60a176e8d9ef3cb287c7973290a0f9d}"  # v0.5.2
-
-echo "==> Dictionary tokenizer build (vibrato @ ${VIBRATO_REF})"
-
-# 1. Clone the vendored engine (gitignored; fresh checkout on first run).
-if [[ ! -d "${VENDOR_DIR}" ]]; then
-  echo "==> Cloning ${UPSTREAM} (pinned ${VIBRATO_REF})"
-  git clone "${UPSTREAM}" "${VENDOR_DIR}"
-  git -C "${VENDOR_DIR}" checkout -q "${VIBRATO_REF}"
-else
-  current_ref="$(git -C "${VENDOR_DIR}" rev-parse HEAD 2>/dev/null || true)"
-  if [[ "${current_ref}" != "${VIBRATO_REF}" ]]; then
-    echo "WARNING: vendor/vibrato is at ${current_ref:-<unknown>}, pinned ref is ${VIBRATO_REF}"
-    echo "         Override VIBRATO_REF to build a different commit intentionally."
-  fi
-fi
-
-# 2. Build our FFI crate. The cdylib statically embeds the engine and the
-#    zstd decoder, so the staged dylib needs no companion files.
-echo "==> Building ffi/vibrato-ffi (first run takes a while)"
-cargo build --release --manifest-path "${FFI_DIR}/Cargo.toml"
-
-# 3. Staging.
-echo "==> Staging into ${FRAMEWORKS_DIR}"
-mkdir -p "${FRAMEWORKS_DIR}"
-cp -f "${FFI_DIR}/target/release/libvibrato_ffi.dylib" "${FRAMEWORKS_DIR}/libdictionary.dylib"
-install_name_tool -id "@rpath/libdictionary.dylib" "${FRAMEWORKS_DIR}/libdictionary.dylib"
-# A pure-Rust cdylib carries no build-tree rpaths; strip defensively anyway —
-# the app must never depend on this machine's layout.
-for path in $(otool -l "${FRAMEWORKS_DIR}/libdictionary.dylib" | awk '/LC_RPATH/{getline; print $2}'); do
-  install_name_tool -delete_rpath "$path" "${FRAMEWORKS_DIR}/libdictionary.dylib" 2>/dev/null || true
-done
-
-# 4. Fetch the pinned IPADIC model (~7.7 MB tar.xz). package.sh bundles
-#    system.dic.zst into Contents/Resources; the app decompresses it once on
-#    first launch (no DB build step). The model ships in release DMGs, so its
-#    integrity is enforced on every build — refreshing to a different model
-#    is a deliberate digest bump.
 DICT_DIR="${REPO_ROOT}/local/dictionaries"
-MODEL_DIR="${DICT_DIR}/ipadic-mecab-2_7_0"
-IPADIC_URL="https://github.com/daac-tools/vibrato/releases/download/v0.5.0/ipadic-mecab-2_7_0.tar.xz"
-# Pinned digest (ipadic-mecab-2_7_0.tar.xz from the v0.5.0 release assets,
-# recorded by the Phase 0 preflight).
-VIBRATO_IPADIC_SHA256="${VIBRATO_IPADIC_SHA256:-4764f983b7c3a9e1cb6a5ee945e00558efd812980e0dad61224f63ee3b0475d9}"
-mkdir -p "${MODEL_DIR}"
-ARCHIVE="${MODEL_DIR}/model.tar.xz"
-if [[ ! -f "${ARCHIVE}" ]]; then
-  echo "==> Fetching ipadic-mecab-2_7_0.tar.xz"
-  curl -fL --retry 3 -o "${ARCHIVE}" "${IPADIC_URL}"
-fi
-echo "==> Verifying ipadic model digest"
-actual="$(shasum -a 256 "${ARCHIVE}" | awk '{print $1}')"
-if [[ "${actual}" != "${VIBRATO_IPADIC_SHA256}" ]]; then
-  echo "ERROR: ipadic model SHA-256 mismatch" >&2
-  echo "       expected ${VIBRATO_IPADIC_SHA256}" >&2
-  echo "       got      ${actual}" >&2
-  rm -f "${ARCHIVE}"
+BUILD_DIR="${REPO_ROOT}/build"
+
+# --- Pin: keep in sync with Mimidasu/Dictionary/JMDictPin.swift -----------------
+PIN_TAG="1.4.1-auto-release-2026-09-01"
+PIN_ASSET="jmdictExtended-2026-09-01.json.zip"
+# SHA-256 of the .zip asset, cross-checked against the digest GitHub publishes
+# on the release asset page.
+PIN_SHA256="4bee23eb7bd088d0a9c48301d0d25964b8ac9ecd6465c91b40adf8191d4b040a"
+PIN_URL="https://github.com/Bluskyo/JMDict_Extended/releases/download/${PIN_TAG}/${PIN_ASSET}"
+
+# --- Names pin: JMnedict proper nouns, ingested into the same DB ----------------
+# Source is scriptin/jmdict-simplified (the JMDict pin above stays on
+# Bluskyo/JMDict_Extended); the two bump independently.
+NAME_PIN_TAG="3.6.2+20260914172325"
+NAME_PIN_ASSET="jmnedict-all-3.6.2+20260914172325.json.zip"
+NAME_PIN_SHA256="843470cd19284d6caea54e6027df1791402766bd90ba70d36dba0cd787aeaa2a"
+NAME_PIN_URL="https://github.com/scriptin/jmdict-simplified/releases/download/${NAME_PIN_TAG}/${NAME_PIN_ASSET}"
+# -------------------------------------------------------------------------------
+
+ZIP_PATH="${DICT_DIR}/${PIN_ASSET}"
+JSON_PATH="${DICT_DIR}/${PIN_ASSET%.zip}"
+# The names zip's inner file drops the +build-timestamp suffix.
+NAME_ZIP_PATH="${DICT_DIR}/${NAME_PIN_ASSET}"
+NAME_JSON_PATH="${DICT_DIR}/jmnedict-all-${NAME_PIN_TAG%%+*}.json"
+PROBE_LOG="${BUILD_DIR}/jmdict-probe.log"
+PREPARED_NAME="jmdict-${PIN_TAG}.sqlite"
+ZST_NAME="${PREPARED_NAME}.zst"
+ZST_PATH="${DICT_DIR}/${ZST_NAME}"
+
+MODE="build"
+REBUILD=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --probe-only) MODE="probe" ;;
+    --rebuild) REBUILD=1 ;;
+    -h|--help)
+      echo "usage: build_dictionary.sh [--probe-only] [--rebuild]"
+      echo "  (default)    probe the pinned asset, then build the DB (skips if built)"
+      echo "  --probe-only probe only, no DB emitted"
+      echo "  --rebuild    probe + rebuild the DB even if the artifact exists"
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1 (see --help)" >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
+if [[ "${MODE}" == "probe" && "${REBUILD}" == "1" ]]; then
+  echo "ERROR: --probe-only and --rebuild are mutually exclusive" >&2
   exit 1
 fi
-if [[ ! -f "${MODEL_DIR}/system.dic.zst" ]]; then
-  echo "==> Extracting model"
-  extract_dir="$(mktemp -d)"
-  tar -xJf "${ARCHIVE}" -C "${extract_dir}"
-  # The archive may nest its files in a versioned directory.
-  src_dir="${extract_dir}"
-  if [[ ! -f "${src_dir}/system.dic.zst" ]]; then
-    src_dir="$(dirname "$(find "${extract_dir}" -name system.dic.zst | head -1)")"
+
+echo "==> JMDict_Extended pin: ${PIN_TAG}"
+echo "    asset: ${PIN_ASSET}"
+echo "==> JMnedict names pin: ${NAME_PIN_TAG}"
+echo "    asset: ${NAME_PIN_ASSET}"
+
+# Cross-check the Swift pin constants (drift fails here, never silently).
+PIN_SWIFT="${REPO_ROOT}/Mimidasu/Dictionary/JMDictPin.swift"
+if [[ ! -f "${PIN_SWIFT}" ]]; then
+  echo "ERROR: ${PIN_SWIFT} not found; the pin must exist in both the script and Swift." >&2
+  exit 1
+fi
+check_pin_constant() {
+  local name="$1" expected="$2"
+  python3 - "$name" "$expected" "${PIN_SWIFT}" <<'CHECKEOF'
+import re, sys
+name, expected, path = sys.argv[1], sys.argv[2], sys.argv[3]
+src = open(path, encoding="utf-8").read()
+m = re.search(rf'\b{name}\s*=\s*"([^"]+)"', src)
+actual = m.group(1) if m else None
+if actual != expected:
+    print(f"ERROR: JMDictPin.{name} mismatch\n  script: {expected}\n  swift:  {actual}", file=sys.stderr)
+    sys.exit(1)
+CHECKEOF
+  echo "    pin.${name}: ok"
+}
+check_pin_constant releaseTag "${PIN_TAG}"
+check_pin_constant sourceAssetFileName "${PIN_ASSET}"
+check_pin_constant sourceSHA256 "${PIN_SHA256}"
+check_pin_constant nameReleaseTag "${NAME_PIN_TAG}"
+check_pin_constant nameSourceAssetFileName "${NAME_PIN_ASSET}"
+check_pin_constant nameSourceSHA256 "${NAME_PIN_SHA256}"
+
+# The produced artifact filename must match the Swift pin constants — the
+# versioned name is the staleness key (§0.1 item 4). preparedFileName is
+# interpolated in Swift, so guard the derivation expressions themselves
+# (releaseTag is already cross-checked above, which pins the concrete name).
+if ! grep -Fq 'static let preparedFileName = "\(artifactPrefix)\(releaseTag).\(artifactExtension)"' "${PIN_SWIFT}"; then
+  echo "ERROR: JMDictPin.preparedFileName no longer derives from artifactPrefix + releaseTag + artifactExtension; update this drift guard." >&2
+  exit 1
+fi
+if ! grep -Fq 'static let artifactPrefix = "jmdict-"' "${PIN_SWIFT}"; then
+  echo "ERROR: JMDictPin.artifactPrefix is no longer \"jmdict-\"; update this drift guard." >&2
+  exit 1
+fi
+if ! grep -Fq 'static let artifactExtension = "sqlite"' "${PIN_SWIFT}"; then
+  echo "ERROR: JMDictPin.artifactExtension is no longer \"sqlite\"; update this drift guard." >&2
+  exit 1
+fi
+if ! grep -Fq 'bundledFileName = preparedFileName + ".zst"' "${PIN_SWIFT}"; then
+  echo "ERROR: JMDictPin.bundledFileName no longer derives from preparedFileName + \".zst\"; update this drift guard." >&2
+  exit 1
+fi
+
+# Up-to-date skip (build mode only): the artifact name is versioned by the
+# pin tag, so a pin bump naturally misses and rebuilds. A truncated artifact
+# from an interrupted build fails `zstd -t` and falls through to a rebuild.
+# --rebuild bypasses this entirely (needed when the build mapping changes
+# under the same pin). --probe-only never consults the DB.
+if [[ "${MODE}" == "build" && "${REBUILD}" == "0" && -s "${ZST_PATH}" ]]; then
+  if ! command -v zstd >/dev/null 2>&1; then
+    echo "WARNING: zstd not found; cannot verify ${ZST_NAME}, rebuilding."
+  elif zstd -q -t "${ZST_PATH}" 2>/dev/null; then
+    echo "==> ${ZST_NAME} already built and valid; skipping (use --rebuild to force)."
+    exit 0
+  else
+    echo "WARNING: ${ZST_PATH} exists but failed its integrity check; rebuilding."
   fi
-  cp -f "${src_dir}/system.dic.zst" "${src_dir}/COPYING" "${src_dir}/NOTICE" "${MODEL_DIR}/"
-  rm -rf "${extract_dir}"
 fi
 
-# 5. Ad-hoc sign so the app loads it locally.
-echo "==> Ad-hoc signing"
-codesign --force --sign - "${FRAMEWORKS_DIR}/libdictionary.dylib"
-
-# 6. Self-check: exactly the 5 generic exports, and no build-tree rpaths.
-echo "==> Verifying exported symbols"
-symbols="$(nm -gU "${FRAMEWORKS_DIR}/libdictionary.dylib" | awk '$3 ~ /_dictionary_/ {print $3}' | sed 's/^_//' | sort)"
-echo "${symbols}"
-expected=$'dictionary_free\ndictionary_free_string\ndictionary_open\ndictionary_prepare\ndictionary_tokenize_json'
-if [[ "${symbols}" != "${expected}" ]]; then
-  echo "ERROR: expected exactly the 5 dictionary_* exports, found:" >&2
-  echo "${symbols}" >&2
-  exit 1
+# Fetch once; verify the digest on every run (like the IPADIC pin).
+mkdir -p "${DICT_DIR}" "${BUILD_DIR}"
+if [[ ! -f "${ZIP_PATH}" ]]; then
+  echo "==> Downloading ${PIN_URL}"
+  curl -fL --retry 3 -o "${ZIP_PATH}" "${PIN_URL}"
 fi
-rpaths="$(otool -l "${FRAMEWORKS_DIR}/libdictionary.dylib" | awk '/LC_RPATH/{getline; print $2}' | wc -l | tr -d ' ')"
-if [[ "${rpaths}" -ne 0 ]]; then
-  echo "ERROR: expected zero LC_RPATH load commands, found ${rpaths}" >&2
+echo "==> Verifying asset SHA-256"
+actual="$(shasum -a 256 "${ZIP_PATH}" | awk '{print $1}')"
+if [[ "${actual}" != "${PIN_SHA256}" ]]; then
+  echo "ERROR: asset SHA-256 mismatch" >&2
+  echo "  expected ${PIN_SHA256}" >&2
+  echo "  got      ${actual}" >&2
+  rm -f "${ZIP_PATH}"
   exit 1
 fi
 
+if [[ ! -f "${JSON_PATH}" ]]; then
+  echo "==> Unzipping to ${JSON_PATH}"
+  unzip -o -q "${ZIP_PATH}" -d "${DICT_DIR}"
+fi
+if [[ ! -f "${JSON_PATH}" ]]; then
+  echo "ERROR: expected JMDict member not produced by unzip: ${JSON_PATH}" >&2
+  echo "  (the release asset's inner file may have been renamed; check: unzip -l \"${ZIP_PATH}\")" >&2
+  exit 1
+fi
+
+# Names asset: download once, verify the digest on every run (same pattern).
+NAME_ZIP_FRESH=0
+if [[ ! -f "${NAME_ZIP_PATH}" ]]; then
+  echo "==> Downloading ${NAME_PIN_URL}"
+  curl -fL --retry 3 -o "${NAME_ZIP_PATH}" "${NAME_PIN_URL}"
+  NAME_ZIP_FRESH=1
+fi
+echo "==> Verifying names asset SHA-256"
+actual="$(shasum -a 256 "${NAME_ZIP_PATH}" | awk '{print $1}')"
+if [[ "${actual}" != "${NAME_PIN_SHA256}" ]]; then
+  echo "ERROR: names asset SHA-256 mismatch" >&2
+  echo "  expected ${NAME_PIN_SHA256}" >&2
+  echo "  got      ${actual}" >&2
+  rm -f "${NAME_ZIP_PATH}"
+  exit 1
+fi
+
+# A freshly downloaded zip must (re-)extract: the unzipped name keys on the
+# version only, so a same-version re-cut at a new build timestamp would
+# otherwise keep feeding the stale JSON to a build that records the new pin.
+if [[ "${NAME_ZIP_FRESH}" == "1" || ! -f "${NAME_JSON_PATH}" ]]; then
+  echo "==> Unzipping to ${NAME_JSON_PATH}"
+  rm -f "${NAME_JSON_PATH}"
+  unzip -o -q "${NAME_ZIP_PATH}" -d "${DICT_DIR}"
+fi
+if [[ ! -f "${NAME_JSON_PATH}" ]]; then
+  echo "ERROR: expected names member not produced by unzip: ${NAME_JSON_PATH}" >&2
+  echo "  (the release asset's inner file may have been renamed; check: unzip -l \"${NAME_ZIP_PATH}\")" >&2
+  exit 1
+fi
+
+# Probe on every run that proceeds past the up-to-date skip — build mode
+# only continues past a passing probe.
+echo "==> Probing format (full report: ${PROBE_LOG})"
+python3 "${REPO_ROOT}/scripts/jmdict_probe.py" "${JSON_PATH}" "${NAME_JSON_PATH}" "${PROBE_LOG}"
+if [[ "${MODE}" == "probe" ]]; then
+  echo
+  echo "Probe passed. The pinned asset matches the documented contract."
+  exit 0
+fi
+
+# ============================================================================
+# DB build — the probe above already ran and passed on this exact asset.
+#
+command -v zstd >/dev/null 2>&1 || {
+  echo "ERROR: zstd not found (brew install zstd)" >&2
+  exit 1
+}
+
+RAW_DB="${BUILD_DIR}/${PREPARED_NAME}"
+BUILD_LOG="${BUILD_DIR}/jmdict-build.log"
+
+echo "==> Building ${PREPARED_NAME} (log: ${BUILD_LOG})"
+rm -f "${RAW_DB}" "${ZST_PATH}"
+
+python3 "${REPO_ROOT}/scripts/jmdict_build.py" "${JSON_PATH}" "${NAME_JSON_PATH}" "${RAW_DB}" "${ZST_PATH}" \
+  "${PROBE_LOG}" "${PIN_TAG}" "${PIN_SHA256}" "${PIN_ASSET}" \
+  "${NAME_PIN_TAG}" "${NAME_PIN_SHA256}" "${NAME_PIN_ASSET}" 2>&1 | tee "${BUILD_LOG}"
+
+zstd -q -t "${ZST_PATH}"
 echo
-echo "Done. The app loads ${FRAMEWORKS_DIR}/libdictionary.dylib when run from"
-echo "this checkout; scripts/package.sh bundles the dylib into"
-echo "Mimidasu.app/Contents/Frameworks and system.dic.zst into Contents/Resources."
+echo "Done. package.sh bundles ${ZST_NAME} into Mimidasu.app/Contents/Resources;"
+echo "DictionaryStore (Phase 5) stages/decompresses it to jmdict-<tag>.sqlite."

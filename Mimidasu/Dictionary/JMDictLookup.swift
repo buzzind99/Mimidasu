@@ -22,7 +22,7 @@ final class JMDictLookup: Sendable {
     /// Where the prepared JMDict database lives: the location `DictionaryStore`
     /// promotes into (repo-local `build/prepared/` in debug checkouts,
     /// Application Support in release), or — debug checkouts only — the
-    /// uncompressed intermediate `scripts/build_jmdict.sh` leaves in `build/`.
+    /// uncompressed intermediate `scripts/build_dictionary.sh` leaves in `build/`.
     static var defaultDatabaseURL: URL? {
         defaultDatabaseURL(
             destination: DictionaryStore.defaultDestinationDirectory,
