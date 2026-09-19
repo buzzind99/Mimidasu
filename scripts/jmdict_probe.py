@@ -31,6 +31,10 @@ NAME_SCOPE_EXCLUDED = {"unclass", "place"}
 NAME_REF_ENTRIES = 403272
 NAME_REF_HEADWORDS = 790805
 NAME_REF_ID_MAX = 9_999_990
+# Word ids must stay below the JMnedict ingest offset (jmdict_build.py
+# NAME_SEQ_OFFSET): the UI classifies names by ent_seq >= offset, so a word
+# at or above it would silently render through the name path.
+WORD_ID_CEILING = 9_999_999
 
 
 def main(json_path, names_json_path, log_path):
@@ -131,6 +135,7 @@ def main(json_path, names_json_path, log_path):
     max_kanji = (0, None)
     max_kana = (0, None)
     id_parse_failures = 0
+    word_id_over_ceiling = 0
     word_key_missing = Counter()
     kanji_key_missing = Counter()
     kana_key_missing = Counter()
@@ -185,9 +190,12 @@ def main(json_path, names_json_path, log_path):
             if key not in w:
                 word_key_missing[key] += 1
         try:
-            int(w["id"])
+            wid = int(w["id"])
         except (KeyError, ValueError, TypeError):
             id_parse_failures += 1
+            wid = None
+        if wid is not None and wid > WORD_ID_CEILING:
+            word_id_over_ceiling += 1
 
         kobjs = w.get("kanji") or []
         robjs = w.get("kana") or []
@@ -614,6 +622,9 @@ def main(json_path, names_json_path, log_path):
 
     if id_parse_failures:
         fail(f"{id_parse_failures} ids failed to parse as int")
+    if word_id_over_ceiling:
+        fail(f"{word_id_over_ceiling} word ids above {WORD_ID_CEILING} "
+             f"(would render as name entries)")
     if word_key_missing:
         fail(f"words missing required keys: {dict(word_key_missing)}")
     if kanji_key_missing:
