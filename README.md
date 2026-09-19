@@ -12,7 +12,7 @@ discover." Add one more ミ and the word gains an 耳 (*mimi*, ear): **ミミダ
 a verb, because every definition popup is a little *mimidasu*.
 
 <p align="center">
-  <img src="debug/ss.png" alt="Mimidasu app screenshot" width="900">
+  <img src="Docs/mimidasu.png" alt="Mimidasu app screenshot" width="900">
 </p>
 
 ## Level-up your Japanese listening
