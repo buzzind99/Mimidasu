@@ -2,14 +2,14 @@ name: Mimidasu
 options:
   bundleIdPrefix: mimidasu
   deploymentTarget:
-    macOS: "15.0"
+    macOS: "15.5"
   createIntermediateGroups: true
   groupSortPosition: top
 
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    MACOSX_DEPLOYMENT_TARGET: "15.5"
     CODE_SIGN_STYLE: Manual
     DEVELOPMENT_TEAM: ""
     GENERATE_INFOPLIST_FILE: YES

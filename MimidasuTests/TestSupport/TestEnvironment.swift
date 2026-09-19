@@ -11,7 +11,7 @@ import Foundation
 enum TestEnvironment {
 
     /// True when `TranslationSession(installedSource:target:)` exists on this
-    /// OS (macOS 26+; the deployment target is macOS 15).
+    /// OS (macOS 26+; the deployment target is macOS 15.5).
     static var supportsInstalledTranslationSession: Bool {
         if #available(macOS 26.0, *) {
             return true
