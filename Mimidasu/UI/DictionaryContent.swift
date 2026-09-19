@@ -54,22 +54,22 @@ enum DictionaryContent {
     }
 
     /// First tag of the stored comma-joined POS string, rendered through the
-    /// JMnedict name-type badges: name entries store their entity types
-    /// (`surname`, `place`, …) in `pos` and show friendly uppercase labels;
-    /// JMDict POS tags and unknown values render verbatim. Multi-type
-    /// senses take the first token.
+    /// JMnedict name-type labels; JMDict POS tags and unknown values render
+    /// verbatim, and multi-tag senses take the first token. Serves word sense
+    /// rows only — name entries never reach the sense row, their entity
+    /// types render in full via `nameTypeBadges(for:)`.
     static func posLabel(_ pos: String?) -> String? {
         guard let pos, !pos.isEmpty else { return nil }
         let tag = pos.components(separatedBy: ",").first?
             .trimmingCharacters(in: .whitespaces)
         guard let tag, !tag.isEmpty else { return nil }
-        return nameTypeBadges[tag] ?? tag
+        return nameTypeLabels[tag] ?? tag
     }
 
     /// JMnedict name type → badge label. The mapped rows cover the common
     /// upstream vocabulary; the rare types (`char`, `serv`, `fict`, …) fall
     /// through verbatim. JMDict POS tags never collide with these tokens.
-    private static let nameTypeBadges = [
+    private static let nameTypeLabels = [
         "surname": "SURNAME",
         "given": "GIVEN NAME",
         "fem": "GIVEN NAME",
@@ -83,6 +83,51 @@ enum DictionaryContent {
         "work": "WORK",
         "unclass": "NAME"
     ]
+
+    /// JMnedict ingest offset: name entries ride `ent_seq + 10M`, above
+    /// every JMDict row.
+    static let nameSeqOffset = 10_000_000
+
+    /// True when the entry is a JMnedict name (person, place, company, …).
+    static func isName(_ entry: JMDictEntry) -> Bool {
+        entry.entSeq >= nameSeqOffset
+    }
+
+    /// Badge-row labels for a name entry: every comma-split pos token mapped
+    /// through the friendly labels, deduped in order (`fem`/`given` both land
+    /// on GIVEN NAME); rare unmapped types pass through verbatim. Word
+    /// entries contribute nothing — their POS tags stay in the sense row.
+    static func nameTypeBadges(for entry: JMDictEntry) -> [String] {
+        guard isName(entry) else { return [] }
+        var badges: [String] = []
+        for sense in entry.senses {
+            for token in sense.pos?.components(separatedBy: ",") ?? [] {
+                let tag = token.trimmingCharacters(in: .whitespaces)
+                guard !tag.isEmpty else { continue }
+                let badge = nameTypeLabels[tag] ?? tag
+                if !badges.contains(badge) {
+                    badges.append(badge)
+                }
+            }
+        }
+        return badges
+    }
+
+    /// A name entry's glosses minus the romanization echo: JMnedict stores
+    /// the name itself as the English gloss ("Doku" under どく), which the
+    /// romaji line already renders — the case-insensitive match drops, real
+    /// content ("Spirited Away") stays. Blank glosses drop; an unmappable
+    /// reading keeps everything left.
+    static func nameGlosses(for entry: JMDictEntry) -> [String] {
+        let glosses = entry.senses.flatMap(\.glosses)
+        guard let romaji = romaji(for: entry) else {
+            return glosses.filter { gloss in !gloss.trimmingCharacters(in: .whitespaces).isEmpty }
+        }
+        return glosses.filter { gloss in
+            let trimmed = gloss.trimmingCharacters(in: .whitespaces)
+            return !trimmed.isEmpty && trimmed.lowercased() != romaji
+        }
+    }
 
     /// Prefix of `items` capped at `limit` (nil = every item), with the
     /// hidden count for the "+ N more" footer. Shared by the sense and gloss

@@ -68,7 +68,7 @@ struct DictionaryContentTests {
     }
 
     @Test("JMnedict name types render friendly badges")
-    func nameTypeBadges() {
+    func posLabelNameTypes() {
         #expect(DictionaryContent.posLabel("surname") == "SURNAME")
         #expect(DictionaryContent.posLabel("given") == "GIVEN NAME")
         #expect(DictionaryContent.posLabel("fem") == "GIVEN NAME")
@@ -91,6 +91,79 @@ struct DictionaryContentTests {
         #expect(DictionaryContent.posLabel("char") == "char")
         #expect(DictionaryContent.posLabel("relig") == "relig")
         #expect(DictionaryContent.posLabel("v1,vt") == "v1")
+    }
+
+    // MARK: - Name entries (JMnedict offset range)
+
+    /// 木村 as JMnedict id 5668306 → ent_seq 15_668_306: types place +
+    /// surname under one reading, stored gloss the romanization "Kimura".
+    private func nameEntry(
+        entSeq: Int = 15_668_306, reb: String? = "きむら",
+        pos: String? = "place,surname", glosses: [String] = ["Kimura"],
+        senses: [JMDictSense]? = nil
+    ) -> JMDictEntry {
+        JMDictEntry(
+            entSeq: entSeq, keb: "木村", reb: reb, common: false, jlpt: nil,
+            hatsuon: nil, accPatts: nil, zoPatts: nil,
+            senses: senses ?? [sense(pos: pos, glosses: glosses)]
+        )
+    }
+
+    @Test("only the offset range counts as a name entry")
+    func isName() {
+        // Real data never touches this band (words stay well under the
+        // offset; ingest lands names at 15M+) — the pair pins the >=
+        // predicate itself.
+        #expect(!DictionaryContent.isName(entry()))
+        #expect(DictionaryContent.isName(nameEntry(entSeq: 10_000_000)))
+        #expect(!DictionaryContent.isName(nameEntry(entSeq: 9_999_999)))
+    }
+
+    @Test("name type badges map every stored token, deduped in order")
+    func nameTypeBadgeList() {
+        #expect(DictionaryContent.nameTypeBadges(for: nameEntry()) == ["PLACE NAME", "SURNAME"])
+        #expect(
+            DictionaryContent.nameTypeBadges(for: nameEntry(pos: "surname,place"))
+                == ["SURNAME", "PLACE NAME"]
+        )
+        #expect(DictionaryContent.nameTypeBadges(for: nameEntry(pos: "fem,given")) == ["GIVEN NAME"])
+        #expect(DictionaryContent.nameTypeBadges(for: nameEntry(pos: "char,surname")) == ["char", "SURNAME"])
+        #expect(DictionaryContent.nameTypeBadges(for: nameEntry(pos: nil)) == [])
+        // Word entries contribute nothing — their POS tags stay in the sense row.
+        #expect(DictionaryContent.nameTypeBadges(for: entry()) == [])
+        // Dedupe also spans senses (ingest flattens names to one sense
+        // today; the mapper still guards the multi-sense shape).
+        #expect(
+            DictionaryContent.nameTypeBadges(for: nameEntry(senses: [
+                sense(pos: "surname", glosses: ["Kimura"]),
+                sense(pos: "fem,surname", glosses: ["Kimura"])
+            ])) == ["SURNAME", "GIVEN NAME"]
+        )
+    }
+
+    @Test("name glosses drop the romaji echo and keep real content")
+    func nameGlosses() {
+        // きむら → "kimura"; the stored gloss "Kimura" is the echo and drops.
+        #expect(DictionaryContent.nameGlosses(for: nameEntry()) == [])
+        // The echo drops case-insensitively; other glosses stay.
+        #expect(
+            DictionaryContent.nameGlosses(for: nameEntry(glosses: ["KIMURA", "town in Hokkaido"]))
+                == ["town in Hokkaido"]
+        )
+        // A reading whose romaji differs from the gloss keeps it.
+        #expect(
+            DictionaryContent.nameGlosses(
+                for: nameEntry(reb: "せんとちひろのかみかくし", glosses: ["Spirited Away"])
+            ) == ["Spirited Away"]
+        )
+        // An unmappable reading keeps every gloss.
+        #expect(DictionaryContent.nameGlosses(for: nameEntry(reb: "漢字")) == ["Kimura"])
+        // Blank glosses drop in both branches — with and without a romaji.
+        #expect(DictionaryContent.nameGlosses(for: nameEntry(glosses: ["Kimura", "  "])) == [])
+        #expect(
+            DictionaryContent.nameGlosses(for: nameEntry(reb: "漢字", glosses: ["Kimura", ""]))
+                == ["Kimura"]
+        )
     }
 
     // MARK: - Pitch pill

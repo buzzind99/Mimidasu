@@ -240,7 +240,7 @@ struct DictionaryEntryContentView: View {
             displayOrigin.flatMap(DictionaryContent.joinedMatchBadge(for:)),
             entry.common ? "COMMON" : nil,
             DictionaryContent.jlptBadge(entry.jlpt)
-        ].compactMap(\.self)
+        ].compactMap(\.self) + DictionaryContent.nameTypeBadges(for: entry)
         if !badges.isEmpty {
             HStack(spacing: 6) {
                 ForEach(badges, id: \.self) { badge in
@@ -317,14 +317,48 @@ struct DictionaryEntryContentView: View {
 
     @ViewBuilder
     private var senseRows: some View {
-        let truncated = DictionaryContent.truncated(entry.senses, limit: senseLimit)
+        if DictionaryContent.isName(entry) {
+            nameGlossRows
+        } else {
+            let truncated = DictionaryContent.truncated(entry.senses, limit: senseLimit)
+            if !truncated.visible.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(Array(truncated.visible.enumerated()), id: \.offset) { index, sense in
+                        senseRow(number: index + 1, sense: sense)
+                    }
+                    if truncated.hidden > 0 {
+                        Text("+ \(truncated.hidden) more senses")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+            }
+        }
+    }
+
+    /// A name sense's remaining glosses as numbered rows — the type badge
+    /// moved to the badge row and the romanization echo dropped, so what's
+    /// left is real content only.
+    @ViewBuilder
+    private var nameGlossRows: some View {
+        let truncated = DictionaryContent.truncated(
+            DictionaryContent.nameGlosses(for: entry), limit: glossLimit
+        )
         if !truncated.visible.isEmpty {
             VStack(alignment: .leading, spacing: 5) {
-                ForEach(Array(truncated.visible.enumerated()), id: \.offset) { index, sense in
-                    senseRow(number: index + 1, sense: sense)
+                ForEach(Array(truncated.visible.enumerated()), id: \.offset) { index, gloss in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("\(index + 1).")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(Theme.secondaryText)
+                        Text(verbatim: gloss)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.primaryText)
+                            .textSelection(.disabled)
+                    }
                 }
                 if truncated.hidden > 0 {
-                    Text("+ \(truncated.hidden) more senses")
+                    Text("+ \(truncated.hidden) more")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(Theme.secondaryText)
                 }
