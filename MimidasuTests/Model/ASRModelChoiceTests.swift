@@ -13,7 +13,11 @@ struct ASRModelChoiceTests {
             #expect(!choice.approximateSize.isEmpty)
             #expect(!choice.blurb.isEmpty)
             #expect(choice.pinnedSHA256.count == 64)
-            #expect(choice.pinnedSHA256.allSatisfy { $0.isHexDigit && !$0.isUppercase })
+            #expect(
+                choice.pinnedSHA256.allSatisfy { char in
+                    char.isHexDigit && !char.isUppercase
+                }
+            )
             #expect(choice.downloadURL.lastPathComponent == choice.ggufFileName)
             #expect(choice.downloadURL.path.contains(choice.modelID))
         }

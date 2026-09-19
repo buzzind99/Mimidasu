@@ -49,3 +49,11 @@ identifier_name:
     - y
     - h
     - m
+
+# Swift 6 — idiom enforcement: no `$0…$9` closure args in app code.
+custom_rules:
+  anonymous_closure_arg:
+    name: "Anonymous closure argument"
+    regex: '\$[0-9]+'
+    message: "Use named closure parameters or key-path function expressions."
+    severity: warning

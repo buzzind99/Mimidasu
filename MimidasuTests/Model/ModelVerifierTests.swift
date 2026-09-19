@@ -71,7 +71,11 @@ struct ModelVerifierTests {
         #expect(
             ModelVerifier.expectedSHA256(for: .lite) != ModelVerifier.expectedSHA256(for: .full)
         )
-        #expect(ASRModelChoice.full.pinnedSHA256.allSatisfy { $0.isHexDigit && !$0.isUppercase })
+        #expect(
+            ASRModelChoice.full.pinnedSHA256.allSatisfy { char in
+                char.isHexDigit && !char.isUppercase
+            }
+        )
     }
 
     /// A same-size content mutation bumps the file's mtime, so the (path,
