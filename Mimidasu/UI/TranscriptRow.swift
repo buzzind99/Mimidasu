@@ -33,9 +33,10 @@ struct TranscriptRow: View, Equatable {
     var lookupPopover: ((Int) -> RubyTextView.LookupPopover?)?
     /// True only while this row is the newest entry: a freshly appended
     /// row fades in, while older rows render opaque so recycled rows
-    /// scrolling back into view don't re-fade. Excluded from `==`: the
-    /// flag flips false only when a newer row lands, by which time
-    /// `shown` has already carried the opacity to 1.
+    /// scrolling back into view don't re-fade. Part of `==`: the demotion
+    /// to false (a newer row landed) must re-render the row so opacity is
+    /// 1 by implementation, and a recycled row whose `shown` state was
+    /// discarded can't re-fade — the `onAppear` guard fails on false.
     let fadesIn: Bool
 
     /// Fade state for a freshly appended row: starts transparent and
@@ -51,6 +52,7 @@ struct TranscriptRow: View, Equatable {
             && lhs.scale == rhs.scale
             && lhs.cursorMode == rhs.cursorMode
             && lhs.lookupAnchor == rhs.lookupAnchor
+            && lhs.fadesIn == rhs.fadesIn
     }
 
     var body: some View {

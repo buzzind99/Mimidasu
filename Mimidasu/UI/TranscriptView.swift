@@ -75,11 +75,6 @@ struct TranscriptView: View {
                         },
                         fadesIn: entry.id == model.entries.last?.id
                     )
-                    // Opacity only: a .move transition animates
-                    // relative to the viewport, which displaces
-                    // neighboring rows while the re-anchor chase is
-                    // also repositioning content.
-                    .transition(.opacity)
                     .id(entry.id)
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                     .listRowSeparator(.hidden)
