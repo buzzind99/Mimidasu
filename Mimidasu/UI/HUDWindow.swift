@@ -163,6 +163,14 @@ final class HUDHostingView: NSHostingView<HUDView> {
         return unlockRegion.contains(local) ? super.hitTest(point) : nil
     }
 
+    override func mouseDown(with event: NSEvent) {
+        guard let panel, !panel.locked else { return super.mouseDown(with: event) }
+        // macOS 27 stopped honoring isMovableByWindowBackground for
+        // SwiftUI-hosted borderless panels even when the hosting view itself
+        // answers mouseDownCanMoveWindow=YES, so the drag starts explicitly.
+        window?.performDrag(with: event)
+    }
+
     override var mouseDownCanMoveWindow: Bool {
         guard let panel else { return super.mouseDownCanMoveWindow }
         return !panel.locked
