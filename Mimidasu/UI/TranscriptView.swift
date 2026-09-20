@@ -22,9 +22,8 @@ import SwiftUI
 /// read the growth itself and drop the pin exactly when it must act, so
 /// growth ticks never feed the pin decision.
 /// Re-anchoring then chases the bottom marker on every geometry tick until
-/// the content sits flush: a single scrollTo can land short while the
-/// insertion spring or List's estimated layout is still settling, so the
-/// chase converges quietly.
+/// the content sits flush: a single scrollTo can land short while List's
+/// estimated layout is still settling, so the chase converges quietly.
 struct TranscriptView: View {
     var model: AppModel
     @AppStorage(ReadingAnnotation.storageKey) private var readingAnnotation = ReadingAnnotation.romaji
@@ -73,7 +72,8 @@ struct TranscriptView: View {
                         lookupAnchor: lookupAnchor(for: entry.sentence.index),
                         lookupPopover: { tokenIndex in
                             lookupPopover(entry.sentence.index, tokenIndex)
-                        }
+                        },
+                        fadesIn: entry.id == model.entries.last?.id
                     )
                     // Opacity only: a .move transition animates
                     // relative to the viewport, which displaces
@@ -104,10 +104,6 @@ struct TranscriptView: View {
             // The bottom marker row is 1pt tall; without this List enforces
             // a minimum row height that would keep it from sitting flush.
             .environment(\.defaultMinListRowHeight, 1)
-            .animation(
-                .spring(response: 0.35, dampingFraction: 0.85),
-                value: model.entries.count
-            )
             .onScrollGeometryChange(for: TranscriptScrollPin.Snapshot.self) { geometry in
                 TranscriptScrollPin.Snapshot(
                     offsetY: geometry.contentOffset.y,
@@ -202,7 +198,7 @@ struct TranscriptView: View {
 ///   must act, so growth ticks never feed the pin decision.
 /// - While pinned, movement toward the bottom chases the bottom marker
 ///   until the content sits flush: a single scrollTo can land short while
-///   the insertion spring or List's estimated layout is still settling.
+///   List's estimated layout is still settling.
 /// - Unpinned, movement into the bottom tolerance re-engages the pin.
 enum TranscriptScrollPin {
     /// Distance from the viewport bottom within which the user counts as

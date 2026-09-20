@@ -31,6 +31,16 @@ struct TranscriptRow: View, Equatable {
     /// `lookupAnchor` covers the changes that must re-render the row, and
     /// the closure is stable per parent render.
     var lookupPopover: ((Int) -> RubyTextView.LookupPopover?)?
+    /// True only while this row is the newest entry: a freshly appended
+    /// row fades in, while older rows render opaque so recycled rows
+    /// scrolling back into view don't re-fade. Excluded from `==`: the
+    /// flag flips false only when a newer row lands, by which time
+    /// `shown` has already carried the opacity to 1.
+    let fadesIn: Bool
+
+    /// Fade state for a freshly appended row: starts transparent and
+    /// eases to opaque on first appearance.
+    @State private var shown = false
 
     /// `nonisolated` so it can satisfy `Equatable` on this
     /// `@MainActor`-inferred view; every compared property is an immutable
@@ -73,6 +83,13 @@ struct TranscriptRow: View, Equatable {
         }
         // Generous row spacing stands in for a divider.
         .padding(.bottom, 24)
+        // Opacity only: animating layout would displace neighboring rows
+        // while the re-anchor chase is also repositioning content.
+        .opacity(fadesIn && !shown ? 0 : 1)
+        .onAppear {
+            guard fadesIn, !shown else { return }
+            withAnimation(.easeOut(duration: 0.25)) { shown = true }
+        }
     }
 
     @ViewBuilder
