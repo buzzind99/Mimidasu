@@ -1,7 +1,6 @@
 import AVFoundation
 import CoreAudio
 import Foundation
-import os
 import Synchronization
 
 /// Emitted mono 16 kHz chunk (160 ms = 2,560 samples). `samples` is a value
@@ -420,9 +419,10 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
     /// `maxDrainPasses` — a converter stuck on `.haveData` with zero frames
     /// would otherwise spin the realtime IO thread forever.
     ///
-    /// The converter's input block escapes: `input` is captured through
-    /// `nonisolated(unsafe)` and its single feed gated with a lock (the
-    /// block is invoked serially, but the compiler can't see that). The input
+    /// The SDK annotates the input-block parameter `NS_NOESCAPE` and
+    /// non-`@Sendable`, so the block cannot escape `convert` and is
+    /// invoked serially on this IO thread; its single feed is gated by
+    /// a plain captured flag — no synchronization needed. The input
     /// status is `.noDataNow`, never `.endOfStream`: the latter is terminal,
     /// latching the converter into an ended state so every later callback
     /// converts to zero frames. `.noDataNow` just says this callback has no
@@ -432,8 +432,8 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
         through converter: AVAudioConverter,
         into output: AVAudioPCMBuffer
     ) -> [Float]? {
-        nonisolated(unsafe) let inputBuffer = input
-        let fed = OSAllocatedUnfairLock(initialState: false)
+        let inputBuffer = input
+        var fed = false
         var samples: [Float] = []
         var status: AVAudioConverterOutputStatus = .haveData
         var passes = 0
@@ -442,12 +442,12 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
             output.frameLength = 0
             var conversionError: NSError?
             status = converter.convert(to: output, error: &conversionError) { _, inputStatus in
-                if fed.withLock({ state in state }) {
+                if fed {
                     inputStatus.pointee = .noDataNow
                     return nil
                 }
                 inputStatus.pointee = .haveData
-                fed.withLock { state in state = true }
+                fed = true
                 return inputBuffer
             }
             guard status != .error, conversionError == nil,
