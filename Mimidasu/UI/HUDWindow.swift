@@ -44,7 +44,6 @@ final class HUDWindowController {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
-        panel.isMovableByWindowBackground = true
         panel.ignoresMouseEvents = false
         panel.isReleasedWhenClosed = false
         panel.center()
@@ -75,12 +74,10 @@ final class HUDPanel: NSPanel, ObservableObject {
     @Published var locked = false {
         didSet {
             guard oldValue != locked else { return }
-            // Movability is gated on the window itself: AppKit consults the
-            // deepest hit-tested view (SwiftUI internals in the padlock
-            // region, which report movable=YES) for background-drag moves,
-            // so the HUDHostingView override alone can't suppress them.
+            // `isMovable` gates AppKit's own move paths while locked; the
+            // unlocked drag is performed explicitly by
+            // `HUDHostingView.mouseDown`.
             isMovable = !locked
-            isMovableByWindowBackground = !locked
             if locked {
                 styleMask.remove(.resizable)
             } else {
@@ -164,15 +161,19 @@ final class HUDHostingView: NSHostingView<HUDView> {
     }
 
     override func mouseDown(with event: NSEvent) {
-        guard let panel, !panel.locked else { return super.mouseDown(with: event) }
-        // macOS 27 stopped honoring isMovableByWindowBackground for
-        // SwiftUI-hosted borderless panels even when the hosting view itself
-        // answers mouseDownCanMoveWindow=YES, so the drag starts explicitly.
-        window?.performDrag(with: event)
-    }
-
-    override var mouseDownCanMoveWindow: Bool {
-        guard let panel else { return super.mouseDownCanMoveWindow }
-        return !panel.locked
+        guard let panel, !panel.locked, let window else { return super.mouseDown(with: event) }
+        // Resize borders stay with AppKit: only background clicks start a
+        // drag, so the unlocked panel's edges keep resizing.
+        let point = convert(event.locationInWindow, from: nil)
+        let border: CGFloat = 5
+        if point.x < border || point.x > bounds.width - border
+            || point.y < border || point.y > bounds.height - border
+        {
+            return super.mouseDown(with: event)
+        }
+        // AppKit's background drag (isMovableByWindowBackground) doesn't
+        // fire for SwiftUI-hosted borderless panels, so unlocked drags
+        // start explicitly here.
+        window.performDrag(with: event)
     }
 }
