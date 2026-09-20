@@ -157,7 +157,12 @@ build_app Mimidasu Release "${BUILD_DIR}/Mimidasu.app"
 stage_runtime "${BUILD_DIR}/Mimidasu.app"
 stage_notices "${BUILD_DIR}/Mimidasu.app" LICENSE.md
 stage_readme "${BUILD_DIR}/Mimidasu.app"
+# Staged data files can carry com.apple.quarantine (any browser-downloaded
+# input does); the notary submission rejects quarantined bundle files, so
+# strip before the seal and gate after signing.
+strip_quarantine "${BUILD_DIR}/Mimidasu.app"
 sign_app "${BUILD_DIR}/Mimidasu.app"
+require_no_quarantine "${BUILD_DIR}/Mimidasu.app"
 make_dmg "${BUILD_DIR}/Mimidasu.app" "${DMG_NAME}"
 
 echo

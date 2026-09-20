@@ -134,11 +134,16 @@ stage_notices "${APP}" LICENSE-MAS.md
 # The embedded profile authorizes the sandbox entitlements at launch; it must
 # be in place before the outer bundle is sealed.
 cp -f "${MAS_PROFILE}" "${APP}/Contents/embedded.provisionprofile"
+# Browser-downloaded profiles carry com.apple.quarantine, which App Store
+# upload validation rejects anywhere inside the package — strip it before the
+# outer bundle is sealed, then gate on it after signing.
+strip_quarantine "${APP}"
 
 echo "==> Signing app bundle"
 codesign --force --sign "${MAS_IDENTITY}" --timestamp \
   --entitlements "${MERGED_ENTITLEMENTS}" "${APP}"
 codesign --verify --deep --strict "${APP}"
+require_no_quarantine "${APP}"
 
 echo
 echo "==> Entitlements on the signed app:"

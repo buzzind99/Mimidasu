@@ -42,6 +42,30 @@ require_runtime_artifacts() {
   (( ok )) || exit 1
 }
 
+# App Store upload validation rejects any package file that carries the
+# com.apple.quarantine extended attribute (error 91109). Browser-downloaded
+# inputs — the provisioning profile above all — pick the attribute up, and
+# plain `cp` preserves it. Targeted deletion only: a blanket `xattr -c` would
+# also try (and fail) to drop the system-managed com.apple.provenance.
+strip_quarantine() {
+  local app="$1"
+  xattr -dr com.apple.quarantine "${app}" 2>/dev/null || true
+}
+
+# Hard gate after staging: a quarantine attribute that survives into the
+# artifact fails the upload late (Transporter / App Store Connect), so fail
+# here instead, listing the offending paths.
+require_no_quarantine() {
+  local app="$1" hits
+  hits="$(xattr -r "${app}" 2>/dev/null | grep ': com.apple.quarantine$' | sed 's/: com.apple.quarantine$//' || true)"
+  if [[ -n "${hits}" ]]; then
+    echo "ERROR: quarantined files remain in the bundle:" >&2
+    sed 's/^/  /' <<<"${hits}" >&2
+    echo "  Strip with: xattr -dr com.apple.quarantine \"${app}\"" >&2
+    exit 1
+  fi
+}
+
 # Copy the runtime dylibs and bundled model data into the app bundle and sign
 # every nested Mach-O with SIGN_IDENTITY.
 stage_runtime() {
