@@ -32,3 +32,6 @@ ffi/vibrato-ffi/target/
 
 # Logs & temp
 *.log
+
+# sourcekit-lsp build-server bridge
+buildServer.json
