@@ -45,17 +45,27 @@ enum ASRModelChoice: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Hugging Face resolve URL for the pinned GGUF file.
-    var downloadURL: URL {
-        URL(string: "https://huggingface.co/cstr/\(modelID)/resolve/main/\(ggufFileName)")!
+    /// Upstream repo revision the download URL resolves against. Pinning a
+    /// commit SHA (instead of `main`) keeps shipped builds on bytes that can
+    /// never change: later upstream pushes only move `main`.
+    var revision: String {
+        switch self {
+        case .lite: "e1ad67de9d05137a6a0b02beba1fd66e28df6ae4"
+        case .full: "5d4346e47c268ba91a332a148a1fd39b766408ac"
+        }
     }
 
-    /// Pinned SHA-256 (release-time integrity check). Lite's pin is the
-    /// digest of the repo's dev GGUF; Full's is the Hugging Face LFS oid.
+    /// Hugging Face resolve URL for the pinned GGUF file.
+    var downloadURL: URL {
+        URL(string: "https://huggingface.co/cstr/\(modelID)/resolve/\(revision)/\(ggufFileName)")!
+    }
+
+    /// Pinned SHA-256 (release-time integrity check) — the Hugging Face LFS
+    /// oid of the GGUF at the pinned revision.
     var pinnedSHA256: String {
         switch self {
         case .lite:
-            "b7126f2cb4fe0440cb76f652aed3f1d67813ca1d12088a13b0cafb8884a72a57"
+            "6b84003db9da214c129bcdbb1c471d25b211775a905aecb253dd23aebf18b7f4"
         case .full:
             "dac5e1b95659c0a95b2a1dc60083eb17740454a921ec39f9c24e50b930ca31ab"
         }

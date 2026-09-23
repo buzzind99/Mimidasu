@@ -49,7 +49,7 @@ struct ModelLocatorTests {
         for choice in ASRModelChoice.allCases {
             #expect(
                 choice.downloadURL.absoluteString ==
-                    "https://huggingface.co/cstr/\(choice.modelID)/resolve/main/\(choice.ggufFileName)"
+                    "https://huggingface.co/cstr/\(choice.modelID)/resolve/\(choice.revision)/\(choice.ggufFileName)"
             )
             #expect(ModelDownloader.downloadURL(for: choice) == choice.downloadURL)
         }
