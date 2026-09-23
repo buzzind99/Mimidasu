@@ -30,7 +30,7 @@ private struct WindowFootprintHost: NSViewRepresentable {
 /// updates.
 private final class WindowFootprintView: NSView {
     /// Compact footprint while onboarding owns the window.
-    private static let onboardingContentSize = NSSize(width: 580, height: 740)
+    private static let onboardingContentSize = NSSize(width: 580, height: 800)
 
     private var desiredOnboarding = false
     private var appliedOnboarding: Bool?
