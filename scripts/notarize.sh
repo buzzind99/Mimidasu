@@ -79,8 +79,10 @@ if ! xcrun notarytool history --keychain-profile "${NOTARY_PROFILE}" >/dev/null 
   fi
 fi
 
-# 3. Build, stage, harden-sign, DMG — package.sh handles all of it once the
-#    identity is a Developer ID one (hardened runtime + timestamp follow).
+# 3. Build, stage, harden-sign, styled DMG — package.sh handles all of it
+#    once the identity is a Developer ID one (hardened runtime + timestamp
+#    follow). The Finder background bakes in there, before the submission
+#    below — never re-style after stapling.
 if [[ "${SKIP_PACKAGE:-0}" != "1" ]]; then
   scripts/package.sh
 elif [[ ! -f "${DMG}" ]]; then

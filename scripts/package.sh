@@ -60,6 +60,7 @@ echo "==> Version ${APP_VERSION} (DMG: ${DMG_NAME}.dmg)" >&2
 BUILD_NUMBER="${BUILD_NUMBER:-$(git -C "${REPO_ROOT}" rev-list --count HEAD 2>/dev/null || echo 1)}"
 
 source "${REPO_ROOT}/scripts/lib/staging.sh"
+source "${REPO_ROOT}/scripts/dmg/style_dmg.sh"
 
 cd "${REPO_ROOT}"
 
@@ -141,15 +142,11 @@ EOF
 
 make_dmg() {
   local app="$1" name="$2"
-  local staging="${BUILD_DIR}/${name}"
-  rm -rf "${staging}" "${BUILD_DIR}/${name}.dmg"
-  mkdir -p "${staging}"
-  cp -R "${app}" "${staging}/"
-  ln -s /Applications "${staging}/Applications"
-  # ULMO (lzma) over UDZO (zlib): smaller (~8%) download for the
-  # bundled dictionaries + runtime dylibs; mountable on macOS 10.15+.
-  hdiutil create -volname "${name}" -srcfolder "${staging}" \
-    -format ULMO -ov "${BUILD_DIR}/${name}.dmg"
+  rm -f "${BUILD_DIR}/${name}.dmg"
+  # Styled via scripts/dmg/style_dmg.sh (dmgbuild writes the .DS_Store
+  # directly — no Finder scripting): the background and icon layout bake in
+  # here, before notarize.sh submits — never after (the staple must come last).
+  style_dmg "${app}" "${name}" "${BUILD_DIR}/${name}.dmg"
 }
 
 # --- app ---
