@@ -51,6 +51,9 @@ private struct ToastCard: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.accentPink)
                     .buttonStyle(.plain)
+                    // pointerStyle only applies on hover-tracking views; bare
+                    // plain-style buttons need this no-op onHover to activate it.
+                    .onHover { _ in }
                     .pointerStyle(.link)
                     .padding(.top, 4)
                 }
