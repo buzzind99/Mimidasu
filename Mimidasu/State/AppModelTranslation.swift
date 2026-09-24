@@ -6,21 +6,22 @@ import Translation
 /// translation toasts), split out to keep `AppModel.swift` under the 600-line
 /// lint gate.
 extension AppModel {
-    /// Retry after a translation failure (the toast's Retry action). Re-reads
-    /// the selected provider (and its key) and re-attaches an engine — so a
-    /// manual retry re-attempts the external engine even after the fallback
-    /// latched, in case the key or network was fixed. Resets the latch:
-    /// every manual retry re-arms the one-way auto-fallback, so a
-    /// failure after a retry re-latches onto Apple instead of parking on
-    /// `.unavailable` forever.
+    /// Retry after a translation failure (the toast's Reconnect action).
+    /// Re-reads the selected provider (and its key) and re-attaches an
+    /// engine — so a manual retry re-attempts the external engine even
+    /// after the fallback latched, in case the key or network was fixed.
+    /// Resets the latch: every manual retry re-arms the one-way
+    /// auto-fallback, so a failure after a retry re-latches onto Apple
+    /// instead of parking on `.unavailable` forever.
     func retryTranslation() {
         reengageTranslation()
     }
 
     /// Re-arms the one-way auto-fallback and re-attaches the selected engine:
-    /// resets the latch, dismisses the latched degraded card (its Retry action
-    /// would otherwise linger), then activates. Shared by the manual retry and
-    /// a live provider change — both are explicit user intent to re-engage.
+    /// resets the latch, dismisses the latched degraded card (its Reconnect
+    /// action would otherwise linger), then activates. Shared by the manual
+    /// retry and a live provider change — both are explicit user intent to
+    /// re-engage.
     private func reengageTranslation() {
         translationFallbackActive = false
         // A latched degraded card carries this action; clear it up front so
@@ -182,7 +183,7 @@ extension AppModel {
 
     /// Posts/clears the translation toasts on state change (post on entry,
     /// dismiss on exit): retry progress is transient; degraded/unavailable
-    /// are persistent cards carrying Retry. The fallback card stays for the
+    /// are persistent cards carrying Reconnect. The fallback card stays for the
     /// session while the latch is active — the fresh Apple run's `.ready`
     /// must not clear it (it would flash for under a second); it clears on
     /// manual retry (latch reset) or session stop. `.unavailable` always
@@ -222,7 +223,7 @@ extension AppModel {
 
     private var retryAction: ToastCenter.Action {
         ToastCenter.Action(
-            label: "Retry", handler: { [weak self] in self?.retryTranslation() }
+            label: "Reconnect", handler: { [weak self] in self?.retryTranslation() }
         )
     }
 

@@ -74,7 +74,7 @@ struct TranslationQueueErrorCopyTests {
     @Test("engine errors render their copy with the toast severity", arguments: [
         (
             TranslationEngineError.invalidKey,
-            "Invalid API key. Check the key in Settings, then retry.", TranslationFailureSeverity.permanent
+            "Invalid API key. Check the key in Settings, then reconnect.", TranslationFailureSeverity.permanent
         ),
         (
             TranslationEngineError.quotaExceeded,
@@ -95,7 +95,7 @@ struct TranslationQueueErrorCopyTests {
         ),
         (
             TranslationEngineError.network,
-            "Network error reaching the provider. Check the connection, then retry.",
+            "Network error reaching the provider. Check the connection, then reconnect.",
             TranslationFailureSeverity.transient
         ),
         (
@@ -165,7 +165,7 @@ struct TranslationQueueErrorCopyTests {
 
         #expect(
             outcome?.message == "The ja→en translation pack is not installed. Allow the download "
-                + "prompt (or install it in System Settings), then retry."
+                + "prompt (or install it in System Settings), then reconnect."
         )
     }
 

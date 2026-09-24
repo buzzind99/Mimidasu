@@ -146,11 +146,11 @@ struct AppModelTranslationEngineTests {
             model.translationStatus
                 == .degraded("External translation failed — using Apple on-device", .permanent)
         )
-        // The degraded card carries the Retry affordance; it must survive the
-        // fresh Apple run's `.ready` while the latch is active.
+        // The degraded card carries the Reconnect affordance; it must survive
+        // the fresh Apple run's `.ready` while the latch is active.
         let fallbackToast = model.toasts.toasts.first { toast in toast.key == ToastKey.translationFallback }
         #expect(fallbackToast?.style == .yellowPersistent)
-        #expect(fallbackToast?.action?.label == "Retry")
+        #expect(fallbackToast?.action?.label == "Reconnect")
 
         await stopTranslation(model)
     }

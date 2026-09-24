@@ -260,7 +260,7 @@ final class TranslationQueue {
     private static func describe(_ error: TranslationEngineError) -> String {
         switch error {
         case .invalidKey:
-            "Invalid API key. Check the key in Settings, then retry."
+            "Invalid API key. Check the key in Settings, then reconnect."
         case .quotaExceeded:
             "The provider's API quota is exhausted. Retry later or switch provider."
         case .rateLimited:
@@ -270,7 +270,7 @@ final class TranslationQueue {
         case let .badResponse(detail):
             "The provider returned an unexpected response: \(detail)"
         case .network:
-            "Network error reaching the provider. Check the connection, then retry."
+            "Network error reaching the provider. Check the connection, then reconnect."
         case .cancelled:
             "Translation was cancelled."
         }
@@ -285,7 +285,7 @@ final class TranslationQueue {
                 switch translationError {
                 case TranslationError.notInstalled:
                     return "The ja→en translation pack is not installed. Allow the download "
-                        + "prompt (or install it in System Settings), then retry."
+                        + "prompt (or install it in System Settings), then reconnect."
                 default:
                     break
                 }

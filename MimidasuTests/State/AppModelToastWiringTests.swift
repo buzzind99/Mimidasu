@@ -40,7 +40,7 @@ struct AppModelToastWiringTests {
         #expect(toast?.action == nil)
     }
 
-    @Test("a degraded status posts the persistent fallback card with Retry")
+    @Test("a degraded status posts the persistent fallback card with Reconnect")
     func degradedStatusPostsFallbackCard() async {
         let model = await makeSUT()
         model.translationFallbackActive = true
@@ -51,22 +51,22 @@ struct AppModelToastWiringTests {
 
         let toast = model.toasts.toasts.first { toast in toast.key == ToastKey.translationFallback }
         #expect(toast?.style == .yellowPersistent)
-        #expect(toast?.action?.label == "Retry")
+        #expect(toast?.action?.label == "Reconnect")
         #expect(!model.toasts.toasts.contains { toast in toast.key == ToastKey.translationUnavailable })
     }
 
-    @Test("an unavailable status posts the red card with Retry")
+    @Test("an unavailable status posts the red card with Reconnect")
     func unavailableStatusPostsRedCard() async {
         let model = await makeSUT()
         model.translationFallbackActive = true
 
         model.handleTranslationStatus(
-            .unavailable("Invalid API key. Check the key in Settings, then retry.", .permanent)
+            .unavailable("Invalid API key. Check the key in Settings, then reconnect.", .permanent)
         )
 
         let toast = model.toasts.toasts.first { toast in toast.key == ToastKey.translationUnavailable }
         #expect(toast?.style == .redPersistent)
-        #expect(toast?.action?.label == "Retry")
+        #expect(toast?.action?.label == "Reconnect")
         #expect(!model.toasts.toasts.contains { toast in toast.key == ToastKey.translationFallback })
     }
 
@@ -79,7 +79,7 @@ struct AppModelToastWiringTests {
             .degraded("External translation failed — using Apple on-device", .permanent)
         )
         model.handleTranslationStatus(
-            .unavailable("Network error reaching the provider. Check the connection, then retry.", .transient)
+            .unavailable("Network error reaching the provider. Check the connection, then reconnect.", .transient)
         )
 
         model.handleTranslationStatus(.ready)
@@ -89,8 +89,8 @@ struct AppModelToastWiringTests {
 
     /// The exact auto-fallback race: the fresh Apple run publishes `.ready`
     /// immediately at run start, but while the fallback latch is active the
-    /// degraded card must survive — otherwise the Retry action flashes for
-    /// under a second and never shows.
+    /// degraded card must survive — otherwise the Reconnect action flashes
+    /// for under a second and never shows.
     @Test("a ready status keeps the fallback card while latched")
     func readyStatusKeepsFallbackCardWhileLatched() async {
         let model = await makeSUT()
@@ -103,7 +103,7 @@ struct AppModelToastWiringTests {
 
         let toast = model.toasts.toasts.first { toast in toast.key == ToastKey.translationFallback }
         #expect(toast?.style == .yellowPersistent)
-        #expect(toast?.action?.label == "Retry")
+        #expect(toast?.action?.label == "Reconnect")
         #expect(!model.toasts.toasts.contains { toast in toast.key == ToastKey.translationUnavailable })
     }
 
