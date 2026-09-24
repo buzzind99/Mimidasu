@@ -53,8 +53,9 @@ struct DictionaryPopoverView: View {
                 }
             case let .notFound(surface, related):
                 DictionaryNotFoundView(
-                    surface: surface, related: related,
-                    onSelectRelated: { result in model.selectAlsoPill(result) }
+                    surface: surface, related: related, copyPlacement: .pill,
+                    onSelectRelated: { result in model.selectAlsoPill(result) },
+                    onCopy: { model.copySnippet(surface) }
                 )
             }
         }
@@ -157,8 +158,9 @@ struct DictionaryCardView: View {
             }
         case let .notFound(surface, related):
             DictionaryNotFoundView(
-                surface: surface, related: related,
-                onSelectRelated: { result in model.selectAlsoPill(result) }
+                surface: surface, related: related, copyPlacement: .icon,
+                onSelectRelated: { result in model.selectAlsoPill(result) },
+                onCopy: { model.copySnippet(surface) }
             )
             .onHeightChange { height in topSectionHeight = height }
             .onAppear {

@@ -39,23 +39,32 @@ struct DictionaryResultPillRow: View {
     }
 }
 
-/// The not-found card and popover content: the tapped surface with a plain
-/// "no entry" line — the lookup never promotes a kanji-split fallback to
-/// the display result — and the split hits demoted to "related:" pills
-/// (tapping one promotes it to the card's primary result).
+/// The not-found card and popover content: the tapped surface with its
+/// copy control and a plain "no entry" line — the lookup never promotes a
+/// kanji-split fallback to the display result — and the split hits demoted
+/// to "related:" pills (tapping one promotes it to the card's primary
+/// result).
 struct DictionaryNotFoundView: View {
     let surface: String
     let related: [LookupResult]
+    var copyPlacement: DictionaryCopyPlacement = .none
     var onSelectRelated: (LookupResult) -> Void = { _ in }
+    var onCopy: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: surface)
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(Theme.primaryText)
-                    .lineLimit(1)
-                    .textSelection(.disabled)
+                HStack(spacing: 8) {
+                    Text(verbatim: surface)
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(Theme.primaryText)
+                        .lineLimit(1)
+                        .textSelection(.disabled)
+                    Spacer(minLength: 8)
+                    DictionaryCopyButton(
+                        placement: copyPlacement, help: "Copy the text", action: onCopy
+                    )
+                }
                 Text("No dictionary entry")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Theme.secondaryText)
@@ -70,7 +79,7 @@ struct DictionaryNotFoundView: View {
 
 // MARK: - Shared entry content view
 
-/// Where the host places the copy control inside the shared entry content.
+/// Where the host places the copy control in the shared dictionary content.
 enum DictionaryCopyPlacement {
     /// Popover: labeled Copy pill in the header row.
     case pill
@@ -78,6 +87,52 @@ enum DictionaryCopyPlacement {
     case icon
     /// No copy control.
     case none
+}
+
+/// The copy control behind `DictionaryCopyPlacement`: the labeled pink pill
+/// or the compact icon tile, shared by the found entry header and the
+/// not-found surface header so the two hosts can never diverge.
+struct DictionaryCopyButton: View {
+    let placement: DictionaryCopyPlacement
+    let help: String
+    let action: () -> Void
+
+    var body: some View {
+        switch placement {
+        case .pill:
+            styled(pillLabel)
+        case .icon:
+            styled(iconLabel)
+        case .none:
+            EmptyView()
+        }
+    }
+
+    private func styled(_ label: some View) -> some View {
+        Button(action: action) {
+            label
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
+        .help(help)
+    }
+
+    private var pillLabel: some View {
+        Label("Copy", systemImage: "doc.on.doc")
+            .font(.system(size: 11, weight: .semibold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(Theme.accentPink))
+            .foregroundStyle(.white)
+    }
+
+    private var iconLabel: some View {
+        Image(systemName: "doc.on.doc")
+            .font(.system(size: 11))
+            .foregroundStyle(Theme.secondaryText)
+            .frame(width: 22, height: 22)
+            .background(Theme.tileFill.clipShape(RoundedRectangle(cornerRadius: 6)))
+    }
 }
 
 /// The full dictionary entry composition — headword (+ reading), romaji,
@@ -171,14 +226,7 @@ struct DictionaryEntryContentView: View {
             if entryCount > 1, showsEntryPager {
                 entryPager
             }
-            switch copyPlacement {
-            case .pill:
-                copyButton
-            case .icon:
-                copyIconButton
-            case .none:
-                EmptyView()
-            }
+            copyButton
         }
     }
 
@@ -208,30 +256,9 @@ struct DictionaryEntryContentView: View {
     }
 
     private var copyButton: some View {
-        Button(action: onCopy) {
-            Label("Copy", systemImage: "doc.on.doc")
-                .font(.system(size: 11, weight: .semibold))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Capsule().fill(Theme.accentPink))
-                .foregroundStyle(.white)
-        }
-        .buttonStyle(.plain)
-        .pointerStyle(.link)
-        .help("Copy the headword")
-    }
-
-    private var copyIconButton: some View {
-        Button(action: onCopy) {
-            Image(systemName: "doc.on.doc")
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.secondaryText)
-                .frame(width: 22, height: 22)
-                .background(Theme.tileFill.clipShape(RoundedRectangle(cornerRadius: 6)))
-        }
-        .buttonStyle(.plain)
-        .pointerStyle(.link)
-        .help("Copy the headword")
+        DictionaryCopyButton(
+            placement: copyPlacement, help: "Copy the headword", action: onCopy
+        )
     }
 
     @ViewBuilder
