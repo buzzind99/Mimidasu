@@ -51,6 +51,7 @@ private struct ToastCard: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.accentPink)
                     .buttonStyle(.plain)
+                    .pointerStyle(.link)
                     .padding(.top, 4)
                 }
             }
