@@ -330,7 +330,7 @@ struct AppModelSessionTests {
     @Test("a mid-session capture error posts capture.lost and restart recovers")
     func captureErrorPostsToastAndRestartRecovers() async {
         let sut = await makeSUT(poll: [
-            .final(text: "おわり。", startSample: 0, endSample: 16000, lang: "ja")
+            .final(text: "終わり。", startSample: 0, endSample: 16000, lang: "ja")
         ])
         sut.model.start()
         #expect(await pollUntil { sut.model.phase == .running }, "start brings the session up to running")

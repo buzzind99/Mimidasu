@@ -16,14 +16,15 @@ enum KanaClassification {
         (0x30A1 ... 0x30FF).contains(scalar.value)
     }
 
-    /// Kanji and the iteration mark 々.
+    /// Kanji, the iteration mark 々, and the ideographic zero 〇.
     static func isKanji(_ scalar: Unicode.Scalar) -> Bool {
         (0x4E00 ... 0x9FFF).contains(scalar.value)
             || (0x3400 ... 0x4DBF).contains(scalar.value)
             || scalar.value == 0x3005
+            || scalar.value == 0x3007
     }
 
-    /// Whether `text` contains any kanji (or 々).
+    /// Whether `text` contains any kanji (or 々/〇).
     static func containsKanji(_ text: String) -> Bool {
         text.unicodeScalars.contains(where: isKanji)
     }

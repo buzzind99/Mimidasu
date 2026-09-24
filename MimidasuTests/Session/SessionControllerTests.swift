@@ -23,8 +23,8 @@ struct SessionControllerTests {
     private let sessionModelID = "test-model-GGUF"
     private let captureFailureDetail = "boom"
     private let engineFailureMessage = "decode failed"
-    private let fullSentence = "こんにちは。"
-    private let flushTailSentence = "おわりです"
+    private let fullSentence = "今日は良い天気です。"
+    private let flushTailSentence = "終わりです"
     private let oneSecondInSamples = 16000
 
     // MARK: - Helpers
@@ -116,10 +116,10 @@ struct SessionControllerTests {
 
         sut.controller.warmUpIfNeeded(modelURL: warmUpModelURL)
         sut.controller.warmUpIfNeeded(modelURL: warmUpModelURL)
+
         #expect(
             await pollUntil { sut.log.names == ["factory allowMock=false", "engine.prepare"] }
         )
-
         #expect(sut.live.partial == "")
         #expect(sut.controller.sessionMetadata == nil)
     }
@@ -136,8 +136,8 @@ struct SessionControllerTests {
         #expect(
             await pollUntil { sut.log.names == ["factory allowMock=false", "engine.prepare"] }
         )
-
         sut.controller.warmUpIfNeeded(modelURL: otherURL)
+
         #expect(
             await pollUntil {
                 sut.log.names == [
@@ -261,8 +261,8 @@ struct SessionControllerTests {
         let sut = makeSUT()
 
         _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
-
         let metadata = try #require(sut.controller.sessionMetadata)
+
         #expect(metadata.model == "mock")
         #expect(metadata.sourceLang == "ja")
         #expect(metadata.targetLang == "en")
@@ -284,8 +284,8 @@ struct SessionControllerTests {
         )
 
         _ = try await controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
-
         let metadata = try #require(controller.sessionMetadata)
+
         #expect(metadata.model == sessionModelID)
     }
 
@@ -372,8 +372,8 @@ struct SessionControllerTests {
         _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
 
         sut.capture.onIOError?(.setupFailed(captureFailureDetail))
-        #expect(await pollUntil { !messages.isEmpty }, "the capture error surfaces")
 
+        #expect(await pollUntil { !messages.isEmpty }, "the capture error surfaces")
         #expect(messages.first == CaptureError.setupFailed(captureFailureDetail).errorDescription)
     }
 
@@ -385,8 +385,8 @@ struct SessionControllerTests {
         _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
 
         sut.engine.onEngineError?(engineFailureMessage)
-        #expect(await pollUntil { !messages.isEmpty }, "the engine error surfaces")
 
+        #expect(await pollUntil { !messages.isEmpty }, "the engine error surfaces")
         #expect(messages == [engineFailureMessage])
     }
 
@@ -416,6 +416,7 @@ struct SessionControllerTests {
             )
         ])
         var sentences: [Sentence] = []
+
         sut.controller.onSentence = { sentence in sentences.append(sentence) }
         _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
         sut.controller.startTimers()
@@ -428,6 +429,26 @@ struct SessionControllerTests {
                 Sentence(index: 0, startS: 0.0, endS: 1.0, lang: "ja", text: fullSentence)
             ]
         )
+    }
+
+    /// Kana-, Latin-, and symbol-only finals all carry no kanji, so none of
+    /// them may enter the sentence pipeline.
+    @Test("a final without kanji never reaches the sentence pipeline", arguments: [
+        "こんにちは。", "Is this new?", "..."
+    ])
+    func finalWithoutKanjiNeverEmits(finalText: String) async throws {
+        let sut = makeSUT(poll: [
+            .final(text: finalText, startSample: 0, endSample: oneSecondInSamples, lang: "ja")
+        ])
+        var sentences: [Sentence] = []
+
+        sut.controller.onSentence = { sentence in sentences.append(sentence) }
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
+        sut.controller.startTimers()
+        await pumpTimers(seconds: 0.5)
+        await sut.controller.stop()
+
+        #expect(sentences.isEmpty)
     }
 
     // MARK: - stop() teardown ordering

@@ -30,6 +30,7 @@ final class SentenceBuffer {
             case 0x3040 ... 0x309F, // hiragana
                  0x30A0 ... 0x30FF, // katakana (incl. long-vowel mark ー)
                  0x4E00 ... 0x9FFF, // CJK unified ideographs
+                 0x3007, // ideographic zero 〇
                  0x30 ... 0x39: // ASCII digits
                 true
             case 0x41 ... 0x5A, 0x61 ... 0x7A: // Latin letters
@@ -76,6 +77,15 @@ final class SentenceBuffer {
         } else if text.count >= config.maxChars {
             splitAtClauseBoundary()
         }
+    }
+
+    /// Records a final that carries no transcript text (a dropped filler or
+    /// interjection): speech continued, so the open sentence's silence timer
+    /// and end span stay honest without appending anything.
+    func noteTrailing(endSample: Int, now: ContinuousClock.Instant = .now) {
+        guard !isEmpty else { return }
+        lastEndSample = endSample
+        lastAppendAt = now
     }
 
     /// Tier 2: called on a timer; closes the buffer after the silence timeout.

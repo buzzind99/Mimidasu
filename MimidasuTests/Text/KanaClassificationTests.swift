@@ -31,8 +31,11 @@ struct KanaClassificationTests {
         #expect(KanaClassification.isKatakana(scalar) == expected)
     }
 
-    @Test("classifies kanji, extension A, 々, and the astral gap", arguments: [
+    @Test("classifies kanji, extension A, 々, 〇, and the astral gap", arguments: [
         (0x3005, true), // 々 iteration mark
+        (0x3006, false), // 〆 ideographic closing mark
+        (0x3007, true), // 〇 ideographic zero
+        (0x3008, false), // 〈 just above 〇
         (0x3400, true), // 㐂 extension A first
         (0x4DBF, true), // extension A last
         (0x4E00, true), // 一 unified first
@@ -63,6 +66,7 @@ struct KanaClassificationTests {
         ("𠮷野家", true),
         ("桜", true),
         ("時々", true),
+        ("〇〇", true),
         ("かな", false),
         ("ABC", false),
         ("", false)

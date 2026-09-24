@@ -37,6 +37,7 @@ struct SentenceBufferTests {
         "今日はとても良い天気なので散歩に行きました、そのあとは買い物に出かけて晩ご飯を食べました。"
     private let asciiQuestionSentence = "Is this new?"
     private let asciiExclamationSentence = "Nice!"
+    private let ideographicZeroSentence = "〇〇。"
 
     // MARK: - Helpers
 
@@ -164,6 +165,45 @@ struct SentenceBufferTests {
         buffer.tick(now: .now.advanced(by: .seconds(60)))
 
         #expect(sink.sentences.isEmpty)
+    }
+
+    // MARK: - Dropped finals
+
+    /// A final dropped for carrying no kanji is still speech: it must push
+    /// the silence timeout and the open sentence's end span forward.
+    @Test("a dropped final keeps the silence timer and end span fresh")
+    func droppedFinalKeepsTimerAndEndSpanFresh() {
+        let (buffer, sink) = makeSUT()
+        let start = ContinuousClock.Instant.now
+        buffer.append(finalText: unpunctuatedSentence, startSample: 0, endSample: oneSecondInSamples)
+
+        buffer.noteTrailing(endSample: twoSecondsInSamples, now: start.advanced(by: .seconds(0.9)))
+
+        buffer.tick(now: start.advanced(by: .seconds(1.8)))
+        #expect(sink.sentences.isEmpty)
+
+        buffer.tick(now: start.advanced(by: .seconds(2.0)))
+        #expect(sink.sentences.first?.text == unpunctuatedSentence)
+        #expect(sink.sentences.first?.endS == 2.0)
+    }
+
+    @Test("a dropped final with an empty buffer records nothing")
+    func droppedFinalWithEmptyBufferRecordsNothing() {
+        let (buffer, sink) = makeSUT()
+
+        buffer.noteTrailing(endSample: oneSecondInSamples)
+        buffer.flush()
+
+        #expect(sink.sentences.isEmpty)
+    }
+
+    @Test("an ideographic-zero final counts as content")
+    func ideographicZeroFinalIsContent() {
+        let (buffer, sink) = makeSUT()
+
+        buffer.append(finalText: ideographicZeroSentence, startSample: 0, endSample: oneSecondInSamples)
+
+        #expect(sink.sentences.first?.text == ideographicZeroSentence)
     }
 
     // MARK: - Tier 3: length cap
