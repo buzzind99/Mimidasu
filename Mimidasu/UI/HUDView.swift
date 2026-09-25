@@ -103,7 +103,7 @@ struct HUDView: View {
                     .font(.system(size: 13 * uiScale.factor))
                     .foregroundStyle(.tertiary)
             } else {
-                HStack(alignment: .top, spacing: 6) {
+                HStack(alignment: .center, spacing: 6) {
                     entryView(displayedEntry(in: entries))
                     historyButtons(entries: entries)
                 }
@@ -129,14 +129,14 @@ struct HUDView: View {
             if readingAnnotation != .none {
                 Text(SessionClock.timestamp(entry.sentence.startS))
                     .font(ScaledFont.caption(uiScale.factor).monospacedDigit())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.hudTimestamp)
                 jpText(of: entry)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(SessionClock.timestamp(entry.sentence.startS))
                         .font(ScaledFont.caption(uiScale.factor).monospacedDigit())
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Theme.hudTimestamp)
                     jpText(of: entry)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -166,27 +166,43 @@ struct HUDView: View {
         .foregroundStyle(.white)
     }
 
-    /// Right-side history cycling. Up = newer (disabled at latest, so the
-    /// cursor follows new translations); down = older (pins to that exact
-    /// sentence, so new translations never move the view).
+    /// Right-side history stack, vertically centered against the entry.
+    /// Down = newer (disabled at latest, so the cursor follows new
+    /// translations); up = older (pins to that exact sentence, so new
+    /// translations never move the view). Double chevrons jump to the ends:
+    /// oldest (pins the first entry) and newest (clears the pin, re-follows
+    /// latest).
     private func historyButtons(entries: [SessionEntry]) -> some View {
         VStack(spacing: 2) {
             historyButton(
+                icon: "chevron.up.2",
+                help: "Oldest translation",
+                disabled: !HUDHistory.canJumpToOldest(entries: entries, pinned: model.hudPinnedIndex)
+            ) {
+                model.hudPinnedIndex = entries.first?.sentence.index
+            }
+            historyButton(
                 icon: "chevron.up",
+                help: "Older translation",
+                disabled: !HUDHistory.canStepOlder(entries: entries, pinned: model.hudPinnedIndex)
+            ) {
+                cycleHistory(entries: entries, step: -1)
+            }
+            historyButton(
+                icon: "chevron.down",
                 help: "Newer translation",
                 disabled: !HUDHistory.canStepNewer(entries: entries, pinned: model.hudPinnedIndex)
             ) {
                 cycleHistory(entries: entries, step: 1)
             }
             historyButton(
-                icon: "chevron.down",
-                help: "Older translation",
-                disabled: !HUDHistory.canStepOlder(entries: entries, pinned: model.hudPinnedIndex)
+                icon: "chevron.down.2",
+                help: "Newest translation",
+                disabled: !HUDHistory.canJumpToNewest(entries: entries, pinned: model.hudPinnedIndex)
             ) {
-                cycleHistory(entries: entries, step: -1)
+                model.hudPinnedIndex = nil
             }
         }
-        .padding(.top, 1)
     }
 
     /// Steps the pin one translated entry up/down. Stepping onto the newest

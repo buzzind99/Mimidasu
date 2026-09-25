@@ -43,4 +43,19 @@ enum HUDHistory {
         guard entries.count >= 2 else { return false }
         return pinned != entries[0].sentence.index
     }
+
+    /// "Jump to oldest" enablement: needs somewhere to go — at least two
+    /// entries and not already showing the oldest.
+    static func canJumpToOldest(entries: [SessionEntry], pinned: Int?) -> Bool {
+        guard entries.count >= 2 else { return false }
+        return pinned != entries[0].sentence.index
+    }
+
+    /// "Jump to newest" enablement: needs at least two entries and a pin
+    /// away from the latest (a pin on the newest behaves like no pin, so
+    /// both count as already at the latest).
+    static func canJumpToNewest(entries: [SessionEntry], pinned: Int?) -> Bool {
+        guard let newest = entries.last?.sentence.index, entries.count >= 2 else { return false }
+        return pinned != nil && pinned != newest
+    }
 }

@@ -160,4 +160,53 @@ struct HUDHistoryTests {
         #expect(HUDHistory.canStepNewer(entries: entries, pinned: pinned) == canNewer)
         #expect(HUDHistory.canStepOlder(entries: entries, pinned: pinned) == canOlder)
     }
+
+    // MARK: - Jump enablement
+
+    @Test("jump enablement on empty entries disables both ends")
+    func jumpEnablementEmpty() {
+        #expect(!HUDHistory.canJumpToOldest(entries: [], pinned: nil))
+        #expect(!HUDHistory.canJumpToNewest(entries: [], pinned: nil))
+        #expect(!HUDHistory.canJumpToOldest(entries: [], pinned: 3))
+        #expect(!HUDHistory.canJumpToNewest(entries: [], pinned: 3))
+    }
+
+    @Test("jump enablement on a single entry disables both ends")
+    func jumpEnablementSingle() {
+        let entries = entries(5)
+
+        #expect(!HUDHistory.canJumpToOldest(entries: entries, pinned: nil))
+        #expect(!HUDHistory.canJumpToNewest(entries: entries, pinned: nil))
+        #expect(!HUDHistory.canJumpToOldest(entries: entries, pinned: 5))
+        #expect(!HUDHistory.canJumpToNewest(entries: entries, pinned: 5))
+    }
+
+    @Test("jump enablement with no pin allows oldest only")
+    func jumpEnablementNoPin() {
+        let entries = entries(0, 1, 2)
+
+        #expect(HUDHistory.canJumpToOldest(entries: entries, pinned: nil))
+        #expect(!HUDHistory.canJumpToNewest(entries: entries, pinned: nil))
+    }
+
+    @Test("jump enablement per pinned position", arguments: [
+        // (pinned, canJumpOldest, canJumpNewest)
+        (0, false, true),
+        (1, true, true),
+        (2, true, false),
+    ])
+    func jumpEnablementAtPin(pinned: Int, canJumpOldest: Bool, canJumpNewest: Bool) {
+        let entries = entries(0, 1, 2)
+
+        #expect(HUDHistory.canJumpToOldest(entries: entries, pinned: pinned) == canJumpOldest)
+        #expect(HUDHistory.canJumpToNewest(entries: entries, pinned: pinned) == canJumpNewest)
+    }
+
+    @Test("jump enablement treats a pin on the newest like no pin")
+    func jumpEnablementPinOnNewest() {
+        let entries = entries(0, 1, 2)
+
+        #expect(!HUDHistory.canJumpToNewest(entries: entries, pinned: 2))
+        #expect(HUDHistory.canJumpToOldest(entries: entries, pinned: 2))
+    }
 }

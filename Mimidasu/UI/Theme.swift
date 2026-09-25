@@ -214,6 +214,9 @@ enum Theme {
     /// HUD annotations: `annotationPink`'s dark palette value, pinned because
     /// the HUD surface is always dark regardless of the app appearance.
     static let hudAnnotation = Color(hex: 0xFF9DBB)
+    /// HUD entry timestamps: white 60%, pinned for the same always-dark
+    /// surface (tertiary reads too dim over the translucent black fill).
+    static let hudTimestamp = Color(white: 1, opacity: 0.6)
 }
 
 /// The notice pill's color pair for one tone.
