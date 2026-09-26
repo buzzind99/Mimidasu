@@ -175,13 +175,14 @@ final class AppModel {
 
     /// The in-flight teardown task from `stop()`. `shutdownForTermination`
     /// awaits it so quit never runs a second teardown concurrently with a
-    /// user-initiated one.
-    private var stopTask: Task<Void, Never>?
+    /// user-initiated one. Internal: managed from `AppModelTermination.swift`.
+    var stopTask: Task<Void, Never>?
 
     /// Latched by `shutdownForTermination`: once quit-time teardown begins,
     /// `start` is refused — a session begun during the `.terminateLater`
     /// window would race the engine retirement that follows the drain.
-    private(set) var isTerminating = false
+    /// Internal: managed from `AppModelTermination.swift`.
+    var isTerminating = false
     /// SESSION-card duration anchors: set when a session's chunks start
     /// flowing (`onSessionBegin`) and when teardown completes
     /// (`performStop`); both nil before the first session. Duration reads
@@ -196,7 +197,8 @@ final class AppModel {
     private(set) var captureLostAt: ContinuousClock.Instant?
     /// Injectable so tests can observe (and fake) the quit-time release of
     /// the process-warm ASR engine; the default drives the real factory.
-    private let retireWarmEngine: @Sendable () -> Void
+    /// Internal: invoked from `AppModelTermination.swift`.
+    let retireWarmEngine: @Sendable () -> Void
 
     /// Sentence index → position in `entries`. Entries are append-only within
     /// a session (positions never shift), so translations resolve in O(1)
@@ -507,29 +509,6 @@ final class AppModel {
         }
     }
 
-    /// Quit-time teardown, invoked via `.mimidasuAppWillTerminate` (posted by
-    /// `AppDelegate.applicationShouldTerminate`, which returns
-    /// `.terminateLater` and waits for `.mimidasuTerminationTeardownComplete`).
-    ///
-    /// Winds a live session down exactly like a manual stop — flush decode +
-    /// translation tail stay exportable — then permanently releases the
-    /// process-warm ASR engine so the C library frees its session (and its
-    /// Metal contexts) before the process exits instead of leaving them alive
-    /// at device teardown. Completes with the teardown-complete notification
-    /// in all paths, including an idle model (the warm engine can exist with
-    /// no session ever started), latching `isTerminating` first.
-    func shutdownForTermination() async {
-        isTerminating = true
-        if let stopTask {
-            await stopTask.value
-        } else if phase == .starting || phase == .running || phase == .stopping || phase == .sourceLost {
-            phase = .stopping
-            await performStop()
-        }
-        retireWarmEngine()
-        NotificationCenter.default.post(name: .mimidasuTerminationTeardownComplete, object: nil)
-    }
-
     /// Teardown via `SessionController` (capture, ASR, buffering, timers),
     /// after which the translation queue has drained and the session winds
     /// down. That keeps the tail of the session exportable with translations
@@ -540,8 +519,9 @@ final class AppModel {
     /// `beginSession` restart via the reliable invalidate + reassign path
     /// (same as `retryTranslation`). Nil-ing here and reassigning an
     /// identical config on start is a path SwiftUI's `.translationTask`
-    /// does not reliably re-fire on.
-    private func performStop() async {
+    /// does not reliably re-fire on. Internal: driven by `stop()` and from
+    /// `AppModelTermination.swift`.
+    func performStop() async {
         await sessionController.stop()
         // The external worker parks in the queue's wake loop after draining;
         // once `sessionController.stop()` has drained (translations intact),
