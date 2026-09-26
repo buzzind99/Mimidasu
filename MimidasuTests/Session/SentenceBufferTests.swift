@@ -169,8 +169,8 @@ struct SentenceBufferTests {
 
     // MARK: - Dropped finals
 
-    /// A final dropped for carrying no kanji is still speech: it must push
-    /// the silence timeout and the open sentence's end span forward.
+    /// A final dropped for carrying no Japanese script is still speech: it
+    /// must push the silence timeout and the open sentence's end span forward.
     @Test("a dropped final keeps the silence timer and end span fresh")
     func droppedFinalKeepsTimerAndEndSpanFresh() {
         let (buffer, sink) = makeSUT()
@@ -204,6 +204,22 @@ struct SentenceBufferTests {
         buffer.append(finalText: ideographicZeroSentence, startSample: 0, endSample: oneSecondInSamples)
 
         #expect(sink.sentences.first?.text == ideographicZeroSentence)
+    }
+
+    /// The controller gate admits any Japanese-script final; the buffer's
+    /// content check must agree, or an admitted final could be dropped
+    /// silently without keeping the silence timer honest.
+    @Test("astral kanji, iteration marks, and compat ideographs count as content", arguments: [
+        "𠀋。", // extension B
+        "々々。", // iteration marks
+        "髙。" // BMP compat ideograph
+    ])
+    func japaneseScriptFinalsAreContent(finalText: String) {
+        let (buffer, sink) = makeSUT()
+
+        buffer.append(finalText: finalText, startSample: 0, endSample: oneSecondInSamples)
+
+        #expect(sink.sentences.first?.text == finalText)
     }
 
     // MARK: - Tier 3: length cap

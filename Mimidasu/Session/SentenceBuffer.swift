@@ -22,23 +22,22 @@ final class SentenceBuffer {
     private static let clauseBoundaries = ["けど", "から", "ので", "って", "、", ","]
 
     /// True if the string contains at least one "content" character
-    /// (kana, kanji, Latin letter, or digit). Punctuation/symbols only
-    /// (e.g. "...", "...?") return false.
+    /// (Japanese script via `KanaClassification`, Latin letter, or digit).
+    /// Punctuation/symbols only (e.g. "...", "...?") return false. Delegates
+    /// the Japanese-script half so the buffer's definition can never diverge
+    /// from the controller's final gate: every admitted final counts as
+    /// content here.
     private static func hasContent(_ s: String) -> Bool {
-        s.unicodeScalars.contains { scalar in
-            switch scalar.value {
-            case 0x3040 ... 0x309F, // hiragana
-                 0x30A0 ... 0x30FF, // katakana (incl. long-vowel mark ー)
-                 0x4E00 ... 0x9FFF, // CJK unified ideographs
-                 0x3007, // ideographic zero 〇
-                 0x30 ... 0x39: // ASCII digits
-                true
-            case 0x41 ... 0x5A, 0x61 ... 0x7A: // Latin letters
-                true
-            default:
-                false
+        KanaClassification.containsJapanese(s)
+            || s.unicodeScalars.contains { scalar in
+                switch scalar.value {
+                case 0x30 ... 0x39, // ASCII digits
+                     0x41 ... 0x5A, 0x61 ... 0x7A: // Latin letters
+                    true
+                default:
+                    false
+                }
             }
-        }
     }
 
     let config = Config()
@@ -79,9 +78,10 @@ final class SentenceBuffer {
         }
     }
 
-    /// Records a final that carries no transcript text (a dropped filler or
-    /// interjection): speech continued, so the open sentence's silence timer
-    /// and end span stay honest without appending anything.
+    /// Records a final that carries no transcript text (a Latin- or
+    /// symbol-only final dropped by the controller gate): speech continued,
+    /// so the open sentence's silence timer and end span stay honest
+    /// without appending anything.
     func noteTrailing(endSample: Int, now: ContinuousClock.Instant = .now) {
         guard !isEmpty else { return }
         lastEndSample = endSample
