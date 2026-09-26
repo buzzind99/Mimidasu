@@ -49,7 +49,7 @@ struct TargetLanguage: Hashable, Sendable, Identifiable, Codable {
         try container.encode(code)
     }
 
-    /// Localized display name ("English", "中文（简体）") for the picker rows;
+    /// Localized display name ("English", "简体中文") for the picker rows;
     /// falls back to the English name when the locale can't name the code.
     var displayName: String {
         (Locale.current as NSLocale).displayName(forKey: .identifier, value: code)
@@ -60,7 +60,7 @@ struct TargetLanguage: Hashable, Sendable, Identifiable, Codable {
     /// conventional native name ("Indonesia" → "Bahasa Indonesia").
     private static let nativeNameOverrides = ["id": "Bahasa Indonesia"]
 
-    /// The name in the language itself ("Deutsch", "中文（简体）"), resolved
+    /// The name in the language itself ("Deutsch", "简体中文"), resolved
     /// against a locale built from `code`; falls back to the English name
     /// when the OS can't name the code. CLDR spells endonyms as the language
     /// itself does ("français", "türkçe"); an initial capital is forced so

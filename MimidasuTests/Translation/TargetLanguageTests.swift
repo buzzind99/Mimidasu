@@ -66,6 +66,25 @@ struct TargetLanguageTests {
         #expect(TargetLanguage(code: "zh-Hant").deeplCode == "ZH-HANT")
     }
 
+    // MARK: - Native names
+
+    @Test("the native name resolves in the language itself with an initial capital")
+    func nativeNameResolvesSelfLocale() {
+        #expect(TargetLanguage(code: "de").nativeName == "Deutsch")
+        // CLDR spells the French endonym lowercase; the picker capitalizes it.
+        #expect(TargetLanguage(code: "fr").nativeName == "Français")
+    }
+
+    @Test("the Indonesian endonym uses the conventional native name")
+    func nativeNameOverride() {
+        #expect(TargetLanguage(code: "id").nativeName == "Bahasa Indonesia")
+    }
+
+    @Test("a compound-code endonym resolves through the scripted variant")
+    func nativeNameCompoundCode() {
+        #expect(TargetLanguage(code: "zh-Hans").nativeName == "简体中文")
+    }
+
     // MARK: - Unknown-code fallback
 
     @Test("an unknown code falls back to English")
