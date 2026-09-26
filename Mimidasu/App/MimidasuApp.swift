@@ -6,6 +6,10 @@ struct MimidasuApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model = AppModel()
 
+    init() {
+        appDelegate.observeTranslationOverlayVisibility()
+    }
+
     var body: some Scene {
         WindowGroup("Mimidasu") {
             ContentView(model: model, live: model.live, latency: model.latency)
@@ -14,12 +18,6 @@ struct MimidasuApp: App {
                         appDelegate.hud.bind(model: model, live: model.live)
                     }
                     appDelegate.hud.setVisible(visible)
-                }
-                .onChange(of: model.translationOverlayVisible) { _, visible in
-                    if visible {
-                        appDelegate.translationOverlay.bind(model: model)
-                    }
-                    appDelegate.translationOverlay.setVisible(visible)
                 }
         }
         .windowStyle(.hiddenTitleBar)
@@ -47,6 +45,27 @@ struct MimidasuApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let hud = HUDWindowController.shared
     let translationOverlay = TranslationOverlayWindowController.shared
+
+    private var overlayVisibilityTask: Task<Void, Never>?
+
+    /// Drives the overlay panel from `translationOverlayVisible` for the
+    /// whole process lifetime. The flag's mutation sites (the HUD's
+    /// translate button, the overlay's own close button) sit on panels that
+    /// outlive the main window, so the wiring cannot live in a scene's
+    /// SwiftUI content.
+    func observeTranslationOverlayVisibility() {
+        overlayVisibilityTask = Task { [translationOverlay] in
+            for await notification in NotificationCenter.default.notifications(
+                named: .mimidasuTranslationOverlayVisibilityDidChange
+            ) {
+                guard let model = notification.object as? AppModel else { continue }
+                if model.translationOverlayVisible {
+                    translationOverlay.bind(model: model)
+                }
+                translationOverlay.setVisible(model.translationOverlayVisible)
+            }
+        }
+    }
 
     /// Upper bound on quit-time teardown: whichever arrives first — the
     /// teardown-complete notification or this watchdog — releases the quit.

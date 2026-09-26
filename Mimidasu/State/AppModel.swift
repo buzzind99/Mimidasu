@@ -53,8 +53,17 @@ final class AppModel {
     /// Translation-only companion overlay of the HUD: a scrollable,
     /// bottom-pinned list of every finalized translation. Shown/hidden from
     /// the HUD's translate button or the overlay's own close button; not
-    /// persisted (like `hudVisible`, it starts hidden each launch).
-    var translationOverlayVisible = false
+    /// persisted (like `hudVisible`, it starts hidden each launch). Each
+    /// flip posts `.mimidasuTranslationOverlayVisibilityDidChange`.
+    var translationOverlayVisible = false {
+        didSet {
+            guard translationOverlayVisible != oldValue else { return }
+            NotificationCenter.default.post(
+                name: .mimidasuTranslationOverlayVisibilityDidChange, object: self
+            )
+        }
+    }
+
     /// HUD translation history cursor: the pinned sentence index while
     /// browsing older translations, or nil to follow the latest translated
     /// entry. Pinning an older entry means new translations never move the

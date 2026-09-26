@@ -258,6 +258,18 @@ struct AppModelTests {
         #expect(model.translationOverlayVisible)
     }
 
+    @Test("re-showing the HUD leaves the overlay hidden")
+    func reshowingHUDKeepsOverlayHidden() async {
+        let model = await makeSUT()
+        model.hudVisible = true
+        model.translationOverlayVisible = true
+        model.hudVisible = false
+
+        model.hudVisible = true
+
+        #expect(!model.translationOverlayVisible)
+    }
+
     // MARK: - Session controller wiring
 
     @Test("session begin clears the transcript state")

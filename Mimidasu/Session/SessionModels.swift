@@ -98,4 +98,12 @@ extension Notification.Name {
     /// fires, whichever comes first.
     static let mimidasuTerminationTeardownComplete =
         Notification.Name("MimidasuTerminationTeardownComplete")
+
+    /// Posted by `AppModel` whenever `translationOverlayVisible` flips. The
+    /// overlay window is driven from here rather than a scene-scoped
+    /// `onChange` because both of the flag's mutation sites (the HUD's
+    /// translate button, the overlay's own close button) sit on windows
+    /// that outlive the main window.
+    static let mimidasuTranslationOverlayVisibilityDidChange =
+        Notification.Name("MimidasuTranslationOverlayVisibilityDidChange")
 }
