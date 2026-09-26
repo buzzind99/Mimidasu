@@ -23,7 +23,6 @@ struct SessionControllerTests {
     private let sessionModelID = "test-model-GGUF"
     private let captureFailureDetail = "boom"
     private let engineFailureMessage = "decode failed"
-    private let fullSentence = "今日は良い天気です。"
     private let flushTailSentence = "終わりです"
     private let oneSecondInSamples = 16000
 
@@ -409,13 +408,15 @@ struct SessionControllerTests {
         #expect(sut.live.partial == "")
     }
 
-    @Test("the poll timer routes a final into the sentence pipeline")
-    func pollTimerEmitsSentence() async throws {
+    /// Kana-only finals count as Japanese script — the final re-decode often
+    /// renders kanji words as kana even when the partial showed kanji — so
+    /// they flow through exactly like kanji-bearing ones.
+    @Test("the poll timer routes a final into the sentence pipeline", arguments: [
+        "今日は良い天気です。", "こんにちは。"
+    ])
+    func pollTimerEmitsSentence(finalText: String) async throws {
         let sut = makeSUT(poll: [
-            .final(
-                text: fullSentence, startSample: 0,
-                endSample: oneSecondInSamples, lang: "ja"
-            )
+            .final(text: finalText, startSample: 0, endSample: oneSecondInSamples, lang: "ja")
         ])
         var sentences: [Sentence] = []
 
@@ -428,17 +429,17 @@ struct SessionControllerTests {
         #expect(emitted, "the poll timer must route the final into the sentence pipeline")
         #expect(
             sentences == [
-                Sentence(index: 0, startS: 0.0, endS: 1.0, lang: "ja", text: fullSentence)
+                Sentence(index: 0, startS: 0.0, endS: 1.0, lang: "ja", text: finalText)
             ]
         )
     }
 
-    /// Kana-, Latin-, and symbol-only finals all carry no kanji, so none of
-    /// them may enter the sentence pipeline.
-    @Test("a final without kanji never reaches the sentence pipeline", arguments: [
-        "こんにちは。", "Is this new?", "..."
+    /// Latin- and symbol-only finals carry no Japanese script, so neither
+    /// may enter the sentence pipeline.
+    @Test("a final without Japanese script never reaches the sentence pipeline", arguments: [
+        "Is this new?", "..."
     ])
-    func finalWithoutKanjiNeverEmits(finalText: String) async throws {
+    func finalWithoutJapaneseNeverEmits(finalText: String) async throws {
         let sut = makeSUT(poll: [
             .final(text: finalText, startSample: 0, endSample: oneSecondInSamples, lang: "ja")
         ])

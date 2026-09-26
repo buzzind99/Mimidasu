@@ -380,10 +380,11 @@ final class SessionController {
         case let .final(text, startSample, endSample, lang):
             live.partial = ""
             _ = lang
-            // Only kanji-bearing finals become transcript sentences:
-            // kana- or Latin-only finals (fillers, interjections) are
-            // dropped at the door.
-            guard KanaClassification.containsKanji(text) else {
+            // Only Japanese-script finals become transcript sentences —
+            // kana counts: the final re-decode often renders kanji words
+            // as kana even when the partial showed kanji. Latin- or
+            // symbol-only finals are dropped at the door.
+            guard KanaClassification.containsJapanese(text) else {
                 // A dropped final is still speech: keep the open sentence's
                 // silence timer and end span honest without appending it.
                 sentenceBuffer?.noteTrailing(endSample: endSample)
