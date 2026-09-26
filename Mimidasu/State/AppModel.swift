@@ -98,9 +98,14 @@ final class AppModel {
     let notices = NoticeCenter()
     let translationQueue = TranslationQueue()
     /// Non-secret translation provider settings (selected provider, hasKey
-    /// flags, OpenRouter model, test results). Keys stay in `SecureKeyStoring`
-    /// and are read on demand (engine construction, connection tests).
+    /// flags, OpenRouter model, test results, target language). Keys stay in
+    /// `SecureKeyStoring` and are read on demand (engine construction,
+    /// connection tests).
     let translationSettings: TranslationSettings
+    /// Runtime-discovered translation-target catalog (`LanguageAvailability`
+    /// probe), refreshed by Settings on open; the TARGET LANGUAGE picker
+    /// reads it.
+    let appleTranslationAvailability = AppleTranslationAvailability()
     /// Non-secret ASR model selection (Lite default, Full opt-in); persisted
     /// across launches. Switching applies at the next session start.
     let asrModelSettings: ASRModelSettings
@@ -446,7 +451,9 @@ final class AppModel {
 
     private func beginSession() async throws {
         let started = try await sessionController.begin(
-            modelURL: modelURL, modelID: asrModelSettings.selected.modelID
+            modelURL: modelURL,
+            modelID: asrModelSettings.selected.modelID,
+            targetLang: translationSettings.targetLanguage.code
         )
         // The session may have been cancelled (or its capture lost) while
         // `begin()` was in flight. Tear down whatever begin() brought up so

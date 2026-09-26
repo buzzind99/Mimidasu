@@ -80,7 +80,8 @@ struct OpenRouterEngineTests {
     private func makeEngine(
         script: Script,
         apiKey: String = "openrouter-key-1234",
-        model: String = "tencent/hy-mt2-30b-a3b"
+        model: String = "tencent/hy-mt2-30b-a3b",
+        target: TargetLanguage = .english
     ) -> OpenRouterEngine {
         let transport = HTTPTranslationTransport(timeout: 1) { request in
             let index = script.requestCount
@@ -90,6 +91,7 @@ struct OpenRouterEngineTests {
         return OpenRouterEngine(
             apiKey: apiKey,
             model: model,
+            target: target,
             transport: transport,
             ladder: TransientRetryLadder(retriesBadResponse: true, sleep: { _ in })
         )
@@ -135,6 +137,33 @@ struct OpenRouterEngineTests {
         let body = try #require(script.bodies.first)
         let decoded = try JSONDecoder().decode(RequestBody.self, from: body)
         #expect(decoded.model == OpenRouterEngine.defaultModel)
+    }
+
+    @Test("the system prompt names the selected target language")
+    func promptNamesTargetLanguage() async throws {
+        let script = Script(handler: Self.okContent("hola"))
+        let engine = makeEngine(script: script, model: "test/model", target: TargetLanguage(code: "es"))
+
+        _ = try await engine.translate(["こんにちは"])
+
+        let body = try #require(script.bodies.first)
+        let decoded = try JSONDecoder().decode(RequestBody.self, from: body)
+        // The model field is target-independent; the prompt names the target
+        // in all three places and keeps the ASR caveat.
+        #expect(decoded.model == "test/model")
+        #expect(decoded.messages[0].content.contains("Spanish"))
+        #expect(!decoded.messages[0].content.contains("English"))
+        #expect(decoded.messages[0].content.contains("ASR"))
+    }
+
+    @Test("the prompt uses the full English name for Chinese variants")
+    func promptUsesFullEnglishNameForChineseVariants() {
+        let messages = OpenRouterEngine.messages(
+            for: "こんにちは", target: TargetLanguage(code: "zh-Hans")
+        )
+
+        #expect(messages[0].content.contains("Simplified Chinese"))
+        #expect(messages[1].content == "こんにちは")
     }
 
     @Test("multiple texts issue one request per sentence, order preserved")

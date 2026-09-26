@@ -3,13 +3,14 @@ import Foundation
 /// DeepL API engine. Host auto-detects from the key: a `:fx` suffix is the
 /// free tier (`api-free.deepl.com`), anything else is Pro (`api.deepl.com`).
 /// Key travels in the `Authorization: DeepL-Auth-Key` header. Batch `text[]`
-/// with the fixed ja→en pair (`source_lang=JA`, `target_lang=EN`).
+/// with the fixed `JA` source and the selected target's uppercase DeepL code.
 struct DeepLEngine: TranslationEngine {
     let preferredBatchSize = 32
 
     var onRetry: (@Sendable (RetryProgress) -> Void)?
 
     private let client: BatchTranslateClient
+    private let targetLang: String
 
     static let proEndpoint = URL(string: "https://api.deepl.com/v2/translate")!
     static let freeEndpoint = URL(string: "https://api-free.deepl.com/v2/translate")!
@@ -25,9 +26,17 @@ struct DeepLEngine: TranslationEngine {
 
     init(
         apiKey: String,
+        target: TargetLanguage = .english,
         transport: HTTPTranslationTransport? = nil,
         ladder: TransientRetryLadder = TransientRetryLadder()
     ) {
+        // A nil code would mean a language DeepL can't serve; every picker
+        // catalog entry carries one, so this is a wiring bug, not a
+        // user-reachable state.
+        guard let deeplCode = target.deeplCode else {
+            preconditionFailure("DeepL has no target code for \(target.code)")
+        }
+        targetLang = deeplCode
         client = BatchTranslateClient(
             endpoint: Self.endpoint(for: apiKey),
             headers: ["Authorization": "DeepL-Auth-Key \(apiKey)"],
@@ -39,7 +48,7 @@ struct DeepLEngine: TranslationEngine {
     func translate(_ texts: [String]) async throws -> [String] {
         guard !texts.isEmpty else { return [] }
         let data = try await client.send(
-            DeepLRequestBody(text: texts, sourceLang: "JA", targetLang: "EN"),
+            DeepLRequestBody(text: texts, sourceLang: "JA", targetLang: targetLang),
             classify: Self.classify,
             onRetry: onRetry
         )

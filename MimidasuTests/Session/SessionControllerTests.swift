@@ -260,12 +260,14 @@ struct SessionControllerTests {
     func beginCapturesMockMetadata() async throws {
         let sut = makeSUT()
 
-        _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
+        _ = try await sut.controller.begin(
+            modelURL: warmUpModelURL, modelID: sessionModelID, targetLang: "zh-Hans"
+        )
         let metadata = try #require(sut.controller.sessionMetadata)
 
         #expect(metadata.model == "mock")
         #expect(metadata.sourceLang == "ja")
-        #expect(metadata.targetLang == "en")
+        #expect(metadata.targetLang == "zh-Hans")
         #expect(metadata.chunkMS == 160)
     }
 

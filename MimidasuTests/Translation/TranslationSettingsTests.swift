@@ -101,7 +101,8 @@ struct TranslationSettingsTests {
         settings.select(.deepl)
 
         #expect(settings.deeplIsFreeTier)
-        #expect(settings.activeEngineDescription(fallbackActive: false) == "DeepL (Free)")
+        let target = TargetLanguage.english.displayName
+        #expect(settings.activeEngineDescription(fallbackActive: false) == "DeepL (Free) → \(target)")
     }
 
     @Test("removing a free-tier DeepL key clears the tier marker")
@@ -218,6 +219,54 @@ struct TranslationSettingsTests {
         #expect(second.selectedProvider == .google)
     }
 
+    // MARK: - Target language
+
+    @Test("target language defaults to English")
+    func targetLanguageDefaultsToEnglish() {
+        let (settings, _) = makeSUT()
+
+        #expect(settings.targetLanguage == .english)
+    }
+
+    @Test("select persists the target language choice")
+    func selectPersistsTargetLanguage() {
+        let (first, defaults) = makeSUT()
+        first.select(TargetLanguage(code: "zh-Hans"))
+
+        let (second, _) = makeSUT(defaults: defaults)
+
+        #expect(second.targetLanguage.code == "zh-Hans")
+    }
+
+    @Test("an unknown persisted target code falls back to English")
+    func unknownPersistedTargetFallsBackToEnglish() throws {
+        let suiteName = "test.TranslationSettings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.set("xx-Unknown", forKey: "translation.targetLanguage")
+
+        let (settings, _) = makeSUT(defaults: defaults)
+
+        #expect(settings.targetLanguage == .english)
+    }
+
+    @Test("active engine description names the selected target")
+    func activeEngineDescriptionNamesTarget() {
+        let (settings, _) = makeSUT()
+
+        #expect(
+            settings.activeEngineDescription(fallbackActive: false)
+                == "Apple (on-device) → \(TargetLanguage.english.displayName)"
+        )
+
+        settings.select(TargetLanguage(code: "zh-Hans"))
+
+        let zhHans = TargetLanguage(code: "zh-Hans")
+        #expect(
+            settings.activeEngineDescription(fallbackActive: false)
+                == "Apple (on-device) → \(zhHans.displayName)"
+        )
+    }
+
     // MARK: - Test results
 
     @Test("test results persist across relaunch")
@@ -237,17 +286,18 @@ struct TranslationSettingsTests {
     @Test("active engine description reflects each provider")
     func activeEngineDescriptionVariants() throws {
         let (settings, _) = makeSUT()
+        let target = TargetLanguage.english.displayName
 
-        #expect(settings.activeEngineDescription(fallbackActive: false) == "Apple (on-device)")
+        #expect(settings.activeEngineDescription(fallbackActive: false) == "Apple (on-device) → \(target)")
 
         try settings.saveKey("sk-openrouter", for: .openrouter)
         settings.select(.openrouter)
 
-        #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenRouter · \(OpenRouterEngine.defaultModel)")
+        #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenRouter · \(OpenRouterEngine.defaultModel) → \(target)")
 
         settings.openRouterModel = "tencent/hy-mt2-30b-a3b"
 
-        #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenRouter · tencent/hy-mt2-30b-a3b")
+        #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenRouter · tencent/hy-mt2-30b-a3b → \(target)")
     }
 
     @Test("effective OpenRouter model falls back to the engine default when empty")
@@ -265,8 +315,9 @@ struct TranslationSettingsTests {
         let (settings, _) = makeSUT()
         try settings.saveKey("sk-google", for: .google)
         settings.select(.google)
+        let target = TargetLanguage.english.displayName
 
-        #expect(settings.activeEngineDescription(fallbackActive: true) == "Google Translate — fallback active")
+        #expect(settings.activeEngineDescription(fallbackActive: true) == "Google Translate → \(target) — fallback active")
     }
 
     // MARK: - Provider metadata

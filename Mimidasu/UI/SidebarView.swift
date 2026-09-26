@@ -83,7 +83,10 @@ struct SidebarView: View {
                 Text("Mimidasu")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(Theme.primaryText)
-                Text("Japanese → English")
+                // Live translation route: the target tracks the language
+                // picked in Settings (restart-only, so it flips at the next
+                // session start).
+                Text("Japanese → \(model.translationSettings.targetLanguage.displayName)")
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.secondaryText)
             }

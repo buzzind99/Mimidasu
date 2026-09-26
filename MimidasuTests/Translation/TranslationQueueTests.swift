@@ -395,6 +395,37 @@ struct TranslationQueueTests {
         )
     }
 
+    // MARK: - Target language stamping
+
+    /// The queue stamps every delivered translation with `targetLangCode`
+    /// (set by `AppModel` at engine attach) instead of a fixed code.
+    @Test("delivered translations carry the queue's target language code")
+    func translationsCarryTargetLangCode() async {
+        let engine = makeEchoEngine()
+        let queue = TranslationQueue()
+        queue.targetLangCode = "zh-Hans"
+        let sink = QueueSink()
+        await confirmation("translation delivered") { delivered in
+            queue.setHandlers(
+                result: { index, translation in
+                    sink.receive(index: index, translation: translation)
+                    delivered()
+                },
+                status: { _ in }
+            )
+            let worker = Task { await queue.run(with: engine) }
+            defer { worker.cancel() }
+
+            queue.enqueue(makeSentence(index: 0, text: sentenceText))
+            #expect(
+                await pollUntil(timeout: resultTimeout) { sink.results.count == 1 }
+            )
+        }
+
+        #expect(sink.results.first?.translation.lang == "zh-Hans")
+        #expect(sink.results.first?.translation.text == "EN:\(sentenceText)")
+    }
+
     // MARK: - AppleSessionEngine smoke (real pack)
 
     /// Keeps `AppleSessionEngine` exercised against the real OS ja→en pack:

@@ -96,6 +96,48 @@ struct TranslationConnectionTesterTests {
         #expect(decoded.targetLang == "EN")
     }
 
+    @Test("the Google probe carries the selected target's wire code")
+    func googleProbeForwardsTarget() async throws {
+        let script = Script(handler: { _ in
+            (
+                Data(#"{"data":{"translations":[{"translatedText":"你好"}]}}"#.utf8),
+                Self.httpResponse(GoogleTranslateEngine.endpoint, 200)
+            )
+        })
+        let transport = makeTransport(script)
+
+        try await TranslationConnectionTester.test(
+            provider: .google, key: "k",
+            target: TargetLanguage(code: "zh-Hans"), transport: transport
+        )
+
+        let decoded = try JSONDecoder().decode(
+            GoogleProbeTargetBody.self, from: #require(script.bodies.first)
+        )
+        #expect(decoded.source == "ja")
+        #expect(decoded.target == "zh-CN")
+    }
+
+    @Test("the DeepL probe carries the selected target's wire code")
+    func deeplProbeForwardsTarget() async throws {
+        let script = Script(handler: { _ in
+            (
+                Data(#"{"translations":[{"detected_source_language":"JA","text":"สวัสดี"}]}"#.utf8),
+                Self.httpResponse(DeepLEngine.proEndpoint, 200)
+            )
+        })
+        let transport = makeTransport(script)
+
+        try await TranslationConnectionTester.test(
+            provider: .deepl, key: "k",
+            target: TargetLanguage(code: "th"), transport: transport
+        )
+
+        let decoded = try JSONDecoder().decode(DeepLProbeBody.self, from: #require(script.bodies.first))
+        #expect(decoded.sourceLang == "JA")
+        #expect(decoded.targetLang == "TH")
+    }
+
     @Test("OpenRouter probes GET /api/v1/key with the bearer key")
     func openRouterKeyProbe() async throws {
         let keyURL = try #require(URL(string: "https://openrouter.ai/api/v1/key"))
@@ -183,6 +225,11 @@ struct TranslationConnectionTesterTests {
 
 private struct GoogleProbeBody: Decodable {
     let q: [String]
+}
+
+private struct GoogleProbeTargetBody: Decodable {
+    let source: String
+    let target: String
 }
 
 private struct DeepLProbeBody: Decodable {

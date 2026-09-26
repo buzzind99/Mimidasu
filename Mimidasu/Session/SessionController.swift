@@ -130,8 +130,9 @@ final class SessionController {
     /// available (caller maps that to `.needsModel`); throws when capture setup
     /// fails. `modelURL` comes from the caller's
     /// resolved state (single resolve, no second verify on the start path);
-    /// `modelID` is the active choice's id for session metadata.
-    func begin(modelURL: URL?, modelID: String) async throws -> Bool {
+    /// `modelID` is the active choice's id for session metadata; `targetLang`
+    /// is the selected translation target's BCP-47 code for session metadata.
+    func begin(modelURL: URL?, modelID: String, targetLang: String = "en") async throws -> Bool {
         // No TCC preflight: the tap needs no Microphone permission — the
         // system prompts for audio-capture access at the aggregate's first
         // IO (driven by NSAudioCaptureUsageDescription). That first IO is the
@@ -170,7 +171,7 @@ final class SessionController {
         sessionMetadata = SessionMetadata(
             startedAt: Date(),
             sourceLang: "ja",
-            targetLang: "en",
+            targetLang: targetLang,
             model: engine.isMock ? "mock" : modelID,
             chunkMS: 160
         )

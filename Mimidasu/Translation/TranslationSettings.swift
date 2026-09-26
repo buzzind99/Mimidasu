@@ -108,6 +108,13 @@ final class TranslationSettings {
         didSet { defaults.set(deeplIsFreeTier, forKey: Self.deeplFreeKey) }
     }
 
+    /// Selected translation target (the source stays fixed `ja`). Persisted
+    /// as the raw BCP-47 code; unknown codes fall back to English on load.
+    /// Restart-only: a new target applies at the next session start.
+    private(set) var targetLanguage: TargetLanguage {
+        didSet { defaults.set(targetLanguage.code, forKey: Self.targetLanguageKey) }
+    }
+
     /// Observed so views update on `removeKey`/`setTestResult`; dictionary
     /// assignment routes through the property setter, firing observation.
     private(set) var hasKey: [TranslationProvider: Bool]
@@ -120,6 +127,7 @@ final class TranslationSettings {
     private static let selectedKey = "translation.selectedProvider"
     private static let openRouterModelKey = "translation.openRouterModel"
     private static let deeplFreeKey = "translation.deeplFreeTier"
+    private static let targetLanguageKey = "translation.targetLanguage"
     private static func hasKeyKey(_ provider: TranslationProvider) -> String {
         "translation.hasKey.\(provider.rawValue)"
     }
@@ -153,6 +161,8 @@ final class TranslationSettings {
         selectedProvider = selected
         openRouterModel = defaults.string(forKey: Self.openRouterModelKey) ?? ""
         deeplIsFreeTier = defaults.bool(forKey: Self.deeplFreeKey)
+        targetLanguage = defaults.string(forKey: Self.targetLanguageKey)
+            .map(TargetLanguage.init(code:)) ?? .english
 
         var hasKey: [TranslationProvider: Bool] = [:]
         var keyHints: [TranslationProvider: String] = [:]
@@ -236,6 +246,13 @@ final class TranslationSettings {
         selectedProvider = provider
     }
 
+    /// Persists the target-language picker selection. Restart-only: engines
+    /// and the Apple config read the value at the next session start; no
+    /// mid-session re-translation is wired.
+    func select(_ target: TargetLanguage) {
+        targetLanguage = target
+    }
+
     // MARK: - Connection tests
 
     func testResult(for provider: TranslationProvider) -> ConnectionTestResult? {
@@ -262,11 +279,12 @@ final class TranslationSettings {
     }
 
     /// Truthful description of the engine currently in use, including the
-    /// Apple-fallback latch ("DeepL (Free) — fallback active"). The base
-    /// label prefers the attached provider (`attachedProvider`) over the
-    /// picker so it never names an engine that isn't actually running; nil
-    /// (nothing external attached, or no session yet) falls back to the
-    /// picker selection. Driven by published state
+    /// Apple-fallback latch ("DeepL (Free) — fallback active") and the
+    /// selected target ("Apple (on-device) → English"). The base label
+    /// prefers the attached provider (`attachedProvider`) over the picker so
+    /// it never names an engine that isn't actually running; nil (nothing
+    /// external attached, or no session yet) falls back to the picker
+    /// selection. Driven by published state
     /// (`translationFallbackActive`, `activeExternalProvider`), never
     /// re-derived from the picker alone.
     func activeEngineDescription(
@@ -284,6 +302,7 @@ final class TranslationSettings {
         case .openrouter:
             "OpenRouter · \(effectiveOpenRouterModel)"
         }
+        label += " → \(targetLanguage.displayName)"
         if fallbackActive, provider.isExternal {
             label += " — fallback active"
         }

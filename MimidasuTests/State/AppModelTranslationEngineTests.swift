@@ -2,6 +2,7 @@ import Foundation
 @testable import Mimidasu
 import Synchronization
 import Testing
+@preconcurrency import Translation
 
 /// Tests `AppModel`'s engine selection: an external provider spawns a
 /// worker task (config stays nil), an exhausted external engine latches the

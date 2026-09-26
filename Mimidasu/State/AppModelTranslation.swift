@@ -37,6 +37,9 @@ extension AppModel {
     /// host. Apple: invalidate + recreate the config so `.translationTask`
     /// reliably re-fires and hands an `AppleSessionEngine` to the queue.
     func activateTranslation() {
+        // Stamp the queue with the current target before any engine
+        // attaches: `translateBatch` labels every result with it.
+        translationQueue.targetLangCode = translationSettings.targetLanguage.code
         if let engine = makeExternalEngine() {
             activeTranslationEngine = .external
             activeExternalProvider = translationSettings.selectedProvider
@@ -107,7 +110,8 @@ extension AppModel {
         }
         do {
             try await TranslationConnectionTester.test(
-                provider: provider, key: key, transport: translationTransport
+                provider: provider, key: key, target: translationSettings.targetLanguage,
+                transport: translationTransport
             )
         } catch {
             translationSettings.setTestResult(.failure(error.statusMessage), for: provider)
@@ -135,7 +139,9 @@ extension AppModel {
 
     /// Builds the selected external provider's engine, or nil when Apple is
     /// selected (or the external provider has no usable key — the unconfigured
-    /// edge falls back to Apple with a note in `activateTranslation`).
+    /// edge falls back to Apple with a note in `activateTranslation`). The
+    /// selected target language threads into every engine: the OpenRouter
+    /// prompt names it, Google/DeepL map it to their wire codes.
     private func makeExternalEngine() -> (any TranslationEngine)? {
         let provider = translationSettings.selectedProvider
         guard provider.isExternal, let key = translationSettings.key(for: provider) else {
@@ -143,14 +149,16 @@ extension AppModel {
         }
         // The guard narrowed the domain to the external providers; Apple is
         // served by the `.translationTask` host in `activateTranslation`.
+        let target = translationSettings.targetLanguage
         var engine: any TranslationEngine = if provider == .google {
-            GoogleTranslateEngine(apiKey: key, transport: translationTransport)
+            GoogleTranslateEngine(apiKey: key, target: target, transport: translationTransport)
         } else if provider == .deepl {
-            DeepLEngine(apiKey: key, transport: translationTransport)
+            DeepLEngine(apiKey: key, target: target, transport: translationTransport)
         } else {
             OpenRouterEngine(
                 apiKey: key,
                 model: translationSettings.openRouterModel,
+                target: target,
                 transport: translationTransport
             )
         }
@@ -246,12 +254,14 @@ extension AppModel {
         translationConfig = makeTranslationConfig()
     }
 
-    /// ja→en configuration, built identically for session start and retry so
-    /// SwiftUI's `.translationTask` treats both paths the same way.
+    /// ja→target configuration, built identically for session start and retry
+    /// so SwiftUI's `.translationTask` treats both paths the same way. The
+    /// target reads current settings each time, so a picker change applies at
+    /// the next build (session start / retry) — restart-only by design.
     private func makeTranslationConfig() -> TranslationSession.Configuration {
         TranslationSession.Configuration(
             source: Locale.Language(identifier: "ja"),
-            target: Locale.Language(identifier: "en")
+            target: Locale.Language(identifier: translationSettings.targetLanguage.code)
         )
     }
 }

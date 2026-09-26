@@ -42,13 +42,16 @@ struct GoogleTranslateEngineTests {
         }
     }
 
-    private func makeEngine(script: Script) -> GoogleTranslateEngine {
+    private func makeEngine(
+        script: Script, target: TargetLanguage = .english
+    ) -> GoogleTranslateEngine {
         let transport = HTTPTranslationTransport(timeout: 1) { request in
             script.record(request)
             return try script.response()
         }
         return GoogleTranslateEngine(
             apiKey: "google-key-1234",
+            target: target,
             transport: transport,
             ladder: TransientRetryLadder(sleep: { _ in })
         )
@@ -80,6 +83,19 @@ struct GoogleTranslateEngineTests {
         #expect(decoded.format == "text")
         #expect(decoded.source == "ja")
         #expect(decoded.target == "en")
+    }
+
+    @Test("the body target follows the selected language")
+    func targetFollowsSelection() async throws {
+        let script = Script(response: Self.ok(#"{"data":{"translations":[{"translatedText":"你好"}]}}"#))
+        let engine = makeEngine(script: script, target: TargetLanguage(code: "zh-Hans"))
+
+        _ = try await engine.translate(["こんにちは"])
+
+        let body = try #require(script.body)
+        let decoded = try JSONDecoder().decode(RequestBody.self, from: body)
+        #expect(decoded.source == "ja")
+        #expect(decoded.target == "zh-CN", "the Chinese variant maps to Google's regional code")
     }
 
     // MARK: - Response parsing

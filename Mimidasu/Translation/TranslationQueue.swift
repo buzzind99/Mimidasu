@@ -51,6 +51,12 @@ enum TranslationStatus: Equatable {
 final class TranslationQueue {
     private(set) var status: TranslationStatus = .idle
 
+    /// BCP-47 code stamped onto every `SentenceTranslation` this session
+    /// produces. `AppModel` sets it when attaching an engine (reading the
+    /// selected target); the default keeps pre-attach runs and tests
+    /// coherent with the previous fixed English behavior.
+    var targetLangCode = "en"
+
     /// The single source of truth for untranslated sentences, FIFO order.
     /// Deliberately plain state, not a buffered AsyncStream: a stream's
     /// internal buffer is invisible to `drain` and silently discarded when
@@ -236,13 +242,13 @@ final class TranslationQueue {
 
     /// Translates one batch in a single engine round-trip (batches amortize
     /// the call during bursts). Returns sentences paired with translations;
-    /// the fixed ja→en pair makes the response language constant.
+    /// each result is stamped with the session's target language code.
     private func translateBatch(
         _ batch: [Sentence], using engine: any TranslationEngine
     ) async throws -> [(Sentence, SentenceTranslation)] {
         let translations = try await engine.translate(batch.map(\.text))
         return zip(batch, translations).map { sentence, text in
-            (sentence, SentenceTranslation(lang: "en", text: text))
+            (sentence, SentenceTranslation(lang: targetLangCode, text: text))
         }
     }
 

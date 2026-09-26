@@ -7,11 +7,16 @@ import Foundation
 /// in a single round-trip. Outcomes land in `TranslationSettings` and render
 /// inline.
 enum TranslationConnectionTester {
+    /// - Parameters:
+    ///   - target: the selected translation target, threaded into the
+    ///     translate probes (Google/DeepL request bodies); OpenRouter's key
+    ///     probe is target-independent.
     /// - Throws: A short-status `TranslationEngineError` from the engine
     ///   taxonomy (never key material or raw response bodies).
     static func test(
         provider: TranslationProvider,
         key: String,
+        target: TargetLanguage = .english,
         transport: HTTPTranslationTransport? = nil
     ) async throws(TranslationEngineError) {
         switch provider {
@@ -21,6 +26,7 @@ enum TranslationConnectionTester {
             try await translateProbe(
                 GoogleTranslateEngine(
                     apiKey: key,
+                    target: target,
                     transport: transport,
                     ladder: TransientRetryLadder(retries: 0)
                 )
@@ -29,6 +35,7 @@ enum TranslationConnectionTester {
             try await translateProbe(
                 DeepLEngine(
                     apiKey: key,
+                    target: target,
                     transport: transport,
                     ladder: TransientRetryLadder(retries: 0)
                 )

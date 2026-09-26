@@ -84,6 +84,9 @@ struct SettingsView: View {
             keyDraft = ""
             keySaveFailed = false
             modelDraft = settings.openRouterModel
+            // The cached window doesn't re-run `.task` on reopen; the
+            // availability probe is a no-op once loaded anyway.
+            Task { await model.appleTranslationAvailability.refreshIfNeeded() }
         }
     }
 
@@ -127,6 +130,7 @@ struct SettingsView: View {
                     modelDraft: $modelDraft
                 )
             }
+            SettingsTargetLanguageCard(model: model, settings: settings)
             appearanceCard
             modelCard
             sessionCard

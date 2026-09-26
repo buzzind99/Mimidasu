@@ -25,6 +25,9 @@ struct OpenRouterEngine: TranslationEngine {
 
     var onRetry: (@Sendable (RetryProgress) -> Void)?
 
+    /// Selected target language; names the language in the system prompt.
+    private let target: TargetLanguage
+
     private let client: ChatCompletionsClient
 
     static let endpoint = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
@@ -33,9 +36,11 @@ struct OpenRouterEngine: TranslationEngine {
     init(
         apiKey: String,
         model: String,
+        target: TargetLanguage = .english,
         transport: HTTPTranslationTransport? = nil,
         ladder: TransientRetryLadder = TransientRetryLadder(retriesBadResponse: true)
     ) {
+        self.target = target
         // An empty model string (placeholder-only Settings field) would be
         // sent verbatim and rejected by the API; fall back to the default.
         client = ChatCompletionsClient(
@@ -60,7 +65,7 @@ struct OpenRouterEngine: TranslationEngine {
         results.reserveCapacity(texts.count)
         for text in texts {
             try await results.append(client.complete(
-                Self.messages(for: text),
+                Self.messages(for: text, target: target),
                 decode: { data in try Self.parse(ChatCompletionsClient.content(of: data)) },
                 onRetry: onRetry
             ))
@@ -70,12 +75,15 @@ struct OpenRouterEngine: TranslationEngine {
 
     // MARK: - Prompt + parsing
 
-    static func messages(for text: String) -> [ChatCompletionsClient.Message] {
+    /// System prompt names the target in three places ("Japanese-to-Spanish",
+    /// "casual Spanish", "the Spanish translation") and keeps the ASR caveat:
+    /// the model must infer intent past recognition errors.
+    static func messages(for text: String, target: TargetLanguage = .english) -> [ChatCompletionsClient.Message] {
         let system = """
-        You are a Japanese-to-English translation engine. Input is ASR output and may \
-        contain recognition errors or fragments — infer the intended meaning in casual \
-        English. Reply with only the English translation: no quotes, no explanations, \
-        no romaji, nothing else.
+        You are a Japanese-to-\(target.englishName) translation engine. Input is ASR output \
+        and may contain recognition errors or fragments — infer the intended meaning in \
+        casual \(target.englishName). Reply with only the \(target.englishName) translation: \
+        no quotes, no explanations, no romaji, nothing else.
         """
         return [
             ChatCompletionsClient.Message(role: "system", content: system),

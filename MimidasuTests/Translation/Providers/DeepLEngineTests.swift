@@ -42,13 +42,16 @@ struct DeepLEngineTests {
         }
     }
 
-    private func makeEngine(script: Script, apiKey: String = "deepl-key-1234") -> DeepLEngine {
+    private func makeEngine(
+        script: Script, apiKey: String = "deepl-key-1234", target: TargetLanguage = .english
+    ) -> DeepLEngine {
         let transport = HTTPTranslationTransport(timeout: 1) { request in
             script.record(request)
             return try script.response()
         }
         return DeepLEngine(
             apiKey: apiKey,
+            target: target,
             transport: transport,
             ladder: TransientRetryLadder(sleep: { _ in })
         )
@@ -93,6 +96,19 @@ struct DeepLEngineTests {
 
         let request = try #require(script.request)
         #expect(request.url == DeepLEngine.freeEndpoint)
+    }
+
+    @Test("the body target follows the selected language")
+    func targetFollowsSelection() async throws {
+        let script = Script(response: Self.ok(#"{"translations":[{"text":"สวัสดี"}]}"#))
+        let engine = makeEngine(script: script, target: TargetLanguage(code: "th"))
+
+        _ = try await engine.translate(["こんにちは"])
+
+        let body = try #require(script.body)
+        let decoded = try JSONDecoder().decode(DeepLRequestBodyFixture.self, from: body)
+        #expect(decoded.sourceLang == "JA")
+        #expect(decoded.targetLang == "TH", "the DeepL code is the uppercase catalog entry")
     }
 
     // MARK: - Response parsing

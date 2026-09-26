@@ -2,7 +2,8 @@ import Foundation
 
 /// Google Cloud Translation v2 engine. Key travels in the `X-goog-api-key`
 /// header (never the query string, which would leak it into logs). Batch
-/// `q[]` with `format=text`, fixed ja→en. The v2 API HTML-escapes output
+/// `q[]` with `format=text`, fixed `ja` source and the selected target (the
+/// Chinese variants map to `zh-CN` / `zh-TW`). The v2 API HTML-escapes output
 /// (`&#39;`, `&quot;`, …), so results are unescaped before returning.
 struct GoogleTranslateEngine: TranslationEngine {
     let preferredBatchSize = 32
@@ -10,14 +11,17 @@ struct GoogleTranslateEngine: TranslationEngine {
     var onRetry: (@Sendable (RetryProgress) -> Void)?
 
     private let client: BatchTranslateClient
+    private let target: TargetLanguage
 
     static let endpoint = URL(string: "https://translation.googleapis.com/language/translate/v2")!
 
     init(
         apiKey: String,
+        target: TargetLanguage = .english,
         transport: HTTPTranslationTransport? = nil,
         ladder: TransientRetryLadder = TransientRetryLadder()
     ) {
+        self.target = target
         client = BatchTranslateClient(
             endpoint: Self.endpoint,
             headers: ["X-goog-api-key": apiKey],
@@ -29,7 +33,7 @@ struct GoogleTranslateEngine: TranslationEngine {
     func translate(_ texts: [String]) async throws -> [String] {
         guard !texts.isEmpty else { return [] }
         let data = try await client.send(
-            GoogleRequestBody(q: texts, format: "text", source: "ja", target: "en"),
+            GoogleRequestBody(q: texts, format: "text", source: "ja", target: target.googleCode),
             classify: Self.classify,
             onRetry: onRetry
         )
