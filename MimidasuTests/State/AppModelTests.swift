@@ -225,6 +225,39 @@ struct AppModelTests {
         #expect(model.toasts.toasts.isEmpty)
     }
 
+    // MARK: - HUD & overlay visibility
+
+    @Test("showing the HUD leaves the translation overlay's visibility alone")
+    func showingHUDKeepsOverlayVisibility() async {
+        let model = await makeSUT()
+        model.translationOverlayVisible = true
+
+        model.hudVisible = true
+
+        #expect(model.translationOverlayVisible)
+    }
+
+    @Test("hiding the HUD hides the translation overlay with it")
+    func hidingHUDHidesTranslationOverlay() async {
+        let model = await makeSUT()
+        model.hudVisible = true
+        model.translationOverlayVisible = true
+
+        model.hudVisible = false
+
+        #expect(!model.translationOverlayVisible)
+    }
+
+    @Test("hiding an already-hidden HUD is a no-op for the overlay")
+    func hidingHiddenHUDKeepsOverlayVisibility() async {
+        let model = await makeSUT()
+        model.translationOverlayVisible = true
+
+        model.hudVisible = false
+
+        #expect(model.translationOverlayVisible)
+    }
+
     // MARK: - Session controller wiring
 
     @Test("session begin clears the transcript state")

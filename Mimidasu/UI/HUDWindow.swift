@@ -105,16 +105,18 @@ final class HUDHostingView: NSHostingView<HUDView> {
         window as? HUDPanel
     }
 
-    /// Must mirror `padlockButton`'s layout: 24×24 button with 6pt padding,
-    /// expanded by a 4pt margin for a comfortable hit target.
+    /// Must mirror `HUDView.headerButtons`' layout: two 24×24 buttons with
+    /// 6pt spacing and 6pt row padding, expanded by a 4pt margin for a
+    /// comfortable hit target.
     private var unlockRegion: CGRect {
         let size: CGFloat = 24
         let pad: CGFloat = 6
         let margin: CGFloat = 4
+        let row: CGFloat = 2 * size + 6
         return CGRect(
-            x: bounds.width - pad - size - margin,
+            x: bounds.width - pad - row - margin,
             y: pad - margin,
-            width: size + 2 * margin,
+            width: row + 2 * margin,
             height: size + 2 * margin
         )
     }

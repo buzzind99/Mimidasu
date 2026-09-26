@@ -40,7 +40,21 @@ final class AppModel {
     var translationStatus: TranslationStatus = .idle
     var engineIsMock = false
     var modelURL: URL?
-    var hudVisible = false
+    /// Hiding the HUD takes its translation-only companion overlay down
+    /// with it, so the overlay's toggle never points at a window the user
+    /// can no longer see.
+    var hudVisible = false {
+        didSet {
+            guard !hudVisible, oldValue else { return }
+            translationOverlayVisible = false
+        }
+    }
+
+    /// Translation-only companion overlay of the HUD: a scrollable,
+    /// bottom-pinned list of every finalized translation. Shown/hidden from
+    /// the HUD's translate button or the overlay's own close button; not
+    /// persisted (like `hudVisible`, it starts hidden each launch).
+    var translationOverlayVisible = false
     /// HUD translation history cursor: the pinned sentence index while
     /// browsing older translations, or nil to follow the latest translated
     /// entry. Pinning an older entry means new translations never move the

@@ -41,11 +41,38 @@ struct HUDView: View {
             stroke: .white.opacity(panel.locked ? 0.08 : 0.35)
         )
         .frame(minWidth: 360, minHeight: 170)
-        .overlay(alignment: .topTrailing) { padlockButton }
+        .overlay(alignment: .topTrailing) { headerButtons }
     }
 
-    /// Pinned top-trailing with 6pt padding; HUDHostingView.unlockRegion
-    /// mirrors this rect so it stays clickable while locked.
+    /// Top-trailing row: translation-overlay toggle, padlock outermost.
+    /// HUDHostingView.unlockRegion mirrors this rect so both buttons stay
+    /// clickable while locked.
+    private var headerButtons: some View {
+        HStack(spacing: 6) {
+            translationOverlayButton
+            padlockButton
+        }
+        .padding(6)
+    }
+
+    /// Shows/hides the translation-only companion overlay; tinted with the
+    /// translation color while the overlay is on screen.
+    private var translationOverlayButton: some View {
+        Button {
+            model.translationOverlayVisible.toggle()
+        } label: {
+            Image(systemName: "translate")
+                .font(.system(size: 10))
+                .foregroundStyle(
+                    model.translationOverlayVisible ? Theme.translationTeal : .secondary
+                )
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Show or hide the translation-only overlay")
+    }
+
     private var padlockButton: some View {
         Button {
             panel.locked.toggle()
@@ -57,7 +84,6 @@ struct HUDView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(6)
         .help(panel.locked ? "Unlock to move/resize (HUD is click-through when locked)" : "Lock (click-through)")
     }
 

@@ -15,6 +15,12 @@ struct MimidasuApp: App {
                     }
                     appDelegate.hud.setVisible(visible)
                 }
+                .onChange(of: model.translationOverlayVisible) { _, visible in
+                    if visible {
+                        appDelegate.translationOverlay.bind(model: model)
+                    }
+                    appDelegate.translationOverlay.setVisible(visible)
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
@@ -40,6 +46,7 @@ struct MimidasuApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let hud = HUDWindowController.shared
+    let translationOverlay = TranslationOverlayWindowController.shared
 
     /// Upper bound on quit-time teardown: whichever arrives first — the
     /// teardown-complete notification or this watchdog — releases the quit.

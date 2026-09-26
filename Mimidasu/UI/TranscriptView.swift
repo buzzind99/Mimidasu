@@ -32,7 +32,10 @@ struct TranscriptView: View {
     /// Scroll state held out of the body: per-tick geometry writes land on
     /// the model, never on this view's graph, so a drag doesn't re-diff
     /// the rows.
-    @State private var scroll = TranscriptScrollModel()
+    @State private var scroll = PinnedScrollModel(
+        topAnchorID: TranscriptView.topAnchorID,
+        bottomAnchorID: TranscriptView.bottomAnchorID
+    )
 
     static let bottomAnchorID = "transcript-bottom-anchor"
     static let topAnchorID = "transcript-top-anchor"
@@ -94,7 +97,9 @@ struct TranscriptView: View {
             // toast zone at the top-trailing corner where the toast stack
             // mounts).
             .overlay(alignment: .bottomTrailing) {
-                TranscriptJumpButtons(scroll: scroll, proxy: proxy)
+                ScrollJumpButtons(scroll: scroll, proxy: proxy)
+                    .padding(.trailing, 24)
+                    .padding(.bottom, 20)
             }
             // The bottom marker row is 1pt tall; without this List enforces
             // a minimum row height that would keep it from sitting flush.
@@ -299,15 +304,16 @@ enum TranscriptScrollPin {
     }
 }
 
-/// Scroll-side state for the transcript's manual bottom pin, held out of
-/// `TranscriptView` so per-tick geometry writes never invalidate the
-/// row-diffing body: the raw snapshot, pin flag, and coalescing flag are
-/// written every tick but read only inside these handlers — no body
-/// observes them — while the jump buttons observe just the two visibility
-/// flags, which are assigned only on an actual flip.
+/// Scroll-side state for a manual bottom-pinned scroll view (the
+/// transcript list and the translation overlay), held out of the owning
+/// view so per-tick geometry writes never invalidate the row-diffing
+/// body: the raw snapshot, pin flag, and coalescing flag are written
+/// every tick but read only inside these handlers — no body observes
+/// them — while the jump buttons observe just the two visibility flags,
+/// which are assigned only on an actual flip.
 @Observable
 @MainActor
-private final class TranscriptScrollModel {
+final class PinnedScrollModel {
     private var snapshot: TranscriptScrollPin.Snapshot?
     private var pinnedToBottom = true
     /// Coalesces bursts of re-anchor requests into a single scrollTo.
@@ -315,6 +321,14 @@ private final class TranscriptScrollModel {
 
     private(set) var showUpButton = false
     private(set) var showDownButton = false
+
+    private let topAnchorID: String
+    private let bottomAnchorID: String
+
+    init(topAnchorID: String, bottomAnchorID: String) {
+        self.topAnchorID = topAnchorID
+        self.bottomAnchorID = bottomAnchorID
+    }
 
     /// Consumes one geometry tick: re-evaluates the pin decision, refreshes
     /// jump-button visibility, and chases the bottom marker as decided. A
@@ -365,7 +379,7 @@ private final class TranscriptScrollModel {
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) {
-                proxy.scrollTo(TranscriptView.bottomAnchorID, anchor: .bottom)
+                proxy.scrollTo(bottomAnchorID, anchor: .bottom)
             }
         }
     }
@@ -374,7 +388,7 @@ private final class TranscriptScrollModel {
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            proxy.scrollTo(TranscriptView.topAnchorID, anchor: .top)
+            proxy.scrollTo(topAnchorID, anchor: .top)
         }
     }
 
@@ -389,13 +403,15 @@ private final class TranscriptScrollModel {
     }
 }
 
-/// The transcript's jump buttons — the only per-scroll-tick UI. Observes
-/// just the scroll model's two visibility flags, so the vast majority of
-/// geometry ticks (plain drags, the re-anchor chase, pin churn) render
-/// nothing at all.
-private struct TranscriptJumpButtons: View {
-    let scroll: TranscriptScrollModel
+/// A pinned scroll view's jump buttons — the only per-scroll-tick UI.
+/// Observes just the scroll model's two visibility flags, so the vast
+/// majority of geometry ticks (plain drags, the re-anchor chase, pin
+/// churn) render nothing at all. Bare column: placement/padding belongs
+/// to the composing view.
+struct ScrollJumpButtons: View {
+    let scroll: PinnedScrollModel
     let proxy: ScrollViewProxy
+    var glyphColor: Color = Theme.annotationPink
 
     var body: some View {
         VStack(spacing: 10) {
@@ -406,8 +422,6 @@ private struct TranscriptJumpButtons: View {
                 scroll.repinAndChase(proxy)
             }
         }
-        .padding(.trailing, 24)
-        .padding(.bottom, 20)
     }
 
     private func jumpButton(
@@ -418,7 +432,7 @@ private struct TranscriptJumpButtons: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.annotationPink)
+                .foregroundStyle(glyphColor)
                 .frame(width: 34, height: 34)
                 .background(
                     Circle()
