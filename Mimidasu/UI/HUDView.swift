@@ -153,14 +153,14 @@ struct HUDView: View {
     private func entryView(_ entry: SessionEntry) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             if readingAnnotation != .none {
-                Text(SessionClock.timestamp(entry.sentence.startS))
+                Text(entry.startTimestamp)
                     .font(ScaledFont.caption(uiScale.factor).monospacedDigit())
                     .foregroundStyle(Theme.hudTimestamp)
                 jpText(of: entry)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(SessionClock.timestamp(entry.sentence.startS))
+                    Text(entry.startTimestamp)
                         .font(ScaledFont.caption(uiScale.factor).monospacedDigit())
                         .foregroundStyle(Theme.hudTimestamp)
                     jpText(of: entry)

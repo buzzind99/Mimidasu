@@ -118,7 +118,7 @@ struct TranslationOverlayView: View {
 
     private func row(for entry: SessionEntry) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(SessionClock.timestamp(entry.sentence.startS))
+            Text(entry.startTimestamp)
                 .font(ScaledFont.caption(uiScale.factor).monospacedDigit())
                 .foregroundStyle(Theme.hudTimestamp)
             if let en = entry.joinedTranslations {
