@@ -48,7 +48,8 @@ struct TransientRetryLadder: Sendable {
         stage: RetryProgress.Stage = .batchRetry,
         onRetry: (@Sendable (RetryProgress) -> Void)? = nil
     ) async throws -> T {
-        for attempt in 0 ... retries {
+        var attempt = 0
+        while true {
             do {
                 return try await operation()
             } catch {
@@ -57,10 +58,9 @@ struct TransientRetryLadder: Sendable {
                 let delay = Self.retryAfter(of: error).map(Duration.seconds)
                     ?? backoffs[min(attempt, backoffs.count - 1)]
                 try await sleep(delay)
+                attempt += 1
             }
         }
-        // Unreachable: the loop either returns or throws on every path.
-        throw TranslationEngineError.network
     }
 
     func isTransient(_ error: Error) -> Bool {
