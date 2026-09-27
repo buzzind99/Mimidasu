@@ -1,10 +1,20 @@
 import Foundation
 import Translation
 
-/// Translation-engine management surface of `AppModel` (retry, provider
-/// activation, queue-status handling, the latched Apple fallback, and the
-/// translation toasts), split out to keep `AppModel.swift` under the 600-line
-/// lint gate.
+// Translation-engine management surface of `AppModel` (retry, provider
+// activation, queue-status handling, the latched Apple fallback, and the
+// translation toasts), split out to keep `AppModel.swift` under the 600-line
+// lint gate.
+
+/// Which translation engine is currently attached to the queue. Derived
+/// state (status pill, Settings "Currently using" row) reads this, never the
+/// provider picker — a provider change re-attaches the engine via
+/// `activateTranslation` before the labels could disagree.
+enum ActiveTranslationEngine: Equatable {
+    case apple
+    case external
+}
+
 extension AppModel {
     /// Retry after a translation failure (the toast's Reconnect action).
     /// Re-reads the selected provider (and its key) and re-attaches an
@@ -43,6 +53,11 @@ extension AppModel {
         if let engine = makeExternalEngine() {
             activeTranslationEngine = .external
             activeExternalProvider = translationSettings.selectedProvider
+            // Invalidate any airborne Apple probe: the fallback latch can
+            // re-enter Apple while a pre-attach probe is still in flight,
+            // and that stale landing must not re-mark the engine.
+            highFidelitySequence += 1
+            appleHighFidelityProbe = (false, nil)
             translationConfig?.invalidate()
             translationWorker?.cancel()
             let queue = translationQueue
@@ -57,6 +72,7 @@ extension AppModel {
             activeTranslationEngine = .apple
             activeExternalProvider = nil
             refreshTranslationConfig()
+            probeHighFidelity()
         }
     }
 
@@ -244,6 +260,10 @@ extension AppModel {
         translationStatus = .degraded("External translation failed — using Apple on-device", severity)
         reconcileTranslationToasts(translationStatus)
         refreshTranslationConfig()
+        // The fallback is an Apple activation: the external attach cleared
+        // the marker, so re-probe for the ENGINES card to report what the
+        // fresh config actually requests.
+        probeHighFidelity()
     }
 
     /// Invalidates the live config (parking any attached Apple host) and
@@ -258,10 +278,64 @@ extension AppModel {
     /// so SwiftUI's `.translationTask` treats both paths the same way. The
     /// target reads current settings each time, so a picker change applies at
     /// the next build (session start / retry) — restart-only by design.
+    /// On macOS 26.4+ the config prefers the high-fidelity (Apple
+    /// Intelligence) strategy for more fluent output; where the device or
+    /// language pair can't serve it, the framework silently falls back to the
+    /// fast model, so the request degrades to today's behavior.
     private func makeTranslationConfig() -> TranslationSession.Configuration {
-        TranslationSession.Configuration(
+        var config = TranslationSession.Configuration(
             source: Locale.Language(identifier: "ja"),
             target: Locale.Language(identifier: translationSettings.targetLanguage.code)
         )
+        if #available(macOS 26.4, *) {
+            config.preferredStrategy = .highFidelity
+        }
+        return config
+    }
+
+    /// High fidelity for the pair the labels display: the last probe must
+    /// have landed installed for exactly the selected target. A marker
+    /// probed for an older pair never labels the current one — the target
+    /// is restart-only, so a mid-session picker change drops the marker
+    /// until the next Apple activation re-probes.
+    var appleHighFidelity: Bool {
+        appleHighFidelityProbe.installed
+            && appleHighFidelityProbe.targetCode == translationSettings.targetLanguage.code
+    }
+
+    /// Probes whether the OS can serve the high-fidelity (Apple
+    /// Intelligence) strategy for the current ja→target pair and records the
+    /// outcome (with the probed code) for the ENGINES card and the Settings
+    /// labels. Fired on every Apple activation (session start, retry,
+    /// provider change, the latched fallback); the sequence token drops a
+    /// probe whose activation was superseded before it landed.
+    private func probeHighFidelity() {
+        appleHighFidelityProbe = (false, nil)
+        highFidelitySequence += 1
+        let sequence = highFidelitySequence
+        let targetCode = translationSettings.targetLanguage.code
+        let probe = highFidelityProbe
+        Task { [weak self] in
+            let available = await probe(targetCode)
+            guard let self,
+                  sequence == highFidelitySequence,
+                  activeTranslationEngine == .apple
+            else { return }
+            appleHighFidelityProbe = (available, targetCode)
+        }
+    }
+
+    /// The real probe: on macOS 26.4+ asks `LanguageAvailability` whether
+    /// the high-fidelity (Apple Intelligence) strategy is installed for
+    /// ja→target — only `.installed` counts, since a merely downloadable
+    /// pair still runs the fast model. Older systems report false.
+    nonisolated static func checkHighFidelityAvailability(targetCode: String) async -> Bool {
+        guard #available(macOS 26.4, *) else { return false }
+        let availability = LanguageAvailability(preferredStrategy: .highFidelity)
+        let status = await availability.status(
+            from: Locale.Language(identifier: "ja"),
+            to: Locale.Language(identifier: targetCode)
+        )
+        return status == .installed
     }
 }

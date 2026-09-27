@@ -3,8 +3,9 @@ import Testing
 
 /// Tests the pure sidebar status mapping: the session capsule's
 /// title/icon/gradient-choice/disabled gate per phase (including the
-/// model-check gating that must not disable Stop), the ASR dot tone, and
-/// the translation detail line with its fallback-latch override.
+/// model-check gating that must not disable Stop), the ASR dot tone, the
+/// translation detail line with its fallback-latch override, and the
+/// ENGINES card's engine-name row.
 @Suite("Sidebar status mapping")
 struct SidebarStatusTests {
 
@@ -144,6 +145,40 @@ struct SidebarStatusTests {
                 status: .retrying("2 retries left"),
                 activeEngine: .external, fallbackActive: true
             ) == "External"
+        )
+    }
+
+    // MARK: - Engine name
+
+    @Test("the Apple row names Apple Intelligence only when available")
+    func appleEngineName() {
+        #expect(
+            SidebarStatus.translationEngineName(
+                activeEngine: .apple, externalProvider: nil,
+                selectedProvider: .apple, appleHighFidelity: true
+            ) == "Apple Intelligence"
+        )
+        #expect(
+            SidebarStatus.translationEngineName(
+                activeEngine: .apple, externalProvider: nil,
+                selectedProvider: .apple, appleHighFidelity: false
+            ) == "Apple"
+        )
+    }
+
+    @Test("external runs name the attached provider and ignore the marker")
+    func externalEngineName() {
+        #expect(
+            SidebarStatus.translationEngineName(
+                activeEngine: .external, externalProvider: .deepl,
+                selectedProvider: .openrouter, appleHighFidelity: false
+            ) == "DeepL"
+        )
+        #expect(
+            SidebarStatus.translationEngineName(
+                activeEngine: .external, externalProvider: nil,
+                selectedProvider: .google, appleHighFidelity: true
+            ) == "Google"
         )
     }
 

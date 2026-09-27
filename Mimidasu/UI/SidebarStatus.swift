@@ -76,4 +76,22 @@ struct SidebarStatus: Equatable {
                 : (activeEngine == .apple ? "On-device" : "External")
         }
     }
+
+    /// Names the translation engine for the ENGINES card's row title. The
+    /// Apple row names Apple Intelligence when the OS reported the strategy
+    /// installed for the current pair; otherwise it stays "Apple". External
+    /// runs name `externalProvider` (recorded at attachment time), never the
+    /// picker — a mid-session selection change must not relabel an engine
+    /// the queue isn't using.
+    static func translationEngineName(
+        activeEngine: ActiveTranslationEngine,
+        externalProvider: TranslationProvider?,
+        selectedProvider: TranslationProvider,
+        appleHighFidelity: Bool
+    ) -> String {
+        guard activeEngine == .external else {
+            return appleHighFidelity ? "Apple Intelligence" : "Apple"
+        }
+        return (externalProvider ?? selectedProvider).shortName
+    }
 }

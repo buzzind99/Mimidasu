@@ -225,8 +225,12 @@ extension SidebarView {
     /// the picker — a mid-session selection change must not relabel an
     /// engine the queue isn't using.
     private var translationEngineName: String {
-        guard model.activeTranslationEngine == .external else { return "Apple" }
-        return (model.activeExternalProvider ?? model.translationSettings.selectedProvider).shortName
+        SidebarStatus.translationEngineName(
+            activeEngine: model.activeTranslationEngine,
+            externalProvider: model.activeExternalProvider,
+            selectedProvider: model.translationSettings.selectedProvider,
+            appleHighFidelity: model.appleHighFidelity
+        )
     }
 
     private var translationDetail: String {

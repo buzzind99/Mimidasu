@@ -47,6 +47,7 @@ struct AppModelTranslationTargetTests {
             translationSettings: settings,
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelTarget"),
             translationTransport: constantStatusTransport(500),
+            highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
 
@@ -71,6 +72,38 @@ struct AppModelTranslationTargetTests {
         await stopTranslation(model)
     }
 
+    // MARK: - Strategy
+
+    /// The Apple config prefers the high-fidelity (Apple Intelligence)
+    /// strategy on macOS 26.4+; earlier systems can't express it, so the
+    /// suite cancels visibly instead of passing silently.
+    @Test("the Apple config prefers the high-fidelity strategy when available")
+    func appleConfigPrefersHighFidelityWhenAvailable() async throws {
+        guard #available(macOS 26.4, *) else {
+            try Test.cancel("preferredStrategy requires macOS 26.4")
+        }
+        let model = AppModel(
+            translationSettings: isolatedTranslationSettings(suite: "test.AppModelTarget"),
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelTarget"),
+            highFidelityProbe: { _ in false },
+            initialModelResolve: { _ in nil }
+        )
+
+        model.retryTranslation()
+        #expect(model.translationConfig != nil, "the Apple path builds the config synchronously")
+        #expect(
+            model.translationConfig?.preferredStrategy == .highFidelity,
+            "the config prefers the high-fidelity strategy"
+        )
+
+        // Quiesce the launch-time model check before stopping: its async
+        // landing would otherwise clobber the stop-wound phase and the
+        // teardown poll would never observe `.idle`.
+        await model.initialModelCheck?.value
+
+        await stopTranslation(model)
+    }
+
     // MARK: - External engine wiring
 
     /// The engine built by `makeExternalEngine` receives the target: the
@@ -90,6 +123,7 @@ struct AppModelTranslationTargetTests {
             translationSettings: settings,
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelTarget"),
             translationTransport: transport,
+            highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
 

@@ -69,6 +69,7 @@ struct AppModelCloudDisclosureTests {
             translationSettings: settings,
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelCloudDisclosure"),
             translationTransport: constantStatusTransport(200),
+            highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
 
@@ -92,6 +93,7 @@ struct AppModelCloudDisclosureTests {
             translationSettings: settings,
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelCloudDisclosure"),
             translationTransport: constantStatusTransport(200),
+            highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
 
@@ -114,6 +116,7 @@ struct AppModelCloudDisclosureTests {
             translationSettings: settings,
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelCloudDisclosure"),
             translationTransport: constantStatusTransport(200),
+            highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
 
@@ -143,6 +146,7 @@ struct AppModelCloudDisclosureTests {
             translationSettings: settings,
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelCloudDisclosure"),
             translationTransport: translatedBodyTransport(),
+            highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
 

@@ -51,10 +51,13 @@ extension TranslationProvider {
         }
     }
 
-    /// Provider picker row label; DeepL appends its free-tier marker.
-    func settingsName(deeplIsFreeTier: Bool) -> String {
+    /// Provider picker row label. Apple names the capability tier only when
+    /// the OS reported the high-fidelity strategy installed for the current
+    /// pair (`appleHighFidelity`), matching the sidebar and status rows;
+    /// DeepL appends its free-tier marker.
+    func settingsName(deeplIsFreeTier: Bool, appleHighFidelity: Bool = false) -> String {
         switch self {
-        case .apple: "Apple"
+        case .apple: appleHighFidelity ? "Apple Intelligence (High fidelity)" : "Apple"
         case .google: "Google Translate"
         case .deepl: deeplIsFreeTier ? "DeepL (Free)" : "DeepL"
         case .openrouter: "OpenRouter"
@@ -280,21 +283,26 @@ final class TranslationSettings {
 
     /// Truthful description of the engine currently in use, including the
     /// Apple-fallback latch ("DeepL (Free) — fallback active") and the
-    /// selected target ("Apple (on-device) → English"). The base label
-    /// prefers the attached provider (`attachedProvider`) over the picker so
-    /// it never names an engine that isn't actually running; nil (nothing
-    /// external attached, or no session yet) falls back to the picker
-    /// selection. Driven by published state
+    /// selected target ("Apple (on-device) → English"; "Apple Intelligence
+    /// (High fidelity) → English" once the probe reports the strategy
+    /// installed). The Apple label names Apple Intelligence only while the
+    /// OS reported the high-fidelity strategy installed for the current pair
+    /// (`appleHighFidelity`); otherwise it stays "Apple (on-device)". The
+    /// base label prefers the attached provider (`attachedProvider`) over
+    /// the picker so it never names an engine that isn't actually running;
+    /// nil (nothing external attached, or no session yet) falls back to the
+    /// picker selection. Driven by published state
     /// (`translationFallbackActive`, `activeExternalProvider`), never
     /// re-derived from the picker alone.
     func activeEngineDescription(
         fallbackActive: Bool,
-        attachedProvider: TranslationProvider? = nil
+        attachedProvider: TranslationProvider? = nil,
+        appleHighFidelity: Bool = false
     ) -> String {
         let provider = attachedProvider ?? selectedProvider
         var label: String = switch provider {
         case .apple:
-            "Apple (on-device)"
+            appleHighFidelity ? "Apple Intelligence (High fidelity)" : "Apple (on-device)"
         case .google:
             "Google Translate"
         case .deepl:

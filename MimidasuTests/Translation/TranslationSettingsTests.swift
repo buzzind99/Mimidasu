@@ -300,6 +300,18 @@ struct TranslationSettingsTests {
         #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenRouter · tencent/hy-mt2-30b-a3b → \(target)")
     }
 
+    @Test("the Apple description names Apple Intelligence when high fidelity runs")
+    func appleDescriptionReflectsHighFidelity() {
+        let (settings, _) = makeSUT()
+        let target = TargetLanguage.english.displayName
+
+        #expect(settings.activeEngineDescription(fallbackActive: false) == "Apple (on-device) → \(target)")
+        #expect(
+            settings.activeEngineDescription(fallbackActive: false, appleHighFidelity: true)
+                == "Apple Intelligence (High fidelity) → \(target)"
+        )
+    }
+
     @Test("effective OpenRouter model falls back to the engine default when empty")
     func effectiveOpenRouterModelFallsBackToDefault() {
         let (settings, _) = makeSUT()
@@ -347,6 +359,10 @@ struct TranslationSettingsTests {
         #expect(TranslationProvider.openrouter.settingsDetail(hasKey: false) == "External · API key + model")
         #expect(TranslationProvider.openrouter.settingsDetail(hasKey: true) == "External · API key + model · Configured")
         #expect(TranslationProvider.apple.settingsName(deeplIsFreeTier: false) == "Apple")
+        #expect(
+            TranslationProvider.apple.settingsName(deeplIsFreeTier: false, appleHighFidelity: true)
+                == "Apple Intelligence (High fidelity)"
+        )
         #expect(TranslationProvider.google.settingsName(deeplIsFreeTier: false) == "Google Translate")
         #expect(TranslationProvider.deepl.settingsName(deeplIsFreeTier: false) == "DeepL")
         #expect(TranslationProvider.deepl.settingsName(deeplIsFreeTier: true) == "DeepL (Free)")

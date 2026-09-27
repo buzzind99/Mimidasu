@@ -23,6 +23,7 @@ struct AppModelSessionStatsTests {
         let model = AppModel(
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelStats"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelStats"),
+            highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
         await model.initialModelCheck?.value

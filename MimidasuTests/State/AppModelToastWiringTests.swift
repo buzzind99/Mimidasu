@@ -20,6 +20,7 @@ struct AppModelToastWiringTests {
         let model = AppModel(
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelToastWiring"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelToastWiring"),
+            highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
         await model.initialModelCheck?.value

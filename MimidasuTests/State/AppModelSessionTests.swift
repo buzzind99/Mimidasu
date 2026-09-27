@@ -189,6 +189,9 @@ struct AppModelSessionTests {
             },
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelSession"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelSession"),
+            // Hermetic: session start activates the Apple engine, whose
+            // probe would otherwise hit the real LanguageAvailability.
+            highFidelityProbe: { _ in false },
             // Stub the launch check: the real locator hashes the dev GGUF and
             // the resolved URL feeds the warm-up. The scripted URL below
             // drives the same path over the injected doubles.

@@ -14,15 +14,6 @@ enum SessionPhase: Equatable {
     case failed(String)
 }
 
-/// Which translation engine is currently attached to the queue. Derived
-/// state (status pill, Settings "Currently using" row) reads this, never the
-/// provider picker — a provider change re-attaches the engine via
-/// `activateTranslation` before the labels could disagree.
-enum ActiveTranslationEngine: Equatable {
-    case apple
-    case external
-}
-
 /// Orchestrates capture → ASR → sentence buffering → translation, and owns
 /// the published UI state. All public state is @MainActor. The mechanics of
 /// a live session (engine, capture, buffering, timers) live in
@@ -156,6 +147,17 @@ final class AppModel {
     /// `AppModelTranslation.swift`.
     var activeExternalProvider: TranslationProvider?
 
+    /// Outcome of the last high-fidelity (Apple Intelligence) probe: whether
+    /// the OS reports the strategy installed, and the ja→target code it was
+    /// probed for (nil until a probe lands). Internal: managed from
+    /// `AppModelTranslation.swift`.
+    var appleHighFidelityProbe: (installed: Bool, targetCode: String?) = (false, nil)
+
+    /// Monotonic token ruling which high-fidelity probe may land: every
+    /// engine attach and teardown bumps it, so a probe superseded before it
+    /// finished is dropped. Internal: managed from `AppModelTranslation.swift`.
+    var highFidelitySequence = 0
+
     /// A key-verified external provider whose selection is held behind the
     /// one-time cloud disclosure: the Settings sheet confirms that transcript
     /// sentences will be sent to this provider before it becomes the
@@ -210,6 +212,12 @@ final class AppModel {
     /// the real per-provider `URLSession` transports.
     let translationTransport: HTTPTranslationTransport?
 
+    /// Injectable probe for the OS's high-fidelity (Apple Intelligence)
+    /// translation availability per target code (tests); the default drives
+    /// the real `LanguageAvailability` check. Internal: invoked from
+    /// `AppModelTranslation.swift`.
+    let highFidelityProbe: @Sendable (String) async -> Bool
+
     /// Injectable so the terminate-notification wiring can be tested
     /// hermetically — posting on the shared `.default` center from a parallel
     /// test would stop every other live `AppModel`. The default is the
@@ -230,6 +238,9 @@ final class AppModel {
         translationSettings: TranslationSettings? = nil,
         asrModelSettings: ASRModelSettings? = nil,
         translationTransport: HTTPTranslationTransport? = nil,
+        highFidelityProbe: @escaping @Sendable (String) async -> Bool = { code in
+            await AppModel.checkHighFidelityAvailability(targetCode: code)
+        },
         jmDictLookup: JMDictLookup? = nil,
         initialModelResolve: @escaping @Sendable (ASRModelChoice) -> URL? = { choice in
             ModelLocator.resolve(for: choice)
@@ -244,6 +255,7 @@ final class AppModel {
         self.jmDictLookup = jmDictLookup ?? JMDictLookup()
         modelResolve = initialModelResolve
         self.translationTransport = translationTransport
+        self.highFidelityProbe = highFidelityProbe
         self.retireWarmEngine = retireWarmEngine
         self.willTerminateNotifications = willTerminateNotifications
         if let makeSessionController {
@@ -528,6 +540,9 @@ final class AppModel {
         // tear it down. Apple runs are owned by SwiftUI and stay parked.
         translationWorker?.cancel()
         translationWorker = nil
+        // Teardown supersedes any airborne high-fidelity probe: a landing
+        // must not mark a session that no longer exists.
+        highFidelitySequence += 1
         translationStatus = .idle
         sessionEndedAt = .now
         // Stop/teardown clears all toasts and notices (phase → `.idle`).

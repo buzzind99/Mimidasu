@@ -64,15 +64,29 @@ struct AppModelTranslationEngineTests {
         #expect(await pollUntil(timeout: 5) { model.phase == .idle }, "stop() winds the phase down to idle")
     }
 
+    /// Builds an `AppModel` over the given settings with the model resolve
+    /// and the high-fidelity probe stubbed hermetically — Apple activations
+    /// never reach the real `LanguageAvailability`.
+    private func makeModel(
+        settings: TranslationSettings,
+        transport: HTTPTranslationTransport? = nil
+    ) -> AppModel {
+        AppModel(
+            translationSettings: settings,
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
+            translationTransport: transport,
+            highFidelityProbe: { _ in false },
+            initialModelResolve: { _ in nil }
+        )
+    }
+
     // MARK: - Engine selection
 
     @Test("an external provider spawns a worker and parks the Apple host")
     func externalProviderSpawnsWorkerWithoutConfig() async {
-        let model = AppModel(
-            translationSettings: makeSettings(provider: .openrouter),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
-            translationTransport: constantStatusTransport(500),
-            initialModelResolve: { _ in nil }
+        let model = makeModel(
+            settings: makeSettings(provider: .openrouter),
+            transport: constantStatusTransport(500)
         )
 
         model.retryTranslation()
@@ -88,11 +102,7 @@ struct AppModelTranslationEngineTests {
     func unconfiguredProviderFallsBackToApple() {
         let settings = isolatedTranslationSettings(suite: "test.AppModelEngine")
         settings.select(.openrouter)
-        let model = AppModel(
-            translationSettings: settings,
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
-            initialModelResolve: { _ in nil }
-        )
+        let model = makeModel(settings: settings)
 
         model.retryTranslation()
 
@@ -103,11 +113,9 @@ struct AppModelTranslationEngineTests {
     @Test("each external provider builds its engine and spawns the worker")
     func eachExternalProviderBuildsItsEngine() async {
         for provider in [TranslationProvider.google, .deepl] {
-            let model = AppModel(
-                translationSettings: makeSettings(provider: provider),
-                asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
-                translationTransport: constantStatusTransport(401),
-                initialModelResolve: { _ in nil }
+            let model = makeModel(
+                settings: makeSettings(provider: provider),
+                transport: constantStatusTransport(401)
             )
 
             model.retryTranslation()
@@ -127,11 +135,9 @@ struct AppModelTranslationEngineTests {
 
     @Test("an exhausted external engine latches Apple fallback with a degraded status")
     func externalFailureLatchesAppleFallback() async {
-        let model = AppModel(
-            translationSettings: makeSettings(provider: .openrouter),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
-            translationTransport: constantStatusTransport(401),
-            initialModelResolve: { _ in nil }
+        let model = makeModel(
+            settings: makeSettings(provider: .openrouter),
+            transport: constantStatusTransport(401)
         )
 
         model.retryTranslation()
@@ -161,11 +167,9 @@ struct AppModelTranslationEngineTests {
     /// `.unavailable` forever.
     @Test("a manual retry re-arms the one-way fallback latch")
     func manualRetryRearmsFallbackLatch() async {
-        let model = AppModel(
-            translationSettings: makeSettings(provider: .openrouter),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
-            translationTransport: constantStatusTransport(401),
-            initialModelResolve: { _ in nil }
+        let model = makeModel(
+            settings: makeSettings(provider: .openrouter),
+            transport: constantStatusTransport(401)
         )
 
         // First failure: latches onto Apple.
@@ -215,11 +219,9 @@ struct AppModelTranslationEngineTests {
             )!
             return (body, response)
         }
-        let model = AppModel(
-            translationSettings: makeSettings(provider: .openrouter),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
-            translationTransport: transport,
-            initialModelResolve: { _ in nil }
+        let model = makeModel(
+            settings: makeSettings(provider: .openrouter),
+            transport: transport
         )
         let recorder = TextRecorder()
         var statuses: [TranslationStatus] = []
@@ -260,11 +262,9 @@ struct AppModelTranslationEngineTests {
     @Test("a mid-session provider change re-attaches the engine; idle defers")
     func providerChangeReattachesEngineMidSession() async {
         let settings = makeSettings(provider: .openrouter)
-        let model = AppModel(
-            translationSettings: settings,
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
-            translationTransport: constantStatusTransport(401),
-            initialModelResolve: { _ in nil }
+        let model = makeModel(
+            settings: settings,
+            transport: constantStatusTransport(401)
         )
 
         // Attach the external engine (as session start would).
@@ -305,11 +305,9 @@ struct AppModelTranslationEngineTests {
     @Test("a mid-session provider change resets the fallback latch")
     func providerChangeResetsFallbackLatch() async {
         let settings = makeSettings(provider: .openrouter)
-        let model = AppModel(
-            translationSettings: settings,
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
-            translationTransport: constantStatusTransport(401),
-            initialModelResolve: { _ in nil }
+        let model = makeModel(
+            settings: settings,
+            transport: constantStatusTransport(401)
         )
 
         model.retryTranslation()
@@ -341,11 +339,9 @@ struct AppModelTranslationEngineTests {
     @Test("selecting an unconfigured provider keeps the active engine")
     func unconfiguredProviderChangeKeepsActiveEngine() async {
         let settings = makeSettings(provider: .openrouter)
-        let model = AppModel(
-            translationSettings: settings,
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
-            translationTransport: constantStatusTransport(401),
-            initialModelResolve: { _ in nil }
+        let model = makeModel(
+            settings: settings,
+            transport: constantStatusTransport(401)
         )
 
         model.retryTranslation()
@@ -381,11 +377,9 @@ struct AppModelTranslationEngineTests {
     func verifiedProbeSelectsProvider() async {
         let settings = makeSettings(provider: .google)
         try? settings.saveKey("test-key-1234", for: .openrouter)
-        let model = AppModel(
-            translationSettings: settings,
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
-            translationTransport: constantStatusTransport(200),
-            initialModelResolve: { _ in nil }
+        let model = makeModel(
+            settings: settings,
+            transport: constantStatusTransport(200)
         )
         model.retryTranslation()
         #expect(await pollUntil { model.translationStatus == .ready })
@@ -417,11 +411,9 @@ struct AppModelTranslationEngineTests {
     func failedProbeKeepsActiveEngine() async {
         let settings = makeSettings(provider: .openrouter)
         try? settings.saveKey("test-key-1234", for: .google)
-        let model = AppModel(
-            translationSettings: settings,
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
-            translationTransport: constantStatusTransport(403),
-            initialModelResolve: { _ in nil }
+        let model = makeModel(
+            settings: settings,
+            transport: constantStatusTransport(403)
         )
         model.retryTranslation()
         #expect(await pollUntil { model.translationStatus == .ready })
@@ -440,11 +432,7 @@ struct AppModelTranslationEngineTests {
     @Test("verifying a provider without a key records a failure and returns false")
     func verifyingWithoutKeyFails() async {
         let settings = isolatedTranslationSettings(suite: "test.AppModelEngine")
-        let model = AppModel(
-            translationSettings: settings,
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
-            initialModelResolve: { _ in nil }
-        )
+        let model = makeModel(settings: settings)
 
         let verified = await model.verifyAndSelectTranslationProvider(.deepl)
 
@@ -459,11 +447,9 @@ struct AppModelTranslationEngineTests {
     @Test("verifying the already-selected provider re-attaches its engine and resets the latch")
     func verifyingSelectedProviderReattaches() async {
         let settings = makeSettings(provider: .openrouter)
-        let model = AppModel(
-            translationSettings: settings,
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
-            translationTransport: keyProbeTransport(),
-            initialModelResolve: { _ in nil }
+        let model = makeModel(
+            settings: settings,
+            transport: keyProbeTransport()
         )
         model.retryTranslation()
         #expect(await pollUntil { model.translationStatus == .ready })

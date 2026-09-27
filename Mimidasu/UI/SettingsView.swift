@@ -232,9 +232,12 @@ struct SettingsView: View {
                             .fill(Palette.tileFill)
                     )
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(provider.settingsName(deeplIsFreeTier: settings.deeplIsFreeTier))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Palette.primaryText)
+                    Text(provider.settingsName(
+                        deeplIsFreeTier: settings.deeplIsFreeTier,
+                        appleHighFidelity: model.appleHighFidelity
+                    ))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Palette.primaryText)
                     Text(provider.settingsDetail(hasKey: settings.hasKey(for: provider)))
                         .font(.system(size: 10.5))
                         .foregroundStyle(Palette.mutedText)
@@ -356,7 +359,8 @@ struct SettingsView: View {
                         fallbackActive:
                         model.translationFallbackActive &&
                             model.activeTranslationEngine == .apple,
-                        attachedProvider: model.activeExternalProvider
+                        attachedProvider: model.activeExternalProvider,
+                        appleHighFidelity: model.appleHighFidelity
                     )
                 )
                 .font(.system(size: 11, design: .monospaced))

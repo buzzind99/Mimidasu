@@ -24,6 +24,7 @@ struct AppModelExportTests {
         let model = AppModel(
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelExport"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelExport"),
+            highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
         await model.initialModelCheck?.value
@@ -79,6 +80,7 @@ struct AppModelExportTests {
             },
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelExport"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelExport"),
+            highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
         await model.initialModelCheck?.value

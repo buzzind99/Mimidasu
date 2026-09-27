@@ -17,6 +17,7 @@ struct AppModelDictionaryTests {
         AppModel(
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelDictionary"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelDictionary"),
+            highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
     }

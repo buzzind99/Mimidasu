@@ -33,6 +33,7 @@ final class AppModelLookupTests {
         AppModel(
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelLookup"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelLookup"),
+            highFidelityProbe: { _ in false },
             jmDictLookup: jmDictLookup ?? JMDictLookup(resolveDatabase: { [fixture] in fixture.url }),
             initialModelResolve: { _ in nil }
         )
