@@ -50,6 +50,14 @@ On first launch you pick a speech model and it downloads automatically; press
 - `scripts/lint.sh` — swiftformat + swiftlint
 - See `ARCHITECTURE.md` for design notes
 
+## Support Mimidasu 💛
+
+Mimidasu is a labor of love — every feature is free. I built this because I
+couldn't find anything like this that is completely free. If Mimidasu makes
+your Japanese learning, listening, or content workflow easier, please consider
+sponsoring the project. Every contribution — big or small — helps keep
+the project alive, free, and improving.
+
 ## License
 
 Mimidasu is Copyright (C) 2026 Aulia Sufian Adi.
