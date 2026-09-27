@@ -390,8 +390,9 @@ final class ReadingAnnotator: @unchecked Sendable {
     /// with the digit form (1日 → ついたち, `digitDateReadings`). The
     /// standalone 笑 noun reads えみ, but transcripts mean the laughter わら
     /// (net-slang 笑, and ASR fragments like 笑てない that tokenize 笑
-    /// standalone).
-    private static let surfaceReadings = ["一日": "いちにち", "笑": "わら"]
+    /// standalone). The lexicon's 辺(あたり) entry wins after この, but
+    /// あたり is the written 辺り — the bare surface reads へん.
+    private static let surfaceReadings = ["一日": "いちにち", "笑": "わら", "辺": "へん"]
 
     // MARK: - Text helpers
 

@@ -174,6 +174,24 @@ struct ReadingAnnotatorAnnotationTests {
         #expect(describe(segments) == [["笑", "wara", "わら"]])
     }
 
+    @Test("overrides the 辺 homograph reading (あたり) with the bare-surface reading (へん)")
+    func standaloneHenOverridesAtari() throws {
+        let annotator = makeAnnotator([token("辺", start: 0, reading: "あたり")])
+
+        let segments = try #require(annotator.segments(for: "辺"))
+
+        #expect(describe(segments) == [["辺", "hen", "へん"]])
+    }
+
+    @Test("overrides the fallback's 辺 homograph reading (あたり) with the bare-surface reading (へん)")
+    func standaloneHenOverridesFallbackAtari() throws {
+        let annotator = makeAnnotator([token("辺", start: 0)], readingFallback: { _ in "あたり" })
+
+        let segments = try #require(annotator.segments(for: "辺"))
+
+        #expect(describe(segments) == [["辺", "hen", "へん"]])
+    }
+
     /// Single dictionary entries carrying an etymological particle は still
     /// read it as the particle "wa" (segmented で+は contexts hit the
     /// bare-particle override instead).
