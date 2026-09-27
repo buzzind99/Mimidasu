@@ -1,20 +1,4 @@
 import SwiftUI
-import Translation
-
-/// Hidden helper that acquires the `TranslationSession` from SwiftUI and
-/// feeds it to the queue. This is also what surfaces the one-time OS
-/// language-pack download prompt.
-struct TranslationSessionHost: View {
-    var model: AppModel
-
-    var body: some View {
-        Color.clear
-            .frame(width: 0, height: 0)
-            .translationTask(model.translationConfig) { session in
-                await model.translationQueue.run(with: AppleSessionEngine(session))
-            }
-    }
-}
 
 /// Root view: onboarding until the model resolves, then the main shell —
 /// sidebar | 1pt divider | transcript pane with the live strip, the toast
@@ -35,7 +19,6 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme($appearance.resolvedColorScheme)
-        .background(TranslationSessionHost(model: model))
         .frame(minWidth: isOnboarding ? 800 : 1080, minHeight: isOnboarding ? 720 : 800)
         .onboardingWindowFootprint(isOnboarding)
         .onAppear {

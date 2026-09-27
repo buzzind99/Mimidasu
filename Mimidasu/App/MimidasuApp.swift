@@ -4,7 +4,6 @@ import SwiftUI
 @main
 struct MimidasuApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var model = AppModel()
 
     init() {
         appDelegate.observeOverlayVisibility()
@@ -12,7 +11,11 @@ struct MimidasuApp: App {
 
     var body: some Scene {
         WindowGroup("Mimidasu") {
-            ContentView(model: model, live: model.live, latency: model.latency)
+            ContentView(
+                model: appDelegate.model,
+                live: appDelegate.model.live,
+                latency: appDelegate.model.latency
+            )
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
@@ -20,25 +23,30 @@ struct MimidasuApp: App {
         .commands {
             CommandGroup(after: .newItem) {
                 Button("Copy Transcript") {
-                    model.copyTranscript()
+                    appDelegate.model.copyTranscript()
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
-                .disabled(!model.isExportable)
+                .disabled(!appDelegate.model.isExportable)
             }
         }
 
         Settings {
-            SettingsView(model: model)
+            SettingsView(model: appDelegate.model)
         }
         .windowStyle(.hiddenTitleBar)
     }
 }
 
-/// Bridges AppKit (HUD panel) and the quit-time teardown handshake.
+/// Bridges AppKit (HUD panel) and the quit-time teardown handshake. Owns the
+/// process-lifetime `AppModel`: a single instance by construction, so the
+/// panels and scenes all observe the same model no matter how SwiftUI
+/// re-initializes the `App` struct.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    let model = AppModel()
     let hud = HUDWindowController.shared
     let translationOverlay = TranslationOverlayWindowController.shared
+    let translationSessionPanel = TranslationSessionPanelController.shared
 
     private var hudVisibilityTask: Task<Void, Never>?
     private var overlayVisibilityTask: Task<Void, Never>?
@@ -90,6 +98,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var resignKeyObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // The session panel is ordered here rather than at init: window
+        // ordering is only guaranteed to be honored after launch completes.
+        // The panel must outlive every window — with the Apple translation
+        // session host in the main window's tree, closing that window
+        // cancelled the translation run and stranded the queue's pending
+        // sentences.
+        translationSessionPanel.bind(model: model)
         // SwiftUI's Settings scene ignores `.windowStyle(.hiddenTitleBar)`,
         // so the chrome is hidden at the AppKit level when the
         // lazily-created window becomes key on open.
