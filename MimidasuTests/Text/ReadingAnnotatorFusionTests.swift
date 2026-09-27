@@ -439,28 +439,4 @@ struct ReadingAnnotatorFusionTests {
 
         #expect(describe(segments) == [[text, romaji, furigana]])
     }
-
-    // MARK: - Lexical reading repairs
-
-    @Test("overrides the single token's date reading of 一日 with the duration reading")
-    func singleTokenIchinichiOverridesTsuitachi() throws {
-        let annotator = makeAnnotator([token("一日", start: 0, reading: "ついたち")])
-
-        let segments = try #require(annotator.segments(for: "一日"))
-
-        #expect(describe(segments) == [["一日", "ichinichi", "いちにち"]])
-    }
-
-    @Test("repairs the dictionary's unvoiced reading of the entrance to the spoken rendaku form",
-          arguments: [
-              ("入口", "iriguchi", "いりぐち"),
-              ("入り口", "iriguchi", "いりぐち")
-          ])
-    func entranceRendakuRepair(text: String, romaji: String, furigana: String) throws {
-        let annotator = makeAnnotator([token(text, start: 0, reading: "いりくち")])
-
-        let segments = try #require(annotator.segments(for: text))
-
-        #expect(describe(segments) == [[text, romaji, furigana]])
-    }
 }

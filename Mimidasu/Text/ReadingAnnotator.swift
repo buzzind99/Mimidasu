@@ -213,7 +213,7 @@ final class ReadingAnnotator: @unchecked Sendable {
             ))
             return
         }
-        reading = Self.surfaceReadings[surface] ?? Self.lexicalKana[reading] ?? reading
+        reading = Self.surfaceReadings[surface] ?? Self.lexicalKana[reading] ?? Self.spokenKana(reading)
         var romaji = KanaRomaji.romaji(fromKana: reading) ?? surface
         if let lexical = Self.lexicalRomaji[reading] {
             romaji = lexical
@@ -374,6 +374,15 @@ final class ReadingAnnotator: @unchecked Sendable {
     /// kana: 入口/入り口 carries the etymological いりくち but is spoken with
     /// rendaku (いりぐち) — keyed by reading so both written forms inherit it.
     private static let lexicalKana = ["いりくち": "いりぐち"]
+
+    /// The lexicon's ニッポン readings repaired to the common にほん: IPADIC
+    /// reads 日本 ニッポン and its fused compounds with it (日本人
+    /// にっぽんじん, 日本一 にっぽんいち) while splitting the rest (日本中,
+    /// 日本製) onto the same にっぽん token — replacing every occurrence
+    /// covers both segmentation shapes.
+    private static func spokenKana(_ reading: String) -> String {
+        reading.contains("にっぽん") ? reading.replacing("にっぽん", with: "にほん") : reading
+    }
 
     /// Whole-surface reading overrides, keyed by the written form: 一日 is a
     /// single dictionary token whose first reading is the date ついたち, but

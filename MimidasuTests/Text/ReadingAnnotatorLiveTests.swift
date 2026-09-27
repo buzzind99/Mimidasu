@@ -91,7 +91,11 @@ struct ReadingAnnotatorLiveTests {
         ("または", "matawa", nil),
         ("かんな", "kanna", nil),
         ("めっちゃ", "meccha", nil),
-        ("ヴァイオリン", "vaiorin", nil)
+        ("ヴァイオリン", "vaiorin", nil),
+        ("日本", "nihon", "にほん"),
+        ("日本人", "nihonjin", "にほんじん"),
+        ("日本一", "nihon'ichi", "にほんいち"),
+        ("日本語", "nihongo", "にほんご")
     ])
     func dictionaryReading(input: String, romaji: String, furigana: String?) throws {
         let segments = try segments(input)
@@ -456,7 +460,8 @@ struct ReadingAnnotatorLiveTests {
         "こんにちは", "123", "お、母さん", "母、さん", "私の母です", "六等", "六歳", "七回",
         "2年", "八年", "十四日", "おっ、いいね", "言ってあげる", "こっちの方", "㐂", "𠮷", "Hello",
         "一人", "二人", "四人", "一人前", "それでは", "ならでは",
-        "なっ ちゃっ てる", "ドライブでてないかも なんか 新規の トライブ 作成 になっ ちゃっ てるなぁ。"
+        "なっ ちゃっ てる", "ドライブでてないかも なんか 新規の トライブ 作成 になっ ちゃっ てるなぁ。",
+        "日本", "日本人", "日本一", "日本中", "日本製"
     ])
     func concatenateBack(text: String) throws {
         let segments = try segments(text)
