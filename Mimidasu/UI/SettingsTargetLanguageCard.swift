@@ -103,7 +103,7 @@ struct SettingsTargetLanguageCard: View {
         } label: {
             HStack(spacing: 10) {
                 Text(target.nativeName)
-                    .font(.system(size: 14, weight: .bold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Palette.primaryText)
                     .lineLimit(1)
                 // English/international name in grey beside the native
@@ -191,7 +191,8 @@ struct DictionaryEnglishNoticeSheet: View {
                 .foregroundStyle(Palette.primaryText)
             Text(
                 "Word lookups in the transcript are explained in English only — "
-                    + "they aren't translated to the selected target language."
+                    + "they aren't translated to the selected target language. "
+                    + "Only the transcribed text itself is translated."
             )
             .font(.system(size: 12))
             .foregroundStyle(Palette.secondaryText)
