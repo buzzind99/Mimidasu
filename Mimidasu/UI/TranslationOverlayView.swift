@@ -23,83 +23,79 @@ struct TranslationOverlayView: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            // Translation list fills the left; the jump buttons live in
-            // their own right-side column so they never sit on top of the
-            // text.
-            HStack(alignment: .bottom, spacing: 0) {
-                List {
-                    Color.clear
-                        .frame(height: 1)
-                        .padding(.top, 16)
-                        .id(Self.topAnchorID)
-                        .listRowInsets(EdgeInsets())
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                    if translatedEntries.isEmpty {
-                        emptyState
-                            .listRowInsets(EdgeInsets())
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                    }
-                    ForEach(translatedEntries) { entry in
-                        row(for: entry)
-                            .id(entry.id)
-                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                    }
-                    Color.clear
-                        .frame(height: 1)
-                        .padding(.bottom, 12)
-                        .id(Self.bottomAnchorID)
+            List {
+                Color.clear
+                    .frame(height: 1)
+                    .id(Self.topAnchorID)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                if translatedEntries.isEmpty {
+                    emptyState
                         .listRowInsets(EdgeInsets())
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                // The bottom marker row is 1pt tall; without this List
-                // enforces a minimum row height that would keep it from
-                // sitting flush.
-                .environment(\.defaultMinListRowHeight, 1)
-                .onScrollGeometryChange(for: TranscriptScrollPin.Snapshot.self) { geometry in
-                    TranscriptScrollPin.Snapshot(
-                        offsetY: geometry.contentOffset.y,
-                        contentHeight: geometry.contentSize.height,
-                        containerHeight: geometry.containerSize.height,
-                        insetTop: geometry.contentInsets.top,
-                        insetBottom: geometry.contentInsets.bottom
-                    )
-                } action: { old, new in
-                    scroll.handle(old: old, new: new, proxy: proxy)
+                ForEach(translatedEntries) { entry in
+                    row(for: entry)
+                        .id(entry.id)
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                 }
-                .onChange(of: model.entries) { _, _ in
-                    // Covers appends and rows growing when a translation lands.
-                    scroll.reAnchor(proxy)
-                }
-                .onChange(of: uiScale) { _, _ in
-                    // Scaling resizes every row; re-anchor if pinned.
-                    scroll.reAnchor(proxy)
-                }
-                .onAppear {
-                    // List has no `.initialOffset` anchor (ScrollView-only);
-                    // start pinned at the newest translation.
-                    scroll.reAnchor(proxy)
-                }
-
-                ScrollJumpButtons(scroll: scroll, proxy: proxy, glyphColor: .secondary)
+                Color.clear
+                    .frame(height: 1)
+                    .padding(.bottom, 2)
+                    .id(Self.bottomAnchorID)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .padding(.top, 20)
+            // The bottom marker row is 1pt tall; without this List
+            // enforces a minimum row height that would keep it from
+            // sitting flush.
+            .environment(\.defaultMinListRowHeight, 1)
+            .onScrollGeometryChange(for: TranscriptScrollPin.Snapshot.self) { geometry in
+                TranscriptScrollPin.Snapshot(
+                    offsetY: geometry.contentOffset.y,
+                    contentHeight: geometry.contentSize.height,
+                    containerHeight: geometry.containerSize.height,
+                    insetTop: geometry.contentInsets.top,
+                    insetBottom: geometry.contentInsets.bottom
+                )
+            } action: { old, new in
+                scroll.handle(old: old, new: new, proxy: proxy)
+            }
+            .onChange(of: model.entries) { _, _ in
+                // Covers appends and rows growing when a translation lands.
+                scroll.reAnchor(proxy)
+            }
+            .onChange(of: uiScale) { _, _ in
+                // Scaling resizes every row; re-anchor if pinned.
+                scroll.reAnchor(proxy)
+            }
+            .onAppear {
+                // List has no `.initialOffset` anchor (ScrollView-only);
+                // start pinned at the newest translation.
+                scroll.reAnchor(proxy)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .cardSurface(
+                radius: 12,
+                fill: .black.opacity(0.62),
+                stroke: .white.opacity(panel.locked ? 0.08 : 0.35)
+            )
+            .frame(minWidth: 280, minHeight: 200)
+            .overlay(alignment: .topTrailing) { headerButtons }
+            .overlay(alignment: .trailing) {
+                jumpButtons(proxy: proxy)
                     .padding(.trailing, 10)
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .cardSurface(
-            radius: 12,
-            fill: .black.opacity(0.62),
-            stroke: .white.opacity(panel.locked ? 0.08 : 0.35)
-        )
-        .frame(minWidth: 280, minHeight: 200)
-        .overlay(alignment: .topTrailing) { headerButtons }
     }
 
     /// Translated entries only; finalized-but-untranslated sentences never
@@ -113,7 +109,46 @@ struct TranslationOverlayView: View {
             .font(.system(size: 13 * uiScale.factor))
             .foregroundStyle(.tertiary)
             .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.top, 32)
+    }
+
+    /// End-of-scroll jump buttons, styled like the HUD's history chevrons:
+    /// bare bold double-chevron glyphs, trailing edge, vertically centered.
+    /// Visibility rides the same `PinnedScrollModel` signals the
+    /// transcript's floating buttons use.
+    private func jumpButtons(proxy: ScrollViewProxy) -> some View {
+        VStack(spacing: 2) {
+            jumpButton(
+                icon: "chevron.up.2",
+                visible: scroll.showUpButton,
+                help: "Jump to oldest"
+            ) {
+                scroll.unpinAndScrollToTop(proxy)
+            }
+            jumpButton(
+                icon: "chevron.down.2",
+                visible: scroll.showDownButton,
+                help: "Jump to newest"
+            ) {
+                scroll.repinAndChase(proxy)
+            }
+        }
+    }
+
+    private func jumpButton(
+        icon: String, visible: Bool, help: String, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.secondary)
+                .frame(width: 16, height: 14)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(visible ? 1 : 0)
+        .allowsHitTesting(visible)
+        .animation(.easeOut(duration: 0.18), value: visible)
+        .help(help)
     }
 
     private func row(for entry: SessionEntry) -> some View {
@@ -130,18 +165,38 @@ struct TranslationOverlayView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .padding(.bottom, 12)
+        .padding(.top, 12)
     }
 
-    /// Top-trailing pair: padlock, then the close button outermost.
-    /// `TranslationOverlayHostingView.buttonRegion` mirrors this row so
-    /// both stay clickable while locked.
+    /// Top-trailing cluster: padlock beside a trailing column of the close
+    /// button over the subtitle-overlay toggle.
+    /// `TranslationOverlayHostingView.buttonRegion` mirrors this cluster so
+    /// all three stay clickable while locked.
     private var headerButtons: some View {
-        HStack(spacing: 6) {
+        HStack(alignment: .top, spacing: 6) {
             padlockButton
-            closeButton
+            VStack(spacing: 6) {
+                closeButton
+                subtitleOverlayButton
+            }
         }
         .padding(6)
+    }
+
+    /// Shows/hides the floating subtitle overlay; tinted with the accent
+    /// color while the HUD is on screen.
+    private var subtitleOverlayButton: some View {
+        Button {
+            model.hudVisible.toggle()
+        } label: {
+            Image(systemName: "rectangle.on.rectangle")
+                .font(.system(size: 10))
+                .foregroundStyle(model.hudVisible ? Theme.accentPink : .secondary)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Show or hide the subtitle overlay")
     }
 
     private var padlockButton: some View {

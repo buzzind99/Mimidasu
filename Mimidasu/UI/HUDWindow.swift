@@ -91,9 +91,10 @@ final class HUDPanel: NSPanel, ObservableObject {
 }
 
 /// Hosts the HUD content and implements click-through via hit-testing:
-/// while locked, only the padlock's region accepts mouse events; every
-/// other point returns nil so clicks land on the window underneath.
-/// Also grows the window vertically to fit its content (top edge anchored).
+/// while locked, only the top-trailing button cluster accepts mouse
+/// events; every other point returns nil so clicks land on the window
+/// underneath. Also grows the window vertically to fit its content (top
+/// edge anchored).
 final class HUDHostingView: NSHostingView<HUDView> {
     /// Builds a fixed-width measurement copy of the HUD content so the
     /// fully-wrapped ideal height can be computed offscreen.
@@ -105,20 +106,29 @@ final class HUDHostingView: NSHostingView<HUDView> {
         window as? HUDPanel
     }
 
-    /// Must mirror `HUDView.headerButtons`' layout: two 24×24 buttons with
-    /// 6pt spacing and 6pt row padding, expanded by a 4pt margin for a
-    /// comfortable hit target.
+    /// Must mirror `HUDView.headerButtons`' cluster: a 24×24 padlock beside
+    /// a trailing column (24×24 buttons, 6pt spacing) of the close button
+    /// over the translation-overlay toggle, 6pt row padding, expanded by a
+    /// 4pt margin for a comfortable hit target.
     private var unlockRegion: CGRect {
         let size: CGFloat = 24
         let pad: CGFloat = 6
         let margin: CGFloat = 4
-        let row: CGFloat = 2 * size + 6
-        return CGRect(
+        let gap: CGFloat = 6
+        let row: CGFloat = 2 * size + gap
+        let topRow = CGRect(
             x: bounds.width - pad - row - margin,
             y: pad - margin,
             width: row + 2 * margin,
             height: size + 2 * margin
         )
+        let toggle = CGRect(
+            x: bounds.width - pad - size - margin,
+            y: pad + size + gap - margin,
+            width: size + 2 * margin,
+            height: size + 2 * margin
+        )
+        return topRow.union(toggle)
     }
 
     override func layout() {

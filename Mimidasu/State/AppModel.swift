@@ -31,27 +31,27 @@ final class AppModel {
     var translationStatus: TranslationStatus = .idle
     var engineIsMock = false
     var modelURL: URL?
-    /// Hiding the HUD takes its translation-only companion overlay down
-    /// with it, so the overlay's toggle never points at a window the user
-    /// can no longer see.
+    /// Floating subtitle overlay, shown/hidden from the sidebar's overlay
+    /// button, the HUD's own close button, or the translation overlay's
+    /// subtitle button; not persisted (starts hidden each launch).
+    /// Independent of `translationOverlayVisible`, and each flip posts
+    /// `.mimidasuHUDVisibilityDidChange`.
     var hudVisible = false {
         didSet {
-            guard !hudVisible, oldValue else { return }
-            translationOverlayVisible = false
+            guard hudVisible != oldValue else { return }
+            NotificationCenter.default.post(name: .mimidasuHUDVisibilityDidChange, object: self)
         }
     }
 
-    /// Translation-only companion overlay of the HUD: a scrollable,
-    /// bottom-pinned list of every finalized translation. Shown/hidden from
-    /// the HUD's translate button or the overlay's own close button; not
-    /// persisted (like `hudVisible`, it starts hidden each launch). Each
-    /// flip posts `.mimidasuTranslationOverlayVisibilityDidChange`.
+    /// Translation-only companion overlay: a scrollable, bottom-pinned list
+    /// of every finalized translation. Shown/hidden from the HUD's translate
+    /// button, the overlay's own close button, or the sidebar's overlay
+    /// master switch (which closes it); not persisted (starts hidden each
+    /// launch). Each flip posts `.mimidasuTranslationOverlayVisibilityDidChange`.
     var translationOverlayVisible = false {
         didSet {
             guard translationOverlayVisible != oldValue else { return }
-            NotificationCenter.default.post(
-                name: .mimidasuTranslationOverlayVisibilityDidChange, object: self
-            )
+            NotificationCenter.default.post(name: .mimidasuTranslationOverlayVisibilityDidChange, object: self)
         }
     }
 

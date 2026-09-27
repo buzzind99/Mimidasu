@@ -7,18 +7,12 @@ struct MimidasuApp: App {
     @State private var model = AppModel()
 
     init() {
-        appDelegate.observeTranslationOverlayVisibility()
+        appDelegate.observeOverlayVisibility()
     }
 
     var body: some Scene {
         WindowGroup("Mimidasu") {
             ContentView(model: model, live: model.live, latency: model.latency)
-                .onChange(of: model.hudVisible) { _, visible in
-                    if visible {
-                        appDelegate.hud.bind(model: model, live: model.live)
-                    }
-                    appDelegate.hud.setVisible(visible)
-                }
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
@@ -46,14 +40,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let hud = HUDWindowController.shared
     let translationOverlay = TranslationOverlayWindowController.shared
 
+    private var hudVisibilityTask: Task<Void, Never>?
     private var overlayVisibilityTask: Task<Void, Never>?
 
-    /// Drives the overlay panel from `translationOverlayVisible` for the
-    /// whole process lifetime. The flag's mutation sites (the HUD's
-    /// translate button, the overlay's own close button) sit on panels that
-    /// outlive the main window, so the wiring cannot live in a scene's
-    /// SwiftUI content.
-    func observeTranslationOverlayVisibility() {
+    /// Drives the overlay panels from `hudVisible` and
+    /// `translationOverlayVisible` for the whole process lifetime. The
+    /// flags' panel-borne mutation sites (the HUD's close and translate
+    /// buttons, the translation overlay's close and subtitle buttons) sit
+    /// on panels that outlive the main window, so the wiring cannot live
+    /// in a scene's SwiftUI content.
+    func observeOverlayVisibility() {
+        hudVisibilityTask = Task { [hud] in
+            for await notification in NotificationCenter.default.notifications(
+                named: .mimidasuHUDVisibilityDidChange
+            ) {
+                guard let model = notification.object as? AppModel else { continue }
+                if model.hudVisible {
+                    hud.bind(model: model, live: model.live)
+                }
+                hud.setVisible(model.hudVisible)
+            }
+        }
         overlayVisibilityTask = Task { [translationOverlay] in
             for await notification in NotificationCenter.default.notifications(
                 named: .mimidasuTranslationOverlayVisibilityDidChange

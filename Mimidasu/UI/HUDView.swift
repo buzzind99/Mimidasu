@@ -44,15 +44,34 @@ struct HUDView: View {
         .overlay(alignment: .topTrailing) { headerButtons }
     }
 
-    /// Top-trailing row: translation-overlay toggle, padlock outermost.
-    /// HUDHostingView.unlockRegion mirrors this rect so both buttons stay
-    /// clickable while locked.
+    /// Top-trailing cluster: padlock beside a trailing column of the close
+    /// button over the translation-overlay toggle. HUDHostingView
+    /// .unlockRegion mirrors this cluster so all three stay clickable
+    /// while locked.
     private var headerButtons: some View {
-        HStack(spacing: 6) {
-            translationOverlayButton
+        HStack(alignment: .top, spacing: 6) {
             padlockButton
+            VStack(spacing: 6) {
+                closeButton
+                translationOverlayButton
+            }
         }
         .padding(6)
+    }
+
+    /// Hides the subtitle overlay (the translation overlay stays up).
+    private var closeButton: some View {
+        Button {
+            model.hudVisible = false
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Hide subtitle overlay")
     }
 
     /// Shows/hides the translation-only companion overlay; tinted with the

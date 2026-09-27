@@ -290,7 +290,7 @@ extension SidebarView {
     private var toolbar: some View {
         HStack(spacing: 8) {
             exportMenu
-            hudToggleButton
+            overlayToggleButton
             Spacer()
             scaleStepper
             settingsButton
@@ -324,19 +324,21 @@ extension SidebarView {
         .help("Copy or export the session transcript")
     }
 
-    private var hudToggleButton: some View {
+    private var overlayToggleButton: some View {
         Button {
-            model.hudVisible.toggle()
+            model.toggleOverlays()
         } label: {
             Image(systemName: "rectangle.on.rectangle")
-                .foregroundStyle(model.hudVisible ? Theme.accentPink : Theme.primaryText.opacity(0.7))
+                .foregroundStyle(
+                    model.anyOverlayVisible ? Theme.accentPink : Theme.primaryText.opacity(0.7)
+                )
                 .frame(width: 34, height: 32)
                 .cardSurface(radius: 9)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .hoverHighlight(iconButtonShape)
-        .help("Floating always-on-top subtitle overlay (click-through, resizable)")
+        .help("Show or hide the floating overlays (subtitle + translations)")
     }
 
     private var settingsButton: some View {

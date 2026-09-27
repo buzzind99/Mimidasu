@@ -1,5 +1,6 @@
 import Foundation
 @testable import Mimidasu
+import Synchronization
 import Testing
 
 /// Tests `AppModel` session-control guards, translation wiring, and the
@@ -240,20 +241,10 @@ struct AppModelTests {
         #expect(model.translationOverlayVisible)
     }
 
-    @Test("hiding the HUD hides the translation overlay with it")
-    func hidingHUDHidesTranslationOverlay() async {
+    @Test("hiding the HUD leaves the translation overlay visible")
+    func hidingHUDKeepsTranslationOverlayVisible() async {
         let model = await makeSUT()
         model.hudVisible = true
-        model.translationOverlayVisible = true
-
-        model.hudVisible = false
-
-        #expect(!model.translationOverlayVisible)
-    }
-
-    @Test("hiding an already-hidden HUD is a no-op for the overlay")
-    func hidingHiddenHUDKeepsOverlayVisibility() async {
-        let model = await makeSUT()
         model.translationOverlayVisible = true
 
         model.hudVisible = false
@@ -261,8 +252,25 @@ struct AppModelTests {
         #expect(model.translationOverlayVisible)
     }
 
-    @Test("re-showing the HUD leaves the overlay hidden")
-    func reshowingHUDKeepsOverlayHidden() async {
+    @Test("flipping hudVisible posts the HUD visibility notification")
+    func hudVisibleFlipPostsNotification() async {
+        let model = await makeSUT()
+        let flips = Mutex(0)
+        let observer = NotificationCenter.default.addObserver(
+            forName: .mimidasuHUDVisibilityDidChange, object: model, queue: nil
+        ) { _ in flips.withLock { count in count += 1 } }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        model.hudVisible = true
+        // Assigning the current value is a no-op for observers too.
+        model.hudVisible = true
+        model.hudVisible = false
+
+        #expect(flips.withLock { count in count } == 2)
+    }
+
+    @Test("hiding and re-showing the HUD leaves the overlay visible")
+    func hidingAndReshowingHUDKeepsOverlayVisible() async {
         let model = await makeSUT()
         model.hudVisible = true
         model.translationOverlayVisible = true
@@ -270,6 +278,54 @@ struct AppModelTests {
 
         model.hudVisible = true
 
+        #expect(model.translationOverlayVisible)
+    }
+
+    @Test("anyOverlayVisible tracks either overlay")
+    func anyOverlayVisibleTracksEitherOverlay() async {
+        let model = await makeSUT()
+
+        #expect(!model.anyOverlayVisible)
+
+        model.hudVisible = true
+        #expect(model.anyOverlayVisible)
+
+        model.hudVisible = false
+        model.translationOverlayVisible = true
+        #expect(model.anyOverlayVisible)
+    }
+
+    @Test("toggling overlays from all-closed opens the HUD only")
+    func togglingOverlaysFromClosedOpensHUDOnly() async {
+        let model = await makeSUT()
+
+        model.toggleOverlays()
+
+        #expect(model.hudVisible)
+        #expect(!model.translationOverlayVisible)
+    }
+
+    @Test("toggling overlays closes everything from any open state")
+    func togglingOverlaysClosesEverythingFromAnyOpenState() async {
+        let model = await makeSUT()
+
+        model.hudVisible = true
+        model.toggleOverlays()
+
+        #expect(!model.hudVisible)
+        #expect(!model.translationOverlayVisible)
+
+        model.translationOverlayVisible = true
+        model.toggleOverlays()
+
+        #expect(!model.hudVisible)
+        #expect(!model.translationOverlayVisible)
+
+        model.hudVisible = true
+        model.translationOverlayVisible = true
+        model.toggleOverlays()
+
+        #expect(!model.hudVisible)
         #expect(!model.translationOverlayVisible)
     }
 
