@@ -14,6 +14,19 @@ struct SettingsTargetLanguageCard: View {
     /// Horizontal inset shared by the row bands and the dividers so every
     /// band edge and line end aligns.
     private static let bandInset: CGFloat = 14
+    /// Fixed row height so the scroll viewport can stop exactly on a row
+    /// boundary instead of cutting a partial row.
+    private static let rowHeight: CGFloat = 38
+    /// Full rows shown before the rest scrolls; the rest of the OS-dependent
+    /// catalog scrolls inside the card.
+    private static let visibleRowCount = 5
+
+    /// Exact scroll-viewport height: `min(count, visibleRowCount)` rows plus
+    /// the hairlines between them, so no partial row is ever visible.
+    private static func viewportHeight(rowCount: Int) -> CGFloat {
+        let visible = min(rowCount, visibleRowCount)
+        return CGFloat(visible) * rowHeight + CGFloat(max(visible - 1, 0))
+    }
 
     init(model: AppModel, settings: TranslationSettings) {
         _model = Bindable(wrappedValue: model)
@@ -32,21 +45,29 @@ struct SettingsTargetLanguageCard: View {
                 }
             }
             if model.appleTranslationAvailability.isLoaded {
-                // ~5 rows in view; the rest of the OS-dependent catalog
-                // scrolls inside the card.
-                ScrollView(.vertical) {
-                    VStack(spacing: 0) {
-                        let targets = model.appleTranslationAvailability.targets
-                        ForEach(targets) { target in
-                            row(target)
-                            if target != targets.last {
-                                settingsDivider().padding(.horizontal, Self.bandInset)
+                if model.appleTranslationAvailability.targets.isEmpty {
+                    // The probe can legally yield nothing usable; say so
+                    // instead of mounting a 0-height viewport.
+                    Text("No compatible target languages found")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.mutedText)
+                } else {
+                    ScrollView(.vertical) {
+                        VStack(spacing: 0) {
+                            let targets = model.appleTranslationAvailability.targets
+                            ForEach(targets) { target in
+                                row(target)
+                                if target != targets.last {
+                                    settingsDivider().padding(.horizontal, Self.bandInset)
+                                }
                             }
                         }
                     }
+                    .frame(height: Self.viewportHeight(
+                        rowCount: model.appleTranslationAvailability.targets.count
+                    ))
+                    .opacity(sessionIsLive ? 0.45 : 1)
                 }
-                .frame(maxHeight: 200)
-                .opacity(sessionIsLive ? 0.45 : 1)
             } else {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -132,7 +153,7 @@ struct SettingsTargetLanguageCard: View {
                 }
             }
             .padding(.horizontal, Self.bandInset + 12)
-            .padding(.vertical, 9)
+            .frame(height: Self.rowHeight)
             .background {
                 if selected {
                     RowBand(inset: Self.bandInset)
