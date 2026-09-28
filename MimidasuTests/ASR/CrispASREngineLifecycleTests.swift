@@ -1,5 +1,6 @@
 import Foundation
 @testable import Mimidasu
+import Synchronization
 import Testing
 
 /// Tests `CrispASREngine`'s session lifecycle over the scripted fake
@@ -259,5 +260,114 @@ struct CrispASREngineLifecycleTests {
             "documents the current trim-only flush behavior — the endpoint path would emit nothing"
         )
         requireFinal(drained.first, text: "<sil>", start: 0, end: 16000)
+    }
+
+    // MARK: - Drained teardown (in-flight job vs. free)
+
+    @Test("close frees the session once the in-flight decode drains within the grace")
+    func closeFreesAfterInFlightDecodeDrains() async throws {
+        let library = FakeCrispASRLibrary()
+        library.vadReplies = [.failure(-3)] // degrade → deterministic cap finals
+        library.transcribeReplies = ["キャップ。"]
+        library.transcribeHoldSemaphore = DispatchSemaphore(value: 0)
+        let engine = try makePreparedEngine(library)
+
+        engine.push([Float](repeating: 0.1, count: 12 * CrispASREngine.sampleRate)) // loud cap decode
+        // `#require`, not `#expect`: a failed entry poll must abort the
+        // test — continuing would drain a trivially idle engine and pass
+        // vacuously.
+        try #require(
+            await pollUntilOffMain { library.transcribeEntered },
+            "the cap decode entered the fake and is held"
+        )
+        defer {
+            library.transcribeHoldSemaphore?.signal()
+            library.transcribeHoldSemaphore = nil
+        }
+
+        let task = Task.detached { engine.close() }
+        library.transcribeHoldSemaphore?.signal()
+        library.transcribeHoldSemaphore = nil // an unexpected second decode must not hang the suite
+        let closed = await task.value
+
+        #expect(closed, "the decode finished within the grace, so the session was freed")
+        #expect(library.closeSessionCount == 1)
+        #expect(
+            !library.freedUnderTranscribe,
+            "the free must follow the drained decode, never overlap it"
+        )
+    }
+
+    @Test("close leaks the session instead of freeing under a decode that outlives the grace")
+    func closeLeaksWhenDecodeOutlivesGrace() async throws {
+        let library = FakeCrispASRLibrary()
+        library.vadReplies = [.failure(-3)] // degrade → deterministic cap finals
+        library.transcribeReplies = ["キャップ。"]
+        library.transcribeHoldSemaphore = DispatchSemaphore(value: 0)
+        let engine = try makePreparedEngine(library)
+        engine.closeDrainTimeout = 0.05
+
+        engine.push([Float](repeating: 0.1, count: 12 * CrispASREngine.sampleRate)) // loud cap decode
+        #expect(await pollUntilOffMain { library.transcribeEntered }, "the cap decode entered the fake and is held")
+        let samplesBeforeClose = engine.pushedSamples
+        defer {
+            library.transcribeHoldSemaphore?.signal()
+            library.transcribeHoldSemaphore = nil
+        }
+
+        let closed = await Task.detached { engine.close() }.value
+
+        #expect(!closed, "close reports the leak; the caller must skip further runtime teardown")
+        #expect(library.closeSessionCount == 0, "the session must never be freed under the in-flight decode")
+        #expect(!library.freedUnderTranscribe)
+        #expect(state(engine) { current in current.finishing }, "close latched finishing, not just the nilled session")
+        engine.push(loudSecond)
+        #expect(
+            engine.pushedSamples == samplesBeforeClose,
+            "push after close stays ignored (finishing latched before the drain)"
+        )
+    }
+
+    @Test("finish skips the flush decode when a decode outlives the drain")
+    func finishSkipsFlushWhenDrainExpires() async throws {
+        let library = FakeCrispASRLibrary()
+        library.vadReplies = [.spans([(start: 0.0, end: 1.0)])] // speechful utterance → the flush would decode
+        library.transcribeReplies = [""]
+        library.transcribeHoldSemaphore = DispatchSemaphore(value: 0)
+        let engine = try makePreparedEngine(library)
+        engine.drainTimeout = 0.05
+
+        engine.push(loudSecond) // window partial decode (held)
+        #expect(await pollUntilOffMain { library.transcribeEntered }, "the window decode entered the fake and is held")
+        defer {
+            library.transcribeHoldSemaphore?.signal()
+            library.transcribeHoldSemaphore = nil
+        }
+
+        // Nil until finish() returns: a (buggy) flush decode would park on
+        // the still-held semaphore and finish() would never return — the
+        // bounded poll turns that regression into a failure instead of a
+        // hung suite.
+        let outcome = Mutex<[ASREvent]?>(nil)
+        Task.detached {
+            outcome.withLock { slot in slot = engine.finish() }
+        }
+        let finished = await pollUntilOffMain { outcome.withLock { events in events != nil } }
+        #expect(finished, "finish returned while the decode is still held — the flush decode must not run")
+        if finished {
+            let drained = outcome.withLock { events in events }
+            #expect(drained?.isEmpty == true, "the held job produced nothing the inbox could drain")
+        }
+
+        // The fake records a transcribe call only after its hold releases,
+        // so once the in-flight decode lands the count must be exactly one;
+        // a flush decode that snuck through would land as call two.
+        library.transcribeHoldSemaphore?.signal()
+        library.transcribeHoldSemaphore = nil
+        #expect(await pollUntilOffMain { library.transcribeCalls.count == 1 }, "the in-flight partial decode landed")
+        #expect(
+            library.transcribeCalls.count == 1,
+            "the flush decode must not run on a session a live job still owns"
+        )
     }
 }

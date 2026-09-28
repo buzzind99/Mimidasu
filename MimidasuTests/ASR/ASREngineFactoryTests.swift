@@ -208,4 +208,94 @@ struct ASREngineFactoryTests {
         ASREngineFactory.retireWarmEngine { shutdownCalls += 1 } // empty cache → no call
         #expect(shutdownCalls == 1, "an empty cache must not call the runtime shutdown")
     }
+
+    @Test("retireWarmEngine skips the runtime shutdown when the close had to leak the session")
+    func retireWarmEngineSkipsShutdownOnLeakedClose() async throws {
+        defer { ASREngineFactory.retireWarmEngine(shutdownRuntime: {}) }
+        let library = FakeCrispASRLibrary()
+        library.vadReplies = [.failure(-3)] // degrade → deterministic cap finals
+        library.transcribeHoldSemaphore = DispatchSemaphore(value: 0)
+        let tmp = try TemporaryDirectory(prefix: "mimidasu-factory-leak")
+        let modelURL = try tmp.write(Data("gguf".utf8), named: "model.gguf")
+        let engine = try CrispASREngine(modelPath: modelURL, library: library)
+        try engine.prepare()
+        try engine.openStream()
+        engine.closeDrainTimeout = 0.05
+
+        #expect(
+            ASREngineFactory.makeEngine(
+                modelURL: modelURL,
+                allowMock: true,
+                makeNative: { _ in engine }
+            ) != nil,
+            "the leaking engine is installed as the warm engine"
+        )
+        engine.push([Float](repeating: 0.1, count: 12 * CrispASREngine.sampleRate)) // loud cap decode
+        #expect(await pollUntilOffMain { library.transcribeEntered }, "the cap decode entered the fake and is held")
+        defer {
+            library.transcribeHoldSemaphore?.signal()
+            library.transcribeHoldSemaphore = nil
+        }
+
+        var shutdownCalls = 0
+        ASREngineFactory.retireWarmEngine { shutdownCalls += 1 }
+        #expect(
+            shutdownCalls == 0,
+            "a leaked session means a C call is still running in that runtime — the cached-model free must not follow"
+        )
+    }
+
+    @Test("a stale-model close that leaks poisons the runtime: a later clean retire still skips the shutdown")
+    func stalePathLeakPoisonsRuntimeShutdown() async throws {
+        defer { ASREngineFactory.retireWarmEngine(shutdownRuntime: {}) }
+        let leakingLibrary = FakeCrispASRLibrary()
+        leakingLibrary.vadReplies = [.failure(-3)] // degrade → deterministic cap finals
+        leakingLibrary.transcribeHoldSemaphore = DispatchSemaphore(value: 0)
+        let tmp = try TemporaryDirectory(prefix: "mimidasu-factory-poison")
+        let staleURL = try tmp.write(Data("gguf".utf8), named: "stale.gguf")
+        let freshURL = try tmp.write(Data("gguf".utf8), named: "fresh.gguf")
+        let staleEngine = try CrispASREngine(modelPath: staleURL, library: leakingLibrary)
+        try staleEngine.prepare()
+        try staleEngine.openStream()
+        staleEngine.closeDrainTimeout = 0.05
+        // Swapped in by the stale-model path and closed cleanly by the quit
+        // below — the shutdown decision must hinge on the poison latch, not
+        // on this engine's own close.
+        let freshEngine = try CrispASREngine(modelPath: freshURL, library: FakeCrispASRLibrary())
+
+        #expect(
+            ASREngineFactory.makeEngine(
+                modelURL: staleURL,
+                allowMock: true,
+                makeNative: { _ in staleEngine }
+            ) != nil,
+            "the leaking engine is installed as the warm engine"
+        )
+        staleEngine.push([Float](repeating: 0.1, count: 12 * CrispASREngine.sampleRate)) // loud cap decode
+        #expect(await pollUntilOffMain { leakingLibrary.transcribeEntered }, "the cap decode entered the fake and is held")
+        defer {
+            leakingLibrary.transcribeHoldSemaphore?.signal()
+            leakingLibrary.transcribeHoldSemaphore = nil
+        }
+
+        // A different model path closes the stale engine, whose decode is
+        // still held — the close leaks and poisons the runtime — and caches
+        // the fresh engine in its place.
+        #expect(
+            ASREngineFactory.makeEngine(
+                modelURL: freshURL,
+                allowMock: true,
+                makeNative: { _ in freshEngine }
+            ) != nil,
+            "the fresh engine replaces the stale one despite the leaked close"
+        )
+        #expect(leakingLibrary.closeSessionCount == 0, "the stale session was leaked, not freed")
+
+        var shutdownCalls = 0
+        ASREngineFactory.retireWarmEngine { shutdownCalls += 1 }
+        #expect(
+            shutdownCalls == 0,
+            "the fresh engine closed cleanly, but the poisoned runtime must not be shut down"
+        )
+    }
 }

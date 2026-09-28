@@ -48,9 +48,23 @@ final class FakeCrispASRLibrary: CrispASRLibraryAPI, @unchecked Sendable {
     /// fallback backend is exercised (the protocol default).
     var detectBackendResult: String?
     /// Set → `vadSlices` marks the call entered and blocks until released.
-    var vadHoldSemaphore: DispatchSemaphore?
-    /// Set → `transcribeText` marks the call entered and blocks until released.
-    var transcribeHoldSemaphore: DispatchSemaphore?
+    /// Lock-backed: the fake reads it on the job thread while tests clear
+    /// it (`= nil`) from the test task.
+    var vadHoldSemaphore: DispatchSemaphore? {
+        get { lock.withLock { vadHoldSemaphoreValue } }
+        set { lock.withLock { vadHoldSemaphoreValue = newValue } }
+    }
+
+    private var vadHoldSemaphoreValue: DispatchSemaphore?
+
+    /// Set → `transcribeText` marks the call entered and blocks until
+    /// released. Lock-backed for the same reason.
+    var transcribeHoldSemaphore: DispatchSemaphore? {
+        get { lock.withLock { transcribeHoldSemaphoreValue } }
+        set { lock.withLock { transcribeHoldSemaphoreValue = newValue } }
+    }
+
+    private var transcribeHoldSemaphoreValue: DispatchSemaphore?
 
     private(set) var vadCalls: [[Float]] = []
     private(set) var vadEntered = false
@@ -61,6 +75,11 @@ final class FakeCrispASRLibrary: CrispASRLibraryAPI, @unchecked Sendable {
     private(set) var openSessionCount = 0
     private(set) var openSessionBackends: [String] = []
     private(set) var closeSessionCount = 0
+    /// Set when `closeSession` ran while a `transcribeText` call was still
+    /// inside the fake — the use-after-free shape the teardown drain must
+    /// never produce (a plain call count cannot distinguish it).
+    private(set) var freedUnderTranscribe = false
+    private var transcribeInside = false
 
     var vadModelPath: String? {
         vadModelPathValue
@@ -79,13 +98,20 @@ final class FakeCrispASRLibrary: CrispASRLibraryAPI, @unchecked Sendable {
     }
 
     func closeSession(_ session: OpaquePointer?) {
-        lock.withLock { closeSessionCount += 1 }
+        lock.withLock {
+            closeSessionCount += 1
+            if transcribeInside {
+                freedUnderTranscribe = true
+            }
+        }
     }
 
     func transcribeText(
         session: OpaquePointer?, pcm: borrowing Span<Float>, languageCode: String
     ) -> String? {
         let pcmCopy = pcm.withUnsafeBufferPointer { buffer in Array(buffer) }
+        lock.withLock { transcribeInside = true }
+        defer { lock.withLock { transcribeInside = false } }
         if let hold = transcribeHoldSemaphore {
             lock.withLock { transcribeEntered = true }
             hold.wait()

@@ -84,12 +84,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Upper bound on quit-time teardown: whichever arrives first — the
     /// teardown-complete notification or this watchdog — releases the quit.
-    /// Sums the known drain budgets (the constants below) plus margin for
-    /// the deliberately unbounded synchronous flush decode; a pathologically
-    /// hung C call still trips the watchdog, and the user can always
-    /// force-quit.
+    /// Sums the known drain budgets (the constants below — finish's job
+    /// drain, the translation tail, and close's shorter grace) plus margin
+    /// for the deliberately unbounded synchronous flush decode; a
+    /// pathologically hung C call still trips the watchdog, and the user can
+    /// always force-quit.
     private static let teardownWatchdogInterval: TimeInterval =
-        CrispASREngine.drainTimeout + SessionController.translationDrainTimeout + 5
+        CrispASREngine.drainTimeout + CrispASREngine.closeDrainTimeout
+            + SessionController.translationDrainTimeout + 5
 
     private var repliedToTerminate = false
     private var teardownWatchdog: Timer?

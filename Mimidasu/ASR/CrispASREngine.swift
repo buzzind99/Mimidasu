@@ -72,14 +72,27 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
     /// Total budget for `finish()` to wait out in-flight decode/VAD jobs.
     /// Bounds the whole drain, not each semaphore wait — a hung C call never
     /// clears its in-flight flag, so per-wait timeouts alone would re-arm
-    /// forever. (The synchronous flush decode below stays unbounded: it is a
-    /// single direct C call on the session, and aborting mid-call would leave
-    /// the C library using a session this side has already torn down.)
+    /// forever. (The synchronous flush decode stays unbounded by this
+    /// budget — it is a single direct C call on the session, and aborting
+    /// mid-call would leave the C library using a session this side has
+    /// already torn down — but it holds `prepareMutex`, so `close()` can
+    /// never free the session underneath it.)
     static let drainTimeout: TimeInterval = 30
     /// Per-instance drain budget — defaults to the static budget above.
     /// Injectable so tests can exercise the bounded wait against a held job
     /// without waiting out the full 30 s.
     var drainTimeout = CrispASREngine.drainTimeout
+    /// Budget for `close()` to wait out in-flight decode/VAD jobs before it
+    /// leaks the session instead of freeing it. Short on purpose: when
+    /// `close()` follows a `finish()` that already waited out the full
+    /// `drainTimeout`, a job still in flight there is hung — this grace only
+    /// covers a job that finished in between (or a close with no preceding
+    /// finish) and bounds the extra wait on a known-hung one.
+    static let closeDrainTimeout: TimeInterval = 5
+    /// Per-instance close-drain budget — defaults to the static budget above.
+    /// Injectable so tests can exercise the leak path without waiting out the
+    /// full grace.
+    var closeDrainTimeout = CrispASREngine.closeDrainTimeout
 
     // FireRedVAD (via the dispatcher-backed crispasr_vad_slices ABI; the
     // model is process-cached in the C library after the first call).
