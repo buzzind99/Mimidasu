@@ -308,7 +308,7 @@ struct TranslationSettingsTests {
         #expect(settings.activeEngineDescription(fallbackActive: false) == "Apple (on-device) → \(target)")
         #expect(
             settings.activeEngineDescription(fallbackActive: false, appleHighFidelity: true)
-                == "Apple Intelligence (High fidelity) → \(target)"
+                == "Apple Intelligence (high fidelity) → \(target)"
         )
     }
 
@@ -361,7 +361,7 @@ struct TranslationSettingsTests {
         #expect(TranslationProvider.apple.settingsName(deeplIsFreeTier: false) == "Apple")
         #expect(
             TranslationProvider.apple.settingsName(deeplIsFreeTier: false, appleHighFidelity: true)
-                == "Apple Intelligence (High fidelity)"
+                == "Apple Intelligence (high fidelity)"
         )
         #expect(TranslationProvider.google.settingsName(deeplIsFreeTier: false) == "Google Translate")
         #expect(TranslationProvider.deepl.settingsName(deeplIsFreeTier: false) == "DeepL")

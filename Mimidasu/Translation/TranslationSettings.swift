@@ -57,7 +57,7 @@ extension TranslationProvider {
     /// DeepL appends its free-tier marker.
     func settingsName(deeplIsFreeTier: Bool, appleHighFidelity: Bool = false) -> String {
         switch self {
-        case .apple: appleHighFidelity ? "Apple Intelligence (High fidelity)" : "Apple"
+        case .apple: appleHighFidelity ? "Apple Intelligence (high fidelity)" : "Apple"
         case .google: "Google Translate"
         case .deepl: deeplIsFreeTier ? "DeepL (Free)" : "DeepL"
         case .openrouter: "OpenRouter"
@@ -284,7 +284,7 @@ final class TranslationSettings {
     /// Truthful description of the engine currently in use, including the
     /// Apple-fallback latch ("DeepL (Free) — fallback active") and the
     /// selected target ("Apple (on-device) → English"; "Apple Intelligence
-    /// (High fidelity) → English" once the probe reports the strategy
+    /// (high fidelity) → English" once the probe reports the strategy
     /// installed). The Apple label names Apple Intelligence only while the
     /// OS reported the high-fidelity strategy installed for the current pair
     /// (`appleHighFidelity`); otherwise it stays "Apple (on-device)". The
@@ -302,7 +302,7 @@ final class TranslationSettings {
         let provider = attachedProvider ?? selectedProvider
         var label: String = switch provider {
         case .apple:
-            appleHighFidelity ? "Apple Intelligence (High fidelity)" : "Apple (on-device)"
+            appleHighFidelity ? "Apple Intelligence (high fidelity)" : "Apple (on-device)"
         case .google:
             "Google Translate"
         case .deepl:
