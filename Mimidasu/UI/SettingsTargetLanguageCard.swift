@@ -66,6 +66,9 @@ struct SettingsTargetLanguageCard: View {
                     .frame(height: Self.viewportHeight(
                         rowCount: model.appleTranslationAvailability.targets.count
                     ))
+                    // Inert while a session is live: wheel events over the
+                    // list scroll the enclosing settings window instead.
+                    .scrollDisabled(sessionIsLive)
                     .opacity(sessionIsLive ? 0.45 : 1)
                 }
             } else {
