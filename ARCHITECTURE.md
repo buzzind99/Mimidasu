@@ -4,9 +4,11 @@
 macOS (Apple Silicon, 15.5+). Captures system audio via a Core Audio process
 tap, streams it through a selectable ASR GGUF — **Lite** (SenseVoice-Small,
 default) or **Full** (FunASR-Nano) — via the CrispASR runtime with
-FireRedVAD endpointing, and translates finalized sentences to English with
-Apple's on-device Translation framework or an optional cloud provider
-(Google Translate, DeepL, OpenRouter) behind the same engine seam. Ruby
+FireRedVAD endpointing, and translates finalized sentences to a selectable
+target language (English by default) with Apple's on-device Translation
+framework — or Apple Intelligence's high-fidelity strategy where installed —
+or an optional cloud provider (Google Translate, DeepL, OpenRouter) behind
+the same engine seam. Ruby
 annotations (romaji/furigana) and tap-to-lookup dictionary entries come
 from a bundled IPADIC tokenizer plus a pinned JMDict/JMnedict SQLite DB.
 
@@ -32,8 +34,9 @@ from a bundled IPADIC tokenizer plus a pinned JMDict/JMnedict SQLite DB.
              └──────────────┬──────────────┘
                             ▼
              ┌─────────────────────────────┐
-             │       TranslationQueue      │ Apple on-device (default) or
-             │                             │ cloud provider, serialized
+             │       TranslationQueue      │ ja→target (EN default);
+             │                             │ Apple on-device or cloud,
+             │                             │ serialized
              └──────────────┬──────────────┘
                             ▼
              ┌─────────────────────────────┐
@@ -99,11 +102,17 @@ packaged apps in `Contents/Frameworks/`.
 
 ### SentenceBuffer (`Session/`)
 - Streaming ja ASR routinely drops punctuation, so boundaries are 3-tier:
-  1. Terminal punctuation (`。！？`) closes immediately.
+  1. Terminal punctuation (`。！？` plus ASCII `!`/`?`) closes immediately.
   2. No new finals for ~1 s finalizes the buffer.
-  3. ~35–45 char cap, split at the nearest clause boundary (`、` or
-     `けど` / `から` / `ので` / `って`).
+  3. 42-char cap, split at the nearest clause boundary at/after 18 chars
+     (`、` or `,`, or `けど` / `から` / `ので` / `って`).
   Symbol-only finals (e.g. `...`) never start a sentence.
+- **Final gate:** only Japanese-script finals become sentences —
+  `KanaClassification.containsJapanese`, kana included, because the final
+  re-decode often renders kanji words as kana even when the partial showed
+  kanji. Latin/symbol-only finals are dropped at the door and recorded via
+  `noteTrailing`: speech continued, so the open sentence's silence timer
+  and end span stay honest without appending anything.
 - Timestamps from the session sample clock (chunk offsets ÷ 16 kHz): each
   sentence records `start_s`/`end_s`, ±160 ms granularity. Partials are
   never stamped.
@@ -114,11 +123,28 @@ packaged apps in `Contents/Frameworks/`.
 - **Seam:** `TranslationEngine` — ordered batch `translate`, `preferredBatchSize`,
   optional `onRetry`, typed error taxonomy. `TranslationQueue.run(with:)`
   accepts any engine; `Translation/Providers/` holds the cloud adapters.
-- **Engines:** Apple on-device (`AppleSessionEngine` over SwiftUI's
-  `.translationTask`; the default; OS prompts a one-time language pack) and
-  Google Translate, DeepL, OpenRouter (chat completions with a strict JSON
-  array prompt, parsed leniently). Language pair fixed ja→en. A configured
-  external provider becomes active at the next session start.
+- **Engines:** Apple on-device (`AppleSessionEngine` fed by SwiftUI's
+  `.translationTask`, hosted in a process-lifetime 1×1 panel
+  (`TranslationSessionPanelController`) so closing the main window can't
+  cancel the task and strand the queue's pending sentences; the default; OS
+  prompts a one-time language pack) and Google Translate, DeepL, OpenRouter
+  (chat completions with a strict JSON array prompt, parsed leniently).
+  Source is fixed `ja`; the target follows the selection. On macOS 26.4+ a
+  per-activation probe checks whether the high-fidelity (Apple
+  Intelligence) strategy is installed for ja→target — only an installed
+  pair counts — and the ENGINES card labels it "Apple Intelligence (high
+  fidelity)". A configured external provider becomes active at the next
+  session start.
+- **Target language:** `TargetLanguage` carries a BCP-47 entry code plus
+  per-engine mappings (Google/DeepL API codes; OpenRouter prompts name the
+  language); the selection persists as `translation.targetLanguage` and is
+  restart-only — the picker disables while a session is live. The picker's
+  catalog is discovered at runtime: `AppleTranslationAvailability` probes
+  `LanguageAvailability.supportedLanguages`, drops the fixed `ja` source,
+  collapses regional variants, and keeps only entries with metadata — no
+  static language list ships. A non-English pick confirms
+  `DictionaryEnglishNoticeSheet` first (word lookups stay English-glossed;
+  re-raised on every non-English pick).
 - **Queue:** strictly serialized `@MainActor` worker; untranslated
   sentences live in a plain array that survives cancellation; a generation
   token retires cancelled runs; repeats are served from a cache; empty
@@ -129,8 +155,8 @@ packaged apps in `Contents/Frameworks/`.
   malformed output fail fast. Settings' Test probes run zero-retry.
 - **Failure ladder:** exhausted external errors latch Apple on-device for
   the rest of the session (one-way per session; `.degraded` published; the
-  footer's manual Retry re-attempts the external engine). An unconfigured
-  provider falls back to Apple with a status note.
+  footer's manual Reconnect re-attempts the external engine). An
+  unconfigured provider falls back to Apple with a status note.
 - **Keys:** `KeychainStore` (`Security/`, device-only accessibility);
   key material never reaches UserDefaults, logs, error strings, or export
   files — the settings store persists non-secrets only.
@@ -207,9 +233,9 @@ packaged apps in `Contents/Frameworks/`.
   latency, ASR model state, lookup state (popover + pinned card), and the
   `TranslationSession.Configuration` driving `.translationTask`. Split
   into extensions (`AppModelTranslation` / `Export` / `Dictionary` /
-  `Lookup`). Injectable test seams: a scripted `SessionController`, a
-  stubbed model resolver, the terminate-notification center, and the HTTP
-  translation transport.
+  `Lookup` / `ModelSelection` / `Overlay` / `Termination`). Injectable
+  test seams: a scripted `SessionController`, a stubbed model resolver,
+  the terminate-notification center, and the HTTP translation transport.
 - `SessionController`: engine creation via `ASREngineFactory` + background
   warm-up, capture wiring, the sentence buffer, the 60 ms poll / 200 ms
   tick timers, ASR event → sentence handling, mid-session capture restart
@@ -222,21 +248,31 @@ packaged apps in `Contents/Frameworks/`.
 ### UI (`UI/`, SwiftUI `@MainActor`)
 - **Main window:** fixed sidebar (session capsule, READING AIDS + CURSOR
   pickers, ENGINES / AUDIO / SESSION / DICTIONARY cards, toolbar) beside a
-  virtualized transcript (gutter timestamps, `RubyTextView` JP, teal EN
-  translation, circular jump buttons) with the live partial strip pinned
-  under it. The toast stack overlays the transcript pane.
+  virtualized transcript (gutter timestamps, `RubyTextView` JP, teal
+  target-language translation, circular jump buttons) with the live partial
+  strip pinned under it. The toast stack overlays the transcript pane.
 - **State split:** high-frequency partials (`LivePartialState`), the audio
   level ring (`AudioLevelState`), and latency (`LatencyState`) are small
   standalone observables, so partial-rate updates never re-render the
   transcript.
 - **Floating HUD:** always-on-top, semi-transparent, click-through,
-  resizable; up/down chevrons step its pin through translated entries
-  (stepping to the newest clears the pin and re-follows).
+  resizable; single chevrons step its pin through translated entries
+  (stepping to the newest clears the pin and re-follows), double chevrons
+  jump to the ends — oldest pins the first entry, newest re-follows
+  (`HUDHistory` holds the pure semantics). A header button toggles the
+  translation-only overlay.
+- **Translation-only overlay:** an independently shown/hidden sibling of
+  the HUD (`TranslationOverlayWindow`) — an always-on-top, resizable panel
+  listing every finalized translation in a bottom-pinned scroll view with
+  its own jump buttons; padlock-locked it is click-through except for its
+  button cluster, unlocked it drags/resizes. The sidebar's overlay master
+  switch closes both overlays when any is open and reopens the HUD when
+  none are (`toggleOverlays`).
 - **Toasts & notices:** `ToastCenter` — deduped, capped stack of warning/
-  error cards (persistent red cards carry a fix action: Restart, Retry);
-  cleared on session teardown. `NoticeCenter` — a single transient pill
-  (teal confirmations like "Text copied", amber dictionary no-hit), 2 s
-  auto-dismiss.
+  error cards (persistent red cards carry a fix action: Restart,
+  Reconnect); cleared on session teardown. `NoticeCenter` — a single
+  transient pill (teal confirmations like "Text copied", amber dictionary
+  no-hit), 2 s auto-dismiss.
 - **Theming:** `Theme.swift` centralizes tokens (dark values from the
   mock, derived light variant); `AppearanceSetting` (system/light/dark)
   applies via `.preferredColorScheme`; reading-annotation and cursor
@@ -272,8 +308,8 @@ lock; cross-thread handoff uses value types only.
 3. Finals append to `SentenceBuffer` with sample-accurate offsets.
 4. A tier-1/2/3 boundary closes the sentence → immutable `Sentence`
    published (JP row) and enqueued for translation.
-5. `TranslationQueue` resolves → translation published (EN row) and
-   appended to the in-memory session.
+5. `TranslationQueue` resolves → translation published (translated row)
+   and appended to the in-memory session.
 6. On Stop: capture stops, engine finish/drain, translation queue drains
    (bounded); the session becomes exportable.
 
@@ -285,7 +321,8 @@ lock; cross-thread handoff uses value types only.
   "session": {
     "started_at": "2026-08-27T14:32:05+09:00",
     "source_lang": "ja",           // null if ASR auto-detect
-    "target_lang": "en",
+    "target_lang": "en",           // the session's selected target (BCP-47;
+                                   // English is the default)
     "model": "sensevoice-small-GGUF",   // the active choice's modelID
                                         // ("funasr-nano-GGUF" for full)
     "chunk_ms": 160,
@@ -306,7 +343,7 @@ lock; cross-thread handoff uses value types only.
 
 Invariants: consumers read languages from fields (never assume);
 `translations` is append-only; `schema_version` governs evolution;
-sentence `index` is stable and keys JP↔EN alignment.
+sentence `index` is stable and keys JP↔translation alignment.
 
 ## App bundle layout
 
@@ -346,7 +383,7 @@ dylib, or bundled dictionary data is missing.
 | IPADIC v2.7.0 dictionary model | Custom permissive (NAIST et al.) | Bundled as `system.dic.zst`; decompressed on first launch |
 | JMdict (EDRDG, via JMDict_Extended) | CC BY-SA 4.0 (data); MIT (compile) | Pinned lookup DB; full terms in THIRD_PARTY_NOTICES |
 | JMnedict (EDRDG, via jmdict-simplified) | CC BY-SA 4.0 | Pinned names asset, ingested into the same DB |
-| Apple Translation framework | Platform | macOS 15+, on-device |
+| Apple Translation framework | Platform | macOS 15+, on-device; high-fidelity (Apple Intelligence) strategy on 26.4+ |
 | Core Audio process tap | Platform | macOS 15+; requires system-audio recording permission |
 
 Compatibility: Apple Silicon, macOS 15.5+.
