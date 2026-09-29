@@ -1,9 +1,9 @@
 # Mimidasu
 
-**Live English subtitles for anything Japanese on your Mac.**
+**Live translated subtitles for anything Japanese on your Mac.**
 
 Mimidasu listens to whatever your Mac is playing — a livestream, a video, a
-voice chat — and turns the Japanese speech into English subtitles in real
+voice chat — and turns the Japanese speech into translated subtitles in real
 time. No accounts, no uploads, no cloud: everything runs on your machine.
 
 **The name is a pun.** 見出す (*miidasu*) is Japanese for "to spot, to
@@ -18,7 +18,10 @@ a verb, because every definition popup is a little *mimidasu*.
 ## Level-up your Japanese listening
 
 - **Understand while it happens** — sentences appear as they're spoken, with
-  the English translation right under the Japanese
+  the translation right under the Japanese
+- **Pick your translation language** — English by default, with 18 more
+  targets (Chinese, Korean, Spanish, French, …) available in Settings, all
+  on-device via Apple's Translation framework
 - **Private by design** — audio, transcription, and translation all stay
   on-device; nothing ever leaves your Mac unless you opt into a cloud
   translation provider
