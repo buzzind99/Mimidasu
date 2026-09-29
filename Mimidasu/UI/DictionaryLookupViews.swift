@@ -269,7 +269,10 @@ struct DictionaryEntryContentView: View {
             DictionaryContent.jlptBadge(entry.jlpt)
         ].compactMap(\.self) + DictionaryContent.nameTypeBadges(for: entry)
         if !badges.isEmpty {
-            HStack(spacing: 6) {
+            // FlowLayout (the ruby text wrapping engine) keeps long badge
+            // sets — name types in particular — inside the card instead of
+            // clipping at its trailing edge.
+            FlowLayout(spacing: 6, lineSpacing: 6, fingerprint: badges.joined(separator: "\n")) {
                 ForEach(badges, id: \.self) { badge in
                     DictionaryBadgeView(text: badge, color: badge == "COMMON" ? Theme.dotGreen : Theme.brandViolet)
                 }
