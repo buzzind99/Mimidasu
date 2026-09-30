@@ -99,12 +99,14 @@ extension AppModel {
 
     // MARK: - Tap entry point
 
-    /// UI entry for a dictionary-mode tap: re-resolves the rendered
-    /// segments at tap time (cached for unchanged text; live partials use
-    /// their tap-time snapshot), maps them into the value snapshots forward
-    /// expansion consumes — surface, kana reading (furigana; a kana-only
-    /// surface is its own reading), lemma — and runs the lookup on a
-    /// background task. UI state is only ever touched back on the main actor.
+    /// UI entry for a dictionary-mode tap: re-resolves the segments for the
+    /// tapped sentence at tap time (cached for unchanged text) and re-anchors
+    /// the payload's render-time index into that resolution — the payload
+    /// itself is render-time truth (the unit the user actually tapped). Maps
+    /// the resolution into the value snapshots forward expansion consumes —
+    /// surface, kana reading (furigana; a kana-only surface is its own
+    /// reading), lemma — and runs the lookup on a background task. UI state
+    /// is only ever touched back on the main actor.
     func handleLookupTap(_ token: LookupToken, source: SelectedLookup.Source) {
         let segments = ReadingAnnotator.segments(for: token.sentenceText)?
             .map { segment in LookupSegment(
@@ -112,18 +114,44 @@ extension AppModel {
                 lemma: segment.lemma,
                 reading: Self.lookupReading(for: segment)
             ) }
+        let tappedAt = Self.reAnchoredTapIndex(
+            stored: token.tokenIndex, surface: token.surface, in: segments
+        )
         lookupGeneration &+= 1
         let generation = lookupGeneration
         Task {
             await runLookup(
                 segments: segments,
-                tappedAt: token.tokenIndex,
+                tappedAt: tappedAt,
                 sentenceText: token.sentenceText,
                 surface: token.surface,
                 source: source,
                 generation: generation
             )
         }
+    }
+
+    /// The tap-time index for a tap payload's stored render-time index.
+    /// Kept verbatim while the re-resolved segments still agree with the
+    /// payload — the overwhelmingly common case. A resolution that drifted
+    /// (a fragmentation decision that flipped across a dictionary-state
+    /// transition) re-anchors to the first segment whose surface matches
+    /// the tapped surface. No match points one past the end — the
+    /// expansion's bounds guard then fails the tap closed instead of
+    /// looking up whatever drifted into the stored slot — and no segments
+    /// at all keeps the stored index (the empty path reports the annotator
+    /// as unavailable before any indexing).
+    static func reAnchoredTapIndex(
+        stored: Int, surface: String, in segments: [LookupSegment]?
+    ) -> Int {
+        guard let segments, !segments.isEmpty else { return stored }
+        let agrees = segments.indices.contains(stored)
+            && segments[stored].surface == surface
+        if agrees {
+            return stored
+        }
+        return segments.firstIndex(where: { segment in segment.surface == surface })
+            ?? segments.count
     }
 
     /// The tap's kana reading for a rendered segment: the furigana when the

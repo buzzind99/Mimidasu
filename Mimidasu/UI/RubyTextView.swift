@@ -32,8 +32,8 @@ struct RubyTextView: View, Equatable {
     /// cache. Hosts rendering a live partial — a growing 6–10 Hz revision of
     /// the in-flight sentence — opt out: every revision is a distinct string
     /// that will never be queried again, so caching it only churns the
-    /// store. The tap-time re-resolution (`lookupAction`) stays cached
-    /// regardless. Excluded from `==` (no effect on rendered output).
+    /// store. The tap-time re-resolution (`AppModel.handleLookupTap`) stays
+    /// cached regardless. Excluded from `==` (no effect on rendered output).
     var cachesSegments = true
     /// Click behavior for surfaces (sidebar "cursor mode"): `.copy` invokes
     /// `onCopy` with the clicked run; `.dictionary` opens a definition
@@ -128,9 +128,9 @@ struct RubyTextView: View, Equatable {
 
     /// The tap payload for segment `index`: surface, best-known reading,
     /// lemma, segment index, and the full sentence text. Pure over the
-    /// resolved segments; the tap path re-resolves `segments(for: text)`
-    /// first (cached for unchanged text) so a live partial that grew
-    /// between render and tap yields its tap-time snapshot.
+    /// given segments; the tap path passes the segments the body rendered,
+    /// so the payload describes the unit the user actually tapped even
+    /// when the host's tap-time re-resolution drifted.
     static func lookupToken(
         at index: Int, text: String, segments: [ReadingSegment]?
     ) -> LookupToken? {
@@ -180,15 +180,17 @@ struct RubyTextView: View, Equatable {
         return { onCopy?(text) }
     }
 
-    /// The surface action for a dictionary-mode word unit: re-resolves the
-    /// segments at tap time (cached for unchanged text) and hands the host
-    /// the tapped word's payload.
-    private func lookupAction(at index: Int) -> (() -> Void)? {
+    /// The surface action for a dictionary-mode word unit: builds the
+    /// payload from the segments this body render resolved — the units on
+    /// screen — so the tapped surface survives a tap-time resolution that
+    /// drifted; the host's re-anchor then maps the stored index into the
+    /// fresh resolution or fails the tap closed.
+    private func lookupAction(at index: Int, segments: [ReadingSegment]) -> (() -> Void)? {
         guard let onLookup else { return nil }
         let text = text
         return {
             guard let token = Self.lookupToken(
-                at: index, text: text, segments: ReadingAnnotator.segments(for: text)
+                at: index, text: text, segments: segments
             ) else { return }
             onLookup(token)
         }
@@ -236,17 +238,17 @@ struct RubyTextView: View, Equatable {
 
     /// Dictionary path: one tappable unit per annotator segment — no
     /// plain-run folding, so the flow child's index is the tapped segment
-    /// index. With no segments the plain fallback renders instead.
+    /// index. With no segments the plain fallback renders instead. The
+    /// resolved segments ride along to the tap actions: the payload must
+    /// describe what was rendered, not what a later resolution returns.
     @ViewBuilder
     private var segmentedBody: some View {
-        switch Self.segmentedBodyPlan(
-            segments: ReadingAnnotator.segments(for: text, caching: cachesSegments),
-            annotation: annotation
-        ) {
+        let segments = ReadingAnnotator.segments(for: text, caching: cachesSegments) ?? []
+        switch Self.segmentedBodyPlan(segments: segments, annotation: annotation) {
         case let .flow(units):
             FlowLayout(spacing: 4, lineSpacing: 1, fingerprint: fingerprint) {
                 ForEach(Array(units.enumerated()), id: \.offset) { index, unit in
-                    segmentedUnitView(unit, at: index)
+                    segmentedUnitView(unit, at: index, segments: segments)
                 }
             }
         case .plain:
@@ -255,10 +257,12 @@ struct RubyTextView: View, Equatable {
     }
 
     @ViewBuilder
-    private func segmentedUnitView(_ unit: SegmentedUnit, at index: Int) -> some View {
+    private func segmentedUnitView(
+        _ unit: SegmentedUnit, at index: Int, segments: [ReadingSegment]
+    ) -> some View {
         switch unit {
         case let .word(surface, note):
-            wordUnit(surface, note: note, index: index)
+            wordUnit(surface, note: note, index: index, segments: segments)
         case let .inert(surface):
             plainUnit(surface, action: nil)
         }
@@ -269,8 +273,10 @@ struct RubyTextView: View, Equatable {
     /// stable identity — the binding is false (and the content nil) for
     /// all but the anchor word.
     @ViewBuilder
-    private func wordUnit(_ surface: String, note: String?, index: Int) -> some View {
-        let action = lookupAction(at: index)
+    private func wordUnit(
+        _ surface: String, note: String?, index: Int, segments: [ReadingSegment]
+    ) -> some View {
+        let action = lookupAction(at: index, segments: segments)
         if let popover = lookupPopover?(index) {
             wordContent(surface, note: note, action: action)
                 .popover(isPresented: popover.isPresented) {

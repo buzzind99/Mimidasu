@@ -101,6 +101,50 @@ final class AppModelLookupTests {
         #expect(transcriptID != stripID)
     }
 
+    @Test(
+        "tap re-anchor keeps the stored index while segments agree, else re-anchors to the surface",
+        arguments: [
+            // Agreement: the stored index still points at the tapped
+            // surface — kept verbatim.
+            (stored: 1, surface: "土産", expected: 1),
+            // Skew: the stored index drifted onto a different segment; the
+            // tapped surface re-anchors to its first occurrence.
+            (stored: 1, surface: "お", expected: 0),
+            // The tapped surface is gone (fragmentation flipped across a
+            // dictionary-state transition): one past the end, so the
+            // expansion's bounds guard fails the tap closed.
+            (stored: 0, surface: "xyz", expected: 2),
+            // Out-of-bounds stored index with a surface match elsewhere.
+            (stored: 9, surface: "土産", expected: 1)
+        ]
+    )
+    func reAnchoredTapIndex(stored: Int, surface: String, expected: Int) {
+        let segments: [LookupSegment]? = [
+            LookupSegment(surface: "お"), LookupSegment(surface: "土産", lemma: "土産")
+        ]
+
+        #expect(AppModel.reAnchoredTapIndex(
+            stored: stored, surface: surface, in: segments
+        ) == expected)
+    }
+
+    @Test("tap re-anchor fails closed over nil and empty segments")
+    func reAnchoredTapIndexNilSegments() {
+        #expect(AppModel.reAnchoredTapIndex(stored: 3, surface: "お", in: nil) == 3)
+        #expect(AppModel.reAnchoredTapIndex(stored: 3, surface: "お", in: []) == 3)
+    }
+
+    @Test("tap re-anchor breaks duplicate-surface ties on the first occurrence")
+    func reAnchoredTapIndexDuplicateSurfaces() {
+        let segments: [LookupSegment]? = [
+            LookupSegment(surface: "お"), LookupSegment(surface: "お", lemma: "尾")
+        ]
+
+        #expect(AppModel.reAnchoredTapIndex(
+            stored: 9, surface: "お", in: segments
+        ) == 0)
+    }
+
     // MARK: - Hit: select + pin
 
     @Test("a hit selects the popover and pins the card with the retained expansion hits")
