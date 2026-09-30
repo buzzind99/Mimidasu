@@ -236,15 +236,21 @@ extension ReadingAnnotator {
     }
 
     private static func scriptKind(_ scalar: Unicode.Scalar) -> ScriptKind {
-        if KanaClassification.isHiragana(scalar)
-            || (KanaClassification.isKatakana(scalar) && scalar.value != 0x30FB)
-        {
+        if isKanaRunScalar(scalar) {
             return .kana
         }
         if KanaClassification.isKanji(scalar) {
             return .kanji
         }
         return .other
+    }
+
+    /// Kana as one class — hiragana and katakana alike, the middle dot ・
+    /// excepted. Shared with the collapse repair's left-context walk, which
+    /// must not pull a punctuation run into the word it is trying to recover.
+    static func isKanaRunScalar(_ scalar: Unicode.Scalar) -> Bool {
+        KanaClassification.isHiragana(scalar)
+            || (KanaClassification.isKatakana(scalar) && scalar.value != 0x30FB)
     }
 
     /// Partitions into maximal runs of one script kind; an "other" scalar
@@ -295,7 +301,7 @@ extension ReadingAnnotator {
         )
     }
 
-    private static func scalarString(_ scalars: some Sequence<Unicode.Scalar>) -> String {
+    static func scalarString(_ scalars: some Sequence<Unicode.Scalar>) -> String {
         String(String.UnicodeScalarView(scalars))
     }
 }

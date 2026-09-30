@@ -239,8 +239,13 @@ final class ReadingAnnotator: @unchecked Sendable {
     // MARK: - Transcription
 
     private func transcribe(_ text: String) -> (segments: [ReadingSegment], gateDegraded: Bool) {
-        guard let tokens = tokenize(text) else { return ([], false) }
+        guard let raw = tokenize(text) else { return ([], false) }
         let scalars = Array(text.unicodeScalars)
+        // A run the tokenizer collapsed into one unknown node hides real word
+        // boundaries; re-decoding it in short windows recovers them. Runs ahead
+        // of every segment-building rule, so fusion and the fallback
+        // fragmentation tier see clean tokens.
+        let tokens = Self.repairedTokens(raw, of: text, scalars: scalars, tokenize: tokenize)
         var segments: [ReadingSegment] = []
         var cursor = 0
         // A numeral run held back for counter fusion (一回 → "ikkai").
@@ -520,8 +525,9 @@ final class ReadingAnnotator: @unchecked Sendable {
     // MARK: - Text helpers
 
     /// Slices the token's scalar span — `start`/`end` are Unicode-scalar
-    /// indices into the original input, never `String.Index` values.
-    private static func scalarSlice(
+    /// indices into the original input, never `String.Index` values. Internal
+    /// for the collapse repair, which re-slices rebased tokens the same way.
+    static func scalarSlice(
         _ token: DictionaryToken, of scalars: [Unicode.Scalar]
     ) -> String {
         let low = max(0, min(token.start, scalars.count))
