@@ -24,6 +24,17 @@ struct ReadingAlignmentFoldedKanaTests {
         #expect(ReadingAlignment.foldedKana(input) == expected)
     }
 
+    @Test("folds halfwidth katakana through the same compatibility path", arguments: [
+        ("ｱｲｳｴｵ", "あいうえお"),
+        ("ｶﾞ", "が"),
+        ("ﾊﾟ", "ぱ"),
+        ("ｦ", "を"),
+        ("ｰ", "ー")
+    ])
+    func foldsHalfwidthKatakana(input: String, expected: String) {
+        #expect(ReadingAlignment.foldedKana(input) == expected)
+    }
+
     @Test("passes non-kana scalars through unchanged", arguments: [
         ("A漢!", "A漢!"),
         ("", "")

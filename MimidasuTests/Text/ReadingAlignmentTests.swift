@@ -61,6 +61,41 @@ struct ReadingAlignmentTests {
         ])
     }
 
+    @Test("halfwidth katakana surfaces fold onto the hiragana reading (多ｶｲ/おおかい)")
+    func halfwidthFolding() {
+        #expect(runs(surface: "多ｶｲ", reading: "おおかい") == [
+            ReadingAlignment.Run(surface: "多", kana: "おお"),
+            ReadingAlignment.Run(surface: "カイ", kana: "かい")
+        ])
+    }
+
+    @Test(
+        "halfwidth voiced kana and the long-vowel mark compose before folding",
+        arguments: [
+            ("多ｶﾞｲ", "おおがい", [
+                ReadingAlignment.Run(surface: "多", kana: "おお"),
+                ReadingAlignment.Run(surface: "ガイ", kana: "がい")
+            ]),
+            ("多ｹｰﾀｲ", "おおけーたい", [
+                ReadingAlignment.Run(surface: "多", kana: "おお"),
+                ReadingAlignment.Run(surface: "ケータイ", kana: "けーたい")
+            ])
+        ]
+    )
+    func halfwidthComposition(surface: String, reading: String, expected: [ReadingAlignment.Run]) {
+        #expect(runs(surface: surface, reading: reading) == expected)
+    }
+
+    @Test("compatibility normalization composes halfwidth voiced kana (shared NFKC helper)")
+    func compatibilityComposedFoldsHalfwidthVoicing() {
+        // The compatibility mapping alone stops at ハ + ゛; canonical
+        // composition must finish the fold onto the precomposed spellings
+        // the dictionary stores.
+        #expect(ReadingAlignment.compatibilityComposed("ﾊﾟｲﾅｯﾌﾟﾙ") == "パイナップル")
+        #expect(ReadingAlignment.compatibilityComposed("ｶﾞ") == "ガ")
+        #expect(ReadingAlignment.compatibilityComposed("パイナップル") == "パイナップル")
+    }
+
     @Test("repeated surface kana resolve left to right (食べて/たべて)")
     func repeatedKana() {
         #expect(runs(surface: "食べて", reading: "たべて") == [

@@ -14,9 +14,13 @@ enum KanaClassification {
 
     /// Katakana, including the long-vowel mark, small kana, and the middle
     /// dot ・ (U+30FB) — script-neutral punctuation that rides along inside
-    /// the kana block rather than getting its own case.
+    /// the kana block rather than getting its own case. Halfwidth katakana
+    /// (ｦ…ﾟ, 0xFF66–0xFF9F, voicing marks included) classifies here too;
+    /// the halfwidth punctuation row (｡｢｣､･, 0xFF61–0xFF65) does not, so
+    /// run cutting stays symmetric with ・.
     static func isKatakana(_ scalar: Unicode.Scalar) -> Bool {
         (0x30A1 ... 0x30FF).contains(scalar.value)
+            || (0xFF66 ... 0xFF9F).contains(scalar.value)
     }
 
     /// Kanji, the iteration mark 々, the ideographic zero 〇, the

@@ -31,6 +31,23 @@ struct KanaClassificationTests {
         #expect(KanaClassification.isKatakana(scalar) == expected)
     }
 
+    @Test("classifies the halfwidth katakana block, excluding its punctuation row", arguments: [
+        (0xFF65, false), // ･ halfwidth middle dot, punctuation
+        (0xFF66, true), // ｦ, first halfwidth kana
+        (0xFF6F, true), // ｯ small tsu
+        (0xFF70, true), // ｰ halfwidth long-vowel mark
+        (0xFF71, true), // ｱ, first plain-row kana
+        (0xFF9D, true), // ﾝ, last kana
+        (0xFF9E, true), // ﾞ voiced mark
+        (0xFF9F, true), // ﾟ semi-voiced mark
+        (0xFFA0, false) // just above the block
+    ])
+    func halfwidthKatakanaBoundaries(value: UInt32, expected: Bool) throws {
+        let scalar = try #require(Unicode.Scalar(value))
+
+        #expect(KanaClassification.isKatakana(scalar) == expected)
+    }
+
     @Test("classifies kanji, extension planes A–I, compat ideographs, 々, and 〇", arguments: [
         (0x3005, true), // 々 iteration mark
         (0x3006, false), // 〆 ideographic closing mark
@@ -111,6 +128,8 @@ struct KanaClassificationTests {
         ("こんにちは", true),
         ("カタカナ", true),
         ("ー", true),
+        ("ｱｲｳ", true), // halfwidth katakana
+        ("ｶﾞ", true), // halfwidth katakana with a trailing voiced mark
         ("かな漢字", true),
         ("漢字", false),
         ("ABC", false),
@@ -126,6 +145,7 @@ struct KanaClassificationTests {
         ("𠮷", true),
         ("𠀋。", true),
         ("カタカナだけ。", true),
+        ("ﾊﾟｲﾅｯﾌﾟﾙ", true), // halfwidth katakana
         ("髙", true),
         ("2024年", true),
         ("A・B", true), // the middle dot rides along inside the kana block

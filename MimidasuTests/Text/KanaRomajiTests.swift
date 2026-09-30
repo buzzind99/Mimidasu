@@ -199,13 +199,31 @@ struct KanaRomajiTests {
         #expect(KanaRomaji.romaji(fromKana: decomposedGaku) == "gaku")
     }
 
+    // MARK: - Halfwidth katakana
+
+    @Test("folds halfwidth katakana onto its fullwidth morae", arguments: [
+        ("ｱｲｳｴｵ", "aiueo"),
+        ("ｻｸﾗ", "sakura"),
+        ("ｶﾞ", "ga"),
+        ("ｯﾁ", "cchi"),
+        ("ｺｰﾋｰ", "koohii"),
+        ("ﾊﾟｲﾅｯﾌﾟﾙ", "painappuru"),
+        ("ﾝ", "n"),
+    ])
+    func halfwidthKana(kana: String, expected: String) {
+        #expect(KanaRomaji.romaji(fromKana: kana) == expected)
+    }
+
     // MARK: - Gemination predicate
 
     @Test("reports whether the reading's first mora can take a sokuon", arguments: [
         ("か", true),
         ("ちゃ", true),
         ("ぱ", true),
+        ("ｶ", true), // halfwidth, folded before the check
+        ("ﾊﾟ", true),
         ("あ", false),
+        ("ｱ", false),
         ("ん", false),
         ("", false),
     ])

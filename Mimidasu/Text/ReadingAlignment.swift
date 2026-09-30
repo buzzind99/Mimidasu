@@ -17,13 +17,15 @@ enum ReadingAlignment {
         let kana: String
     }
 
-    /// The kana-folded form of `text`: katakana folds onto its hiragana
-    /// counterpart, everything else passes through. Shared with dictionary
-    /// lookup ranking so entry readings compare against furigana text the
-    /// same way alignment compares surface kana against reading kana.
+    /// The kana-folded form of `text`: compatibility-normalized (halfwidth
+    /// katakana rides the same path as its fullwidth mora), then katakana
+    /// folds onto its hiragana counterpart and everything else passes
+    /// through. Shared with dictionary lookup ranking so entry readings
+    /// compare against furigana text the same way alignment compares surface
+    /// kana against reading kana.
     static func foldedKana(_ text: String) -> String {
         String(String.UnicodeScalarView(
-            text.precomposedStringWithCanonicalMapping.unicodeScalars.map(fold)
+            compatibilityComposed(text).unicodeScalars.map(fold)
         ))
     }
 
@@ -33,18 +35,30 @@ enum ReadingAlignment {
     /// tries its anchor kana at each remaining-reading occurrence in order,
     /// backtracking when a choice dead-ends (歌う/うたう — the first う
     /// belongs to the kanji itself, so 歌 must consume うた).
+    /// Both sides are compatibility-composed first — halfwidth voiced
+    /// kana (ｶﾞ) and the long-vowel mark (ｰ) fold onto their fullwidth
+    /// forms — so run surfaces come back in normalized form; consumers read
+    /// only the kana side.
     static func runs(surface: String, reading: String) -> [Run]? {
-        let surfaceScalars = Array(
-            surface.precomposedStringWithCanonicalMapping.unicodeScalars
-        )
-        let readingScalars = Array(
-            reading.precomposedStringWithCanonicalMapping.unicodeScalars
-        )
+        let surfaceScalars = Array(compatibilityComposed(surface).unicodeScalars)
+        let readingScalars = Array(compatibilityComposed(reading).unicodeScalars)
         guard !surfaceScalars.isEmpty, !readingScalars.isEmpty else { return nil }
         guard let chunks = walk(surfaceScalars, from: 0, over: readingScalars[...]) else {
             return nil
         }
         return chunks.map { chunk in Run(surface: chunk.surface, kana: chunk.kana) }
+    }
+
+    /// NFKC: the compatibility mapping (halfwidth katakana onto its
+    /// fullwidth mora) followed by canonical composition (decomposed
+    /// voicing marks onto their precomposed kana). The compatibility
+    /// mapping alone decomposes (ｶﾞ → カ + ゛) and never recomposes, so
+    /// voiced kana would stay split and unmatchable. Shared with the
+    /// annotator's headword gate and romaji conversion, which probe or
+    /// convert against text the dictionary stores precomposed.
+    static func compatibilityComposed(_ text: String) -> String {
+        text.precomposedStringWithCompatibilityMapping
+            .precomposedStringWithCanonicalMapping
     }
 
     // MARK: - Internals
@@ -143,8 +157,11 @@ enum ReadingAlignment {
     }
 
     /// Folds katakana onto its hiragana counterpart so katakana surfaces
-    /// (ゲーム版) match hiragana readings (げーむばん). Non-katakana scalars
-    /// pass through unchanged.
+    /// (ゲーム版) match hiragana readings (げーむばん). Inputs arrive
+    /// compatibility-normalized — halfwidth katakana (ｱ, ｶﾞ, ｰ) composed
+    /// onto its fullwidth mora before folding — so the block arithmetic
+    /// covers every katakana scalar; other non-katakana scalars pass
+    /// through unchanged.
     private static func fold(_ scalar: Unicode.Scalar) -> Unicode.Scalar {
         guard (0x30A1 ... 0x30F6).contains(scalar.value) else { return scalar }
         return Unicode.Scalar(scalar.value - 0x60)!

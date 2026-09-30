@@ -13,8 +13,11 @@ import Foundation
 enum KanaRomaji {
     /// Converts kana (hiragana or katakana) to lowercase wapuro romaji.
     static func romaji(fromKana kana: String) -> String? {
-        // NFC so decomposed voicing marks (か + ゛) map like precomposed が.
-        let normalized = kana.precomposedStringWithCanonicalMapping
+        // NFKC so decomposed voicing marks (か + ゛) map like precomposed が
+        // and halfwidth katakana (ｱ, ｶﾞ, ｰ) folds onto its fullwidth mora.
+        // The compatibility mapping alone decomposes voiced halfwidth kana
+        // (ｶﾞ → カ + ゛); canonical composition finishes the fold onto が.
+        let normalized = ReadingAlignment.compatibilityComposed(kana)
         guard !normalized.isEmpty else { return nil }
         let chars = Array(normalized)
         var romaji = ""
@@ -160,7 +163,7 @@ enum KanaRomaji {
     /// whether a stem-final sokuon merges with the next token or strands as
     /// "tsu". Mirrors `geminatedSokuon`'s accept/reject logic.
     static func geminates(fromKana kana: String) -> Bool {
-        let normalized = kana.precomposedStringWithCanonicalMapping
+        let normalized = ReadingAlignment.compatibilityComposed(kana)
         let chars = Array(normalized)
         guard let first = chars.first else { return false }
         let mora: String? = if chars.count > 1, let digraph = digraphs[String(chars[0 ... 1])] {
