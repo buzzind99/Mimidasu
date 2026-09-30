@@ -53,6 +53,15 @@ final class JMDictReadingFallbackTests {
         #expect(reading == "まご")
     }
 
+    @Test("reading folds a halfwidth writing probe onto the stored keb row")
+    func readingFoldsHalfwidthWriting() throws {
+        // ｶﾀ語 composes onto the stored カタ語 keb row at the SQL boundary;
+        // the entry reading comes back folded to hiragana as always.
+        let reading = try #require(try engine.reading(forWriting: "ｶﾀ語"))
+
+        #expect(reading == "かた語")
+    }
+
     @Test("reading misses for a kana-only writing (keb headwords only)")
     func readingSkipsKanaOnlyWritings() throws {
         #expect(try engine.reading(forWriting: "アルバイト") == nil)

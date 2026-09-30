@@ -1,7 +1,9 @@
 import Foundation
 
-/// One lookup candidate: the exact string queried against `headwords.text`,
-/// plus the headword kind the sense restriction filter is honored against.
+/// One lookup candidate: the string the user tapped, queried against
+/// `headwords.text` in its NFKC-composed form (the database stores
+/// precomposed fullwidth spellings), plus the headword kind the sense
+/// restriction filter is honored against.
 struct LookupCandidate: Equatable, Sendable {
     enum Kind: Equatable, Sendable {
         /// Kanji-bearing writing (the DB's `keb` headword rows).

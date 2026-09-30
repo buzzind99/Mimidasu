@@ -62,6 +62,24 @@ final class JMDictLookupTests {
         #expect(entry.senses[0].glosses == ["part-time job", "side job"])
     }
 
+    @Test("hits through a halfwidth spelling, folded onto the stored fullwidth row")
+    func halfwidthSpellingHit() throws {
+        // The probe composes at the SQL boundary, so a halfwidth tap answers
+        // like its fullwidth spelling: ｶﾀ語 composes onto the stored カタ語
+        // keb row, and ﾊﾟｲﾅｯﾌﾟﾙ's voiced/semi-voiced marks (ﾊﾟ → ハ + ゛)
+        // compose onto 9990150's kana-only パイナップル row.
+        let kebMix = try #require(try engine.lookup(LookupCandidate(text: "ｶﾀ語")))
+        #expect(kebMix.matched == "ｶﾀ語")
+        #expect(kebMix.entries.first?.keb == "カタ語")
+
+        let kanaOnly = try #require(try engine.lookup(LookupCandidate(text: "ﾊﾟｲﾅｯﾌﾟﾙ")))
+        #expect(kanaOnly.matched == "ﾊﾟｲﾅｯﾌﾟﾙ")
+        let entry = try #require(kanaOnly.entries.first)
+        #expect(entry.entSeq == 9_990_150)
+        #expect(entry.reb == "パイナップル")
+        #expect(entry.common)
+    }
+
     @Test("orders senses by ord and splits the stored joins back apart")
     func multiSenseOrder() throws {
         let result = try #require(try engine.lookup(LookupCandidate(text: "あめ")))

@@ -171,11 +171,32 @@ final class JMDictLookup: Sendable {
             return try state.withLock { current -> String? in
                 let db = try openedDatabase(&current)
                 let statement = try db.statement(Self.readingSQL)
-                statement.bind(writing, at: 1)
+                statement.bind(Self.probeText(writing), at: 1)
                 guard try statement.step(), let reb = statement.optionalText(0) else {
                     return nil
                 }
                 return ReadingAlignment.foldedKana(reb)
+            }
+        } catch let error as SQLiteDatabase.Error {
+            throw JMDictLookupError(error)
+        }
+    }
+
+    /// Whether any headword row (kanji or kana spelling) matches `text` —
+    /// the annotator's entry gate for long unknown segments, which must not
+    /// fragment a surface JMDict/JMnedict actually covers (long katakana
+    /// names the tokenizer lexicon lacks). Deliberately kind-free: a
+    /// kana-written word carries only a `reb` row, so filtering on `keb`
+    /// would misclassify it as entry-less. Throws on infrastructure
+    /// failure; callers treat a throw as "has entry" (fail-safe: no
+    /// fragmentation).
+    func hasHeadword(_ text: String) throws -> Bool {
+        do {
+            return try state.withLock { current -> Bool in
+                let db = try openedDatabase(&current)
+                let statement = try db.statement(Self.headwordProbeSQL)
+                statement.bind(Self.probeText(text), at: 1)
+                return try statement.step()
             }
         } catch let error as SQLiteDatabase.Error {
             throw JMDictLookupError(error)
@@ -189,7 +210,7 @@ final class JMDictLookup: Sendable {
             return try state.withLock { current -> LookupResult? in
                 let db = try openedDatabase(&current)
                 var rowByEntry: [Int: HeadwordRow] = [:]
-                for row in try headwordRows(matching: candidate.text, db: db)
+                for row in try headwordRows(matching: Self.probeText(candidate.text), db: db)
                     where rowByEntry[row.entryID] == nil
                 {
                     // Multiple headword rows can reference one entry (kanji and
@@ -320,7 +341,7 @@ final class JMDictLookup: Sendable {
             let restrictedKanji = Self.restrictedWritings(statement.optionalText(3))
             let restrictedKana = Self.restrictedWritings(statement.optionalText(4))
             let restricted = candidate.kind == .kanji ? restrictedKanji : restrictedKana
-            if let restricted, !restricted.contains(candidate.text) {
+            if let restricted, !restricted.contains(Self.probeText(candidate.text)) {
                 continue
             }
             senses.append(JMDictSense(
@@ -369,9 +390,22 @@ final class JMDictLookup: Sendable {
     """
     private static let headwordRowsSQL =
         "SELECT entry_id, jlpt, hatsuon, acc, zo FROM headwords WHERE text = ?"
+    private static let headwordProbeSQL = "SELECT 1 FROM headwords WHERE text = ? LIMIT 1"
     private static let entrySQL = "SELECT keb, reb, common FROM entries WHERE ent_seq = ?"
     private static let senseSQL =
         "SELECT pos, gloss, misc, skeb, sreb FROM senses WHERE entry_id = ? ORDER BY ord"
+
+    /// True NFKC of a probe input: halfwidth katakana and every other
+    /// compatibility spelling fold onto the precomposed fullwidth forms the
+    /// database stores, so all `text = ?` compares — headword rows, the
+    /// sense-restriction lists, the reading fallback, the headword gate —
+    /// answer a halfwidth tap identically to its fullwidth spelling (the
+    /// annotator's gate vouching for a surface is never contradicted by the
+    /// lookup on the same string). Applied at the SQL boundary only;
+    /// candidates keep the surface the user tapped.
+    private static func probeText(_ text: String) -> String {
+        ReadingAlignment.compatibilityComposed(text)
+    }
 
     /// Parses the build's `skeb`/`sreb` column: NULL = applies to every
     /// writing; otherwise a JSON array of writings (an empty array matches

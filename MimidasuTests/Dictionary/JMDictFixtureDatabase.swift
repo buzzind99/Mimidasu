@@ -48,7 +48,10 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// commonness and ent_seq tiebreaks: the common `9990130` carries the
 /// *highest* ent_seq, so common-first is observable only through the
 /// commonness tier, and the two uncommon entries pin ent_seq-ascending
-/// order within a tier (`9990120` < `9990140`).
+/// order within a tier (`9990120` < `9990140`);
+/// `9990150` パイナップル — kana-only loanword whose stored row is
+/// precomposed voiced/semi-voiced katakana, so the headword gate's
+/// halfwidth probe (ﾊﾟｲﾅｯﾌﾟﾙ) can pin the composed fold onto it.
 ///
 /// Two JMnedict-shaped name entries ride the offset ent_seq range the build
 /// maps `int(id) + 10_000_000` into (JMnedict ids 5668306/5668307 →
@@ -413,6 +416,20 @@ private extension JMDictFixtureDatabase {
                     FixtureSense(
                         partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
                         gloss: [FixtureGloss(lang: "eng", text: "uncommon homograph, higher seq")]
+                    )
+                ]
+            ),
+            FixtureWord(
+                id: "9990150",
+                kanji: nil,
+                kana: [FixtureKana(
+                    text: "パイナップル", common: true, appliesToKanji: nil, jlptLevel: nil,
+                    pitchAccent: nil
+                )],
+                sense: [
+                    FixtureSense(
+                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
+                        gloss: [FixtureGloss(lang: "eng", text: "pineapple")]
                     )
                 ]
             ),
