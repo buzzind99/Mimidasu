@@ -45,12 +45,18 @@ func spacedTokens(
 
 /// An annotator that replays canned tokens, independent of the runtime.
 /// The reading fallback is inert by default so reading-less fixtures stay
-/// deterministically unannotated; fallback suites inject their own.
+/// deterministically unannotated; fallback suites inject their own. The
+/// headword gate answers "has entry" by default so no fixture fragments;
+/// fragmentation suites inject their own gate (a `nil` answer degrades:
+/// "has entry", uncached render).
 func makeAnnotator(
     _ canned: [DictionaryToken],
-    readingFallback: @escaping @Sendable (String) -> String? = { _ in nil }
+    readingFallback: @escaping @Sendable (String) -> String? = { _ in nil },
+    headwordGate: @escaping @Sendable (String) -> Bool? = { _ in true }
 ) -> ReadingAnnotator {
-    ReadingAnnotator(tokenize: { _ in canned }, readingFallback: readingFallback)
+    ReadingAnnotator(
+        tokenize: { _ in canned }, readingFallback: readingFallback, headwordGate: headwordGate
+    )
 }
 
 /// Compact [surface, romaji, furigana] rows for whole-segment assertions.

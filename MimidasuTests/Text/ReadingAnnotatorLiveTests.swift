@@ -514,3 +514,51 @@ struct ReadingAnnotatorFallbackLiveTests {
         ])
     }
 }
+
+// MARK: - Live fragmentation corpus
+
+/// The fragmentation pass against the real tokenizer and the real JMDict
+/// gate: the debug/test.md garble strings (long unknown kana runs with no
+/// lexicon coverage) split into tappable pieces, a name the dictionary
+/// covers whole stays whole, and surfaces still concatenate back.
+@Suite(
+    "ReadingAnnotator fragmentation corpus",
+    .enabled(if: LiveDictionaryRuntime.isAvailable && fallbackDatabaseURL != nil)
+)
+struct ReadingAnnotatorFragmentationLiveTests {
+
+    private static let annotator = ReadingAnnotator(tokenize: { text in
+        LiveDictionaryRuntime.engine?.tokenize(text)
+    })
+
+    private func segments(_ text: String) throws -> [ReadingSegment] {
+        try #require(Self.annotator.segments(for: text))
+    }
+
+    @Test("the debug-corpus garble runs fragment into segments of at most 8 scalars",
+          arguments: [
+              "モいモいモいもいモい", "のじゃのじゃのじゃ", "ソラシナソラシカ"
+          ])
+    func garbleFragments(input: String) throws {
+        let segments = try segments(input)
+
+        #expect(segments.count >= 2, "\(input) stayed whole: \(describe(segments))")
+        #expect(segments.allSatisfy { segment in segment.surface.unicodeScalars.count <= 8 })
+        #expect(segments.map(\.surface).joined() == input)
+    }
+
+    @Test("a long name the dictionary covers stays whole")
+    func protectedNameStaysWhole() throws {
+        let segments = try segments("シュワルツェネッガー")
+
+        #expect(segments.map(\.surface) == ["シュワルツェネッガー"])
+    }
+
+    @Test("a natural sentence still concatenates back through the pass")
+    func naturalSentenceConcatenates() throws {
+        let text = "そうなんですよソピアちゃんも確かあれだったよね"
+        let segments = try segments(text)
+
+        #expect(segments.map(\.surface).joined() == text)
+    }
+}

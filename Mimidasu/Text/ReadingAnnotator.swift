@@ -19,15 +19,31 @@ final class ReadingSegment {
     /// lexicon row has none.
     var pos: String?
 
+    /// One original token a sokuon-chain merge folded away: its surface
+    /// (the inter-token gap rides at the head of an absorbed piece) and
+    /// the token's own gap-free kana reading.
+    struct MergePiece {
+        var surface: String
+        var kana: String
+    }
+
+    /// The merge seams of a sokuon-chain segment, in order, first seam
+    /// first. Set only by the merge path, so the fragmentation pass can
+    /// cut at real token boundaries — stem included — when the stem is
+    /// unknown and the whole surface gates as entry-less.
+    var mergePieces: [MergePiece]?
+
     init(
         surface: String, romaji: String?, furigana: String? = nil,
-        lemma: String? = nil, pos: String? = nil
+        lemma: String? = nil, pos: String? = nil,
+        mergePieces: [MergePiece]? = nil
     ) {
         self.surface = surface
         self.romaji = romaji
         self.furigana = furigana
         self.lemma = lemma
         self.pos = pos
+        self.mergePieces = mergePieces
     }
 }
 
@@ -39,22 +55,38 @@ final class ReadingSegment {
 /// no standalone entry for 圧, 灼, …) fall back to the prepared JMDict
 /// database's reading. The dictionary may still be preparing on first launch;
 /// every failure degrades to plain text.
-/// Sendable by immutability contract: `cache`, `tokenize`, and
-/// `readingFallback` are set in init and never mutated afterwards; `NSCache`
-/// is internally thread-safe.
+/// Sendable by immutability contract: `cache`, `tokenize`,
+/// `readingFallback`, and `headwordGate` are set in init and never mutated
+/// afterwards; `NSCache` is internally thread-safe.
 final class ReadingAnnotator: @unchecked Sendable {
     /// The process-wide annotator backing the static entry point.
     static let shared = ReadingAnnotator()
 
+    /// The process-wide JMDict database handle behind the reading fallback
+    /// and the headword gate — one persistent read-only connection for both
+    /// probe paths.
+    private static let jmDictLookup = JMDictLookup()
+
     /// The default reading fallback: a process-wide JMDict lookup consulted
-    /// only for kanji surfaces the tokenizer left reading-less. One indexed
-    /// query per unknown token (the segment cache then amortizes it per
-    /// text); infrastructure failures degrade to a miss. A small per-surface
-    /// cache sits in front so the same unknown surface across different
-    /// sentences (names, rare kanji) queries once — misses included, since
-    /// they re-query most often.
-    private static let jmDictReadingFallback: @Sendable (String) -> String? = {
-        let lookup = JMDictLookup()
+    /// only for kanji surfaces the tokenizer left reading-less — the cached
+    /// wrapper below over the raw reading probe.
+    private static let jmDictReadingFallback: @Sendable (String) -> String? =
+        cachedReadingFallback { surface in
+            try jmDictLookup.reading(forWriting: surface)
+        }
+
+    /// Wraps a raw reading probe in the per-surface cache: real readings and
+    /// genuine misses cache (a miss is its own outcome — names and rare
+    /// kanji miss most often and would otherwise re-query every sentence);
+    /// a throw answers nil uncached (an infrastructure failure is not a
+    /// miss), so the fallback itself re-probes once the database is up.
+    /// That guarantee stops at this layer: a render consumed while the probe
+    /// threw can still be pinned by the segment cache when no gate probe
+    /// flagged it degraded. Injectable probe so tests drive the throw path
+    /// without a database.
+    static func cachedReadingFallback(
+        _ probe: @escaping @Sendable (String) throws -> String?
+    ) -> @Sendable (String) -> String? {
         let fallbackCache = ReadingFallbackCache()
         return { surface in
             switch fallbackCache.cachedReading(for: surface) {
@@ -62,11 +94,16 @@ final class ReadingAnnotator: @unchecked Sendable {
             case .miss: return nil
             case .notCached: break
             }
-            let reading = (try? lookup.reading(forWriting: surface)) ?? nil
+            let reading: String?
+            do {
+                reading = try probe(surface)
+            } catch {
+                return nil
+            }
             fallbackCache.store(reading, for: surface)
             return reading
         }
-    }()
+    }
 
     /// Sized to hold a full transcription session's finalized sentences
     /// so scroll-back re-renders hit instead of re-tokenizing.
@@ -77,6 +114,62 @@ final class ReadingAnnotator: @unchecked Sendable {
         return cache
     }()
 
+    /// The default headword gate: a process-wide JMDict lookup answering
+    /// whether any headword row (kanji or kana spelling) matches a surface,
+    /// memoized per surface. One instance for the process — instantiating
+    /// per call would reopen the database on every probe. An infrastructure
+    /// failure answers `nil` (degraded: "has entry", never fragment)
+    /// without caching, so a still-preparing database re-probes once it is
+    /// up — and the degradation flag keeps the degraded render out of the
+    /// segment cache, so finalized rows re-probe too.
+    private static let jmDictHeadwordGate: @Sendable (String) -> Bool? = memoizedHeadwordGate { surface in
+        try jmDictLookup.hasHeadword(surface)
+    }
+
+    /// Memoizing wrapper around a raw headword probe. Both real answers
+    /// cache — a `false` IS the cached miss, so `NSNumber` needs no
+    /// empty-string marker — because garble recurs across the live
+    /// partials' 6–10 Hz revisions of the same sentence. A throw answers
+    /// `nil` (degraded: callers treat it as "has entry" and must not cache
+    /// the render) and is not cached, so a still-preparing database
+    /// re-probes once it is up.
+    static func memoizedHeadwordGate(
+        _ probe: @escaping @Sendable (String) throws -> Bool
+    ) -> @Sendable (String) -> Bool? {
+        let memo = HeadwordGateMemo()
+        return { surface in
+            if let cached = memo.answer(for: surface) {
+                return cached
+            }
+            guard let answer = try? probe(surface) else {
+                return nil
+            }
+            memo.store(answer, for: surface)
+            return answer
+        }
+    }
+
+    /// Per-surface memo in front of the headword gate. Larger than the
+    /// reading fallback's cache: dictionary-guided prefix cuts multiply the
+    /// distinct probe keys a single garbled surface produces. `NSCache` is
+    /// internally thread-safe but not marked `Sendable`, so it hides behind
+    /// this box.
+    private final class HeadwordGateMemo: @unchecked Sendable {
+        private let cache = NSCache<NSString, NSNumber>()
+
+        init() {
+            cache.countLimit = 1024
+        }
+
+        func answer(for surface: String) -> Bool? {
+            cache.object(forKey: surface as NSString)?.boolValue
+        }
+
+        func store(_ answer: Bool, for surface: String) {
+            cache.setObject(NSNumber(value: answer), forKey: surface as NSString)
+        }
+    }
+
     /// The token source; injectable so tests drive the annotator without the
     /// dictionary runtime.
     private let tokenize: (String) -> [DictionaryToken]?
@@ -84,21 +177,36 @@ final class ReadingAnnotator: @unchecked Sendable {
     /// The reading source for kanji surfaces the token stream carries no
     /// reading for; injectable so tests drive the fallback without the JMDict
     /// database. Consulted only for kanji-bearing surfaces — kana surfaces
-    /// read themselves and read tokens never reach it.
-    private let readingFallback: @Sendable (String) -> String?
+    /// read themselves and read tokens never reach it. Internal for the
+    /// fragmentation pass, which renders kanji-bearing fragments through it.
+    let readingFallback: @Sendable (String) -> String?
+
+    /// The whole-surface entry gate behind the fragmentation pass: a long
+    /// unknown segment the dictionary actually covers stays whole. `nil`
+    /// answers "has entry" and flags the pass degraded (the render must
+    /// not be cached). Injectable so tests drive fragmentation without the
+    /// JMDict database. Receivers must treat input as already NFKC-composed
+    /// (the pass probes via `gateText`) — that composition is what lets the
+    /// memo's keys dedupe the two kana widths.
+    let headwordGate: @Sendable (String) -> Bool?
 
     init(
         tokenize: @escaping (String) -> [DictionaryToken]? = { text in
             DictionaryEngine.shared.tokenize(text)
         },
-        readingFallback: @escaping @Sendable (String) -> String? = ReadingAnnotator.jmDictReadingFallback
+        readingFallback: @escaping @Sendable (String) -> String? = ReadingAnnotator.jmDictReadingFallback,
+        headwordGate: @escaping @Sendable (String) -> Bool? = ReadingAnnotator.jmDictHeadwordGate
     ) {
         self.tokenize = tokenize
         self.readingFallback = readingFallback
+        self.headwordGate = headwordGate
     }
 
     /// Returns per-run segments for `text` (surface + romaji + furigana), or
-    /// `nil` for empty input. Cached.
+    /// `nil` for empty input. Cached — except when the pass ran degraded
+    /// (the headword gate's database was unreachable): those whole-or-split
+    /// decisions carry no real verdict, so they are not pinned and the next
+    /// render re-probes once the dictionary is up.
     static func segments(for text: String) -> [ReadingSegment]? {
         shared.segments(for: text)
     }
@@ -119,17 +227,19 @@ final class ReadingAnnotator: @unchecked Sendable {
             return cached
         }
 
-        let result = transcribe(trimmed)
-        if caching {
-            cache.setObject(result as NSArray, forKey: trimmed as NSString)
+        let outcome = transcribe(trimmed)
+        // A degraded pass decided whole-or-split without a real verdict;
+        // caching would pin those decisions past the dictionary's arrival.
+        if caching, !outcome.gateDegraded {
+            cache.setObject(outcome.segments as NSArray, forKey: trimmed as NSString)
         }
-        return result
+        return outcome.segments
     }
 
     // MARK: - Transcription
 
-    private func transcribe(_ text: String) -> [ReadingSegment] {
-        guard let tokens = tokenize(text) else { return [] }
+    private func transcribe(_ text: String) -> (segments: [ReadingSegment], gateDegraded: Bool) {
+        guard let tokens = tokenize(text) else { return ([], false) }
         let scalars = Array(text.unicodeScalars)
         var segments: [ReadingSegment] = []
         var cursor = 0
@@ -177,6 +287,7 @@ final class ReadingAnnotator: @unchecked Sendable {
                         surface: merged.surface,
                         into: &segments
                     )
+                    segments[segments.count - 1].mergePieces = merged.pieces
                     cursor = tokens[merged.end].end
                     i = merged.end + 1
                 } else {
@@ -189,7 +300,7 @@ final class ReadingAnnotator: @unchecked Sendable {
         }
         flush(&pending, into: &segments)
         appendSpan(from: cursor, to: scalars.count, of: scalars, into: &segments)
-        return segments
+        return fragmented(segments)
     }
 
     /// Emits a non-numeral token: the dictionary's surface reading converted
@@ -206,13 +317,24 @@ final class ReadingAnnotator: @unchecked Sendable {
         if reading == nil, KanaClassification.containsKanji(surface) {
             reading = readingFallback(surface)
         }
-        guard var reading else {
-            segments.append(ReadingSegment(
-                surface: surface, romaji: surface, furigana: nil,
-                lemma: token.base, pos: token.pos
-            ))
-            return
-        }
+        let fields = Self.annotatedFields(surface: surface, reading: reading)
+        segments.append(ReadingSegment(
+            surface: surface, romaji: fields.romaji, furigana: fields.furigana,
+            lemma: token.base, pos: token.pos
+        ))
+    }
+
+    /// Surface + raw kana reading → final romaji/furigana: the
+    /// surfaceReadings → lexicalKana → spokenKana repairs, KanaRomaji
+    /// conversion, then the lexicalRomaji/particleRomaji overrides and the
+    /// standard kanji furigana rule. A nil reading self-transcribes
+    /// (romaji = surface, furigana nil). Shared by the token emitter and the
+    /// fragmentation pass, so split-off fragments annotate exactly like
+    /// whole tokens instead of bare-converting kana.
+    static func annotatedFields(
+        surface: String, reading: String?
+    ) -> (romaji: String, furigana: String?) {
+        guard var reading else { return (surface, nil) }
         reading = Self.surfaceReadings[surface] ?? Self.lexicalKana[reading] ?? Self.spokenKana(reading)
         var romaji = KanaRomaji.romaji(fromKana: reading) ?? surface
         if let lexical = Self.lexicalRomaji[reading] {
@@ -220,13 +342,7 @@ final class ReadingAnnotator: @unchecked Sendable {
         } else if let particle = Self.particleRomaji[surface] {
             romaji = particle
         }
-        segments.append(ReadingSegment(
-            surface: surface,
-            romaji: romaji,
-            furigana: Self.furigana(surface: surface, reading: reading),
-            lemma: token.base,
-            pos: token.pos
-        ))
+        return (romaji, Self.furigana(surface: surface, reading: reading))
     }
 
     /// Joins a sokuon-bearing token with what follows. IPADIC splits
@@ -244,10 +360,12 @@ final class ReadingAnnotator: @unchecked Sendable {
     /// particles (って + は) and numeral runs keep their own conversions; a
     /// genuinely stranded sokuon falls back to the spoken "tsu".
     /// A completed sokuon chain merge: the folded surface, the accumulated
-    /// kana, and the index of the last absorbed token.
+    /// kana, the index of the last absorbed token, and the seam pieces the
+    /// surface was assembled from (each with its own gap-free kana).
     private struct SokuonMerge {
         var surface: String
         var kana: String
+        var pieces: [ReadingSegment.MergePiece]
         var end: Int
     }
 
@@ -260,6 +378,7 @@ final class ReadingAnnotator: @unchecked Sendable {
         else { return nil }
 
         var mergedSurface = surface
+        var pieces = [ReadingSegment.MergePiece(surface: surface, kana: kana)]
         var end = index
         var previousEnd = tokens[index].end
         while kana.unicodeScalars.last.map(Self.isSokuon) == true, end + 1 < tokens.count {
@@ -280,11 +399,14 @@ final class ReadingAnnotator: @unchecked Sendable {
             else { break }
             mergedSurface += gap + nextSurface
             kana += nextReading
+            pieces.append(ReadingSegment.MergePiece(
+                surface: gap + nextSurface, kana: nextReading
+            ))
             end += 1
             previousEnd = next.end
         }
         guard end > index else { return nil }
-        return SokuonMerge(surface: mergedSurface, kana: kana, end: end)
+        return SokuonMerge(surface: mergedSurface, kana: kana, pieces: pieces, end: end)
     }
 
     private static func isSokuon(_ scalar: Unicode.Scalar) -> Bool {
@@ -293,8 +415,9 @@ final class ReadingAnnotator: @unchecked Sendable {
 
     /// A kana-only surface's reading is the surface itself: kana carries its
     /// pronunciation by construction, so unknown katakana and stray kana
-    /// still romaji-convert instead of rendering unannotated.
-    private static func selfReading(_ surface: String) -> String? {
+    /// still romaji-convert instead of rendering unannotated. Internal for
+    /// the fragmentation pass's fragment emitter.
+    static func selfReading(_ surface: String) -> String? {
         guard !surface.isEmpty else { return nil }
         return surface.unicodeScalars.allSatisfy(KanaClassification.isKana) ? surface : nil
     }

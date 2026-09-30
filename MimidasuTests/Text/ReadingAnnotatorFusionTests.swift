@@ -19,6 +19,20 @@ struct ReadingAnnotatorFusionTests {
         #expect(describe(segments) == [["600回", "roppyakkai", "ろっぴゃっかい"]])
     }
 
+    @Test("fuses a halfwidth katakana counter like its fullwidth counterpart (600ｶｲ → roppyakkai)")
+    func halfwidthCounterFusion() throws {
+        let annotator = makeAnnotator(tokens(
+            ["600", "ｶｲ"],
+            readings: [nil, "かい"]
+        ))
+
+        let segments = try #require(annotator.segments(for: "600ｶｲ"))
+
+        // No kanji in the fused surface → no furigana (kana surfaces read
+        // themselves), unlike the 回 case above.
+        #expect(describe(segments) == [["600ｶｲ", "roppyakkai", nil]])
+    }
+
     @Test("normalizes fullwidth digits before fusion, ignoring their readings (６００回 → roppyakkai)")
     func fullwidthDigitFusion() throws {
         let annotator = makeAnnotator(tokens(
