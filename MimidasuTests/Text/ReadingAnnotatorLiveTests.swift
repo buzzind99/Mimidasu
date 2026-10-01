@@ -255,7 +255,7 @@ struct ReadingAnnotatorLiveTests {
         let segments = try segments("三、四本")
 
         #expect(describe(segments) == [
-            ["三", "san", "さん"], ["、", "、", nil], ["四本", "yonbon", "よんぼん"]
+            ["三", "san", "さん"], ["、", "、", nil], ["四本", "yonhon", "よんほん"]
         ])
     }
 
