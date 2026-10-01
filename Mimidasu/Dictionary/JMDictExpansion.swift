@@ -82,7 +82,7 @@ struct ExpansionCandidate: Equatable, Sendable {
 /// stops the walk instead of producing a candidate that bridges a gap.
 enum JMDictExpansion {
     /// Segments one candidate may join, the tapped segment included.
-    static let maxTokens = 3
+    static let maxTokens = 6
     /// Candidates queried per tap, one exact index hit each.
     static let maxCandidates = 9
     /// Longest kanji substring a split emits, bounding the combinatorics of
