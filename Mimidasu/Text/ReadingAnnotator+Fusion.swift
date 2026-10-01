@@ -10,15 +10,19 @@ import Foundation
 extension ReadingAnnotator {
 
     /// Emits a kana reading (from the dictionary, the digit table, or a
-    /// fusion) as a segment, romaji derived with `KanaRomaji`.
+    /// fusion) as a segment, through the shared annotation pipeline — so a
+    /// fused segment honors `surfaceReadings` and the lexical/spoken
+    /// repairs exactly like a whole token. `lemma`/`pos` stay nil: a numeral
+    /// run is not a dictionary word.
     private func append(
-        surface: String, kana: String, romaji: String? = nil, into segments: inout [ReadingSegment]
+        surface: String, kana: String, overridingSurface: Bool = true,
+        into segments: inout [ReadingSegment]
     ) {
-        let converted = romaji ?? KanaRomaji.romaji(fromKana: kana) ?? surface
+        let fields = Self.annotatedFields(
+            surface: surface, reading: kana, overridingSurface: overridingSurface
+        )
         segments.append(ReadingSegment(
-            surface: surface,
-            romaji: converted,
-            furigana: KanaClassification.containsKanji(surface) ? kana : nil
+            surface: surface, romaji: fields.romaji, furigana: fields.furigana
         ))
     }
 
@@ -145,13 +149,13 @@ extension ReadingAnnotator {
         // 14日), the kana table after (kanji numeral runs, 二日/二十日).
         if surface == "日", let date = Self.digitDateReadings[held.digits] {
             pending = nil
-            append(surface: fusedSurface, kana: date, into: &segments)
+            append(surface: fusedSurface, kana: date, overridingSurface: false, into: &segments)
             return true
         }
         Self.resolveDigits(into: &held)
         if surface == "日", let date = Self.kanaDateReadings[held.kana] {
             pending = nil
-            append(surface: fusedSurface, kana: date, into: &segments)
+            append(surface: fusedSurface, kana: date, overridingSurface: false, into: &segments)
             return true
         }
         // Months and hours take lexical number readings the digit table
@@ -216,7 +220,7 @@ extension ReadingAnnotator {
         }
         // Plain fusion: numbers that don't geminate concatenate with the
         // counter (9月 → くがつ, 三人 → さんにん), a ん-ender voicing the
-        // は行 counter (さん+ふん → さんぷん, よん+ほん → よんぼん).
+        // は行 counter (さん+ふん → さんぷん, よん+ほん → よんほん).
         pending = nil
         append(
             surface: fusedSurface,
@@ -305,9 +309,19 @@ extension ReadingAnnotator {
 
     /// Counter readings forced over the dictionary's first reading when a
     /// number precedes: 月 and 時 resolve to the standalone つき/とき entries
-    /// (the counter reads がつ/じ), and 本's shared entry's first reading is
-    /// もと (the counter reads ほん).
-    private static let forcedCounterReadings = ["月": "がつ", "時": "じ", "本": "ほん"]
+    /// (the counter reads がつ/じ), 本's shared entry's first reading is もと
+    /// (the counter reads ほん), and 挺/束/握 resolve to their own nouns
+    /// (てい/たば/にぎ) rather than their counter readings (ちょう/そく/あく).
+    /// These are the counters `surfaceReadings` cannot cover — a number takes
+    /// a different stem with each one (一挺→いっちょう, 八挺→はっちょう).
+    ///
+    /// 旬's token reading しゅん is the noun; the counter is じゅん (一旬 →
+    /// いちじゅん), and only the split 六旬/十旬 reach here — 一旬/三旬 arrive
+    /// as single tokens and read the dictionary's own form.
+    private static let forcedCounterReadings = [
+        "月": "がつ", "時": "じ", "本": "ほん", "挺": "ちょう", "束": "そく",
+        "握": "あく", "旬": "じゅん"
+    ]
 
     /// Whether a token following a held number can be a counter: kanji and
     /// katakana tokens are (月, 匹, キロ). Hiragana-only tokens are particles
@@ -330,7 +344,7 @@ extension ReadingAnnotator {
     /// Voicing across a number's moraic ん (さん/よん/せん/まん): a following
     /// は行 counter voices — to the p-series for the assimilating counters
     /// (ふん 分, ほ 歩, はつ 発: さんぷん, さんぽ, さんぱつ) and to the rendaku
-    /// b-series for the rest (ほん 本, ひき 匹, はこ 箱: よんぼん, さんびき,
+    /// b-series for the rest (ほん 本, ひき 匹, はこ 箱: よんほん, さんびき,
     /// さんばん). Any other counter passes through unchanged.
     private static func voiceAcrossN(numberKana: String, counterKana: String) -> String {
         guard numberKana.hasSuffix("ん"),
@@ -345,10 +359,23 @@ extension ReadingAnnotator {
     }
 
     /// 六 keeps its plain reading before 歳/等/千 (ろくさい/ろくとう/ろくせん):
-    /// the fusion must not produce ろっさい.
+    /// the fusion must not produce ろっさい. Matched by prefix, so 等's longer
+    /// readings (とうぎょう) stay exempt with it.
+    ///
+    /// 六 also does not geminate before these し/しゅ readings — 六種/六処/六尺/
+    /// 六信 read ろくしゅ/ろくしょ/ろくしゃく/ろくしん — matched whole, since
+    /// the prefix しゅ would also swallow しゅう and 六週 is ろっしゅう.
+    ///
+    /// The list is **lexical, not phonological**: 六者 does geminate (ろっしゃ)
+    /// while 六社 on the same しゃ reading does not (ろくしゃ), so no kana-level
+    /// rule separates them and 六社 carries its own `surfaceReadings` entry. Any
+    /// further し-row word needs measuring before it joins this list.
     private static func rokuException(numberKana: String, counterKana: String) -> Bool {
-        numberKana == "ろく"
-            && ["さい", "とう", "せん"].contains { prefix in counterKana.hasPrefix(prefix) }
+        guard numberKana == "ろく" else { return false }
+        if ["さい", "とう", "せん"].contains(where: { prefix in counterKana.hasPrefix(prefix) }) {
+            return true
+        }
+        return ["しん", "しょ", "しゃく", "しゅ"].contains(counterKana)
     }
 
     /// A ば行 onset keeps the plain reading for every numeral: 一番/六番/十番/

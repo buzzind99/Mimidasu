@@ -333,14 +333,25 @@ final class ReadingAnnotator: @unchecked Sendable {
     /// surfaceReadings → lexicalKana → spokenKana repairs, KanaRomaji
     /// conversion, then the lexicalRomaji/particleRomaji overrides and the
     /// standard kanji furigana rule. A nil reading self-transcribes
-    /// (romaji = surface, furigana nil). Shared by the token emitter and the
-    /// fragmentation pass, so split-off fragments annotate exactly like
-    /// whole tokens instead of bare-converting kana.
+    /// (romaji = surface, furigana nil). Shared by all three emitters — the
+    /// plain token, the numeral fusion, and the fragmentation pass — so a fused
+    /// or split-off segment annotates exactly like a whole token instead of
+    /// bare-converting kana.
+    ///
+    /// `overridingSurface: false` skips the whole-surface table and keeps the
+    /// reading it was handed. The fusion's date branch needs that: the calendar
+    /// tables give the digit form its date reading (1日 → ついたち) precisely
+    /// because the kanji form means the duration word (一日 → いちにち), and
+    /// `surfaceReading`'s digit fold maps `1日` onto the `一日` key, where the
+    /// override would flip the day back.
     static func annotatedFields(
-        surface: String, reading: String?
+        surface: String, reading: String?, overridingSurface: Bool = true
     ) -> (romaji: String, furigana: String?) {
         guard var reading else { return (surface, nil) }
-        reading = Self.surfaceReadings[surface] ?? Self.lexicalKana[reading] ?? Self.spokenKana(reading)
+        if overridingSurface {
+            reading = Self.surfaceReading(surface) ?? reading
+        }
+        reading = Self.lexicalKana[reading] ?? Self.spokenKana(reading)
         var romaji = KanaRomaji.romaji(fromKana: reading) ?? surface
         if let lexical = Self.lexicalRomaji[reading] {
             romaji = lexical
@@ -511,16 +522,6 @@ final class ReadingAnnotator: @unchecked Sendable {
     private static func spokenKana(_ reading: String) -> String {
         reading.contains("にっぽん") ? reading.replacing("にっぽん", with: "にほん") : reading
     }
-
-    /// Whole-surface reading overrides, keyed by the written form: 一日 is a
-    /// single dictionary token whose first reading is the date ついたち, but
-    /// transcripts mean the duration word いちにち — the date reading stays
-    /// with the digit form (1日 → ついたち, `digitDateReadings`). The
-    /// standalone 笑 noun reads えみ, but transcripts mean the laughter わら
-    /// (net-slang 笑, and ASR fragments like 笑てない that tokenize 笑
-    /// standalone). The lexicon's 辺(あたり) entry wins after この, but
-    /// あたり is the written 辺り — the bare surface reads へん.
-    private static let surfaceReadings = ["一日": "いちにち", "笑": "わら", "辺": "へん"]
 
     // MARK: - Text helpers
 
