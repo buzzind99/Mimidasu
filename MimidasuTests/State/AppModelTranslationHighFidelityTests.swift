@@ -56,6 +56,7 @@ struct AppModelTranslationHighFidelityTests {
         let model = AppModel(
             translationSettings: makeSettings(provider: .apple),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelHighFidelity"),
+            favorites: isolatedFavorites(),
             initialModelResolve: { _ in nil }
         )
         await model.initialModelCheck?.value
@@ -76,6 +77,7 @@ struct AppModelTranslationHighFidelityTests {
         let model = AppModel(
             translationSettings: makeSettings(provider: .apple),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelHighFidelity"),
+            favorites: isolatedFavorites(),
             highFidelityProbe: { _ in true },
             initialModelResolve: { _ in nil }
         )
@@ -98,6 +100,7 @@ struct AppModelTranslationHighFidelityTests {
         let model = AppModel(
             translationSettings: makeSettings(provider: .apple),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelHighFidelity"),
+            favorites: isolatedFavorites(),
             highFidelityProbe: { _ in
                 probeCalls.withLock { calls in
                     calls += 1
@@ -130,6 +133,7 @@ struct AppModelTranslationHighFidelityTests {
         let model = AppModel(
             translationSettings: settings,
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelHighFidelity"),
+            favorites: isolatedFavorites(),
             translationTransport: constantStatusTransport(401),
             highFidelityProbe: { _ in true },
             initialModelResolve: { _ in nil }

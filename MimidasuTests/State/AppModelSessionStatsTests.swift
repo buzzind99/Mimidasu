@@ -23,6 +23,7 @@ struct AppModelSessionStatsTests {
         let model = AppModel(
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelStats"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelStats"),
+            favorites: isolatedFavorites(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )

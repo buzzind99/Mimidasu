@@ -29,6 +29,7 @@ struct AppModelTests {
         let model = AppModel(
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelControl"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelControl"),
+            favorites: isolatedFavorites(),
             // Hermetic: session start activates the Apple engine, whose
             // probe would otherwise hit the real LanguageAvailability.
             highFidelityProbe: { _ in false },
@@ -474,6 +475,7 @@ struct AppModelTests {
         let model = AppModel(
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelControl"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelControl"),
+            favorites: isolatedFavorites(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil },
             willTerminateNotifications: notifications

@@ -20,6 +20,7 @@ struct AppModelModelSelectionTests {
         let model = AppModel(
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelSelection"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelSelection"),
+            favorites: isolatedFavorites(),
             highFidelityProbe: { _ in false },
             initialModelResolve: resolve
         )

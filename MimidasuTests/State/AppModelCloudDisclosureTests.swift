@@ -68,6 +68,7 @@ struct AppModelCloudDisclosureTests {
         let model = AppModel(
             translationSettings: settings,
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelCloudDisclosure"),
+            favorites: isolatedFavorites(),
             translationTransport: constantStatusTransport(200),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
@@ -92,6 +93,7 @@ struct AppModelCloudDisclosureTests {
         let model = AppModel(
             translationSettings: settings,
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelCloudDisclosure"),
+            favorites: isolatedFavorites(),
             translationTransport: constantStatusTransport(200),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
@@ -115,6 +117,7 @@ struct AppModelCloudDisclosureTests {
         let model = AppModel(
             translationSettings: settings,
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelCloudDisclosure"),
+            favorites: isolatedFavorites(),
             translationTransport: constantStatusTransport(200),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
@@ -145,6 +148,7 @@ struct AppModelCloudDisclosureTests {
         let model = AppModel(
             translationSettings: settings,
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelCloudDisclosure"),
+            favorites: isolatedFavorites(),
             translationTransport: translatedBodyTransport(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }

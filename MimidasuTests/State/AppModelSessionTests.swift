@@ -189,6 +189,7 @@ struct AppModelSessionTests {
             },
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelSession"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelSession"),
+            favorites: isolatedFavorites(),
             // Hermetic: session start activates the Apple engine, whose
             // probe would otherwise hit the real LanguageAvailability.
             highFidelityProbe: { _ in false },

@@ -74,6 +74,7 @@ struct AppModelTranslationEngineTests {
         AppModel(
             translationSettings: settings,
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
+            favorites: isolatedFavorites(),
             translationTransport: transport,
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
