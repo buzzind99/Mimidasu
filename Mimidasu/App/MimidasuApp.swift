@@ -34,6 +34,18 @@ struct MimidasuApp: App {
             SettingsView(model: appDelegate.model)
         }
         .windowStyle(.hiddenTitleBar)
+
+        // The favorites list: a reference panel, not a preferences modal, so it
+        // shares the Settings window's dismiss-on-outside-click path (see the
+        // resign-key observer in `AppDelegate`). `.windowStyle(.hiddenTitleBar)`
+        // is honored by this scene, and the view supplies its own header band
+        // in place of a title bar. No `defaultSize`: the view fixes its own
+        // frame, so `.contentSize` makes the window exactly that.
+        Window("Favorites", id: "favorites") {
+            FavoritesView(model: appDelegate.model)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
     }
 }
 
@@ -97,7 +109,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var teardownWatchdog: Timer?
     private var teardownCompleteObserver: NSObjectProtocol?
     private var keyWindowObserver: NSObjectProtocol?
+    private var favoritesWindowObserver: NSObjectProtocol?
+    private var favoritesCloseObserver: NSObjectProtocol?
     private var resignKeyObserver: NSObjectProtocol?
+    /// The live favorites window, if any — tracks instance identity so a
+    /// refocus never re-centers it, only a fresh window does.
+    private weak var favoritesWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // The session panel is ordered here rather than at init: window
@@ -122,19 +139,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.hideTitleChrome(of: window)
             }
         }
-        // Settings dismisses on any click outside it: losing key status is
-        // exactly that — the click landed on the main window, the desktop,
-        // or another app — so resign-key closes the window.
+        // Settings and Favorites dismiss on any click outside them: losing
+        // key status is exactly that — the click landed on the main window,
+        // the desktop, or another app — so resign-key closes the window.
+        // Favorites is matched by title: the scene has no controller to
+        // register with `SettingsWindowController`, and it does not want one
+        // (that type exists to tell the sidebar gear whether Settings is
+        // open). A window with an attached sheet is exempt: presenting the
+        // un-star confirmation moves key status to the sheet, and closing the
+        // list the instant the question appeared would be its own bug.
         resignKeyObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didResignKeyNotification, object: nil, queue: .main
         ) { note in
             let window = note.object as? NSWindow
             MainActor.assumeIsolated {
-                guard let window,
-                      SettingsWindowController.isSettingsWindow(window),
-                      window.isVisible
+                guard let window, window.isVisible, window.attachedSheet == nil,
+                      window.title == "Favorites"
+                      || SettingsWindowController.isSettingsWindow(window)
                 else { return }
                 window.performClose(nil)
+            }
+        }
+        // The favorites list belongs to the main window's Space: it floats
+        // over it (including fullscreen) and cannot be dragged to another
+        // Space. SwiftUI exposes no scene modifier for collection behavior,
+        // so it is set at the AppKit level on first key — the same bridge
+        // as the settings chrome-hiding above. Title-matched: only the
+        // favorites scene carries it. Stationary opts out of Mission
+        // Control rearrangement; auxiliary keeps it above the fullscreen
+        // main window; moveToActiveSpace pulls it onto the active Space on
+        // every show (the opener lives in the main window, so that is
+        // always the main window's Space) instead of reopening where it was
+        // last closed. A fresh instance also opens centered; refocusing the
+        // open window never moves it.
+        favoritesWindowObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let window = note.object as? NSWindow
+            MainActor.assumeIsolated {
+                guard let self, let window, window.title == "Favorites" else { return }
+                window.collectionBehavior = [.stationary, .fullScreenAuxiliary, .moveToActiveSpace]
+                if self.favoritesWindow !== window {
+                    self.favoritesWindow = window
+                    window.center()
+                }
+            }
+        }
+        // The scene caches its window, so a reopen would restore the last
+        // dragged spot. Centering on close resets it — the close and the
+        // move land in the same tick, so no jump is visible.
+        favoritesCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: nil, queue: .main
+        ) { note in
+            let window = note.object as? NSWindow
+            MainActor.assumeIsolated {
+                guard let window, window.title == "Favorites" else { return }
+                window.center()
             }
         }
     }
