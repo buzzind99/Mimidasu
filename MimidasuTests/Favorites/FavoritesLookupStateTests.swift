@@ -127,6 +127,21 @@ struct FavoritesLookupStateTests {
         #expect(!sut.isExpanded(word) && sut.phase(for: word) == .idle)
     }
 
+    /// Waits until the released query has entered and left `resolveDatabase`,
+    /// then lets the main actor drain before the caller reads a phase. The
+    /// query leaving is not the landing: the throw and the hop back still have
+    /// to happen, so reading the phase immediately would race the very write
+    /// these tests exist to catch. The two polls are asserted so a query that
+    /// never ran fails loudly instead of passing vacuously.
+    private func drainAfterGatedQuery(_ gate: Gate) async {
+        #expect(await pollUntil { gate.hasEntered })
+        #expect(await pollUntil { gate.hasLeft })
+        for _ in 0 ..< 5 {
+            await Task.yield()
+        }
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+
     @Test("a lookup that lands after its row collapsed is discarded")
     func staleResultAfterCollapseIsDiscarded() async {
         let release = DispatchSemaphore(value: 0)
@@ -136,11 +151,7 @@ struct FavoritesLookupStateTests {
         sut.toggle(word) // collapsed, generation bumped
 
         release.signal()
-        // Wait for the blocked query to actually run. The assertion below is
-        // about the write it would make, so the phase must not be read before
-        // the landing could have happened.
-        _ = await pollUntil { gate.hasEntered }
-        _ = await pollUntil { gate.hasLeft }
+        await drainAfterGatedQuery(gate)
 
         // Still idle: the in-flight result found a stale generation and was
         // dropped rather than re-populating a row that was collapsed.
@@ -156,8 +167,7 @@ struct FavoritesLookupStateTests {
 
         sut.reset()
         release.signal()
-        _ = await pollUntil { gate.hasEntered }
-        _ = await pollUntil { gate.hasLeft }
+        await drainAfterGatedQuery(gate)
 
         #expect(sut.phase(for: word) == .idle)
     }

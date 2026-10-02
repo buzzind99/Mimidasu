@@ -254,6 +254,22 @@ struct FavoritesStoreTests {
         #expect(store.words.map(\.headword) == ["食べる", "見る"])
     }
 
+    @Test("a reopened store orders by the file's timestamp, not by insertion")
+    func reopenedOrderFollowsTimestamps() {
+        let (location, cleanup) = makeLocation()
+        defer { cleanup() }
+        let store = FavoritesStore(location: location)
+        // Starred in the opposite order to their timestamps: the newer word
+        // goes in first, so an insert-at-zero list reads the other way round
+        // and only the file's ordering can produce this answer.
+        store.toggle(Self.taberu)
+        store.toggle(Self.miru)
+
+        let reopened = FavoritesStore(location: location)
+
+        #expect(reopened.words.map(\.headword) == ["食べる", "見る"])
+    }
+
     // MARK: - Search
 
     @Test("search hits the headword")
