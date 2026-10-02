@@ -213,8 +213,16 @@ struct FavoritesView: View {
         .cardSurface(radius: 9)
     }
 
+    /// The list is empty for two different reasons, and naming the search for a
+    /// window nobody searched in reads as a bug: an empty field with nothing
+    /// under it needs to say so. The text follows the query the rows were built
+    /// from, so it never names a term the list has not applied yet.
     private var emptyState: some View {
-        Text("No favorites match \"\(query)\".")
+        let trimmed = debouncedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = trimmed.isEmpty
+            ? "No favorites yet. Star a word from the dictionary popover."
+            : "No favorites match \"\(trimmed)\"."
+        return Text(message)
             .font(.system(size: 13))
             .foregroundStyle(Theme.secondaryText)
             .frame(maxWidth: .infinity, alignment: .center)
