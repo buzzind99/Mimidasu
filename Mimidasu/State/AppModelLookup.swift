@@ -112,7 +112,7 @@ extension AppModel {
             .map { segment in LookupSegment(
                 surface: segment.surface,
                 lemma: segment.lemma,
-                reading: Self.lookupReading(for: segment)
+                reading: segment.kanaReading
             ) }
         let tappedAt = Self.reAnchoredTapIndex(
             stored: token.tokenIndex, surface: token.surface, in: segments
@@ -152,21 +152,6 @@ extension AppModel {
         }
         return segments.firstIndex(where: { segment in segment.surface == surface })
             ?? segments.count
-    }
-
-    /// The tap's kana reading for a rendered segment: the furigana when the
-    /// annotator aligned one, else the surface itself when kana-only (kana
-    /// carries its pronunciation by construction — the annotator's own
-    /// self-reading rule). Reading-less kanji, numerals, and plain runs
-    /// carry none: the lookup ranking then ignores readings entirely.
-    private static func lookupReading(for segment: ReadingSegment) -> String? {
-        if let furigana = segment.furigana, !furigana.isEmpty {
-            return furigana
-        }
-        guard !segment.surface.isEmpty,
-              segment.surface.unicodeScalars.allSatisfy(KanaClassification.isKana)
-        else { return nil }
-        return segment.surface
     }
 
     /// Runs the expansion + database queries off-main and applies the

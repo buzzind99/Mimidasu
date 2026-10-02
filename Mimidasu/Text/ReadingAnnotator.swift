@@ -47,6 +47,23 @@ final class ReadingSegment {
     }
 }
 
+extension ReadingSegment {
+    /// The segment's kana reading as displayed: the furigana when the
+    /// annotator aligned one, else the surface itself when it is kana-only
+    /// (kana carries its pronunciation by construction). Reading-less kanji,
+    /// numerals, and plain runs carry none — a consumer with nothing to
+    /// compare should not fold what it was handed.
+    var kanaReading: String? {
+        if let furigana, !furigana.isEmpty {
+            return furigana
+        }
+        guard !surface.isEmpty,
+              surface.unicodeScalars.allSatisfy(KanaClassification.isKana)
+        else { return nil }
+        return surface
+    }
+}
+
 /// Produces romaji (wapuro long vowels, Hepburn consonants) and kana
 /// furigana for Japanese text from the dictionary tokenizer's per-surface
 /// kana readings (`DictionaryEngine`), plus a numeral→counter fusion pass in
