@@ -33,6 +33,7 @@ final class AppModelLookupTests {
         AppModel(
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelLookup"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelLookup"),
+            favorites: isolatedFavorites(),
             highFidelityProbe: { _ in false },
             jmDictLookup: jmDictLookup ?? JMDictLookup(resolveDatabase: { [fixture] in fixture.url }),
             initialModelResolve: { _ in nil }
@@ -411,6 +412,35 @@ final class AppModelLookupTests {
         #expect(model.selectedLookup?.entryIndex == 1, "clamped to the last entry")
         model.stepLookupEntry(to: -5)
         #expect(model.selectedLookup?.entryIndex == 0, "clamped to the first entry")
+    }
+
+    @Test("a favorited entry leads the pager, so tapping あめ opens 雨 rather than 飴")
+    func favoritedEntryLeadsPager() async throws {
+        let model = makeModel()
+        model.favorites.toggle(
+            FavoriteWord(headword: "雨", reading: "あめ", romaji: "ame", addedAt: 1)
+        )
+        await model.runLookup(
+            segments: [LookupSegment(surface: "あめ")], tappedAt: 0,
+            sentenceText: "あめ", surface: "あめ",
+            source: .transcript(sentenceIndex: 0, tokenIndex: 0)
+        )
+
+        let leading = try #require(model.selectedLookup?.content.displayResult?.entries.first)
+        #expect(leading.keb == "雨")
+    }
+
+    @Test("an unfavorited lookup still leads with the entry the dictionary ranked first")
+    func unfavoritedLookupKeepsItsRanking() async throws {
+        let model = makeModel()
+        await model.runLookup(
+            segments: [LookupSegment(surface: "あめ")], tappedAt: 0,
+            sentenceText: "あめ", surface: "あめ",
+            source: .transcript(sentenceIndex: 0, tokenIndex: 0)
+        )
+
+        let leading = try #require(model.selectedLookup?.content.displayResult?.entries.first)
+        #expect(leading.keb == "飴")
     }
 
     // MARK: - Lifecycle

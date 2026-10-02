@@ -202,7 +202,7 @@ extension AppModel {
             // hit, or a not-found with related fallback hits; a bare miss
             // (nothing resolved) posts the amber warning pill instead.
             if let content = resolved.flatMap({ resolution in
-                Self.lookupContent(for: resolution, surface: surface)
+                lookupContent(for: resolution, surface: surface)
             }) {
                 presentLookup(content: content, source: source)
             } else {
@@ -218,18 +218,20 @@ extension AppModel {
         }
     }
 
-    /// The content a resolved tap pins, or nil when nothing resolved at
-    /// all — a not-found resolution without related hits is a bare miss,
-    /// and posts the warning pill instead of pinning an empty card.
-    private static func lookupContent(
+    /// The content a resolved tap pins, or nil when nothing resolved at all —
+    /// a not-found resolution without related hits is a bare miss, and posts
+    /// the warning pill instead of pinning an empty card. A found content also
+    /// leads on a favorited entry where its pager has one, so tapping a word
+    /// the user has studied opens the study instead of the homograph above it.
+    private func lookupContent(
         for resolved: LookupResolution, surface: String
     ) -> LookupContent? {
         switch resolved {
         case let .found(outcome):
-            .found(
+            favorites.promotingFavorites(in: .found(
                 result: outcome.display, also: outcome.also,
                 origin: outcome.displayOrigin
-            )
+            ))
         case let .notFound(related):
             related.isEmpty ? nil : .notFound(surface: surface, related: related)
         }
