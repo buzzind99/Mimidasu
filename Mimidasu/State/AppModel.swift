@@ -123,6 +123,12 @@ final class AppModel {
     /// Non-secret ASR model selection (Lite default, Full opt-in); persisted
     /// across launches. Switching applies at the next session start.
     let asrModelSettings: ASRModelSettings
+    /// The user's starred words, persisted in their own SQLite file and
+    /// outliving sessions (unlike `pinnedLookup`/`selectedLookup`, which
+    /// `wireSessionController` resets). Every mutation runs on the main
+    /// actor; the transcript render path probes the store's in-memory
+    /// match set, never the database.
+    let favorites: FavoritesStore
 
     /// Latest resolve result per choice (bundled → downloaded → dev, SHA-256
     /// verified). The Settings Model section reads it to enable selection;
@@ -237,6 +243,7 @@ final class AppModel {
         )? = nil,
         translationSettings: TranslationSettings? = nil,
         asrModelSettings: ASRModelSettings? = nil,
+        favorites: FavoritesStore? = nil,
         translationTransport: HTTPTranslationTransport? = nil,
         highFidelityProbe: @escaping @Sendable (String) async -> Bool = { code in
             await AppModel.checkHighFidelityAvailability(targetCode: code)
@@ -252,6 +259,7 @@ final class AppModel {
     ) {
         self.translationSettings = translationSettings ?? TranslationSettings()
         self.asrModelSettings = asrModelSettings ?? ASRModelSettings()
+        self.favorites = favorites ?? FavoritesStore()
         self.jmDictLookup = jmDictLookup ?? JMDictLookup()
         modelResolve = initialModelResolve
         self.translationTransport = translationTransport

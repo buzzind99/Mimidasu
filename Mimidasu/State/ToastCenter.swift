@@ -12,6 +12,7 @@ enum ToastKey {
     static let asrWarning = "asr.warning"
     static let exportFailed = "export.failed"
     static let dictionaryLookup = "dictionary.lookup"
+    static let favorites = "favorites.unavailable"
 }
 
 /// State behind the toast stack. Posts are deduped by key — a repeat event
