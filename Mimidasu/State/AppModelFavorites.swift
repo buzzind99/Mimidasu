@@ -6,11 +6,27 @@ import Foundation
 /// rules live there; this file only owns the *outcomes* (which notice or
 /// toast each result deserves, and whether a press needs asking about).
 extension AppModel {
-    /// Removes `headword` once its confirmation has been answered. Silent like
-    /// every other removal — the alert already said what happened, and a pill
-    /// would only cover the transcript.
+    /// Removes `headword` once its confirmation has been answered. A removal
+    /// that succeeds is silent — the alert already said what happened, and a
+    /// pill would only cover the transcript. A removal the store could not
+    /// perform is the opposite case: nothing changed on screen, so it reports
+    /// itself the same way the add path does.
     func confirmFavoriteRemoval(headword: String) {
-        favorites.remove(headword: headword)
+        if case .failed = favorites.remove(headword: headword) {
+            postUnavailable()
+        }
+    }
+
+    /// The one surface a broken store has. Persistent and red, because it is a
+    /// fault rather than an outcome, and keyed so it replaces itself in place
+    /// instead of stacking on every failed star press.
+    private func postUnavailable() {
+        toasts.post(
+            key: ToastKey.favorites, style: .redPersistent,
+            title: "Favorites unavailable",
+            body: "The favorites list could not be updated. Remove "
+                + "favorites.sqlite from Application Support to start over."
+        )
     }
 
     /// Stars the displayed entry's headword. An entry that is already a
@@ -42,12 +58,7 @@ extension AppModel {
                 tone: .warning
             )
         case .failed:
-            toasts.post(
-                key: ToastKey.favorites, style: .redPersistent,
-                title: "Favorites unavailable",
-                body: "The favorites list could not be updated. Remove "
-                    + "favorites.sqlite from Application Support to start over."
-            )
+            postUnavailable()
         default:
             // `.removed` and `.pendingRemoval` cannot arrive: the guard above
             // returns for an already-starred word, and `FavoritesStore.toggle`
@@ -67,7 +78,8 @@ extension AppModel {
     }
 
     /// The per-segment probe the transcript, live strip, and HUD pass down.
-    /// Built fresh per access so each render gets a stable closure value.
+    /// A fresh closure per access: identity is meaningless here, which is why
+    /// membership changes travel as `favorites.revision` instead.
     var favoriteSegmentMatcher: (ReadingSegment) -> Bool {
         let store = favorites
         return { segment in store.matches(segment: segment) }
