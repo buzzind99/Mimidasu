@@ -17,8 +17,6 @@ struct ToastStackView: View {
             }
         }
         .animation(.spring(duration: 0.3), value: center.toasts)
-        .padding(.trailing, 20)
-        .padding(.top, 16)
     }
 }
 

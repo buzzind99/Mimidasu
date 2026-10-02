@@ -17,6 +17,15 @@ extension EnvironmentValues {
     @Entry var favoritesButtonHover: FavoritesButtonHover?
 }
 
+/// Button style with zero pressed-state feedback: the label renders
+/// identically idle, hovered, and pressed. The floating star manages its own
+/// ghost opacity, so `.plain`'s mouse-down dimming would fight it.
+private struct StaticButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+    }
+}
+
 /// Root view: onboarding until the model resolves, then the main shell —
 /// sidebar | 1pt divider | transcript pane with the live strip, the toast
 /// stack overlaid top-trailing, and the notice pill overlaid top.
@@ -26,6 +35,17 @@ struct ContentView: View {
     var latency: LatencyState
 
     @AppearanceSetting private var appearance
+    @Environment(\.openWindow) private var openWindow
+    /// Backing state for the floating favorite-list button (ghosted until
+    /// hovered) and the word-hover stand-down flag the surfaces read.
+    @State private var favoritesButtonHover = FavoritesButtonHover()
+    /// When the favorites window last closed — same shape as the Settings
+    /// gear (`SidebarView.settingsClosedAt`): a star click is itself a click
+    /// outside the window, so resign-key closes it before this button's
+    /// mouse-up action runs, and a fresh close means the click already did
+    /// the toggle-off and must not re-open. Continuous clock: monotonic, so
+    /// a system-time step can't stretch or skip the guard.
+    @State private var favoritesClosedAt: ContinuousClock.Instant?
     /// The un-star awaiting confirmation, in the main window — one slot for
     /// both dictionary hosts. They are mounted together for a pinned lookup, so
     /// a slot per control could raise two dialogs; a slot per *window* cannot.
@@ -113,13 +133,61 @@ struct ContentView: View {
                     }
                 }
             }
+            // Toast stack and favorites opener share one top-trailing
+            // column: toasts push the star down by layout, and it glides
+            // back when they clear. The stack is conditional so its empty
+            // state never eats the inter-item spacing.
             .overlay(alignment: .topTrailing) {
-                ToastStackView(center: model.toasts)
+                VStack(alignment: .trailing, spacing: 12) {
+                    if !model.toasts.toasts.isEmpty {
+                        ToastStackView(center: model.toasts)
+                    }
+                    favoritesListButton
+                }
+                .padding(.trailing, 20)
+                .padding(.top, 16)
             }
             .overlay(alignment: .top) {
                 NoticePillView(center: model.notices)
             }
         }
         .background(Theme.window)
+        .environment(\.favoritesButtonHover, favoritesButtonHover)
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
+            guard (note.object as? NSWindow)?.title == "Favorites" else { return }
+            favoritesClosedAt = .now
+        }
+    }
+
+    /// Floating favorite-list opener. Same 34pt circle chrome as the transcript
+    /// jump buttons; ghosted until hovered so the text behind stays readable.
+    /// Hit area is deliberately the full square, not the circle: corner
+    /// hovers must not fall through to the word surfaces below.
+    private var favoritesListButton: some View {
+        Button {
+            if let favoritesClosedAt,
+               favoritesClosedAt.duration(to: .now) < .milliseconds(500)
+            {
+                return
+            }
+            openWindow(id: "favorites")
+        } label: {
+            Image(systemName: "star.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.favoriteStarYellow)
+                .frame(width: 34, height: 34)
+                .background(
+                    Circle()
+                        .fill(Theme.jumpButtonBackground)
+                        .overlay(Circle().stroke(Theme.jumpButtonStroke))
+                        .shadow(color: .black.opacity(0.4), radius: 10, y: 4)
+                )
+        }
+        .buttonStyle(StaticButtonStyle())
+        .opacity(favoritesButtonHover.isHovering ? 1 : 0.4)
+        .pointerStyle(.link)
+        .help("Favorite list")
+        .accessibilityLabel("Favorite list")
+        .onHover { hovering in favoritesButtonHover.isHovering = hovering }
     }
 }
