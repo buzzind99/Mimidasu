@@ -2,7 +2,8 @@ import SwiftUI
 
 // The pure content assembly (`DictionaryContent`) lives in
 // `DictionaryContent.swift`; this file holds the view types both dictionary
-// hosts render through.
+// hosts render through. The favorite star lives in
+// `DictionaryFavoriteButton.swift`.
 
 /// One row of tappable result pills under a mono label — the entry view's
 /// "also:" fallback hits and the not-found view's "related:" suggestions
@@ -169,6 +170,20 @@ struct DictionaryEntryContentView: View {
     /// When false the host renders the entry pager itself (the sidebar card
     /// puts it on the DICTIONARY label row to free headword width).
     var showsEntryPager = true
+    /// False hides the headword block — headword, inline reading, romaji, and
+    /// the header row's controls. For a host that already renders that
+    /// identity directly above (a favorites row expanding its own definition):
+    /// repeating it costs a line of the row and reads as a mistake. Everything
+    /// below it — badges, pitch pill, senses, "also:" — is unaffected.
+    var showsHeadword = true
+    /// Membership of the displayed entry's headword. Recomputed by each host
+    /// on every render rather than carried across lookups — a related-pill
+    /// promotion repins both hosts to a *different* entry, and a cached value
+    /// would show the previous one's membership until it happened to be
+    /// replaced.
+    var isFavorite = false
+    var favoriteStyle: DictionaryFavoriteStyle = .card
+    var onToggleFavorite: () -> Void = {}
     var onCopy: () -> Void = {}
     var onSelectAlso: (LookupResult) -> Void = { _ in }
     var onStepEntry: (Int) -> Void = { _ in }
@@ -226,7 +241,14 @@ struct DictionaryEntryContentView: View {
             if entryCount > 1, showsEntryPager {
                 entryPager
             }
+            // Both hosts lead with copy and follow with the star, so the reading order
+            // is the same in the narrow sidebar column and the wider popover.
+            // Only the glyph differs by `favoriteStyle`: the card's is a
+            // tiled 14pt mark that pairs with the copy tile, the popover's a
+            // bare 18pt glyph that keeps the header one line so the romaji
+            // below never moves.
             copyButton
+            favoriteButton
         }
     }
 
@@ -258,6 +280,15 @@ struct DictionaryEntryContentView: View {
     private var copyButton: some View {
         DictionaryCopyButton(
             placement: copyPlacement, help: "Copy the headword", action: onCopy
+        )
+    }
+
+    private var favoriteButton: some View {
+        DictionaryFavoriteButton(
+            isFavorite: isFavorite,
+            subject: headword,
+            style: favoriteStyle,
+            action: onToggleFavorite
         )
     }
 
@@ -305,19 +336,21 @@ struct DictionaryEntryContentView: View {
         .background(Capsule().fill(Theme.tileFill))
     }
 
-    /// Everything above the senses: header (+ pager/copy), romaji, badges,
+    /// Everything above the senses: header (+ pager/copy/star), romaji, badges,
     /// pitch pill — never scrolls in the card host. Nested `spacing: 8`
     /// matches the outer VStack so the inline (popover) layout is unchanged.
     private var topSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                headerRow
-                if let romaji = DictionaryContent.romaji(for: entry) {
-                    Text(romaji)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Theme.secondaryText)
-                        .lineLimit(1)
-                        .textSelection(.disabled)
+            if showsHeadword {
+                VStack(alignment: .leading, spacing: 2) {
+                    headerRow
+                    if let romaji = DictionaryContent.romaji(for: entry) {
+                        Text(romaji)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(Theme.secondaryText)
+                            .lineLimit(1)
+                            .textSelection(.disabled)
+                    }
                 }
             }
             badgeRow
