@@ -420,7 +420,7 @@ struct RubyTextView: View, Equatable {
                 units.append(.annotated(
                     surface: segment.surface, note: note, isFavorite: favorite
                 ))
-            } else if case let .plain(run, isFavorite)? = units.last, !isFavorite, !favorite {
+            } else if case let .plain(run, runIsFavorite)? = units.last, !runIsFavorite, !favorite {
                 units[units.count - 1] = .plain(run + segment.surface, isFavorite: false)
             } else {
                 units.append(.plain(segment.surface, isFavorite: favorite))
