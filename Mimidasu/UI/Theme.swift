@@ -156,6 +156,13 @@ enum Theme {
     /// Engine-status dots (green = running, yellow = transitioning).
     static let dotGreen = SharedTokens.statusGreen
     static let dotYellow = Color(light: 0xB45309, dark: 0xFBBF24)
+    /// Favorite star tint: bright yellow in light, darker gold in dark.
+    static let favoriteStarYellow = Color(light: 0xFFCC00, dark: 0xC79A00)
+    /// Favorite words in the transcript / live strip / HUD. Shares the star's
+    /// yellow in light appearance so a recolored word reads as the same
+    /// "yours" as the glyph that starred it; dark appearance keeps its own,
+    /// lighter gold because the star tint is already tuned for dark chrome.
+    static let favoriteAccent = Color(light: 0xFFCC00, dark: 0xFFC24B)
 
     // MARK: Toast
 
