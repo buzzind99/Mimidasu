@@ -254,10 +254,17 @@ struct RubyTextView: View, Equatable {
 
     /// Legacy path: annotation-folded units, or plain text when nothing is
     /// annotatable. The HUD and every non-dictionary mode render here.
+    ///
+    /// "Nothing to show" is annotated *or* favorited, not annotated alone: in
+    /// furigana mode a sentence with no kanji anywhere yields only plain units,
+    /// so gating on annotation alone dropped the favorites those sentences carry
+    /// — the commonest ones — on the floor.
     @ViewBuilder
     private var annotatedBody: some View {
         let units = displayUnits
-        if annotation != .none, units.contains(where: \.isAnnotated) {
+        if annotation != .none,
+           units.contains(where: { unit in unit.isAnnotated || unit.isFavorite })
+        {
             FlowLayout(spacing: 4, lineSpacing: 1, fingerprint: fingerprint) {
                 ForEach(Array(units.enumerated()), id: \.offset) { _, unit in
                     unitView(unit)
@@ -364,6 +371,16 @@ struct RubyTextView: View, Equatable {
         var isAnnotated: Bool {
             guard case .annotated = self else { return false }
             return true
+        }
+
+        /// Whether this unit carries the favorite color. The path gate reads it
+        /// alongside `isAnnotated`: a sentence whose only marked unit is a
+        /// favorite still has to render as units to show the color.
+        var isFavorite: Bool {
+            switch self {
+            case let .plain(_, isFavorite): isFavorite
+            case let .annotated(_, _, isFavorite): isFavorite
+            }
         }
     }
 
