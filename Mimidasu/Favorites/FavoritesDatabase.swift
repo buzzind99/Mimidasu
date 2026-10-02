@@ -5,10 +5,11 @@ import Synchronization
 ///
 /// Sendable by construction, mirroring `JMDictLookup`: the only mutable state
 /// is the lazily opened handle, held in a `Mutex`-guarded `State`, and every
-/// query runs inside its `withLock` scope. A failure to open or to create the
-/// schema is terminal for the instance — `degraded` — and every operation
-/// then throws `Error.degraded`, so a corrupt or unwritable file degrades the
-/// feature instead of taking the app down.
+/// query runs inside its `withLock` scope. Failing to open or to create the
+/// schema is terminal for the instance — `degraded` — so a corrupt or
+/// unwritable file degrades the feature instead of taking the app down. A
+/// later operation that fails is *not* terminal: the handle stays open, so a
+/// transient fault (a busy or full disk) costs one press rather than the list.
 final class FavoritesDatabase: Sendable {
     enum Error: Swift.Error, Equatable {
         /// The database could not be opened or its schema created.
