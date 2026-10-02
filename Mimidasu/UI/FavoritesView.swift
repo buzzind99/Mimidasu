@@ -221,7 +221,7 @@ struct FavoritesView: View {
         let trimmed = debouncedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let message = trimmed.isEmpty
             ? "No favorites yet. Star a word from the dictionary popover."
-            : "No favorites match \"\(trimmed)\"."
+            : "No favorites match “\(trimmed)”."
         return Text(message)
             .font(.system(size: 13))
             .foregroundStyle(Theme.secondaryText)
@@ -256,23 +256,7 @@ struct FavoritesView: View {
                 lookupState.toggle(word)
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                        Text(verbatim: word.headword)
-                            .font(.system(size: 26))
-                            .foregroundStyle(Theme.primaryText)
-                            .lineLimit(1)
-                            .textSelection(.disabled)
-                            .fixedSize(horizontal: true, vertical: false)
-                        if let reading = word.reading {
-                            Text(verbatim: reading)
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(Theme.annotationPink)
-                                .lineLimit(1)
-                                .textSelection(.disabled)
-                                .fixedSize(horizontal: true, vertical: false)
-                        }
-                        Spacer(minLength: 8)
-                    }
+                    headwordBlock(word)
                     if let romaji = word.romaji {
                         Text(verbatim: romaji)
                             .font(.system(size: 11, design: .monospaced))
@@ -289,6 +273,48 @@ struct FavoritesView: View {
             .help(lookupState.isExpanded(word) ? "Hide definition" : "Show definition")
             trailingControls(word)
         }
+    }
+
+    /// The headword and its kana: inline while the pair fits the row, stacked
+    /// with the kana above the word when it does not. Both texts are
+    /// `fixedSize` inline, so a long entry would otherwise draw past the card's
+    /// stroke and push the trailing controls off a window that cannot resize —
+    /// the same reason the shared dictionary header carries this fallback.
+    /// The stacked form drops `fixedSize` from the headword, so it truncates on
+    /// its own line rather than competing with the kana.
+    private func headwordBlock(_ word: FavoriteWord) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                headwordText(word.headword)
+                    .fixedSize(horizontal: true, vertical: false)
+                if let reading = word.reading {
+                    readingText(reading, size: 14)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                if let reading = word.reading {
+                    readingText(reading, size: 12)
+                }
+                headwordText(word.headword)
+            }
+        }
+    }
+
+    private func headwordText(_ headword: String) -> some View {
+        Text(verbatim: headword)
+            .font(.system(size: 26))
+            .foregroundStyle(Theme.primaryText)
+            .lineLimit(1)
+            .textSelection(.disabled)
+    }
+
+    private func readingText(_ reading: String, size: CGFloat) -> some View {
+        Text(verbatim: reading)
+            .font(.system(size: size, weight: .medium))
+            .foregroundStyle(Theme.annotationPink)
+            .lineLimit(1)
+            .textSelection(.disabled)
     }
 
     /// Copy, unstar, and the disclosure chevron — the same order the shared
@@ -342,6 +368,11 @@ struct FavoritesView: View {
                     .controlSize(.small)
             case let .resolved(result):
                 if let entry = result.entries.first {
+                    // No favorite or copy arguments: `showsHeadword: false`
+                    // drops the header row, which is the only place either is
+                    // rendered, so passing them would assert a control the
+                    // expanded block cannot show. The row's own header above
+                    // carries both.
                     DictionaryEntryContentView(
                         entry: entry,
                         entryCount: result.entries.count,
@@ -349,13 +380,8 @@ struct FavoritesView: View {
                         also: [],
                         senseLimit: nil,
                         glossLimit: nil,
-                        copyPlacement: .icon,
                         showsEntryPager: false,
-                        showsHeadword: false,
-                        isFavorite: true,
-                        favoriteStyle: .card,
-                        onToggleFavorite: { askToRemove(word.headword) },
-                        onCopy: { model.copySnippet(word.headword) }
+                        showsHeadword: false
                     )
                 } else {
                     lookupUnavailable(word)
@@ -372,7 +398,7 @@ struct FavoritesView: View {
     }
 
     private func lookupUnavailable(_ word: FavoriteWord, message: String = "") -> some View {
-        Text(message.isEmpty ? "No definition for \"\(word.headword)\"." : message)
+        Text(message.isEmpty ? "No definition for “\(word.headword)”." : message)
             .font(.system(size: 12))
             .foregroundStyle(Theme.secondaryText)
             .fixedSize(horizontal: false, vertical: true)
@@ -392,8 +418,8 @@ struct FavoritesView: View {
         }
         .buttonStyle(.plain)
         .pointerStyle(.link)
-        .help("Remove \"\(word.headword)\" from favorites")
-        .accessibilityLabel("Remove \"\(word.headword)\" from favorites")
+        .help("Remove “\(word.headword)” from favorites")
+        .accessibilityLabel("Remove “\(word.headword)” from favorites")
     }
 
     /// Raises the question. Both star sites come through here so the slot is

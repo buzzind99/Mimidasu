@@ -59,7 +59,7 @@ struct DictionaryFavoriteButton: View {
 
     private var help: String {
         isFavorite
-            ? "Remove \"\(subject)\" from favorites"
-            : "Add \"\(subject)\" to favorites"
+            ? "Remove “\(subject)” from favorites"
+            : "Add “\(subject)” to favorites"
     }
 }
