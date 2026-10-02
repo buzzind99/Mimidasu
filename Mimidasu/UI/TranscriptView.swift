@@ -41,7 +41,13 @@ struct TranscriptView: View {
     static let topAnchorID = "transcript-top-anchor"
 
     var body: some View {
-        ScrollViewReader { proxy in
+        // Read here, in the body, and not inside the row closure: the
+        // matcher accessor only *builds* a closure and observes nothing, so
+        // passing it alone would register no dependency and an already-rendered
+        // row would keep its old colors. Reading the revision registers the
+        // observation that re-diffs the rows (see `lookupAnchor(for:)`).
+        let favoriteRevision = model.favorites.revision
+        return ScrollViewReader { proxy in
             List {
                 Color.clear
                     .frame(height: 1)
@@ -76,6 +82,8 @@ struct TranscriptView: View {
                         lookupPopover: { tokenIndex in
                             lookupPopover(entry.sentence.index, tokenIndex)
                         },
+                        favoritesRevision: favoriteRevision,
+                        isFavorite: model.favoriteSegmentMatcher,
                         fadesIn: entry.id == model.entries.last?.id
                     )
                     .id(entry.id)

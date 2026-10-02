@@ -30,7 +30,18 @@ struct TranscriptRow: View, Equatable {
     /// segment index (`RubyTextView.LookupPopover`). Excluded from `==`:
     /// `lookupAnchor` covers the changes that must re-render the row, and
     /// the closure is stable per parent render.
-    var lookupPopover: ((Int) -> RubyTextView.LookupPopover?)?
+    var lookupPopover: ((Int) -> RubyTextView.LookupPopover)?
+    /// Bumped by `FavoritesStore` on every membership change. Part of `==`:
+    /// `List` skips rows whose `==` holds, so without this a star toggle
+    /// would never repaint a row that is already on screen. It is *also*
+    /// forwarded to `RubyTextView`, which is `Equatable` in its own right —
+    /// a failing row witness alone re-runs this body but leaves the ruby
+    /// view equal to its previous value, and a matcher closure can never
+    /// break that tie.
+    let favoritesRevision: Int
+    /// Excluded from `==`: the closure is stable per parent render, and
+    /// `favoritesRevision` covers the data change it would react to.
+    var isFavorite: ((ReadingSegment) -> Bool)?
     /// True only while this row is the newest entry: a freshly appended
     /// row fades in, while older rows render opaque so recycled rows
     /// scrolling back into view don't re-fade. Part of `==`: the demotion
@@ -52,6 +63,7 @@ struct TranscriptRow: View, Equatable {
             && lhs.scale == rhs.scale
             && lhs.cursorMode == rhs.cursorMode
             && lhs.lookupAnchor == rhs.lookupAnchor
+            && lhs.favoritesRevision == rhs.favoritesRevision
             && lhs.fadesIn == rhs.fadesIn
     }
 
@@ -76,7 +88,9 @@ struct TranscriptRow: View, Equatable {
                     cursorMode: cursorMode,
                     onCopy: onCopy,
                     onLookup: onLookup,
-                    lookupPopover: lookupPopover
+                    lookupPopover: lookupPopover,
+                    isFavoriteSegment: isFavorite,
+                    favoritesRevision: favoritesRevision
                 )
                 .textSelection(.enabled)
 

@@ -14,6 +14,15 @@ struct HUDView: View {
     /// Set on offscreen measurement copies: fixes the layout width so the
     /// measured ideal height reflects text wrapped at the real HUD width.
     var fixedWidth: CGFloat?
+    /// Favorite matcher for both JP surfaces, plus the revision read at the two
+    /// call sites below — which evaluate inside `hudContent`'s body, so a star
+    /// press repaints text the HUD already shows. (The matcher accessor alone
+    /// would not: it builds a closure and observes nothing.) The HUD passes no
+    /// `onLookup`, so it never reaches the segmented path, and in None
+    /// annotation both surfaces stay on the plain fallback.
+    private var favoriteRevision: Int {
+        model.favorites.revision
+    }
 
     var body: some View {
         if let fixedWidth {
@@ -121,7 +130,9 @@ struct HUDView: View {
                     reservesAnnotationLine: true,
                     // Growing partial revisions never repeat — don't churn
                     // the annotator cache with them.
-                    cachesSegments: false
+                    cachesSegments: false,
+                    isFavoriteSegment: model.favoriteSegmentMatcher,
+                    favoritesRevision: favoriteRevision
                 )
                 .foregroundStyle(.white)
                 .fixedSize(horizontal: false, vertical: true)
@@ -206,7 +217,9 @@ struct HUDView: View {
             furiganaFont: .system(size: 11 * uiScale.factor, design: .monospaced),
             annotationColor: Theme.hudAnnotation,
             cursorMode: cursorMode,
-            onCopy: { text in model.copySnippet(text) }
+            onCopy: { text in model.copySnippet(text) },
+            isFavoriteSegment: model.favoriteSegmentMatcher,
+            favoritesRevision: favoriteRevision
         )
         .foregroundStyle(.white)
     }
