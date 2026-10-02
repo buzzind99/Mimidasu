@@ -122,14 +122,24 @@ final class FavoritesStore {
         return .added
     }
 
-    /// Removes by the *raw* spelling while probing the normalized set, so a
-    /// row whose stored headword folds onto another form is still removable.
+    /// Removes by the spellings the rows were *stored* under, while membership
+    /// is probed by the normalized form — the two are different questions, and
+    /// the file has to answer the delete in its own terms. A row stored as
+    /// `ｺｰﾋｰ` and removed as `コーヒー` is the same word, but `DELETE` matches
+    /// the stored text exactly: deleting by the requested spelling would match
+    /// no row, clear the memory, and let the favorite reappear on the next
+    /// launch.
     @discardableResult
     func remove(headword: String) -> FavoriteToggle {
         let key = FavoriteWord.normalize(headword)
         guard matchKeys.contains(key) else { return .removed }
+        // Non-empty: `matchKeys` holds a key only because a loaded row
+        // normalizes to it.
+        let doomed = words.filter { word in FavoriteWord.normalize(word.headword) == key }
         do {
-            try database.delete(headword: headword)
+            for word in doomed {
+                try database.delete(headword: word.headword)
+            }
         } catch {
             return .failed
         }

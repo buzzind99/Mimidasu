@@ -33,6 +33,11 @@ struct FavoritesStoreTests {
     private static let oi = FavoriteWord(
         headword: "おい", reading: "おい", romaji: "oi", addedAt: 1005
     )
+    /// Carries the one character a user can type that would otherwise match
+    /// every row.
+    private static let underscored = FavoriteWord(
+        headword: "A_B", reading: nil, romaji: nil, addedAt: 1006
+    )
 
     /// A fresh temp directory, the store file inside it, and the closure that
     /// removes the directory. Unique per call, so parallel tests never share
@@ -125,17 +130,22 @@ struct FavoritesStoreTests {
         #expect(!store.matches(segment: segment("見た", lemma: "見る")))
     }
 
-    @Test("membership probes the normalized form, not the raw spelling")
+    @Test("a word whose stored spelling folds onto another form is still deletable")
     func removeThroughNormalizedKey() {
-        let (store, cleanup) = makeStore()
+        let (location, cleanup) = makeLocation()
         defer { cleanup() }
+        let store = FavoritesStore(location: location)
         store.toggle(
             FavoriteWord(headword: "ｺｰﾋｰ", reading: nil, romaji: nil, addedAt: 1)
         )
 
         store.remove(headword: "コーヒー")
 
-        #expect(store.count == 0)
+        // The reopen is the assertion that matters: membership is probed by
+        // normalized key, but the row was stored halfwidth, so a delete by the
+        // requested spelling would match nothing in the file and the favorite
+        // would come back on the next launch.
+        #expect(FavoritesStore(location: location).words.isEmpty)
     }
 
     // MARK: - Reading arm
@@ -301,6 +311,16 @@ struct FavoritesStoreTests {
         store.toggle(Self.ko)
 
         #expect(store.search("%").map(\.headword) == ["50%"])
+    }
+
+    @Test("an underscore is matched literally, not as a single-character wildcard")
+    func searchEscapesUnderscore() {
+        let (store, cleanup) = makeStore()
+        defer { cleanup() }
+        store.toggle(Self.miru)
+        store.toggle(Self.underscored)
+
+        #expect(store.search("_").map(\.headword) == ["A_B"])
     }
 
     // MARK: - Cap
