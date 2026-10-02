@@ -146,6 +146,29 @@ final class SQLiteDatabaseTests {
         #expect(try !statement.step())
     }
 
+    // MARK: - Write path
+
+    @Test("writable creates the file and executes unbound DDL and DML")
+    func writableExecutesStatements() throws {
+        let url = tempRoot.appendingPathComponent("favorites.sqlite")
+        let db = try SQLiteDatabase.writable(path: url.path)
+
+        try db.execute("CREATE TABLE IF NOT EXISTS favorites(headword TEXT PRIMARY KEY)")
+        try db.execute("INSERT INTO favorites(headword) VALUES ('見る')")
+
+        let statement = try db.statement("SELECT COUNT(*) FROM favorites")
+        #expect(try statement.step() && statement.requiredInt(0) == 1)
+    }
+
+    @Test("the read-only handle refuses a write at the engine, independent of its open flags")
+    func readOnlyHandleRefusesWrites() throws {
+        let db = try SQLiteDatabase(path: databaseURL.path)
+
+        #expect(throws: SQLiteDatabase.Error.self) {
+            try db.execute("INSERT INTO t(id, label) VALUES (3, 'gamma')")
+        }
+    }
+
     // MARK: - Close
 
     @Test("close is idempotent and statements after close throw")

@@ -9,10 +9,11 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// the app that imports SQLite3. Engines drive it through `statement(_:)`
 /// and the row accessors on `Statement`, so the raw C handle never escapes.
 ///
-/// Thread-safety is the caller's concern: `JMDictLookup` serializes access
-/// under its mutex, matching the single-handle lifetime it manages. The
-/// `@unchecked Sendable` records exactly that contract — the handle and the
-/// statement cache may only be touched from the caller's locked scope.
+/// Thread-safety is the caller's concern: `JMDictLookup` and
+/// `FavoritesDatabase` each serialize access under their own mutex, matching
+/// the single-handle lifetime they manage. The `@unchecked Sendable` records
+/// exactly that contract — the handle and the statement cache may only be
+/// touched from the caller's locked scope.
 final class SQLiteDatabase: @unchecked Sendable {
     enum Error: Swift.Error, Equatable {
         /// No handle could be created (an unopenable path).
@@ -78,9 +79,12 @@ final class SQLiteDatabase: @unchecked Sendable {
     private var preparedStatements: [String: OpaquePointer] = [:]
     private var isClosed = false
 
-    init(path: String) throws(Error) {
+    /// The only initializer that can carry write capability. Private so no
+    /// caller can pass flags — a defaulted `init(path:access:)` would put
+    /// `READWRITE` one keystroke away from the dictionary's call site.
+    private init(opening path: String, flags: Int32) throws(Error) {
         var opened: OpaquePointer?
-        guard sqlite3_open_v2(path, &opened, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+        guard sqlite3_open_v2(path, &opened, flags, nil) == SQLITE_OK,
               let opened
         else {
             let failure: Error = opened.map(Self.error) ?? .unavailable
@@ -88,6 +92,27 @@ final class SQLiteDatabase: @unchecked Sendable {
             throw failure
         }
         handle = opened
+    }
+
+    /// Read-only. The dictionary's entry point — and every existing call
+    /// site's. `query_only` is a second, independent lock: SQLite defines it
+    /// as blocking all changes to database files regardless of the open
+    /// flags, so a write against a prepared dictionary fails at the engine
+    /// even if the flags were ever wrong.
+    convenience init(path: String) throws(Error) {
+        try self.init(opening: path, flags: SQLITE_OPEN_READONLY)
+        do {
+            try execute("PRAGMA query_only = 1")
+        } catch {
+            close()
+            throw error
+        }
+    }
+
+    /// The only route to a writable handle. Favorites own their database;
+    /// the prepared dictionary must never be opened this way.
+    static func writable(path: String) throws(Error) -> SQLiteDatabase {
+        try SQLiteDatabase(opening: path, flags: SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE)
     }
 
     deinit {
@@ -112,6 +137,14 @@ final class SQLiteDatabase: @unchecked Sendable {
         }
         preparedStatements[sql] = prepared
         return Statement(prepared, database: handle)
+    }
+
+    /// Runs one statement that binds nothing (DDL, or a constant `PRAGMA`):
+    /// prepare, step once, discard the row cursor. A step that reports no
+    /// row is `SQLITE_DONE`, which for a write is success.
+    func execute(_ sql: String) throws(Error) {
+        let prepared = try statement(sql)
+        _ = try prepared.step()
     }
 
     /// The connection's current error code and message.
