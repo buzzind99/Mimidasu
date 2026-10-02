@@ -57,6 +57,16 @@ struct RubyTextView: View, Equatable {
     /// (closures carry no value identity); the host's anchor field covers
     /// the data change that must re-render the row.
     var lookupPopover: ((Int) -> LookupPopover?)?
+    /// Whether a rendered segment is a favorite; the host supplies the
+    /// matcher (the store's in-memory key set) and the color follows wherever
+    /// this view already renders per-segment surfaces. nil — any host that
+    /// passes no matcher — leaves every surface its inherited host color.
+    var isFavoriteSegment: ((ReadingSegment) -> Bool)?
+    /// Bumped by `FavoritesStore` on every membership change, and part of
+    /// `==`: `isFavoriteSegment` is a closure with no value identity, so
+    /// without this the view compares equal to its previous value across a
+    /// star toggle and SwiftUI skips the subtree that has to repaint.
+    var favoritesRevision: Int = 0
 
     /// One word unit's popover presentation, resolved by the host per
     /// segment index: the binding presents only while that word is the
@@ -150,15 +160,34 @@ struct RubyTextView: View, Equatable {
         let font: Font
         var italic = false
         var hoverColor = Theme.accentPink
+        /// Overrides the inherited foreground — the favorite color. nil must
+        /// stay a *shape-style* nil, not `Color.primary`: with
+        /// `baseColor: Color?` the ternary's contextual type is `Color?`, so
+        /// `.primary` would resolve to an opaque, scheme-dependent color that
+        /// ignores the host's `.foregroundStyle` override and turns the HUD's
+        /// white surfaces black-on-black in light appearance. The explicit
+        /// `AnyShapeStyle.init` keeps the nil branch as
+        /// `HierarchicalShapeStyle.primary`, which is what inherits.
+        var baseColor: Color?
         var action: (() -> Void)?
 
         @State private var hovering = false
+        /// Stand-down flag from the floating favorite-list button: hover is
+        /// not exclusive, so without this the surface would light up while
+        /// the cursor is on the button above it. Nil where no button exists.
+        @Environment(\.favoritesButtonHover) private var favoritesButtonHover
 
         var body: some View {
+            let suppressed = favoritesButtonHover?.isHovering == true
+            let base: AnyShapeStyle = baseColor.map(AnyShapeStyle.init)
+                ?? AnyShapeStyle(.primary)
             Text(verbatim: text)
                 .font(font)
                 .italic(italic)
-                .foregroundStyle(hovering ? AnyShapeStyle(hoverColor) : AnyShapeStyle(.primary))
+                // Hover stays authoritative over the favorite color: it is the
+                // tap affordance, and the star stand-down only suppresses it
+                // for the surfaces under the floating button.
+                .foregroundStyle(hovering && !suppressed ? AnyShapeStyle(hoverColor) : base)
                 .textSelection(.disabled)
                 .onHover { isHovering in hovering = isHovering }
                 .pointerStyle(action == nil ? nil : .link)
@@ -166,9 +195,12 @@ struct RubyTextView: View, Equatable {
         }
     }
 
-    private func hoverableSurface(_ text: String, action: (() -> Void)? = nil) -> some View {
+    private func hoverableSurface(
+        _ text: String, isFavorite: Bool = false, action: (() -> Void)? = nil
+    ) -> some View {
         SurfaceText(
             text: text, font: surfaceFont, italic: surfaceItalic,
+            baseColor: isFavorite ? Theme.favoriteAccent : nil,
             action: action
         )
     }
@@ -260,11 +292,14 @@ struct RubyTextView: View, Equatable {
     private func segmentedUnitView(
         _ unit: SegmentedUnit, at index: Int, segments: [ReadingSegment]
     ) -> some View {
+        // The index is the segment index: this path never folds plain runs,
+        // so a unit's position in the array is its segment's position.
+        let favorite = isFavoriteSegment?(segments[index]) == true
         switch unit {
         case let .word(surface, note):
-            wordUnit(surface, note: note, index: index, segments: segments)
+            wordUnit(surface, note: note, isFavorite: favorite, index: index, segments: segments)
         case let .inert(surface):
-            plainUnit(surface, action: nil)
+            plainUnit(surface, isFavorite: favorite, action: nil)
         }
     }
 
@@ -274,36 +309,39 @@ struct RubyTextView: View, Equatable {
     /// all but the anchor word.
     @ViewBuilder
     private func wordUnit(
-        _ surface: String, note: String?, index: Int, segments: [ReadingSegment]
+        _ surface: String, note: String?, isFavorite: Bool, index: Int,
+        segments: [ReadingSegment]
     ) -> some View {
         let action = lookupAction(at: index, segments: segments)
         if let popover = lookupPopover?(index) {
-            wordContent(surface, note: note, action: action)
+            wordContent(surface, note: note, isFavorite: isFavorite, action: action)
                 .popover(isPresented: popover.isPresented) {
                     if let content = popover.content {
                         content
                     }
                 }
         } else {
-            wordContent(surface, note: note, action: action)
+            wordContent(surface, note: note, isFavorite: isFavorite, action: action)
         }
     }
 
     @ViewBuilder
     private func wordContent(
-        _ surface: String, note: String?, action: (() -> Void)?
+        _ surface: String, note: String?, isFavorite: Bool, action: (() -> Void)?
     ) -> some View {
         if let note {
-            annotatedUnit(surface, note: note, action: action)
+            annotatedUnit(surface, note: note, isFavorite: isFavorite, action: action)
         } else {
-            plainUnit(surface, action: action)
+            plainUnit(surface, isFavorite: isFavorite, action: action)
         }
     }
 
-    /// Excludes `onCopy`, `onLookup`, and `lookupPopover` (closures have
-    /// no value identity). The witness is `nonisolated` so the conformance
-    /// needs no `@preconcurrency`: every compared property is an immutable
-    /// Sendable value.
+    /// Excludes `onCopy`, `onLookup`, `lookupPopover`, and `isFavoriteSegment`
+    /// (closures have no value identity): for the last two, the change that
+    /// must re-render arrives as `lookupAnchor` and `favoritesRevision`. The
+    /// witness is `nonisolated` so the conformance needs no
+    /// `@preconcurrency`: every compared property is an immutable Sendable
+    /// value.
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.text == rhs.text
             && lhs.annotation == rhs.annotation
@@ -314,11 +352,14 @@ struct RubyTextView: View, Equatable {
             && lhs.surfaceItalic == rhs.surfaceItalic
             && lhs.reservesAnnotationLine == rhs.reservesAnnotationLine
             && lhs.cursorMode == rhs.cursorMode
+            && lhs.favoritesRevision == rhs.favoritesRevision
     }
 
-    private enum DisplayUnit {
-        case plain(String)
-        case annotated(surface: String, note: String)
+    /// One rendered child on the legacy path. Internal (not private) so the
+    /// favorite run-break rule is unit-testable without a rendered view.
+    enum DisplayUnit: Equatable {
+        case plain(String, isFavorite: Bool)
+        case annotated(surface: String, note: String, isFavorite: Bool)
 
         var isAnnotated: Bool {
             guard case .annotated = self else { return false }
@@ -337,29 +378,53 @@ struct RubyTextView: View, Equatable {
             + "\(surfaceItalic)-\(surfaceFont.hashValue)-\(noteFont.hashValue)-\(text)"
     }
 
-    /// Segments folded for rendering: consecutive runs without a distinct
-    /// reading merge into one `.plain` child (whitespace and punctuation
-    /// arrive as separate segments from the annotator).
-    private var displayUnits: [DisplayUnit] {
-        guard let segments = ReadingAnnotator.segments(for: text, caching: cachesSegments) else {
-            return []
-        }
+    /// Pure folding rule for the legacy path: consecutive runs without a
+    /// distinct reading merge into one `.plain` child (whitespace and
+    /// punctuation arrive as separate segments from the annotator).
+    ///
+    /// The favorite flag is resolved *before* folding, and a run only folds
+    /// when none of its segments is a favorite. That guard is load-bearing,
+    /// not vestigial: two real cases drop a starred segment into an otherwise
+    /// plain run — a reading-less kanji in romaji mode, whose reading equals
+    /// its surface, and every kana-only surface in furigana mode, whose
+    /// furigana is nil unless the surface contains kanji (コーヒー,
+    /// ゆっくり). Folding them would leave the commonest favorites silently
+    /// uncolored in exactly the mode a reader is most likely to use.
+    static func displayUnits(
+        for segments: [ReadingSegment], annotation: ReadingAnnotation,
+        isFavorite: ((ReadingSegment) -> Bool)?
+    ) -> [DisplayUnit] {
         var units: [DisplayUnit] = []
         units.reserveCapacity(segments.count)
         for segment in segments {
-            let note = reading(for: segment)
+            let note = reading(for: segment, annotation: annotation)
+            let favorite = isFavorite?(segment) == true
             if let note, note != segment.surface {
-                units.append(.annotated(surface: segment.surface, note: note))
-            } else if case let .plain(run)? = units.last {
-                units[units.count - 1] = .plain(run + segment.surface)
+                units.append(.annotated(
+                    surface: segment.surface, note: note, isFavorite: favorite
+                ))
+            } else if case let .plain(run, isFavorite)? = units.last, !isFavorite, !favorite {
+                units[units.count - 1] = .plain(run + segment.surface, isFavorite: false)
             } else {
-                units.append(.plain(segment.surface))
+                units.append(.plain(segment.surface, isFavorite: favorite))
             }
         }
         return units
     }
 
-    private func reading(for segment: ReadingSegment) -> String? {
+    /// The segments this body renders, folded.
+    private var displayUnits: [DisplayUnit] {
+        guard let segments = ReadingAnnotator.segments(for: text, caching: cachesSegments) else {
+            return []
+        }
+        return Self.displayUnits(
+            for: segments, annotation: annotation, isFavorite: isFavoriteSegment
+        )
+    }
+
+    private static func reading(
+        for segment: ReadingSegment, annotation: ReadingAnnotation
+    ) -> String? {
         annotation == .furigana ? segment.furigana : segment.romaji
     }
 
@@ -378,14 +443,16 @@ struct RubyTextView: View, Equatable {
     @ViewBuilder
     private func unitView(_ unit: DisplayUnit) -> some View {
         switch unit {
-        case let .plain(run):
-            plainUnit(run, action: copyAction(run))
-        case let .annotated(surface, note):
-            annotatedUnit(surface, note: note, action: copyAction(surface))
+        case let .plain(run, isFavorite):
+            plainUnit(run, isFavorite: isFavorite, action: copyAction(run))
+        case let .annotated(surface, note, isFavorite):
+            annotatedUnit(surface, note: note, isFavorite: isFavorite, action: copyAction(surface))
         }
     }
 
-    private func annotatedUnit(_ surface: String, note: String, action: (() -> Void)?) -> some View {
+    private func annotatedUnit(
+        _ surface: String, note: String, isFavorite: Bool, action: (() -> Void)?
+    ) -> some View {
         VStack(spacing: 0) {
             // Furigana mode already renders the annotation line above
             // the surface; the reservation is only needed for modes
@@ -399,9 +466,9 @@ struct RubyTextView: View, Equatable {
                     .foregroundStyle(annotationColor)
                     .lineLimit(1)
                     .textSelection(.disabled)
-                hoverableSurface(surface, action: action)
+                hoverableSurface(surface, isFavorite: isFavorite, action: action)
             } else {
-                hoverableSurface(surface, action: action)
+                hoverableSurface(surface, isFavorite: isFavorite, action: action)
                 Text(verbatim: note)
                     .font(noteFont)
                     .foregroundStyle(annotationColor)
@@ -418,14 +485,16 @@ struct RubyTextView: View, Equatable {
     /// unless `reservesAnnotationLine` asks for the line above as well, to
     /// pin the surface to the same height across all annotation modes.)
     @ViewBuilder
-    private func plainUnit(_ surface: String, action: (() -> Void)?) -> some View {
+    private func plainUnit(
+        _ surface: String, isFavorite: Bool, action: (() -> Void)?
+    ) -> some View {
         if annotation == .furigana || reservesAnnotationLine {
             VStack(spacing: 0) {
                 reservedAnnotationLine
-                hoverableSurface(surface, action: action)
+                hoverableSurface(surface, isFavorite: isFavorite, action: action)
             }
         } else {
-            hoverableSurface(surface, action: action)
+            hoverableSurface(surface, isFavorite: isFavorite, action: action)
         }
     }
 }

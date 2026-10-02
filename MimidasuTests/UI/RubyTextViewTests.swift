@@ -29,7 +29,9 @@ struct RubyTextViewTests {
         onCopy: ((String) -> Void)? = nil,
         onLookup: ((LookupToken) -> Void)? = nil,
         lookupPopover: ((Int) -> RubyTextView.LookupPopover?)? = nil,
-        reservesAnnotationLine: Bool = false
+        reservesAnnotationLine: Bool = false,
+        isFavoriteSegment: ((ReadingSegment) -> Bool)? = nil,
+        favoritesRevision: Int = 0
     ) -> RubyTextView {
         RubyTextView(
             text: "テスト",
@@ -40,7 +42,9 @@ struct RubyTextViewTests {
             cursorMode: cursorMode,
             onCopy: onCopy,
             onLookup: onLookup,
-            lookupPopover: lookupPopover
+            lookupPopover: lookupPopover,
+            isFavoriteSegment: isFavoriteSegment,
+            favoritesRevision: favoritesRevision
         )
     }
 
@@ -158,6 +162,26 @@ struct RubyTextViewTests {
         #expect(view().fingerprint != view(reservesAnnotationLine: true).fingerprint)
     }
 
+    @Test("a favorite toggle changes == so an already-painted surface repaints")
+    func equalityFailsOnFavoritesRevision() {
+        let starred = view(favoritesRevision: 1)
+
+        #expect(starred != view())
+    }
+
+    @Test("the favorite matcher alone cannot break ==, which is why the revision rides along")
+    func equalityIgnoresFavoriteMatcher() {
+        let matcherA = view(isFavoriteSegment: { _ in true })
+        let matcherB = view(isFavoriteSegment: { _ in false })
+
+        #expect(matcherA == matcherB)
+    }
+
+    @Test("fingerprint ignores favorites: color paints only, so the flow cache stays valid")
+    func fingerprintIgnoresFavorites() {
+        #expect(view().fingerprint == view(favoritesRevision: 1).fingerprint)
+    }
+
     // MARK: - Body plan
 
     @Test("nil and empty segments plan the plain fallback so the row never blanks")
@@ -183,6 +207,53 @@ struct RubyTextViewTests {
                 .inert(surface: "。")
             ])
         )
+    }
+
+    @Test("None annotation still plans one unit per segment, which is what makes path A colorable")
+    func noneAnnotationPlansFlow() {
+        let segments = [segment("コーヒー"), segment("。")]
+
+        #expect(
+            RubyTextView.segmentedBodyPlan(segments: segments, annotation: .none) == .flow([
+                .word(surface: "コーヒー", note: nil),
+                .inert(surface: "。")
+            ])
+        )
+    }
+
+    // MARK: - Favorite folding
+
+    @Test("a kana-only favorite breaks out of the plain run its neighbours fold into")
+    func favoriteBreaksPlainRun() {
+        // Furigana is nil for a kana-only surface, so without the run-break
+        // guard コーヒー would merge into one uncolored `.plain` child.
+        let segments = [
+            segment("おい"),
+            segment("コーヒー", furigana: nil),
+            segment("です")
+        ]
+
+        let units = RubyTextView.displayUnits(
+            for: segments, annotation: .furigana,
+            isFavorite: { segment in segment.surface == "コーヒー" }
+        )
+
+        #expect(units == [
+            .plain("おい", isFavorite: false),
+            .plain("コーヒー", isFavorite: true),
+            .plain("です", isFavorite: false)
+        ])
+    }
+
+    @Test("a run with no favorite still folds into one child")
+    func unfavoritedRunsStillFold() {
+        let segments = [segment("はい"), segment("。")]
+
+        let units = RubyTextView.displayUnits(
+            for: segments, annotation: .furigana, isFavorite: nil
+        )
+
+        #expect(units == [.plain("はい。", isFavorite: false)])
     }
 
     // MARK: - Tap payload

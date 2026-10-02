@@ -1,4 +1,21 @@
+import AppKit
 import SwiftUI
+
+/// Shared hover flag for the floating favorite-list button. Hover delivery
+/// is not exclusive, so without this the word surfaces below the button
+/// would light up while the cursor is on it. A reference, not a value: every
+/// reader must see the same instance for the flag to work across the
+/// transcript tree. The HUD and the Favorites window are separate windows and
+/// read the nil default, so neither is affected.
+@Observable
+@MainActor
+final class FavoritesButtonHover {
+    var isHovering = false
+}
+
+extension EnvironmentValues {
+    @Entry var favoritesButtonHover: FavoritesButtonHover?
+}
 
 /// Root view: onboarding until the model resolves, then the main shell —
 /// sidebar | 1pt divider | transcript pane with the live strip, the toast
