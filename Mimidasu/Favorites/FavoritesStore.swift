@@ -137,6 +137,13 @@ final class FavoritesStore {
         // normalizes to it.
         let doomed = words.filter { word in FavoriteWord.normalize(word.headword) == key }
         do {
+            // One delete per row rather than one statement: the spellings are
+            // only known from memory. If a later delete fails the file has lost
+            // the rows committed before it while memory still lists them — which
+            // heals on the next press, because membership is answered from
+            // memory and deleting an already-deleted row is a no-op. Wrapping
+            // the loop in a transaction would close the window; transaction
+            // support on the shared SQLite type is a separate change.
             for word in doomed {
                 try database.delete(headword: word.headword)
             }

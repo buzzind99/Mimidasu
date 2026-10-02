@@ -31,13 +31,17 @@ extension AppModel {
 
     /// Stars the displayed entry's headword. An entry that is already a
     /// favorite does not un-star on this press: it reports
-    /// `.pendingRemoval(headword)`, changes nothing, and the host raises the
-    /// confirmation — in its own state, so only the pressed host's alert
-    /// shows. `DictionaryContent.headword` is already `keb ?? reb`, so
+    /// `.pendingRemoval(headword)`, changes nothing, and the window raises the
+    /// confirmation from its single slot — hosts only forward the headword, so
+    /// the popover and the card, mounted together for one lookup, cannot both
+    /// present. `DictionaryContent.headword` is already `keb ?? reb`, so
     /// homographs sharing a `keb` share one row and one star state: they are
     /// the same word.
     @discardableResult
     func toggleFavorite(_ entry: JMDictEntry) -> FavoriteToggle {
+        // Every JMDict row carries at least one `reb`, so this only trips on a
+        // hand-built entry; it stays silent rather than blaming a store that is
+        // fine, and names nothing the user could act on.
         guard let headword = DictionaryContent.headword(of: entry) else { return .failed }
         if favorites.isFavorite(headword: headword) {
             return .pendingRemoval(headword: headword)
