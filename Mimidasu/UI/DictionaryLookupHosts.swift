@@ -23,12 +23,31 @@ extension AppModel {
 
 // MARK: - Hosts
 
+/// The un-star step both dictionary hosts run: the model decides whether a
+/// press was an add or a removal still to be confirmed, and only the latter is
+/// worth a question. Filing the question is the window's job, so the headword
+/// goes out and the host keeps nothing.
+@MainActor
+private func forwardRemovalRequest(
+    for entry: JMDictEntry, model: AppModel, to onRequest: (String) -> Void
+) {
+    if case let .pendingRemoval(headword) = model.toggleFavorite(entry) {
+        onRequest(headword)
+    }
+}
+
 /// The popover presented by the surface that owns the selection: the shared
-/// entry content with the labeled Copy pill, or the not-found state with
+/// entry content with the icon copy control, or the not-found state with
 /// its related suggestions.
 struct DictionaryPopoverView: View {
     var model: AppModel
     let selected: SelectedLookup
+    /// Raises the window-level un-star question. The popover cannot own it: an
+    /// alert inside a `.popover` presents as a sheet on the popover's own
+    /// window, and closing the popover underneath it strands that sheet's
+    /// dimming backdrop. The main window presents it instead, so the question
+    /// outlives the popover — the same place the sidebar card's lands.
+    let onFavoriteRemovalRequest: (String) -> Void
 
     var body: some View {
         Group {
@@ -43,7 +62,10 @@ struct DictionaryPopoverView: View {
                         displayOrigin: origin,
                         senseLimit: nil,
                         glossLimit: nil,
-                        copyPlacement: .pill,
+                        copyPlacement: .icon,
+                        isFavorite: model.isFavorite(entry),
+                        favoriteStyle: .popover,
+                        onToggleFavorite: { requestRemovalIfPending(entry) },
                         onCopy: {
                             model.copySnippet(DictionaryContent.headword(of: entry) ?? "")
                         },
@@ -53,7 +75,7 @@ struct DictionaryPopoverView: View {
                 }
             case let .notFound(surface, related):
                 DictionaryNotFoundView(
-                    surface: surface, related: related, copyPlacement: .pill,
+                    surface: surface, related: related, copyPlacement: .icon,
                     onSelectRelated: { result in model.selectAlsoPill(result) },
                     onCopy: { model.copySnippet(surface) }
                 )
@@ -62,6 +84,12 @@ struct DictionaryPopoverView: View {
         .padding(16)
         .frame(width: 400, alignment: .topLeading)
         .background(Theme.toastBackground)
+    }
+
+    /// The model decides whether a press was an add or a removal to confirm;
+    /// only a removal raises the question.
+    private func requestRemovalIfPending(_ entry: JMDictEntry) {
+        forwardRemovalRequest(for: entry, model: model, to: onFavoriteRemovalRequest)
     }
 }
 
@@ -76,6 +104,10 @@ struct DictionaryPopoverView: View {
 /// `SidebarView`), while the visible chrome keeps hugging its content.
 struct DictionaryCardView: View {
     var model: AppModel
+    /// Raises the window-level un-star question. Shared with
+    /// `DictionaryPopoverView` — one slot, one alert, in the window that owns
+    /// both hosts (see `FavoriteRemovalConfirmation`).
+    let onFavoriteRemovalRequest: (String) -> Void
 
     /// Measured fixed-chrome pieces feeding `sensesViewport`: the
     /// DICTIONARY label, the entry's fixed top section, and the "also:"
@@ -124,6 +156,12 @@ struct DictionaryCardView: View {
         .cardSurface()
     }
 
+    /// The model decides whether a press was an add or a removal to confirm;
+    /// only a removal raises the question.
+    private func requestRemovalIfPending(_ entry: JMDictEntry) {
+        forwardRemovalRequest(for: entry, model: model, to: onFavoriteRemovalRequest)
+    }
+
     /// The pinned content per state: the shared entry view for a found
     /// lookup, the not-found state with its related suggestions otherwise.
     /// The not-found block feeds the top-section probe so the (sense-less)
@@ -147,6 +185,9 @@ struct DictionaryCardView: View {
                     onSensesHeightChange: { height in sensesContentHeight = height },
                     copyPlacement: .icon,
                     showsEntryPager: false,
+                    isFavorite: model.isFavorite(entry),
+                    favoriteStyle: .card,
+                    onToggleFavorite: { requestRemovalIfPending(entry) },
                     onCopy: {
                         model.copySnippet(DictionaryContent.headword(of: entry) ?? "")
                     },

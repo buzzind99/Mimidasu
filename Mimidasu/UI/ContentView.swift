@@ -26,6 +26,13 @@ struct ContentView: View {
     var latency: LatencyState
 
     @AppearanceSetting private var appearance
+    /// The un-star awaiting confirmation, in the main window — one slot for
+    /// both dictionary hosts. They are mounted together for a pinned lookup, so
+    /// a slot per control could raise two dialogs; a slot per *window* cannot.
+    /// Attached to the window root rather than to either host for a second
+    /// reason: the popover is a window of its own, and an alert presented there
+    /// is orphaned — backdrop and all — the moment the popover closes.
+    @State private var pendingFavoriteRemoval: String?
 
     var body: some View {
         Group {
@@ -38,6 +45,7 @@ struct ContentView: View {
         .preferredColorScheme($appearance.resolvedColorScheme)
         .frame(minWidth: isOnboarding ? 800 : 1080, minHeight: isOnboarding ? 720 : 800)
         .onboardingWindowFootprint(isOnboarding)
+        .favoriteRemovalConfirmation(model, pendingRemoval: $pendingFavoriteRemoval)
         .onAppear {
             Task { await model.refreshModelAvailability() }
         }
@@ -58,19 +66,32 @@ struct ContentView: View {
         model.lookupPopoverBinding(for: .liveStrip)
     }
 
+    /// Files the un-star question the shared window-level alert presents. Both
+    /// dictionary hosts get this one closure, so which control was pressed is
+    /// the only thing either of them contributes.
+    private func requestFavoriteRemoval(_ headword: String) {
+        pendingFavoriteRemoval = headword
+    }
+
     private var mainContent: some View {
         // Read in this body, not inside a nested closure: the matcher accessor
         // builds a closure and observes nothing, so the live strip would keep
         // the colors it painted before the last star press.
         let favoriteRevision = model.favorites.revision
         return HStack(spacing: 0) {
-            SidebarView(model: model)
+            SidebarView(
+                model: model,
+                onFavoriteRemovalRequest: requestFavoriteRemoval
+            )
             Rectangle()
                 .fill(Theme.divider)
                 .frame(width: 1)
                 .ignoresSafeArea()
             VStack(spacing: 0) {
-                TranscriptView(model: model)
+                TranscriptView(
+                    model: model,
+                    onFavoriteRemovalRequest: requestFavoriteRemoval
+                )
                 LiveStripView(
                     live: live,
                     onCopy: { text in model.copySnippet(text) },
@@ -84,7 +105,11 @@ struct ContentView: View {
                 // in place instead of a dismiss+replace.
                 .popover(isPresented: liveStripLookupPresented) {
                     if let selected = model.selectedLookup?.popoverItem(for: .liveStrip) {
-                        DictionaryPopoverView(model: model, selected: selected)
+                        DictionaryPopoverView(
+                            model: model,
+                            selected: selected,
+                            onFavoriteRemovalRequest: requestFavoriteRemoval
+                        )
                     }
                 }
             }

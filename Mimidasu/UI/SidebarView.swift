@@ -7,6 +7,10 @@ import SwiftUI
 /// transcript pane supplies the 1pt divider.
 struct SidebarView: View {
     @Bindable var model: AppModel
+    /// Raises the main window's un-star question for the dictionary card —
+    /// forwarded straight from `ContentView`'s single slot, so the card never
+    /// presents an alert of its own.
+    let onFavoriteRemovalRequest: (String) -> Void
     @AppStorage(ReadingAnnotation.storageKey) private var readingAnnotation = ReadingAnnotation.romaji
     @AppStorage(CursorMode.storageKey) private var cursorMode = CursorMode.none
     @AppStorage(UIScale.storageKey) private var uiScale = UIScale.default
@@ -171,9 +175,12 @@ extension SidebarView {
             // The card's internal GeometryReader slot claims the free
             // sidebar space (its senses list scrolls within it); priority
             // keeps the trailing `Spacer` at its minimum.
-            DictionaryCardView(model: model)
-                .layoutPriority(1)
-                .padding(.bottom, 12)
+            DictionaryCardView(
+                model: model,
+                onFavoriteRemovalRequest: onFavoriteRemovalRequest
+            )
+            .layoutPriority(1)
+            .padding(.bottom, 12)
         } else {
             enginesCard
                 .padding(.bottom, 12)

@@ -26,6 +26,10 @@ import SwiftUI
 /// estimated layout is still settling, so the chase converges quietly.
 struct TranscriptView: View {
     var model: AppModel
+    /// Raises the main window's un-star question for a word popover. Forwarded
+    /// straight from `ContentView`'s single slot: a popover is its own window,
+    /// so the question cannot be raised from inside one.
+    let onFavoriteRemovalRequest: (String) -> Void
     @AppStorage(ReadingAnnotation.storageKey) private var readingAnnotation = ReadingAnnotation.romaji
     @AppStorage(CursorMode.storageKey) private var cursorMode = CursorMode.none
     @AppStorage(UIScale.storageKey) private var uiScale = UIScale.default
@@ -175,7 +179,11 @@ struct TranscriptView: View {
         return RubyTextView.LookupPopover(
             isPresented: model.lookupPopoverBinding(for: source),
             content: model.selectedLookup?.popoverItem(for: source).map { item in
-                DictionaryPopoverView(model: model, selected: item)
+                DictionaryPopoverView(
+                    model: model,
+                    selected: item,
+                    onFavoriteRemovalRequest: onFavoriteRemovalRequest
+                )
             }
         )
     }

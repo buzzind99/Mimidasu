@@ -82,17 +82,15 @@ struct DictionaryNotFoundView: View {
 
 /// Where the host places the copy control in the shared dictionary content.
 enum DictionaryCopyPlacement {
-    /// Popover: labeled Copy pill in the header row.
-    case pill
-    /// Sidebar card: small icon top-trailing of the header row.
+    /// Small icon top-trailing of the header row.
     case icon
     /// No copy control.
     case none
 }
 
-/// The copy control behind `DictionaryCopyPlacement`: the labeled pink pill
-/// or the compact icon tile, shared by the found entry header and the
-/// not-found surface header so the two hosts can never diverge.
+/// The copy control behind `DictionaryCopyPlacement`: the compact icon tile,
+/// shared by the found entry header and the not-found surface header so the
+/// two hosts can never diverge.
 struct DictionaryCopyButton: View {
     let placement: DictionaryCopyPlacement
     let help: String
@@ -100,8 +98,6 @@ struct DictionaryCopyButton: View {
 
     var body: some View {
         switch placement {
-        case .pill:
-            styled(pillLabel)
         case .icon:
             styled(iconLabel)
         case .none:
@@ -116,15 +112,6 @@ struct DictionaryCopyButton: View {
         .buttonStyle(.plain)
         .pointerStyle(.link)
         .help(help)
-    }
-
-    private var pillLabel: some View {
-        Label("Copy", systemImage: "doc.on.doc")
-            .font(.system(size: 11, weight: .semibold))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(Capsule().fill(Theme.accentPink))
-            .foregroundStyle(.white)
     }
 
     private var iconLabel: some View {
