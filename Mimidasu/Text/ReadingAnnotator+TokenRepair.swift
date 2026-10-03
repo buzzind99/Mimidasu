@@ -384,7 +384,8 @@ extension ReadingAnnotator {
             end: token.end + offset,
             reading: token.reading,
             base: token.base,
-            pos: token.pos
+            pos: token.pos,
+            bound: token.bound
         )
     }
 }

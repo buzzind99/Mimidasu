@@ -2,7 +2,7 @@ import Foundation
 import Synchronization
 
 /// One token from the dictionary tokenizer, decoded from the runtime's JSON
-/// payload — `{text, start, end, reading, base, pos}`.
+/// payload — `{text, start, end, reading, base, pos, bound}`.
 ///
 /// `start`/`end` are Unicode-scalar indices into the **original** input
 /// (end-exclusive). The runtime performs no normalization, so spans must be
@@ -23,6 +23,11 @@ struct DictionaryToken: Codable, Equatable {
     /// 名詞, 動詞, …), or nil when the lexicon row marks it `*` or the payload
     /// predates the field.
     let pos: String?
+    /// Whether the token is a bound (non-self-standing) word — 助動詞, the
+    /// lexicon's 非自立 rows, and 形容詞 rows lemmatizing to ない. nil on
+    /// payloads that predate the field; consumers treat that as
+    /// self-standing, the pre-flag behavior.
+    let bound: Bool?
 
     init(
         text: String,
@@ -30,7 +35,8 @@ struct DictionaryToken: Codable, Equatable {
         end: Int,
         reading: String?,
         base: String? = nil,
-        pos: String? = nil
+        pos: String? = nil,
+        bound: Bool? = nil
     ) {
         self.text = text
         self.start = start
@@ -38,6 +44,7 @@ struct DictionaryToken: Codable, Equatable {
         self.reading = reading
         self.base = base
         self.pos = pos
+        self.bound = bound
     }
 }
 

@@ -18,6 +18,12 @@ final class ReadingSegment {
     /// The token's coarse part of speech (名詞, 動詞, …), or nil when the
     /// lexicon row has none.
     var pos: String?
+    /// Whether the token's lexicon row is a bound (non-self-standing) word —
+    /// 助動詞 and the 非自立 rows (ない, いる, くれる, …). The favorite
+    /// matcher's lemma arm skips these: favouring 見る lights 見た, but
+    /// favouring ない must not light ねえ/なきゃ, whose tokens lemmatize to
+    /// ない as conjugates.
+    var isBound: Bool
 
     /// One original token a sokuon-chain merge folded away: its surface
     /// (the inter-token gap rides at the head of an absorbed piece) and
@@ -35,7 +41,7 @@ final class ReadingSegment {
 
     init(
         surface: String, romaji: String?, furigana: String? = nil,
-        lemma: String? = nil, pos: String? = nil,
+        lemma: String? = nil, pos: String? = nil, isBound: Bool = false,
         mergePieces: [MergePiece]? = nil
     ) {
         self.surface = surface
@@ -43,6 +49,7 @@ final class ReadingSegment {
         self.furigana = furigana
         self.lemma = lemma
         self.pos = pos
+        self.isBound = isBound
         self.mergePieces = mergePieces
     }
 }
@@ -304,7 +311,8 @@ final class ReadingAnnotator: @unchecked Sendable {
                             end: tokens[merged.end].end,
                             reading: merged.kana,
                             base: token.base,
-                            pos: token.pos
+                            pos: token.pos,
+                            bound: token.bound
                         ),
                         surface: merged.surface,
                         into: &segments
@@ -342,7 +350,7 @@ final class ReadingAnnotator: @unchecked Sendable {
         let fields = Self.annotatedFields(surface: surface, reading: reading)
         segments.append(ReadingSegment(
             surface: surface, romaji: fields.romaji, furigana: fields.furigana,
-            lemma: token.base, pos: token.pos
+            lemma: token.base, pos: token.pos, isBound: token.bound ?? false
         ))
     }
 

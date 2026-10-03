@@ -47,13 +47,19 @@ struct FavoriteWord: Identifiable, Equatable, Sendable {
     /// reading. Favouring 見る therefore lights up 見た / 見ます / 見ている, and
     /// favouring 有難う lights up ありがとう, which shares no written form with
     /// it.
+    ///
+    /// The lemma arm skips bound tokens: they lemmatize away from what is on
+    /// screen, so favouring ない would otherwise light ねえ / なきゃ / なし —
+    /// conjugates the dictionary resolves to entirely different entries. A
+    /// bound token still matches on its exact surface, so spoken ない — a
+    /// bound token itself — lights as before.
     static func matches(
         _ segment: ReadingSegment, keys: Set<String>, readings: Set<String>
     ) -> Bool {
         if keys.contains(normalize(segment.surface)) {
             return true
         }
-        if let lemma = segment.lemma, keys.contains(normalize(lemma)) {
+        if let lemma = segment.lemma, !segment.isBound, keys.contains(normalize(lemma)) {
             return true
         }
         // Kana surfaces only. A kana-written surface carries its own
