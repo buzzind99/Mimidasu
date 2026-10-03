@@ -100,9 +100,10 @@ struct FavoritesPromotionTests {
         }
         #expect(display == result(["箸", "匙"]), "the display result is untouched")
         #expect(also.map(\.matched) == ["匙", "箸"], "matched text survives")
-        // The favorite leads its own pill's pager; the favorite-free pill
-        // keeps the dictionary's ranking.
+        // The favorite leads its own pill's pager — its own entry moves, not
+        // a copy; the favorite-free pill keeps the dictionary's ranking.
         #expect(also[0].entries.map { entry in entry.keb } == ["見る", "匙"])
+        #expect(also[0].entries.map(\.entSeq) == [2, 1])
         #expect(also[1].entries.map { entry in entry.keb } == ["箸"])
     }
 

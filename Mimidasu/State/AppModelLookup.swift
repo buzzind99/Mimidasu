@@ -267,14 +267,18 @@ extension AppModel {
     /// result as found, and the pill row recomputes from the retained
     /// results relative to the new selection — no new query runs. The
     /// promoted result carries the tapped-surface origin: an explicitly
-    /// chosen hit is never labeled a fallback lead.
+    /// chosen hit is never labeled a fallback lead. The rebuilt content
+    /// runs through the same favorites promotion a fresh tap gets, so a
+    /// "related:" selection — which left its pin unpromoted — still opens
+    /// on a favorited entry and hands out starred, relabeled pills;
+    /// re-promoting an already-promoted "also:" set is a no-op.
     func selectAlsoPill(_ result: LookupResult) {
         guard let pinned = pinnedLookup else { return }
         let source = selectedLookup?.source
         let others = pinned.content.allResults.filter { candidate in candidate != result }
-        let content = LookupContent.found(
+        let content = favorites.promotingFavorites(in: .found(
             result: result, also: others, origin: .tappedSurface
-        )
+        ))
         presentLookup(content: content, source: source)
     }
 
