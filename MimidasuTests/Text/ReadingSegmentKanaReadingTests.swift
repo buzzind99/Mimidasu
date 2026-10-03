@@ -34,7 +34,7 @@ struct ReadingSegmentKanaReadingTests {
         #expect(segment("祝").kanaReading == nil)
     }
 
-    @Test("an empty surface carries none", arguments: ["", "123", "…"])
+    @Test("an empty or non-kana surface carries none", arguments: ["", "123", "…"])
     func readsNothingWithoutKanaSurface(surface: String) {
         #expect(segment(surface).kanaReading == nil)
     }
