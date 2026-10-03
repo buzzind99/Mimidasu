@@ -344,10 +344,11 @@ struct RubyTextView: View, Equatable {
     }
 
     /// Excludes `onCopy`, `onLookup`, `lookupPopover`, and `isFavoriteSegment`
-    /// (closures have no value identity): for the last two, the change that
-    /// must re-render arrives as `lookupAnchor` and `favoritesRevision`. The
-    /// witness is `nonisolated` so the conformance needs no
-    /// `@preconcurrency`: every compared property is an immutable Sendable
+    /// (closures have no value identity). The changes they serve arrive as
+    /// values: favorite membership as `favoritesRevision` here, and the
+    /// popover's content as `TranscriptRow.lookupAnchor` on the row that
+    /// builds this view. The witness is `nonisolated` so the conformance needs
+    /// no `@preconcurrency`: every compared property is an immutable Sendable
     /// value.
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.text == rhs.text
