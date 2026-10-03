@@ -42,13 +42,14 @@ struct FavoriteWord: Identifiable, Equatable, Sendable {
         return ReadingAlignment.foldedKana(reading)
     }
 
-    /// Whether a rendered segment counts as this word: its surface, its lemma,
-    /// or — written in kana, where the surface *is* the reading — a stored
-    /// reading. Favouring 見る therefore lights up 見た / 見ます / 見ている, and
-    /// favouring 有難う lights up ありがとう, which shares no written form with
-    /// it.
+    /// Whether a rendered segment counts as this word: its surface, its
+    /// lemma, the lemma's potential unwrap, or — written in kana, where the
+    /// surface *is* the reading — a stored reading. Favouring 見る therefore
+    /// lights up 見た / 見ます / 見ている, favouring 勝つ lights the potential
+    /// 勝て (whose lemma is 勝てる before a negative), and favouring 有難う
+    /// lights up ありがとう, which shares no written form with it.
     ///
-    /// The lemma arm skips bound tokens: they lemmatize away from what is on
+    /// The lemma arms skip bound tokens: they lemmatize away from what is on
     /// screen, so favouring ない would otherwise light ねえ / なきゃ / なし —
     /// conjugates the dictionary resolves to entirely different entries. A
     /// bound token still matches on its exact surface, so spoken ない — a
@@ -59,8 +60,21 @@ struct FavoriteWord: Identifiable, Equatable, Sendable {
         if keys.contains(normalize(segment.surface)) {
             return true
         }
-        if let lemma = segment.lemma, !segment.isBound, keys.contains(normalize(lemma)) {
-            return true
+        if let lemma = segment.lemma, !segment.isBound {
+            if keys.contains(normalize(lemma)) {
+                return true
+            }
+            // IPADIC lexicalizes potential forms as standalone verbs whose
+            // lemma is the potential itself (勝て before なければ → 勝てる),
+            // so the starred dictionary form hides behind one tail shift —
+            // the same unwrap the tap lookup walks (作れる → 作る). A lemma
+            // that doesn't shape like a potential unwraps to nil, and a
+            // wrong guess is inert unless it equals a stored headword.
+            if let dictionaryForm = JMDictExpansion.dictionaryForm(ofPotential: lemma),
+               keys.contains(normalize(dictionaryForm))
+            {
+                return true
+            }
         }
         // Kana surfaces only. A kana-written surface carries its own
         // pronunciation, so this arm is an exact text comparison against the

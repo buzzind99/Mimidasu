@@ -4,8 +4,9 @@ import Testing
 
 /// The favorite lemma arm against the real tokenizer, end to end: a ない
 /// favorite keeps its conjugate surfaces (ねえ, なきゃ, なし, なく, なかろう)
-/// dark while spoken ない stays lit, and a self-standing lemma still matches a
-/// starred content word.
+/// dark while spoken ない stays lit, a self-standing lemma still matches a
+/// starred content word, and a context-potential lemma (勝て → 勝てる) lights
+/// its starred dictionary form through the unwrap.
 @Suite("FavoriteWord bound-lemma corpus", .enabled(if: LiveDictionaryRuntime.isAvailable))
 struct FavoriteWordBoundLemmaLiveTests {
 
@@ -43,5 +44,22 @@ struct FavoriteWordBoundLemmaLiveTests {
         let lit = try litSurfaces("今のだけ見なかったことにする", keys: Self.miruKeys)
 
         #expect(lit.contains("見"))
+    }
+
+    @Test("a 勝つ favorite lights the context-potential 勝て")
+    func katsuLightsContextPotentialKate() throws {
+        let lit = try litSurfaces(
+            "チームに勝て なければ今度こそ", keys: [FavoriteWord.normalize("勝つ")]
+        )
+
+        #expect(lit == ["勝て"])
+    }
+
+    @Test("a 見る favorite lights 見た, 見ます, and 見ている through their 見 segment",
+          arguments: ["見た。", "見ます。", "見ている。"])
+    func miruLightsItsSegments(sentence: String) throws {
+        let lit = try litSurfaces(sentence, keys: Self.miruKeys)
+
+        #expect(lit == ["見"])
     }
 }

@@ -52,6 +52,33 @@ struct FavoriteWordTests {
         #expect(FavoriteWord.matches(segment("見た", lemma: "見る"), keys: keys, readings: []))
     }
 
+    @Test("a potential-form lemma unwraps to the starred dictionary form, so 勝つ lights 勝て")
+    func matchesUnwrappedPotentialLemma() {
+        let starred = Set([FavoriteWord.normalize("勝つ")])
+
+        #expect(FavoriteWord.matches(
+            segment("勝て", lemma: "勝てる"), keys: starred, readings: []
+        ))
+    }
+
+    @Test("a bound potential lemma stays dark for the unwrapped form")
+    func ignoresBoundPotentialLemma() {
+        let starred = Set([FavoriteWord.normalize("勝つ")])
+
+        #expect(!FavoriteWord.matches(
+            segment("勝て", lemma: "勝てる", isBound: true), keys: starred, readings: []
+        ))
+    }
+
+    @Test("an unwrap that misses the stored form keeps the segment dark")
+    func ignoresUnwrappedPotentialLemma() {
+        let other = Set([FavoriteWord.normalize("負ける")])
+
+        #expect(!FavoriteWord.matches(
+            segment("勝て", lemma: "勝てる"), keys: other, readings: []
+        ))
+    }
+
     @Test("a bound token's lemma never matches, so a ない favorite leaves ねえ and なきゃ dark")
     func ignoresBoundLemma() {
         #expect(!FavoriteWord.matches(
