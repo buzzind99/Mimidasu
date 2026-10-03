@@ -11,6 +11,8 @@ or an optional cloud provider (Google Translate, DeepL, OpenRouter) behind
 the same engine seam. Ruby
 annotations (romaji/furigana) and tap-to-lookup dictionary entries come
 from a bundled IPADIC tokenizer plus a pinned JMDict/JMnedict SQLite DB.
+Starred words persist to a searchable favorites list and render highlighted
+wherever Japanese text is shown.
 
 ## System overview
 
@@ -51,6 +53,9 @@ Sidecars off the main flow:
   verify, and download the chosen GGUF.
 - **ReadingAnnotator + DictionaryStore + JMDictLookup** — ruby annotation
   and tap-to-lookup over the tokenizer and dictionary DBs.
+- **FavoritesStore / FavoritesDatabase / FavoritesPromotion** — starred
+  words: SQLite persistence, transcript highlight matching, favorite-first
+  lookup ranking.
 - **SessionExporter** — TXT / SRT / VTT / JSON.
 - **ToastCenter / NoticeCenter** — every error/status surface.
 
@@ -172,14 +177,26 @@ packaged apps in `Contents/Frameworks/`.
 ### Reading annotation & dictionary lookup (`Text/`, `Dictionary/`)
 - **Annotator:** `ReadingAnnotator` tokenizes via `DictionaryEngine`
   (dlopen'd `libdictionary.dylib`, bundled IPADIC) and emits segments
-  `{surface, romaji, furigana, lemma, pos}` — one segmentation feeds both
-  annotation modes. Romaji derives from kana readings (Hepburn consonants,
-  wapuro long vowels) with particle overrides (は/へ/を → wa/e/o), lexical
-  spellings, numeral→counter fusion (`600回` → "roppyakkai"), and
-  sokuon-span merging (`言って` → one segment). Furigana covers only kanji,
-  aligned by walking the kana reading through the surface; tokens carry a
-  curated reading per inflected surface, so conjugated forms annotate
-  without re-inflection.
+  `{surface, romaji, furigana, lemma, pos, bound}` — one segmentation feeds
+  both annotation modes and the favorite matcher. The tokenizer payload
+  carries `{surface, span, reading, base, pos, bound}`; the runtime
+  auto-detects the lexicon's feature scheme (bundled IPADIC; UniDic rows
+  read with their pronunciation-style `ー` expanded), and `bound` marks
+  non-self-standing words — 助動詞 outright, the 非自立 detail rows, and
+  形容詞 rows lemmatizing to ない. Before segmentation, a run the tokenizer
+  collapsed into one unknown node is re-decoded in short windows to recover
+  the word boundaries inside it. Romaji derives from kana readings (Hepburn
+  consonants, wapuro long vowels) with particle overrides (は/へ/を →
+  wa/e/o), lexical spellings, numeral→counter fusion (`600回` →
+  "roppyakkai"), and sokuon-span merging (`言って` → one segment). Furigana
+  covers only kanji, aligned by walking the kana reading through the
+  surface; tokens carry a curated reading per inflected surface, so
+  conjugated forms annotate without re-inflection. A final pass fragments
+  entry-less segments (long enough, Japanese, whole surface missing from
+  the dictionary) into dictionary-backed pieces via the headword gate —
+  sokuon-merged segments cut at their original token seams; probes that
+  failed on infrastructure answer "has entry" and the pass's decisions are
+  never cached.
 - **Reading fallback:** kanji surfaces the tokenizer leaves reading-less
   consult JMDict's reading index, behind a miss-caching NSCache. Surfaces
   that survive both (names, rare ideographs, bare Latin) render
@@ -198,10 +215,13 @@ packaged apps in `Contents/Frameworks/`.
   Application Support on first launch (offline, smoke-checked).
 - **Lookup engine:** `JMDictLookup` — typed errors (no-hit ≠ infrastructure
   failure), all homograph entries returned ranked common-first, sense
-  restriction filters honored. `JMDictExpansion` walks forward from the
-  tapped segment joining ≤3 candidates (lemma preferred over surface),
-  validated against the sentence's render text (drift fails closed; the
-  tapped segment still queries).
+  restriction filters honored. `JMDictExpansion` builds ≤9 ranked
+  candidates per tap — the tapped surface, its lemma (potential forms
+  unwrap to their dictionary form), forward joins of up to 6 segments,
+  then ≤3-char kanji-run splits (the tapped surface's first, then
+  boundary-crossing ones) — resolved in that order, validated against the
+  sentence's render text (drift fails closed; the tapped segment still
+  queries).
 - **Tap surface:** cursor modes None / Dictionary / Copy. A tap resolves
   through the pipeline and pins the sidebar DICTIONARY card plus a popover
   anchored at the word; homograph entries walk via the `◀ i/N ▶` pager,
@@ -210,6 +230,55 @@ packaged apps in `Contents/Frameworks/`.
   infrastructure failure posts a toast. Name entries render type badges
   (SURNAME / GIVEN NAME / PLACE NAME / …) and drop the romanization-echo
   gloss.
+
+### Favorite words (`Favorites/`)
+- **Star surface:** the dictionary popover and the sidebar DICTIONARY card
+  share one `DictionaryFavoriteButton`, keyed by the displayed entry's
+  headword (`keb ?? reb`) — homographs share one star and one list row.
+  Starring twice is idempotent; un-starring never happens silently — the
+  press raises `FavoriteRemovalConfirmation`, one alert per window (the
+  main window owns the question for both dictionary hosts, which are
+  mounted simultaneously; a `.popover` is its own window and must never
+  present the alert). The not-found state and `also:` pills carry no star.
+- **Model + persistence:** `FavoriteWord`
+  `{headword, reading, romaji, addedAt}` in
+  `~/Library/Application Support/Mimidasu/favorites.sqlite` — authored user
+  data, so it lives there in every configuration. `headword` is the primary
+  key (`INSERT OR IGNORE`, so re-starring is a no-op; un-starring deletes
+  every stored spelling whose normalized form matches — membership is
+  probed normalized, rows are deleted as stored); rows order by
+  epoch-millisecond `addedAt`, newest first. A hard cap of 8,192 rows
+  refuses the next star with a visible notice — nothing is ever silently
+  evicted. A store that cannot open or load degrades terminally: every
+  operation reports failure through one persistent red toast.
+- **Matching (render path):** a rendered segment matches when its surface
+  or lemma equals a stored headword (NFKC-folded), or when an all-kana
+  surface equals a stored reading (kana-folded) — favoring 見る lights up
+  見た / 見ます / 見ている, favoring 有難う lights up ありがとう; a kanji
+  surface is never a reading match. The lemma arm skips bound tokens
+  (`isBound`) — they lemmatize away from what is on screen, so favoring
+  ない must not light ねえ / なきゃ / なし; a bound token still matches on
+  its exact surface. The hot path probes two in-memory sets
+  (`matchKeys` / `readingKeys`) per rendered segment and never touches
+  SQLite; `FavoritesStore.revision` is the observation transcript rows read
+  to repaint. Favorites render in `Theme.favoriteAccent` in the transcript,
+  the live strip, and the HUD — wherever `RubyTextView` renders per-segment
+  units, in every annotation mode, favorite segments staying their own
+  units even where nothing else is annotated.
+- **Favorites window:** opened by a floating star over the transcript
+  (top-trailing, sharing the toast stack's column), a fixed 460×608
+  `Window("favorites")` on the main window's Space that dismisses on any
+  click outside, like Settings. An explainer card, a debounced search
+  against the SQLite list (LIKE with escaped wildcards across headword /
+  reading / romaji), and dictionary-card rows (copy → star → chevron) that
+  expand into the shared entry view via live `JMDictLookup` queries
+  (`FavoritesLookupState` — per-headword phases behind generation tokens;
+  deliberately never the app-wide popover/card pipeline). Search, expansion
+  set, and the pending removal question reset when the window closes.
+- **Favorite-first lookup:** `FavoritesPromotion` reorders an
+  already-resolved lookup once so a favorited entry leads the display
+  result's pager — found results only; `also:` hits and not-found pins are
+  untouched, and the dictionary engine itself never learns favorites exist.
 
 ### Model choice (`Model/`)
 - `ASRModelChoice` — `.lite` / `.full`, each carrying its metadata (GGUF
@@ -230,12 +299,15 @@ packaged apps in `Contents/Frameworks/`.
 ### AppModel + SessionController (`State/`, `Session/`)
 - `AppModel` (@MainActor `@Observable`): session phase, transcript
   entries, translation status, HUD pin, toast/notice stacks, audio level +
-  latency, ASR model state, lookup state (popover + pinned card), and the
+  latency, ASR model state, lookup state (popover + pinned card), the
+  favorites store (star outcomes + the segment matcher), and the
   `TranslationSession.Configuration` driving `.translationTask`. Split
-  into extensions (`AppModelTranslation` / `Export` / `Dictionary` /
-  `Lookup` / `ModelSelection` / `Overlay` / `Termination`). Injectable
-  test seams: a scripted `SessionController`, a stubbed model resolver,
-  the terminate-notification center, and the HTTP translation transport.
+  into extensions (`AppModelTranslation` / `CaptureWarnings` / `Export` /
+  `Dictionary` / `Favorites` / `Lookup` / `ModelSelection` / `Overlay` /
+  `Termination`).
+  Injectable test seams: a scripted `SessionController`, a stubbed model
+  resolver, the terminate-notification center, and the HTTP translation
+  transport.
 - `SessionController`: engine creation via `ASREngineFactory` + background
   warm-up, capture wiring, the sentence buffer, the 60 ms poll / 200 ms
   tick timers, ASR event → sentence handling, mid-session capture restart
@@ -250,7 +322,10 @@ packaged apps in `Contents/Frameworks/`.
   pickers, ENGINES / AUDIO / SESSION / DICTIONARY cards, toolbar) beside a
   virtualized transcript (gutter timestamps, `RubyTextView` JP, teal
   target-language translation, circular jump buttons) with the live partial
-  strip pinned under it. The toast stack overlays the transcript pane.
+  strip pinned under it. The toast stack and the floating Favorites opener
+  share one top-trailing column (toasts push the star down by layout; a
+  500 ms close debounce keeps the star's click from reopening the window it
+  just closed).
 - **State split:** high-frequency partials (`LivePartialState`), the audio
   level ring (`AudioLevelState`), and latency (`LatencyState`) are small
   standalone observables, so partial-rate updates never re-render the
@@ -268,6 +343,9 @@ packaged apps in `Contents/Frameworks/`.
   button cluster, unlocked it drags/resizes. The sidebar's overlay master
   switch closes both overlays when any is open and reopens the HUD when
   none are (`toggleOverlays`).
+- **Favorites window:** the list surface of the Favorite words section —
+  searchable card rows, expandable into live definitions, opened by the
+  floating star and reset on close.
 - **Toasts & notices:** `ToastCenter` — deduped, capped stack of warning/
   error cards (persistent red cards carry a fix action: Restart,
   Reconnect); cleared on session teardown. `NoticeCenter` — a single
