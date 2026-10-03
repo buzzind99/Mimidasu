@@ -239,7 +239,9 @@ packaged apps in `Contents/Frameworks/`.
   press raises `FavoriteRemovalConfirmation`, one alert per window (the
   main window owns the question for both dictionary hosts, which are
   mounted simultaneously; a `.popover` is its own window and must never
-  present the alert). The not-found state and `also:` pills carry no star.
+  present the alert). The not-found state carries no star; an `also:` pill
+  stars only through its promoted lead entry (the not-found host passes no
+  favorites probe).
 - **Model + persistence:** `FavoriteWord`
   `{headword, reading, romaji, addedAt}` in
   `~/Library/Application Support/Mimidasu/favorites.sqlite` — authored user
@@ -277,8 +279,12 @@ packaged apps in `Contents/Frameworks/`.
   set, and the pending removal question reset when the window closes.
 - **Favorite-first lookup:** `FavoritesPromotion` reorders an
   already-resolved lookup once so a favorited entry leads the display
-  result's pager — found results only; `also:` hits and not-found pins are
-  untouched, and the dictionary engine itself never learns favorites exist.
+  result's pager and every `also:` hit's pager — a fallback pill labels
+  itself with its lead entry, so the promotion is what makes the pill
+  readable and starred, and `selectAlsoPill` re-promotes the content it
+  rebuilds. Not-found pins are untouched (a split hit must never present
+  itself as the tapped word), and the dictionary engine itself never learns
+  favorites exist.
 
 ### Model choice (`Model/`)
 - `ASRModelChoice` — `.lite` / `.full`, each carrying its metadata (GGUF
