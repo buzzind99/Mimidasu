@@ -19,10 +19,11 @@ final class ReadingSegment {
     /// lexicon row has none.
     var pos: String?
     /// Whether the token's lexicon row is a bound (non-self-standing) word —
-    /// 助動詞 and the 非自立 rows (ない, いる, くれる, …). The favorite
-    /// matcher's lemma arm skips these: favouring 見る lights 見た, but
-    /// favouring ない must not light ねえ/なきゃ, whose tokens lemmatize to
-    /// ない as conjugates.
+    /// 助動詞, the 非自立 rows (ない, いる, くれる, …), and the 形容詞 rows
+    /// lemmatizing to ない (なし, なかろ — no content adjective lemmatizes
+    /// to ない). The favorite matcher's lemma arm skips these: favouring
+    /// 見る lights 見た, but favouring ない must not light ねえ/なきゃ,
+    /// whose tokens lemmatize to ない as conjugates.
     var isBound: Bool
 
     /// One original token a sokuon-chain merge folded away: its surface
