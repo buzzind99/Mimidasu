@@ -57,15 +57,24 @@ final class FavoritesStore {
     /// test-isolation seam — the default is the real production file, so a
     /// test that forgets to inject one writes to the developer's own
     /// vocabulary.
+    ///
+    /// A failed load degrades the database terminally. The store's contract is
+    /// that memory mirrors the file, and a transient fault on the very first
+    /// read would break exactly that: membership would be answered from empty
+    /// memory while the handle went on serving a file the store can no longer
+    /// see. Degraded, every operation fails into the `.failed` paths instead.
     init(location: URL = FavoritesStore.defaultLocation) {
-        database = FavoritesDatabase(location: location)
-        if let loaded = try? database.all() {
+        let database = FavoritesDatabase(location: location)
+        self.database = database
+        do {
+            let loaded = try database.all()
             words = loaded
             count = loaded.count
             matchKeys = Set(loaded.map { word in FavoriteWord.normalize(word.headword) })
             readingKeys = Self.readingKeys(for: loaded)
-        } else {
-            print("favorites: load failed, starting empty")
+        } catch {
+            print("favorites: load failed, degrading: \(error)")
+            database.degrade()
         }
     }
 

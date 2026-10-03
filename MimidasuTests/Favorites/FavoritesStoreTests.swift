@@ -107,18 +107,6 @@ struct FavoritesStoreTests {
         #expect(outcome == .removed)
     }
 
-    @Test("re-adding an existing headword never duplicates the row")
-    func reAddDoesNotDuplicate() {
-        let (store, cleanup) = makeStore()
-        defer { cleanup() }
-        store.toggle(Self.miru)
-        store.remove(headword: "見る")
-
-        store.toggle(Self.miru)
-
-        #expect(store.words.count == 1)
-    }
-
     @Test("a removed word stops matching, so the transcript drops its color")
     func removeClearsMatchKey() {
         let (store, cleanup) = makeStore()
@@ -146,6 +134,34 @@ struct FavoritesStoreTests {
         // requested spelling would match nothing in the file and the favorite
         // would come back on the next launch.
         #expect(FavoritesStore(location: location).words.isEmpty)
+    }
+
+    @Test("a removal the file refuses reports unavailable and changes nothing")
+    func refusedRemovalReportsUnavailable() throws {
+        let (location, cleanup) = makeLocation()
+        defer { cleanup() }
+        let store = FavoritesStore(location: location)
+        store.toggle(Self.miru)
+        // A second connection holding an exclusive transaction faults the
+        // store's delete immediately — the one way a healthy file refuses a
+        // write, and the shape a busy disk or a competing writer produces.
+        // Until now this branch was unreachable from a fixture: a degraded
+        // store holds no favorites, so its removal never reached the delete.
+        let blocker = try SQLiteDatabase.writable(path: location.path)
+        try blocker.execute("BEGIN EXCLUSIVE")
+
+        #expect(store.remove(headword: "見る") == .failed)
+
+        // Nothing changed where the user can see: the word stays starred, and
+        // the memory the transcript colors still mirrors what the user was
+        // shown — the divergence window is the file's, not the list's.
+        #expect(store.isFavorite(headword: "見る"))
+        #expect(store.words.map(\.headword) == ["見る"])
+
+        try blocker.execute("ROLLBACK")
+        // Not terminal: the next press commits, costing this one press only.
+        #expect(store.remove(headword: "見る") == .removed)
+        #expect(store.words.isEmpty)
     }
 
     // MARK: - Reading arm

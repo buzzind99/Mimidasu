@@ -10,6 +10,8 @@ import Synchronization
 /// unwritable file degrades the feature instead of taking the app down. A
 /// later operation that fails is *not* terminal: the handle stays open, so a
 /// transient fault (a busy or full disk) costs one press rather than the list.
+/// The one exception is `degrade()`, which makes an otherwise healthy instance
+/// terminal at the store's request.
 final class FavoritesDatabase: Sendable {
     enum Error: Swift.Error, Equatable {
         /// The database could not be opened or its schema created.
@@ -53,6 +55,22 @@ final class FavoritesDatabase: Sendable {
         } catch {
             print("favorites: database unavailable at \(location.path): \(error)")
             state = Mutex(.degraded)
+        }
+    }
+
+    /// Makes the instance terminal-degraded at the store's request. The store
+    /// calls this when its *initial load* fails: a transient fault on the first
+    /// read would otherwise leave the handle answering a file the store's
+    /// memory no longer mirrors — `isFavorite` denying rows that are on disk,
+    /// the cap counting memory only. After this every operation reports
+    /// `degraded`, which is the designed surface for a store that cannot be
+    /// trusted.
+    func degrade() {
+        state.withLock { current in
+            if case let .open(db) = current {
+                db.close()
+            }
+            current = .degraded
         }
     }
 
