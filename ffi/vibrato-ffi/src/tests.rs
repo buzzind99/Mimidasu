@@ -384,7 +384,8 @@ fn unidic_pos_folds_onto_ipadic_tags() {
 
 #[test]
 fn unidic_payload_matches_swift_contract() {
-    // The 行っ row end to end: per-surface reading, lemma base, coarse POS.
+    // The 行っ row end to end: per-surface reading, lemma base, coarse POS,
+    // and the bound flag from its 非自立可能 detail column.
     let row = parse_csv_row(
         "動詞,非自立可能,*,*,五段-カ行,連用形-促音便,イク,行く,行っ,イッ,行く,イク,和,*,*,*,*",
     );
@@ -392,6 +393,69 @@ fn unidic_payload_matches_swift_contract() {
     assert_eq!(token.reading.as_deref(), Some("いっ"));
     assert_eq!(token.base.as_deref(), Some("行く"));
     assert_eq!(token.pos.as_deref(), Some("動詞"));
+    assert!(token.bound);
+}
+
+#[test]
+fn ipadic_bound_flags() {
+    // 助動詞 rows are bound outright; 形容詞,非自立 (ない) and 動詞,非自立
+    // (いる) carry the detail tag in column 1. 自立 rows and the `*`-marked
+    // unknown rows are not bound.
+    let masu = parse_csv_row("助動詞,*,*,*,特殊,マス,ます,マス,マス");
+    assert!(bound_from_features(&masu, FeatureScheme::Ipadic));
+    let nai = parse_csv_row("形容詞,非自立,*,*,形容詞・アウオ段,基本形,ない,ナイ,ナイ");
+    assert!(bound_from_features(&nai, FeatureScheme::Ipadic));
+    let iru = parse_csv_row("動詞,非自立,*,*,一段,基本形,いる,イ,イル");
+    assert!(bound_from_features(&iru, FeatureScheme::Ipadic));
+    // 形容詞 rows lemmatizing to ない: the lexicon leaves column 1 untagged,
+    // so the base names the negative conjugate (退職なし, なかろ).
+    let nashi = parse_csv_row("形容詞,自立,*,*,形容詞・アウオ段,基本形,ない,ナイ,ナイ");
+    assert!(bound_from_features(&nashi, FeatureScheme::Ipadic));
+    // A content adjective with a different base stays self-standing.
+    let takai = parse_csv_row("形容詞,自立,*,*,形容詞・アウオ段,基本形,高い,タカイ,タカイ");
+    assert!(!bound_from_features(&takai, FeatureScheme::Ipadic));
+    let jiritsu = parse_csv_row("動詞,自立,*,*,五段・カ行促音便,連用タ接続,行く,イッ,イッ");
+    assert!(!bound_from_features(&jiritsu, FeatureScheme::Ipadic));
+    let unknown = parse_csv_row("名詞,数,*,*,*,*,*");
+    assert!(!bound_from_features(&unknown, FeatureScheme::Ipadic));
+}
+
+#[test]
+fn unidic_bound_flags() {
+    // UniDic's non-self-standing tag is 非自立可能; 助動詞 is bound outright.
+    let iru = parse_csv_row(
+        "動詞,非自立可能,*,*,一段,連用形-一般,イル,いる,い,イ,いる,イ,和,*,*,*,*",
+    );
+    assert!(bound_from_features(&iru, FeatureScheme::Unidic));
+    let jodoushi = parse_csv_row("助動詞,*,*,*,助動詞-タ,終止形-一般,タ,た,た,タ,た,タ,和,*,*,*,*");
+    assert!(bound_from_features(&jodoushi, FeatureScheme::Unidic));
+    let jiritsu = parse_csv_row(
+        "動詞,一般,*,*,五段-カ行,連用形-促音便,イク,行く,行っ,イッ,行く,イク,和,*,*,*,*",
+    );
+    assert!(!bound_from_features(&jiritsu, FeatureScheme::Unidic));
+}
+
+#[test]
+fn payload_carries_bound_flag() {
+    // The flag survives into the serialized payload per token: the
+    // auxiliary ます reads bound, the self-standing 見る does not.
+    let masu = token_payload(
+        "ます".to_owned(),
+        0..2,
+        &parse_csv_row("助動詞,*,*,*,特殊,マス,ます,マス,マス"),
+        FeatureScheme::Ipadic,
+    );
+    let miru = token_payload(
+        "見る".to_owned(),
+        2..4,
+        &parse_csv_row("動詞,自立,*,*,一段,基本形,見る,ミ,ミ"),
+        FeatureScheme::Ipadic,
+    );
+    assert_eq!(
+        serialize_tokens(&[masu, miru]),
+        "[{\"text\":\"ます\",\"start\":0,\"end\":2,\"reading\":\"ます\",\"base\":\"ます\",\"pos\":\"助動詞\",\"bound\":true},\
+           {\"text\":\"見る\",\"start\":2,\"end\":4,\"reading\":\"み\",\"base\":\"見る\",\"pos\":\"動詞\",\"bound\":false}]"
+    );
 }
 
 #[test]
@@ -436,10 +500,10 @@ fn json_shape_matches_swift_contract() {
     .collect::<Vec<_>>();
     assert_eq!(
         serialize_tokens(&tokens),
-        "[{\"text\":\"私\",\"start\":0,\"end\":1,\"reading\":\"わたし\",\"base\":\"私\",\"pos\":\"名詞\"},\
-          {\"text\":\"は\",\"start\":1,\"end\":2,\"reading\":\"は\",\"base\":\"は\",\"pos\":\"助詞\"},\
-          {\"text\":\"学生\",\"start\":2,\"end\":4,\"reading\":\"がくせい\",\"base\":\"学生\",\"pos\":\"名詞\"},\
-          {\"text\":\"です\",\"start\":4,\"end\":6,\"reading\":\"です\",\"base\":\"です\",\"pos\":\"助動詞\"}]"
+        "[{\"text\":\"私\",\"start\":0,\"end\":1,\"reading\":\"わたし\",\"base\":\"私\",\"pos\":\"名詞\",\"bound\":false},\
+           {\"text\":\"は\",\"start\":1,\"end\":2,\"reading\":\"は\",\"base\":\"は\",\"pos\":\"助詞\",\"bound\":false},\
+           {\"text\":\"学生\",\"start\":2,\"end\":4,\"reading\":\"がくせい\",\"base\":\"学生\",\"pos\":\"名詞\",\"bound\":false},\
+           {\"text\":\"です\",\"start\":4,\"end\":6,\"reading\":\"です\",\"base\":\"です\",\"pos\":\"助動詞\",\"bound\":true}]"
     );
 }
 
@@ -455,7 +519,7 @@ fn json_reading_null_when_unknown() {
     // POS is still 記号.
     assert_eq!(
         serialize_tokens(&tokens),
-        "[{\"text\":\"😊\",\"start\":0,\"end\":1,\"reading\":null,\"base\":null,\"pos\":\"記号\"}]"
+        "[{\"text\":\"😊\",\"start\":0,\"end\":1,\"reading\":null,\"base\":null,\"pos\":\"記号\",\"bound\":false}]"
     );
 }
 
@@ -471,7 +535,7 @@ fn json_base_and_pos_null_for_unknown_shape() {
     )];
     assert_eq!(
         serialize_tokens(&tokens),
-        "[{\"text\":\"ミミ\",\"start\":0,\"end\":2,\"reading\":null,\"base\":null,\"pos\":\"名詞\"}]"
+        "[{\"text\":\"ミミ\",\"start\":0,\"end\":2,\"reading\":null,\"base\":null,\"pos\":\"名詞\",\"bound\":false}]"
     );
 }
 

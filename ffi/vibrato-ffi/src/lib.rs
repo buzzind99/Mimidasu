@@ -86,6 +86,16 @@ impl FeatureScheme {
         0
     }
 
+    /// The POS-detail tag marking a bound (non-self-standing) word in
+    /// column 1, 0-based. IPADIC tags ない/いる/くれる etc. 非自立; UniDic's
+    /// counterpart tag is 非自立可能.
+    fn bound_detail_tag(self) -> &'static str {
+        match self {
+            Self::Ipadic => "非自立",
+            Self::Unidic => "非自立可能",
+        }
+    }
+
     /// Maps a UniDic coarse POS tag onto its IPADIC counterpart. Tags beyond
     /// these have identical names in both schemes (名詞, 動詞, 助詞, …).
     /// 接尾辞 has no IPADIC POS1 counterpart (IPADIC tags suffixes 名詞,接尾)
@@ -152,6 +162,7 @@ struct TokenJson {
     reading: Option<String>,
     base: Option<String>,
     pos: Option<String>,
+    bound: bool,
 }
 
 /// Converts katakana to hiragana per scalar. The ア..ん block shifts down by
@@ -289,6 +300,25 @@ fn pos_from_features(features: &[String], scheme: FeatureScheme) -> Option<Strin
     feature_column(features, scheme.pos_column()).map(|raw| scheme.remap_pos(&raw))
 }
 
+/// Whether the token is a bound (non-self-standing) word: 助動詞 outright,
+/// or the scheme's non-self-standing detail tag in column 1 — the rows the
+/// favorite matcher's lemma arm must skip (favouring ない must not light
+/// ねえ/なきゃ, whose tokens lemmatize to ない). 形容詞 rows lemmatizing to
+/// ない (退職なし, なかろ) are the same negative conjugates — no content
+/// adjective lemmatizes to ない — but this lexicon does not tag them 非自立
+/// in column 1, so the base names them here. Unknown rows carry `*` in every
+/// column and read false.
+fn bound_from_features(features: &[String], scheme: FeatureScheme) -> bool {
+    if feature_column(features, scheme.pos_column()).as_deref() == Some("助動詞") {
+        return true;
+    }
+    if feature_column(features, 1).as_deref() == Some(scheme.bound_detail_tag()) {
+        return true;
+    }
+    feature_column(features, scheme.base_column()).as_deref() == Some("ない")
+        && feature_column(features, scheme.pos_column()).as_deref() == Some("形容詞")
+}
+
 /// Splits a MeCab feature CSV row into columns, honoring double-quoted
 /// fields. Mirrors vibrato's private `parse_csv_row`; a single field larger
 /// than the buffer degrades to a truncated column instead of panicking.
@@ -331,6 +361,7 @@ fn token_payload(
         reading,
         base: base_from_features(features, scheme),
         pos: pos_from_features(features, scheme),
+        bound: bound_from_features(features, scheme),
     }
 }
 

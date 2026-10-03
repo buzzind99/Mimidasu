@@ -162,6 +162,66 @@ fn live_spans_are_original_input_scalar_indices() {
 }
 
 #[test]
+fn live_bound_flags_mark_auxiliary_conjugates() {
+    // The favorite matcher's lemma-arm contract against the real lexicon:
+    // negative-auxiliary conjugates (助動詞 ない, the 形容詞-row なし) and
+    // the tense た read bound, while the self-standing stem does not.
+    let Some(model) = skip_unless_model() else {
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("ipadic.dic");
+    assert_eq!(
+        unsafe { dictionary_prepare(cstring(&model).as_ptr(), cstring(&out).as_ptr()) },
+        0
+    );
+    let handle = unsafe { dictionary_open(cstring(&out).as_ptr()) };
+    assert!(!handle.is_null());
+
+    let tokens = |text: &str| -> Vec<(String, bool)> {
+        let json = json_string(unsafe {
+            dictionary_tokenize_json(handle, CString::new(text).unwrap().as_ptr())
+        });
+        let parsed = serde_json::from_str::<Value>(&json).unwrap();
+        parsed
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|token| {
+                (
+                    token["text"].as_str().unwrap().to_owned(),
+                    token["bound"].as_bool().unwrap(),
+                )
+            })
+            .collect()
+    };
+
+    // The negative auxiliary itself, the 形容詞-row conjugate the lexicon
+    // leaves untagged in column 1, and the self-standing stem + tense た.
+    let negative = tokens("高くない");
+    assert!(
+        negative.contains(&("ない".to_owned(), true)),
+        "高くない must carry a bound ない token: {negative:?}"
+    );
+    let nashi = tokens("退職なし");
+    assert!(
+        nashi.contains(&("なし".to_owned(), true)),
+        "退職なし must carry a bound なし token: {nashi:?}"
+    );
+    let eaten = tokens("食べた");
+    assert!(
+        eaten.contains(&("食べ".to_owned(), false)),
+        "食べた must carry a self-standing 食べ token: {eaten:?}"
+    );
+    assert!(
+        eaten.contains(&("た".to_owned(), true)),
+        "食べた must carry a bound た token: {eaten:?}"
+    );
+
+    unsafe { dictionary_free(handle) };
+}
+
+#[test]
 fn ffi_rejects_bad_input_fail_soft() {
     // Missing dictionary file.
     let missing = CString::new("/nonexistent/mimidasu/ipadic.dic").unwrap();
