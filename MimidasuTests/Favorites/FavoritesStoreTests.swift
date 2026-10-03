@@ -286,6 +286,32 @@ struct FavoritesStoreTests {
         #expect(reopened.words.map(\.headword) == ["食べる", "見る"])
     }
 
+    @Test("a backdated star lands where the file would put it, not at the top")
+    func toggleKeepsTheFileOrdering() {
+        let (store, cleanup) = makeStore()
+        defer { cleanup() }
+
+        store.toggle(Self.miru)
+        store.toggle(Self.ko)
+        store.toggle(Self.taberu)
+
+        // Timestamps 1000, 1002, 1001: the newest leads and the backdated
+        // word slots between it and the oldest — what a reopen reads back,
+        // so the list never reshuffles under the user on relaunch.
+        #expect(store.words.map(\.headword) == ["50%", "食べる", "見る"])
+    }
+
+    @Test("two stars in the same millisecond order by headword, as the file orders them")
+    func sameTimestampOrdersByHeadword() {
+        let (store, cleanup) = makeStore()
+        defer { cleanup() }
+
+        store.toggle(FavoriteWord(headword: "そら", reading: nil, romaji: nil, addedAt: 500))
+        store.toggle(FavoriteWord(headword: "あめ", reading: nil, romaji: nil, addedAt: 500))
+
+        #expect(store.words.map(\.headword) == ["あめ", "そら"])
+    }
+
     // MARK: - Degraded store
 
     @Test("a store whose file cannot open reports degraded, not merely empty")

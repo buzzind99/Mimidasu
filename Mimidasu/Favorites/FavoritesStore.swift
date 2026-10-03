@@ -130,7 +130,15 @@ final class FavoritesStore {
         } catch {
             return .failed
         }
-        words.insert(word, at: 0)
+        // The position the file would give the row — `added_at DESC,
+        // headword ASC`. The window renders `words` directly, so an
+        // off-order insert would reshuffle under the user on the next
+        // launch's reload.
+        let index = words.firstIndex { element in
+            element.addedAt < word.addedAt
+                || (element.addedAt == word.addedAt && element.headword > word.headword)
+        } ?? words.count
+        words.insert(word, at: index)
         count = words.count
         matchKeys.insert(key)
         if let reading = FavoriteWord.readingKey(word.reading) {
