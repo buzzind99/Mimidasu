@@ -259,19 +259,26 @@ struct RubyTextView: View, Equatable {
     /// furigana mode a sentence with no kanji anywhere yields only plain units,
     /// so gating on annotation alone dropped the favorites those sentences carry
     /// — the commonest ones — on the floor.
+    ///
+    /// The None-mode check runs before `displayUnits` is computed: building the
+    /// units tokenizes and folds the whole string for an answer None mode always
+    /// knows in advance, and the HUD re-renders its live partial several times
+    /// a second.
     @ViewBuilder
     private var annotatedBody: some View {
-        let units = displayUnits
-        if annotation != .none,
-           units.contains(where: { unit in unit.isAnnotated || unit.isFavorite })
-        {
-            FlowLayout(spacing: 4, lineSpacing: 1, fingerprint: fingerprint) {
-                ForEach(Array(units.enumerated()), id: \.offset) { _, unit in
-                    unitView(unit)
-                }
-            }
-        } else {
+        if annotation == .none {
             plainFallback(text)
+        } else {
+            let units = displayUnits
+            if units.contains(where: { unit in unit.isAnnotated || unit.isFavorite }) {
+                FlowLayout(spacing: 4, lineSpacing: 1, fingerprint: fingerprint) {
+                    ForEach(Array(units.enumerated()), id: \.offset) { _, unit in
+                        unitView(unit)
+                    }
+                }
+            } else {
+                plainFallback(text)
+            }
         }
     }
 

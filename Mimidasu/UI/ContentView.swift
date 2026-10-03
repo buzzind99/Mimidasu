@@ -71,6 +71,28 @@ private struct FavoritesOpenerButton: View {
     }
 }
 
+/// Toast stack and the favorites opener, one top-trailing column: toasts push
+/// the star down by layout, and it glides back when they clear. Its own leaf
+/// so the toast-array read the conditional mount performs registers against
+/// this column alone — in `ContentView.body` it would re-diff the sidebar,
+/// the transcript, and the live strip on every post, dismissal, and expiry.
+private struct TranscriptOverlayColumn: View {
+    let toasts: ToastCenter
+    let hover: FavoritesButtonHover
+    let closedAt: ContinuousClock.Instant?
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 12) {
+            if !toasts.toasts.isEmpty {
+                ToastStackView(center: toasts)
+            }
+            FavoritesOpenerButton(hover: hover, closedAt: closedAt)
+        }
+        .padding(.trailing, 20)
+        .padding(.top, 16)
+    }
+}
+
 /// Root view: onboarding until the model resolves, then the main shell —
 /// sidebar | 1pt divider | transcript pane with the live strip, the toast
 /// stack overlaid top-trailing, and the notice pill overlaid top.
@@ -178,21 +200,14 @@ struct ContentView: View {
                 }
             }
             // Toast stack and favorites opener share one top-trailing
-            // column: toasts push the star down by layout, and it glides
-            // back when they clear. The stack is conditional so its empty
-            // state never eats the inter-item spacing.
+            // column (see `TranscriptOverlayColumn`); it is a leaf so its
+            // toast observation stays local.
             .overlay(alignment: .topTrailing) {
-                VStack(alignment: .trailing, spacing: 12) {
-                    if !model.toasts.toasts.isEmpty {
-                        ToastStackView(center: model.toasts)
-                    }
-                    FavoritesOpenerButton(
-                        hover: favoritesButtonHover,
-                        closedAt: favoritesClosedAt
-                    )
-                }
-                .padding(.trailing, 20)
-                .padding(.top, 16)
+                TranscriptOverlayColumn(
+                    toasts: model.toasts,
+                    hover: favoritesButtonHover,
+                    closedAt: favoritesClosedAt
+                )
             }
             .overlay(alignment: .top) {
                 NoticePillView(center: model.notices)
