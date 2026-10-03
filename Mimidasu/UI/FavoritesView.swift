@@ -64,6 +64,11 @@ struct FavoritesView: View {
             }
             .onChange(of: query) { _, newValue in
                 searchTask?.cancel()
+                // Nothing to debounce when the field already matches the query
+                // the rows were built from. The close-time reset lands here —
+                // its own `query = ""` write re-enters this handler — and must
+                // not respawn the task it just cancelled.
+                guard newValue != debouncedQuery else { return }
                 searchTask = Task { @MainActor in
                     try? await Task.sleep(for: Self.searchDebounce)
                     guard !Task.isCancelled else { return }
@@ -120,9 +125,10 @@ struct FavoritesView: View {
         withTransaction(transaction) {
             query = ""
             debouncedQuery = ""
-            // A debounce still pending at close would land its captured query
-            // after the two lines above, filtering a list the field no longer
-            // shows a term for.
+            // The two writes above re-enter the query handler; its equality
+            // guard turns both into early returns, so no debounce task can
+            // land its captured query after this reset and filter a list the
+            // field no longer shows a term for.
             searchTask?.cancel()
             searchTask = nil
             searchResults = model.favorites.words
