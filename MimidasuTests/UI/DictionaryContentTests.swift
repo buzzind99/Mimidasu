@@ -231,13 +231,20 @@ struct DictionaryContentTests {
         #expect(truncated.hidden == 2)
     }
 
-    @Test("also pills cap at eight — every candidate but the display result")
+    @Test("also pills cap at nine — the resolution ceiling, truncating neither row")
     func alsoCap() {
-        let also = (0 ..< 9).map { index in result("word\(index)") }
+        let candidates = (0 ..< 10).map { index in result("word\(index)") }
 
+        // A found tap's also: row holds at most eight (the display result
+        // takes one); a split-only related: row has no display result and
+        // can hold all nine candidates — none of them truncates.
         #expect(
-            Array(DictionaryContent.truncatedAlso(also)).map(\.matched)
-                == (0 ..< 8).map { index in "word\(index)" }
+            Array(DictionaryContent.truncatedAlso(Array(candidates.prefix(9)))).map(\.matched)
+                == (0 ..< 9).map { index in "word\(index)" }
+        )
+        #expect(
+            Array(DictionaryContent.truncatedAlso(candidates)).map(\.matched)
+                == (0 ..< 9).map { index in "word\(index)" }
         )
         #expect(DictionaryContent.truncatedAlso([]).isEmpty)
     }

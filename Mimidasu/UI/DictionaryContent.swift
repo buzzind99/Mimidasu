@@ -9,10 +9,11 @@ enum DictionaryContent {
     static let maxGlossesPerSense = 3
     static let maxSenses = 5
     /// "also:"/"related:" fallback-hit pill cap. Every tap resolves at most
-    /// `maxCandidates` candidates, so eight is the ceiling — the display
-    /// result takes one, and truncation happens after resolution (display
-    /// only, no query cost).
-    static let maxAlsoPills = 8
+    /// `maxCandidates` candidates: a found tap's "also:" row holds at most
+    /// eight of them (the display result takes one), and a split-only
+    /// not-found tap can hold all nine — so nine truncates neither. All
+    /// truncation happens after resolution (display only, no query cost).
+    static let maxAlsoPills = 9
 
     /// Headword row: the kanji writing when present, else the reading.
     static func headword(of entry: JMDictEntry) -> String? {
