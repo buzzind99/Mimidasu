@@ -171,7 +171,7 @@ final class SQLiteDatabaseTests {
 
     // MARK: - Close
 
-    @Test("close is idempotent and statements after close throw")
+    @Test("close is idempotent and statements after close throw the defined error")
     func closeSemantics() throws {
         let db = try SQLiteDatabase(path: databaseURL.path)
         _ = try db.statement("SELECT id FROM t")
@@ -179,8 +179,11 @@ final class SQLiteDatabaseTests {
         db.close()
         db.close()
 
-        #expect(throws: SQLiteDatabase.Error.self) {
+        #expect {
             try db.statement("SELECT id FROM t")
+        } throws: { error in
+            (error as? SQLiteDatabase.Error)
+                == .sqlite(code: SQLITE_MISUSE, message: "statement after close")
         }
     }
 

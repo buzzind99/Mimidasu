@@ -122,8 +122,12 @@ final class SQLiteDatabase: @unchecked Sendable {
     /// Returns the cached statement for `sql`, resetting any prior step and
     /// bindings; compiles it on first use (`sqlite3_prepare_v2` dominates a
     /// repeat query's cost). Callers fully consume each statement before
-    /// returning, so reuse is safe.
+    /// returning, so reuse is safe. Use after `close()` throws rather than
+    /// preparing against the freed connection.
     func statement(_ sql: String) throws(Error) -> Statement {
+        guard !isClosed else {
+            throw .sqlite(code: SQLITE_MISUSE, message: "statement after close")
+        }
         if let cached = preparedStatements[sql] {
             sqlite3_reset(cached)
             sqlite3_clear_bindings(cached)
