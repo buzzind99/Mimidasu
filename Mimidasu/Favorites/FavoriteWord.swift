@@ -54,6 +54,12 @@ struct FavoriteWord: Identifiable, Equatable, Sendable {
     /// conjugates the dictionary resolves to entirely different entries. A
     /// bound token still matches on its exact surface, so spoken ない — a
     /// bound token itself — lights as before.
+    ///
+    /// One caveat the lexicon owns, not this matcher: on the Full model
+    /// (UniDic) an aspectual content verb rides a 非自立可能 subentry and
+    /// arrives bound, so 行っています's 行っ stays dark for a starred 行く
+    /// where the Lite model lights it. The flag is the lexicon's own
+    /// self-standing judgement.
     static func matches(
         _ segment: ReadingSegment, keys: Set<String>, readings: Set<String>
     ) -> Bool {
@@ -67,9 +73,12 @@ struct FavoriteWord: Identifiable, Equatable, Sendable {
             // IPADIC lexicalizes potential forms as standalone verbs whose
             // lemma is the potential itself (勝て before なければ → 勝てる),
             // so the starred dictionary form hides behind one tail shift —
-            // the same unwrap the tap lookup walks (作れる → 作る). A lemma
-            // that doesn't shape like a potential unwraps to nil, and a
-            // wrong guess is inert unless it equals a stored headword.
+            // the same unwrap the tap lookup walks (作れる → 作る). The tail
+            // map carries only genuine potential shapes (え-row + る, られる),
+            // so anything else — なさる, 得る — unwraps to nil, and the one
+            // real overlap (売れる unwraps to 売る) is a true potential
+            // relation: a starred 売る lighting 売れます is this feature's
+            // contract, not a collision to gate away.
             if let dictionaryForm = JMDictExpansion.dictionaryForm(ofPotential: lemma),
                keys.contains(normalize(dictionaryForm))
             {
