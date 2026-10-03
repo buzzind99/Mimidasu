@@ -9,7 +9,7 @@
 //! # Contract
 //!
 //! - `dictionary_tokenize_json` emits
-//!   `[{"text", "start", "end", "reading", "base", "pos"}]`.
+//!   `[{"text", "start", "end", "reading", "base", "pos", "bound"}]`.
 //!   `start`/`end` are Unicode-scalar indices into the **original** input,
 //!   end-exclusive: vibrato performs no normalization, and its
 //!   `Token::range_char()` counts exactly those scalars. Whitespace runs are
@@ -28,6 +28,11 @@
 //!   with UniDic tags folded onto their IPADIC counterparts (補助記号 →
 //!   記号, 接頭辞 → 接頭詞; see [`FeatureScheme`]); `null` for `*`, missing
 //!   column, or empty.
+//! - `bound` is always present, never null: true for 助動詞 rows outright,
+//!   for rows carrying the scheme's non-self-standing detail tag in column 1
+//!   (IPADIC 非自立, UniDic 非自立可能), and for 形容詞 rows whose base is
+//!   ない (negative conjugates this lexicon leaves untagged in column 1);
+//!   false otherwise, unknown `*` rows included.
 //! - All functions are fail-soft: failures return null/1 rather than panicking.
 //! - Calls on one handle must be externally serialized (the Swift engine
 //!   holds a lock around FFI calls).
@@ -309,6 +314,10 @@ fn pos_from_features(features: &[String], scheme: FeatureScheme) -> Option<Strin
 /// in column 1, so the base names them here. Unknown rows carry `*` in every
 /// column and read false.
 fn bound_from_features(features: &[String], scheme: FeatureScheme) -> bool {
+    // These comparisons read the raw column 0, unlike `pos_from_features`,
+    // which remaps. Deliberate: `remap_pos` folds only 補助記号 → 記号 and
+    // 接頭辞 → 接頭詞, so for 助動詞/形容詞 the raw tag already equals the
+    // remapped one — extend `remap_pos` before relying on that here.
     if feature_column(features, scheme.pos_column()).as_deref() == Some("助動詞") {
         return true;
     }
@@ -452,8 +461,8 @@ pub unsafe extern "C" fn dictionary_free(handle: *mut DictionaryHandle) {
 }
 
 /// Tokenizes `text` into a JSON array
-/// `[{text, start, end, reading, base, pos}]` owned by the runtime until
-/// released with [`dictionary_free_string`]. Returns
+/// `[{text, start, end, reading, base, pos, bound}]` owned by the runtime
+/// until released with [`dictionary_free_string`]. Returns
 /// null on failure (null arguments, invalid UTF-8, allocation failure).
 ///
 /// # Safety
