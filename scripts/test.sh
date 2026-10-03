@@ -144,11 +144,12 @@ if tests:
     # gated on a runtime artifact (the dictionary dylib, the tokenizer) could
     # vanish from the run and the summary would still read PASS. Named, not
     # failed: a suite disabled by an unavailable runtime is the script's own
-    # precondition reporting itself unmet, not a broken test.
+    # precondition reporting itself unmet, not a broken test. The numerator
+    # counts executed tests only — a skip is neither a pass nor a failure.
     n_skipped = tests.get("skippedTests") or 0
     verdict = "FAIL" if (n_failed or build_status) else "PASS"
     skipped = f", {n_skipped} skipped" if n_skipped else ""
-    print(f"tests: {n_tests - n_failed}/{n_tests}{skipped} {verdict}")
+    print(f"tests: {n_tests - n_failed - n_skipped}/{n_tests}{skipped} {verdict}")
 else:
     print(f"tests: unknown ({'FAIL' if build_status else 'no summary'})")
 if fast:
