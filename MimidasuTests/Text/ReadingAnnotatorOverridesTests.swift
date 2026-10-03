@@ -6,10 +6,11 @@ import Testing
 
 /// The numeral-fusion path reaches the shared annotation pipeline, so the
 /// whole-surface overrides apply to a fused segment as they always did to a
-/// whole token. These pin that reach: every case here reads a surface the
-/// fusion manufactures (二役 would be にやく), so they fail outright if the
-/// fused segments stop consulting the table — and the guards at the bottom
-/// pin the counters the table must leave alone.
+/// whole token. The cases up top read surfaces the fusion manufactures
+/// (二役 would be にやく), so they fail outright if the fused segments stop
+/// consulting the table; the dataset-divergent section pins the same table
+/// on plain tokens, and the guards at the bottom pin the counters the table
+/// must leave alone.
 @Suite("ReadingAnnotator numeral overrides")
 struct ReadingAnnotatorOverridesTests {
 
