@@ -24,6 +24,12 @@ extension ReadingAnnotator {
     /// happening to match them, so a future 一-prefixed entry would outrank them.
     private static let surfaceReadings = [
         "一日": "いちにち", "笑": "わら", "辺": "へん",
+        // The lexicon's only bare-改 row is the literary noun あらため (the
+        // word usually written 改め), while the dictionary lists the writing
+        // only under かい — the reading the lookup popup shows. A lone 改 in a
+        // transcript reads かい so the ruby and the romaji agree with it;
+        // 改め keeps its own reading because the key is the whole surface.
+        "改": "かい",
         // Bound-form numerals: the number takes a ひと/ふた/よん stem instead
         // of its cardinal. The tokenizer always splits these into numeral +
         // counter, so mechanical fusion can only ever produce the cardinal

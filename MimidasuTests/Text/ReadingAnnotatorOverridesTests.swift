@@ -257,4 +257,44 @@ struct ReadingAnnotatorOverridesTests {
 
         #expect(describe(segments) == [[text, romaji, furigana]])
     }
+
+    // MARK: - Dataset-divergent single-kanji readings
+
+    /// The lexicon's only bare-改 row reads アラタメ, but the dictionary lists
+    /// the writing only under かい — the reading the lookup popup shows. The
+    /// override keeps the ruby on the dictionary's side of the disagreement.
+    @Test("reads the bare 改 the dictionary's writing implies, not the lexicon's noun row (改 → kai, not aratame)")
+    func bareKaiReadsTheDictionaryWriting() throws {
+        let annotator = makeAnnotator(tokens(["改"], readings: ["あらため"]))
+
+        let segments = try #require(annotator.segments(for: "改"))
+
+        #expect(describe(segments) == [["改", "kai", "かい"]])
+    }
+
+    /// The key is the whole surface, so the word the lexicon's あらため row
+    /// actually spells — 改め — keeps its reading.
+    @Test("leaves 改め on the reading the lexicon and dictionary agree on (改め → aratame)")
+    func aratameWordKeepsItsReading() throws {
+        let annotator = makeAnnotator(tokens(["改め"], readings: ["あらため"]))
+
+        let segments = try #require(annotator.segments(for: "改め"))
+
+        #expect(describe(segments) == [["改め", "aratame", "あらため"]])
+    }
+
+    /// ASR output spaces words out, and the override is per-segment — the
+    /// neighbor's segment and the gap run don't dilute the bare 改's reading.
+    @Test("reads a spaced bare 改 through the same override (改 賊 → kai + zoku)")
+    func spacedBareKaiReadsTheDictionaryWriting() throws {
+        let annotator = makeAnnotator(spacedTokens(
+            ["改", "賊"], readings: ["あらため", "ぞく"]
+        ))
+
+        let segments = try #require(annotator.segments(for: "改 賊"))
+
+        #expect(describe(segments) == [
+            ["改", "kai", "かい"], [" ", " ", nil], ["賊", "zoku", "ぞく"]
+        ])
+    }
 }
