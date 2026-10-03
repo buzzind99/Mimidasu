@@ -25,6 +25,22 @@ struct FavoriteWordBoundLemmaLiveTests {
         .map(\.surface)
     }
 
+    /// That the corpus entry still produces the bound ない conjugates the
+    /// skip exists for. Without this a dictionary bump that stopped emitting
+    /// them would satisfy the dark-listing identically and silently — the
+    /// same trap the collapse suite's `expectCollapse` guards.
+    private func expectConjugates(_ text: String) throws -> [ReadingSegment] {
+        let segments = try #require(Self.annotator.segments(for: text))
+        #expect(
+            segments.contains { segment in segment.isBound && segment.lemma == "ない" },
+            """
+            the corpus entry no longer produces ない conjugates — the bound \
+            skip is untested here: \(segments.map(\.surface))
+            """
+        )
+        return segments
+    }
+
     @Test("a ない favorite lights only the exact ない surfaces in the debug corpus",
           arguments: [
               "マジ敵際はよくねえ、あいつ絶対座るより手際はいいんだけど。",
@@ -34,9 +50,19 @@ struct FavoriteWordBoundLemmaLiveTests {
               "今のだけ見なかったことにして途中まですごくかっこよかったからさせっかくどちらにも悪い話ではなかろう。"
           ])
     func naiConjugatesStayDark(sentence: String) throws {
-        let lit = try litSurfaces(sentence, keys: Self.naiKeys)
+        let segments = try expectConjugates(sentence)
+        let lit = segments
+            .filter { segment in FavoriteWord.matches(segment, keys: Self.naiKeys, readings: []) }
+            .map(\.surface)
 
         #expect(lit.allSatisfy { surface in surface == "ない" }, "unexpectedly lit: \(lit)")
+    }
+
+    @Test("a ない favorite lights the spoken ない")
+    func spokenNaiStaysLit() throws {
+        let lit = try litSurfaces("行きたくない。", keys: Self.naiKeys)
+
+        #expect(lit == ["ない"])
     }
 
     @Test("a self-standing lemma still matches a starred content word")
