@@ -29,7 +29,7 @@ a verb, because every definition popup is a little *mimidasu*.
   click any word for definitions, pitch accent, and JLPT level
 - **Add favorites, spot them in the wild** — favorite words appear
   amber-colored in the transcript, inflected forms included (見る also
-  highlights 見た and 見ます), so keep an eye out for them in the transcript!
+  highlights 見た and 見ます), keep an eye out for your favorite words while listening!
 - **Floating subtitles** — a click-through HUD overlays the video you're
   watching, so Mimidasu stays out of the way
 - **Keep the transcript** — export any session as TXT, SRT, VTT, or JSON
