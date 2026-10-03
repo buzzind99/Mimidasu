@@ -96,11 +96,15 @@ struct FavoritesView: View {
             Rectangle().fill(Theme.divider).frame(height: 1)
             VStack(alignment: .leading, spacing: 10) {
                 noticeCard
-                searchField
-                if rows.isEmpty {
-                    emptyState
+                if model.favorites.isDegraded {
+                    degradedState
                 } else {
-                    rowList(rows)
+                    searchField
+                    if rows.isEmpty {
+                        emptyState
+                    } else {
+                        rowList(rows)
+                    }
                 }
             }
             .padding(14)
@@ -244,6 +248,21 @@ struct FavoritesView: View {
             ? "No favorites yet. Star a word from the dictionary popover."
             : "No favorites match “\(trimmed)”."
         return Text(message)
+            .font(.system(size: 13))
+            .foregroundStyle(Theme.secondaryText)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 24)
+    }
+
+    /// A store whose database failed to open. The read paths answer from
+    /// empty memory, so without this branch the window renders that stub as
+    /// "No favorites yet" — a lie about data the file may still hold. Nothing
+    /// is lost: a healthy reopen serves the same file, which is what the
+    /// search field is hidden for — querying a stub could only ever answer
+    /// empty.
+    private var degradedState: some View {
+        Text("Favorites are unavailable — the store couldn't be opened. Your "
+            + "starred words are untouched; restarting Mimidasu may help.")
             .font(.system(size: 13))
             .foregroundStyle(Theme.secondaryText)
             .frame(maxWidth: .infinity, alignment: .center)

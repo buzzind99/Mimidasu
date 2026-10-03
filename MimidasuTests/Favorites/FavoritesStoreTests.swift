@@ -286,6 +286,24 @@ struct FavoritesStoreTests {
         #expect(reopened.words.map(\.headword) == ["食べる", "見る"])
     }
 
+    // MARK: - Degraded store
+
+    @Test("a store whose file cannot open reports degraded, not merely empty")
+    func failedLoadReportsDegraded() {
+        // A regular file sitting where the store's directory belongs: the
+        // open cannot create its parent, the first read fails, and the store
+        // degrades terminally.
+        let blocked = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimidasu-favorites-blocked-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: blocked) }
+        #expect(FileManager.default.createFile(atPath: blocked.path, contents: nil))
+        let store = FavoritesStore(location: blocked.appendingPathComponent("favorites.sqlite"))
+
+        #expect(store.isDegraded)
+        #expect(store.words.isEmpty)
+        #expect(store.toggle(Self.miru) == .failed)
+    }
+
     // MARK: - Search
 
     @Test("search hits the headword")

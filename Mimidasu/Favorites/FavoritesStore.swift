@@ -29,6 +29,12 @@ final class FavoritesStore {
     /// `RubyTextView` as a plain `Int` because a matcher closure carries no
     /// value identity and can never break an `Equatable` comparison.
     private(set) var revision = 0
+    /// Whether the database failed on its first read and was degraded
+    /// terminally: every file-backed answer is now a stub (empty list, empty
+    /// search). The window reads this to say "unavailable" instead of
+    /// rendering that stub as "No favorites yet" over data the file may still
+    /// hold.
+    private(set) var isDegraded = false
 
     /// Normalized headwords — the hot path. Raw spellings live in `words`.
     private var matchKeys: Set<String> = []
@@ -76,6 +82,7 @@ final class FavoritesStore {
             readingKeys = Self.readingKeys(for: loaded)
         } catch {
             print("favorites: load failed, degrading: \(error)")
+            isDegraded = true
             database.degrade()
         }
     }
