@@ -79,6 +79,75 @@ struct FavoriteWordTests {
         ))
     }
 
+    @Test("a kana-written conjugate matches through its kana lemma against the stored reading")
+    func matchesKanaLemmaOfKanjiFavorite() {
+        let starred = Set([FavoriteWord.normalize("貰う")])
+        let stored = readings("もらう")
+
+        #expect(FavoriteWord.matches(
+            segment("もらって", lemma: "もらう"), keys: starred, readings: stored
+        ))
+    }
+
+    @Test("a bound kana lemma stays dark for the stored reading")
+    func ignoresBoundKanaLemma() {
+        let starred = Set([FavoriteWord.normalize("貰う")])
+        let stored = readings("もらう")
+
+        #expect(!FavoriteWord.matches(
+            segment("もらって", lemma: "もらう", isBound: true),
+            keys: starred, readings: stored
+        ))
+    }
+
+    @Test("a kana lemma that misses every stored reading keeps the segment dark")
+    func ignoresUnrelatedKanaLemma() {
+        let stored = readings("もらう")
+
+        #expect(!FavoriteWord.matches(
+            segment("きいて", lemma: "きく"), keys: [], readings: stored
+        ))
+    }
+
+    @Test("a katakana-written conjugate folds onto the hiragana stored reading")
+    func matchesKatakanaLemmaOfKanjiFavorite() {
+        let starred = Set([FavoriteWord.normalize("貰う")])
+        let stored = readings("もらう")
+
+        #expect(FavoriteWord.matches(
+            segment("モラッテ", lemma: "モラウ"), keys: starred, readings: stored
+        ))
+    }
+
+    @Test("a kana-written potential matches through its unwrapped form against the stored reading")
+    func matchesKanaPotentialOfKanjiFavorite() {
+        let starred = Set([FavoriteWord.normalize("貰う")])
+        let stored = readings("もらう")
+
+        #expect(FavoriteWord.matches(
+            segment("もらえる", lemma: "もらえる"), keys: starred, readings: stored
+        ))
+    }
+
+    @Test("an all-kana lemma lights a kanji surface too, so 貰って lights for a starred 貰う")
+    func matchesKanaLemmaUnderKanjiSurface() {
+        let starred = Set([FavoriteWord.normalize("貰う")])
+        let stored = readings("もらう")
+
+        #expect(FavoriteWord.matches(
+            segment("貰って", lemma: "もらう"), keys: starred, readings: stored
+        ))
+    }
+
+    @Test("a lemma with kanji in it never matches through the stored reading")
+    func ignoresKanjiLemmaReading() {
+        let stored = readings("貰う")
+
+        #expect(!FavoriteWord.matches(
+            segment("貰って", lemma: "貰う"), keys: [], readings: stored
+        ))
+    }
+
     @Test("an empty surface and an empty lemma never match, so a malformed empty key stays inert")
     func ignoresEmptyText() {
         let empty = Set([""])

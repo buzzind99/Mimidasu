@@ -5,8 +5,10 @@ import Testing
 /// The favorite lemma arm against the real tokenizer, end to end: a ない
 /// favorite keeps its conjugate surfaces (ねえ, なきゃ, なし, なく, なかろう)
 /// dark while spoken ない stays lit, a self-standing lemma still matches a
-/// starred content word, and a context-potential lemma (勝て → 勝てる) lights
-/// its starred dictionary form through the unwrap.
+/// starred content word, a context-potential lemma (勝て → 勝てる) lights
+/// its starred dictionary form through the unwrap, and a kanji favorite
+/// lights its kana-written conjugate (もらって) through the kana-lemma
+/// reading bridge.
 @Suite("FavoriteWord bound-lemma corpus", .enabled(if: LiveDictionaryRuntime.isAvailable))
 struct FavoriteWordBoundLemmaLiveTests {
 
@@ -17,10 +19,18 @@ struct FavoriteWordBoundLemmaLiveTests {
     private static let naiKeys: Set<String> = [FavoriteWord.normalize("ない")]
     private static let miruKeys: Set<String> = [FavoriteWord.normalize("見る")]
 
-    private func litSurfaces(_ text: String, keys: Set<String>) throws -> [String] {
+    /// The comparable readings of stored rows, as the store builds them: one
+    /// carrying no kana never arrives, since no kana surface could equal it.
+    private func storedReadings(_ stored: String?...) -> Set<String> {
+        Set(stored.compactMap { candidate in FavoriteWord.readingKey(candidate) })
+    }
+
+    private func litSurfaces(
+        _ text: String, keys: Set<String>, readings: Set<String> = []
+    ) throws -> [String] {
         let segments = try #require(Self.annotator.segments(for: text))
         return segments.filter { segment in
-            FavoriteWord.matches(segment, keys: keys, readings: [])
+            FavoriteWord.matches(segment, keys: keys, readings: readings)
         }
         .map(\.surface)
     }
@@ -87,5 +97,28 @@ struct FavoriteWordBoundLemmaLiveTests {
         let lit = try litSurfaces(sentence, keys: Self.miruKeys)
 
         #expect(lit == ["見"])
+    }
+
+    @Test("a 貰う favorite lights the kana-written もらって")
+    func morauLightsItsKanaConjugate() throws {
+        // That the corpus entry still produces the kana-lemma shape the
+        // bridge rests on: a kana surface lemmatizes to the kana citation
+        // form, which can never equal the kanji headword by spelling.
+        let segments = try #require(Self.annotator.segments(for: "ガジでもらってます。"))
+        #expect(
+            segments.contains { segment in segment.surface == "もらって" && segment.lemma == "もらう" },
+            """
+            the corpus entry no longer lemmatizes kana もらって to もらう — \
+            the kana-lemma arm is untested here: \(segments.map(\.surface))
+            """
+        )
+
+        let lit = try litSurfaces(
+            "ガジでもらってます。",
+            keys: [FavoriteWord.normalize("貰う")],
+            readings: storedReadings("もらう")
+        )
+
+        #expect(lit.contains("もらって"), "lit instead: \(lit)")
     }
 }
