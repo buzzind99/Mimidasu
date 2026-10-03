@@ -34,6 +34,13 @@ final class FavoritesLookupState {
     /// lands after a collapse (or a second expand) is discarded.
     private var generations: [String: Int] = [:]
 
+    /// Results dropped by the generation guard — the guard's observable half.
+    /// A discarded landing writes nothing, so this counter is the only trace
+    /// one leaves: a test can wait for it deterministically instead of
+    /// guessing when a dropped write would have arrived, and a deleted guard
+    /// turns that wait into a failure.
+    private(set) var discardedLandings = 0
+
     private let lookup: JMDictLookup
 
     init(lookup: JMDictLookup) {
@@ -82,8 +89,8 @@ final class FavoritesLookupState {
     }
 
     private func expand(_ word: FavoriteWord) {
-        generations[word.headword, default: 0] += 1
-        let generation = generations[word.headword] ?? 0
+        let generation = (generations[word.headword] ?? 0) + 1
+        generations[word.headword] = generation
         phases[word.headword] = .loading
         let engine = lookup
         let candidate = LookupCandidate(text: word.headword, reading: word.reading)
@@ -97,7 +104,11 @@ final class FavoritesLookupState {
                     return .failure(error)
                 }
             }.value
-            guard let self, generations[word.headword] == generation else { return }
+            guard let self else { return }
+            guard generations[word.headword] == generation else {
+                discardedLandings += 1
+                return
+            }
             switch result {
             case let .success(resolved):
                 phases[word.headword] = resolved.map(Phase.resolved) ?? .notFound

@@ -127,19 +127,68 @@ struct FavoritesLookupStateTests {
         #expect(!sut.isExpanded(word) && sut.phase(for: word) == .idle)
     }
 
-    /// Waits until the released query has entered and left `resolveDatabase`,
-    /// then lets the main actor drain before the caller reads a phase. The
-    /// query leaving is not the landing: the throw and the hop back still have
-    /// to happen, so reading the phase immediately would race the very write
-    /// these tests exist to catch. The two polls are asserted so a query that
-    /// never ran fails loudly instead of passing vacuously.
-    private func drainAfterGatedQuery(_ gate: Gate) async {
-        #expect(await pollUntil { gate.hasEntered })
-        #expect(await pollUntil { gate.hasLeft })
-        for _ in 0 ..< 5 {
-            await Task.yield()
+    @Test("a lookup that cannot run lands on the row as failed")
+    func failedLookupLandsAsFailed() async {
+        let sut = state()
+        let subject = word
+
+        sut.toggle(subject)
+
+        #expect(await pollUntil { sut.phase(for: subject) != .loading })
+        if case .failed = sut.phase(for: subject) {} else {
+            Issue.record("a failed open did not land as failed: \(sut.phase(for: subject))")
         }
-        try? await Task.sleep(for: .milliseconds(20))
+    }
+
+    @Test("a landed lookup resolves the row's phase")
+    func landedLookupResolves() async throws {
+        let fixture = try JMDictFixtureDatabase.build()
+        defer { fixture.remove() }
+        let url = fixture.url
+        let sut = FavoritesLookupState(lookup: JMDictLookup(resolveDatabase: { url }))
+        let word = FavoriteWord(
+            headword: "尾", reading: "お", romaji: "o", addedAt: 0
+        )
+
+        sut.toggle(word)
+
+        #expect(await pollUntil { sut.phase(for: word) != .loading })
+        if case .resolved = sut.phase(for: word) {} else {
+            Issue.record("a fixture hit did not resolve: \(sut.phase(for: word))")
+        }
+    }
+
+    @Test("a landed lookup with no hit marks the row not found")
+    func landedLookupWithoutHitMarksNotFound() async throws {
+        let fixture = try JMDictFixtureDatabase.build()
+        defer { fixture.remove() }
+        let url = fixture.url
+        let sut = FavoritesLookupState(lookup: JMDictLookup(resolveDatabase: { url }))
+        let word = FavoriteWord(
+            headword: "あああああ", reading: "あああああ", romaji: "aaaaa", addedAt: 0
+        )
+
+        sut.toggle(word)
+
+        #expect(await pollUntil { sut.phase(for: word) != .loading })
+        #expect(sut.phase(for: word) == .notFound)
+    }
+
+    /// Releases the gated query and waits until its landing has actually been
+    /// attempted. The three waits are each on observed state, never on a fixed
+    /// delay: the query entering, the query leaving, and — the one that
+    /// matters — the generation guard counting the discard in
+    /// `discardedLandings`. That last poll is what makes the tests
+    /// deterministic, and what makes a *deleted* guard fail them: with the
+    /// guard gone nothing ever counts, so the poll times out instead of the
+    /// assertion passing vacuously.
+    private func releaseAndAwaitDiscard(
+        _ release: DispatchSemaphore, gate: Gate, sut: FavoritesLookupState
+    ) async {
+        #expect(await pollUntil { gate.hasEntered })
+        release.signal()
+        #expect(await pollUntil { gate.hasLeft })
+        #expect(await pollUntil { sut.discardedLandings == 1 })
     }
 
     @Test("a lookup that lands after its row collapsed is discarded")
@@ -150,8 +199,7 @@ struct FavoritesLookupStateTests {
         sut.toggle(word) // in flight, blocked on `release`
         sut.toggle(word) // collapsed, generation bumped
 
-        release.signal()
-        await drainAfterGatedQuery(gate)
+        await releaseAndAwaitDiscard(release, gate: gate, sut: sut)
 
         // Still idle: the in-flight result found a stale generation and was
         // dropped rather than re-populating a row that was collapsed.
@@ -166,8 +214,7 @@ struct FavoritesLookupStateTests {
         sut.toggle(word)
 
         sut.reset()
-        release.signal()
-        await drainAfterGatedQuery(gate)
+        await releaseAndAwaitDiscard(release, gate: gate, sut: sut)
 
         #expect(sut.phase(for: word) == .idle)
     }
