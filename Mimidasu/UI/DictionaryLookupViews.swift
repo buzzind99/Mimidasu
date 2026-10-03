@@ -8,8 +8,9 @@ import SwiftUI
 /// One row of tappable result pills under a mono label — the entry view's
 /// "also:" fallback hits and the not-found view's "related:" suggestions
 /// render through the same component so they can never diverge. Pills flow
-/// and wrap: a tap resolves up to `DictionaryContent.maxAlsoPills` fallback
-/// hits, more than fit one line.
+/// and wrap: a tap resolves up to `JMDictExpansion.maxCandidates` candidates
+/// and a found tap's "also:" row shows at most `DictionaryContent.maxAlsoPills`
+/// pills (the display result takes one), more than fit one line.
 struct DictionaryResultPillRow: View {
     let label: String
     let results: [LookupResult]
@@ -71,7 +72,7 @@ struct DictionaryResultPillRow: View {
         }
         .buttonStyle(.plain)
         .pointerStyle(.link)
-        .accessibilityLabel(starred ? "Look up \(label), favorited" : "Look up \(label)")
+        .accessibilityLabel(starred ? "Look up “\(label)”, favorited" : "Look up “\(label)”")
         .help("Look up “\(label)”")
     }
 }
