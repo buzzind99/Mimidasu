@@ -125,10 +125,12 @@ struct FavoritesView: View {
         withTransaction(transaction) {
             query = ""
             debouncedQuery = ""
-            // The two writes above re-enter the query handler; its equality
-            // guard turns both into early returns, so no debounce task can
-            // land its captured query after this reset and filter a list the
-            // field no longer shows a term for.
+            // The `query = ""` write re-enters the query handler one view
+            // update later — `debouncedQuery` has no observer of its own —
+            // and the handler's equality guard turns it into an early
+            // return, so no debounce task can land its captured query after
+            // this reset and filter a list the field no longer shows a term
+            // for.
             searchTask?.cancel()
             searchTask = nil
             searchResults = model.favorites.words
