@@ -133,4 +133,13 @@ struct FavoriteWordTests {
             segment("ｺｰﾋｰ"), keys: stored, readings: []
         ))
     }
+
+    @Test("identity is the headword, so the list is keyed by word")
+    func identityIsHeadword() {
+        let word = FavoriteWord(
+            headword: "見る", reading: "みる", romaji: "miru", addedAt: 0
+        )
+
+        #expect(word.id == "見る")
+    }
 }

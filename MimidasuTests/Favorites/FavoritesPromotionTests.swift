@@ -85,13 +85,18 @@ struct FavoritesPromotionTests {
 
     @Test("the demoted also: hits are not reordered")
     func leavesAlsoHitsAlone() {
+        // The favorite sits second inside the also: hit, so a promotion that
+        // reached past the display result would reorder it and fail the
+        // whole-content comparison below.
         let content = LookupContent.found(
-            result: result(["箸", "匙"]), also: [result(["見る"])], origin: .tappedSurface
+            result: result(["箸", "匙"]),
+            also: [result(["匙", "見る"])],
+            origin: .tappedSurface
         )
 
         let promoted = FavoritesPromotion.promotingFavorites(in: content, keys: keys)
 
-        #expect(promoted.fallbackResults.map(\.matched) == ["見る"])
+        #expect(promoted == content)
     }
 
     @Test("the origin the display result came from is carried through")
