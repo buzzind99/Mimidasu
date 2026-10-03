@@ -6,9 +6,11 @@ import Testing
 /// favorited also-pill reads starred through the model probe and re-selecting
 /// it opens on its lead, a related-pill tap promotes the content it rebuilds
 /// — the pager leads the favorite and sibling pills re-promote — while the
-/// not-found pin itself stays unpromoted. The pipeline test runs over the
+/// not-found content is never built promoted. The pipeline test runs over the
 /// committed JMDict fixture database; the promotion test injects hand-built
-/// results, which the fixture cannot resolve as a multi-entry fallback pill.
+/// results, because the fixture's multi-entry hits are either display results
+/// (あめ) or same-headword homographs (例子/雨村), so a fallback-pill promotion
+/// relabel is unobservable there.
 @MainActor
 @Suite("AppModel favorites pills")
 final class AppModelFavoritesPillTests {
@@ -58,7 +60,8 @@ final class AppModelFavoritesPillTests {
     }
 
     /// A hand-built fallback hit: one entry per headword, dictionary-ranked
-    /// as given (the fixture database resolves no multi-entry fallback pill).
+    /// as given (the fixture's multi-entry hits never relabel a fallback
+    /// pill — they are display results or same-headword homographs).
     private func result(_ headwords: [String]) -> LookupResult {
         LookupResult(
             matched: headwords[0],
@@ -125,7 +128,8 @@ final class AppModelFavoritesPillTests {
         #expect(display.entries.map { entry in entry.keb } == ["見る", "雨"])
         #expect(model.isFavoriteLead(display), "the tapped pill's pager leads the favorite")
         #expect(also.map(\.matched) == ["尾"], "the sibling pill survives the re-selection")
-        #expect(also[0].entries.first?.keb == "見る", "the sibling pill re-promotes too")
+        let promotedSibling = try #require(also.first)
+        #expect(promotedSibling.entries.first?.keb == "見る", "the sibling pill re-promotes too")
         #expect(model.selectedLookup?.content.displayResult?.entries.first?.keb == "見る")
         #expect(model.selectedLookup?.entryIndex == 0)
         #expect(model.selectedLookup?.source == .liveStrip, "the anchor follows the re-select")

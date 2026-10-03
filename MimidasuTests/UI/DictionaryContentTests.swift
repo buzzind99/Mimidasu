@@ -237,15 +237,15 @@ struct DictionaryContentTests {
 
         // A found tap's also: row holds at most eight (the display result
         // takes one); a split-only related: row has no display result and
-        // can hold all nine candidates — none of them truncates.
+        // can hold all nine candidates — none of them truncates. Ten
+        // candidates cannot occur; that case pins the cap itself.
         #expect(
             Array(DictionaryContent.truncatedAlso(Array(candidates.prefix(9)))).map(\.matched)
                 == (0 ..< 9).map { index in "word\(index)" }
         )
-        #expect(
-            Array(DictionaryContent.truncatedAlso(candidates)).map(\.matched)
-                == (0 ..< 9).map { index in "word\(index)" }
-        )
+        let capped = DictionaryContent.truncatedAlso(candidates)
+        #expect(Array(capped).map(\.matched) == (0 ..< 9).map { index in "word\(index)" })
+        #expect(candidates.count - capped.count == 1)
         #expect(DictionaryContent.truncatedAlso([]).isEmpty)
     }
 

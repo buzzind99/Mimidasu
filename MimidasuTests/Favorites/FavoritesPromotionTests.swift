@@ -85,7 +85,7 @@ struct FavoritesPromotionTests {
     }
 
     @Test("a favorite inside a demoted also: hit leads that pill's pager")
-    func promotesFavoriteInsideAlsoHits() {
+    func promotesFavoriteInsideAlsoHits() throws {
         let content = LookupContent.found(
             result: result(["箸", "匙"]),
             also: [result(["匙", "見る"]), result(["箸"])],
@@ -102,9 +102,11 @@ struct FavoritesPromotionTests {
         #expect(also.map(\.matched) == ["匙", "箸"], "matched text survives")
         // The favorite leads its own pill's pager — its own entry moves, not
         // a copy; the favorite-free pill keeps the dictionary's ranking.
-        #expect(also[0].entries.map { entry in entry.keb } == ["見る", "匙"])
-        #expect(also[0].entries.map(\.entSeq) == [2, 1])
-        #expect(also[1].entries.map { entry in entry.keb } == ["箸"])
+        let favoritePill = try #require(also.first)
+        let plainPill = try #require(also.dropFirst().first)
+        #expect(favoritePill.entries.map { entry in entry.keb } == ["見る", "匙"])
+        #expect(favoritePill.entries.map(\.entSeq) == [2, 1])
+        #expect(plainPill.entries.map { entry in entry.keb } == ["箸"])
     }
 
     @Test("also: hits without a favorite come through unchanged")
