@@ -79,6 +79,14 @@ struct FavoriteWordTests {
         ))
     }
 
+    @Test("an empty surface and an empty lemma never match, so a malformed empty key stays inert")
+    func ignoresEmptyText() {
+        let empty = Set([""])
+
+        #expect(!FavoriteWord.matches(segment(""), keys: empty, readings: []))
+        #expect(!FavoriteWord.matches(segment("見た", lemma: ""), keys: empty, readings: []))
+    }
+
     @Test("a bound token's lemma never matches, so a ない favorite leaves ねえ and なきゃ dark")
     func ignoresBoundLemma() {
         #expect(!FavoriteWord.matches(

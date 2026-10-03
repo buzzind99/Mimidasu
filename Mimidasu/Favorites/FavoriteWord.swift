@@ -63,10 +63,10 @@ struct FavoriteWord: Identifiable, Equatable, Sendable {
     static func matches(
         _ segment: ReadingSegment, keys: Set<String>, readings: Set<String>
     ) -> Bool {
-        if keys.contains(normalize(segment.surface)) {
+        if !segment.surface.isEmpty, keys.contains(normalize(segment.surface)) {
             return true
         }
-        if let lemma = segment.lemma, !segment.isBound {
+        if let lemma = segment.lemma, !segment.isBound, !lemma.isEmpty {
             if keys.contains(normalize(lemma)) {
                 return true
             }
