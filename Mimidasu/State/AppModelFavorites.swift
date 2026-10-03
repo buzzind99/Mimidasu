@@ -81,6 +81,16 @@ extension AppModel {
         favorites.isFavorite(headword: DictionaryContent.headword(of: entry))
     }
 
+    /// Whether a fallback pill leads with a favorited entry — the pill
+    /// star's probe. Promotion already moved a favorite (when the result has
+    /// one) to the front, so the lead is the only entry that can read
+    /// starred.
+    func isFavoriteLead(_ result: LookupResult) -> Bool {
+        favorites.isFavorite(
+            headword: result.entries.first.flatMap(DictionaryContent.headword(of:))
+        )
+    }
+
     /// The per-segment probe the transcript, live strip, and HUD pass down.
     /// A fresh closure per access: identity is meaningless here, which is why
     /// membership changes travel as `favorites.revision` instead.

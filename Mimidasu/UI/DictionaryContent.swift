@@ -8,7 +8,11 @@
 enum DictionaryContent {
     static let maxGlossesPerSense = 3
     static let maxSenses = 5
-    static let maxAlsoPills = 2
+    /// "also:"/"related:" fallback-hit pill cap. Every tap resolves at most
+    /// `maxCandidates` candidates, so eight is the ceiling — the display
+    /// result takes one, and truncation happens after resolution (display
+    /// only, no query cost).
+    static let maxAlsoPills = 8
 
     /// Headword row: the kanji writing when present, else the reading.
     static func headword(of entry: JMDictEntry) -> String? {
@@ -140,7 +144,8 @@ enum DictionaryContent {
         return (visible, items.count - visible.count)
     }
 
-    /// "also:" fallback-hit pills (longest match first), capped at two.
+    /// "also:" fallback-hit pills (longest match first), capped at
+    /// `maxAlsoPills`.
     static func truncatedAlso(_ also: [LookupResult]) -> ArraySlice<LookupResult> {
         also.prefix(maxAlsoPills)
     }

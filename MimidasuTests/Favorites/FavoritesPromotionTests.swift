@@ -4,8 +4,9 @@ import Testing
 
 /// The rule that makes a favorited entry lead the dictionary pager: pure
 /// reordering of an already-resolved lookup, with no store and no database.
-/// Every other part of the outcome — the display result's identity, the
-/// `also:` hits, the origin label, and the not-found state — must come through
+/// Both the display result and every demoted `also:` hit lead on their first
+/// favorite; everything else — the display result's identity, the fallback
+/// set itself, the origin label, and the not-found state — must come through
 /// unchanged, or the popover starts answering a question nobody asked.
 @Suite("FavoritesPromotion")
 struct FavoritesPromotionTests {
@@ -83,14 +84,33 @@ struct FavoritesPromotionTests {
         #expect(promoted.matched == "箸")
     }
 
-    @Test("the demoted also: hits are not reordered")
-    func leavesAlsoHitsAlone() {
-        // The favorite sits second inside the also: hit, so a promotion that
-        // reached past the display result would reorder it and fail the
-        // whole-content comparison below.
+    @Test("a favorite inside a demoted also: hit leads that pill's pager")
+    func promotesFavoriteInsideAlsoHits() {
         let content = LookupContent.found(
             result: result(["箸", "匙"]),
-            also: [result(["匙", "見る"])],
+            also: [result(["匙", "見る"]), result(["箸"])],
+            origin: .tappedSurface
+        )
+
+        let promoted = FavoritesPromotion.promotingFavorites(in: content, keys: keys)
+
+        guard case let .found(display, also, _) = promoted else {
+            Issue.record("a found content stopped being found")
+            return
+        }
+        #expect(display == result(["箸", "匙"]), "the display result is untouched")
+        #expect(also.map(\.matched) == ["匙", "箸"], "matched text survives")
+        // The favorite leads its own pill's pager; the favorite-free pill
+        // keeps the dictionary's ranking.
+        #expect(also[0].entries.map { entry in entry.keb } == ["見る", "匙"])
+        #expect(also[1].entries.map { entry in entry.keb } == ["箸"])
+    }
+
+    @Test("also: hits without a favorite come through unchanged")
+    func leavesUnfavoritedAlsoHitsAlone() {
+        let content = LookupContent.found(
+            result: result(["箸", "匙"]),
+            also: [result(["匙"]), result(["箸"])],
             origin: .tappedSurface
         )
 

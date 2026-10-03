@@ -231,11 +231,14 @@ struct DictionaryContentTests {
         #expect(truncated.hidden == 2)
     }
 
-    @Test("also pills cap at two")
+    @Test("also pills cap at eight — every candidate but the display result")
     func alsoCap() {
-        let also = (0 ..< 3).map { index in result("word\(index)") }
+        let also = (0 ..< 9).map { index in result("word\(index)") }
 
-        #expect(Array(DictionaryContent.truncatedAlso(also)).map(\.matched) == ["word0", "word1"])
+        #expect(
+            Array(DictionaryContent.truncatedAlso(also)).map(\.matched)
+                == (0 ..< 8).map { index in "word\(index)" }
+        )
         #expect(DictionaryContent.truncatedAlso([]).isEmpty)
     }
 

@@ -7,11 +7,19 @@ import SwiftUI
 
 /// One row of tappable result pills under a mono label — the entry view's
 /// "also:" fallback hits and the not-found view's "related:" suggestions
-/// render through the same component so they can never diverge.
+/// render through the same component so they can never diverge. Pills flow
+/// and wrap: a tap resolves up to eight fallback hits, more than fit one
+/// line.
 struct DictionaryResultPillRow: View {
     let label: String
     let results: [LookupResult]
     var onSelect: (LookupResult) -> Void
+    /// Favorites probe behind the pill star: true when the result leads with
+    /// a favorited entry. Promotion already moved a favorite (when the result
+    /// has one) to the front, so the lead is the only entry that can read
+    /// starred. nil keeps the pills starless — the not-found host passes
+    /// nothing.
+    var isFavoriteLead: ((LookupResult) -> Bool)?
 
     var body: some View {
         let pills = DictionaryContent.truncatedAlso(results)
@@ -20,23 +28,48 @@ struct DictionaryResultPillRow: View {
                 Text(verbatim: label)
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(Theme.secondaryText)
-                ForEach(Array(pills.enumerated()), id: \.offset) { _, result in
-                    Button {
-                        onSelect(result)
-                    } label: {
-                        Text(verbatim: DictionaryContent.pillLabel(for: result))
-                            .font(.system(size: 12))
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 4)
-                            .background(Capsule().fill(Theme.accentPink.opacity(0.16)))
-                            .foregroundStyle(Theme.annotationPink)
+                FlowLayout(spacing: 6, lineSpacing: 4, fingerprint: fingerprint(pills)) {
+                    ForEach(Array(pills.enumerated()), id: \.offset) { _, result in
+                        pill(result)
                     }
-                    .buttonStyle(.plain)
-                    .pointerStyle(.link)
-                    .help("Look up “\(DictionaryContent.pillLabel(for: result))”")
                 }
             }
         }
+    }
+
+    /// FlowLayout's cache key. A closure has no value identity, so the star
+    /// flags ride the fingerprint by value: adding or dropping one re-measures
+    /// exactly like a label change, and steady renders reuse the sizes.
+    private func fingerprint(_ pills: ArraySlice<LookupResult>) -> String {
+        pills.map { result in
+            let starred = isFavoriteLead?(result) == true
+            return (starred ? "★" : "") + DictionaryContent.pillLabel(for: result)
+        }
+        .joined(separator: "\n")
+    }
+
+    private func pill(_ result: LookupResult) -> some View {
+        let starred = isFavoriteLead?(result) == true
+        return Button {
+            onSelect(result)
+        } label: {
+            HStack(spacing: 3) {
+                if starred {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Theme.favoriteStarYellow)
+                }
+                Text(verbatim: DictionaryContent.pillLabel(for: result))
+                    .font(.system(size: 12))
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(Theme.accentPink.opacity(0.16)))
+            .foregroundStyle(Theme.annotationPink)
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
+        .help("Look up “\(DictionaryContent.pillLabel(for: result))”")
     }
 }
 
@@ -173,6 +206,9 @@ struct DictionaryEntryContentView: View {
     var onToggleFavorite: () -> Void = {}
     var onCopy: () -> Void = {}
     var onSelectAlso: (LookupResult) -> Void = { _ in }
+    /// Favorites probe for the "also:" pill row's star (nil = starless) —
+    /// forwarded to `DictionaryResultPillRow.isFavoriteLead` unchanged.
+    var isFavoritePillLead: ((LookupResult) -> Bool)?
     var onStepEntry: (Int) -> Void = { _ in }
 
     var body: some View {
@@ -443,7 +479,8 @@ struct DictionaryEntryContentView: View {
     private var alsoSection: some View {
         VStack(spacing: 0) {
             DictionaryResultPillRow(
-                label: "also:", results: also, onSelect: onSelectAlso
+                label: "also:", results: also, onSelect: onSelectAlso,
+                isFavoriteLead: isFavoritePillLead
             )
         }
         .onHeightChange { height in onAlsoHeightChange(height) }

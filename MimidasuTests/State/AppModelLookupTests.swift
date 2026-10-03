@@ -389,6 +389,24 @@ final class AppModelLookupTests {
         #expect(pinned.content.fallbackResults.map(\.matched) == ["お"])
     }
 
+    @Test("a favorited entry leads an also-pill, and selecting the pill opens on it")
+    func alsoPillLeadsFavoriteAndReselects() async throws {
+        let model = makeModel()
+        model.favorites.toggle(
+            FavoriteWord(headword: "お土産", reading: "おみやげ", romaji: "omiyage", addedAt: 1)
+        )
+        await runHit(model, source: .liveStrip)
+
+        let pill = try #require(model.pinnedLookup?.content.fallbackResults.first)
+        #expect(pill.matched == "お土産")
+        #expect(pill.entries.first?.keb == "お土産")
+        #expect(model.isFavoriteLead(pill), "the pill's lead entry is the favorite")
+
+        model.selectAlsoPill(pill)
+        #expect(model.selectedLookup?.entryIndex == 0)
+        #expect(model.selectedLookup?.content.displayResult?.entries.first?.keb == "お土産")
+    }
+
     // MARK: - Entry pager
 
     @Test("the pager pages popover and pinned card together, clamped to the entry count")

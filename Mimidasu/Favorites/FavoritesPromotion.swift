@@ -8,10 +8,14 @@ import Foundation
 enum FavoritesPromotion {
 
     /// `content` with a favorited entry moved to the front of the found
-    /// display result's pager. Everything else is untouched: the display
-    /// result still leads, `also:` hits stay demoted, and a not-found pin keeps
-    /// its related splits as suggestions (a split hit must never present itself
-    /// as the tapped word, D9).
+    /// display result's pager and of every demoted fallback result's pager.
+    /// A fallback pill labels itself with its result's lead entry, so
+    /// promotion inside an `also:` result is what makes a buried favorite
+    /// readable there — the pill relabels to the starred word and opens on
+    /// it, instead of the homograph the dictionary ranked first. Everything
+    /// else is untouched: the display result still leads, and a not-found pin
+    /// keeps its related splits as suggestions (a split hit must never
+    /// present itself as the tapped word, D9).
     static func promotingFavorites(
         in content: LookupContent, keys: Set<String>
     ) -> LookupContent {
@@ -19,7 +23,8 @@ enum FavoritesPromotion {
         case let .found(result, also, origin):
             .found(
                 result: promotingFavorites(in: result, keys: keys),
-                also: also, origin: origin
+                also: also.map { fallback in promotingFavorites(in: fallback, keys: keys) },
+                origin: origin
             )
         case .notFound:
             content

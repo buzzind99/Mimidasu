@@ -70,6 +70,7 @@ struct DictionaryPopoverView: View {
                             model.copySnippet(DictionaryContent.headword(of: entry) ?? "")
                         },
                         onSelectAlso: { result in model.selectAlsoPill(result) },
+                        isFavoritePillLead: { result in model.isFavoriteLead(result) },
                         onStepEntry: { index in model.stepLookupEntry(to: index) }
                     )
                 }
@@ -192,6 +193,7 @@ struct DictionaryCardView: View {
                         model.copySnippet(DictionaryContent.headword(of: entry) ?? "")
                     },
                     onSelectAlso: { result in model.selectAlsoPill(result) },
+                    isFavoritePillLead: { result in model.isFavoriteLead(result) },
                     onStepEntry: { index in model.stepLookupEntry(to: index) }
                 )
             } else {
