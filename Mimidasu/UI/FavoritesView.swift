@@ -22,6 +22,13 @@ struct FavoritesView: View {
     /// a fast typist runs one query instead of one per keystroke.
     @State private var debouncedQuery = ""
     @State private var searchTask: Task<Void, Never>?
+    /// The rows on screen — the whole list with no query, the SQLite matches
+    /// with one. Held rather than computed so the query runs when its inputs
+    /// change (the debounce landing, a favorites mutation, a close) and not on
+    /// every body evaluation: a search active, each row expansion and each
+    /// star pressed in a dictionary host re-runs `body`, and none of those
+    /// needs to re-query the file.
+    @State private var searchResults: [FavoriteWord]
     /// One instance for the whole window, so several rows can be expanded at
     /// once and each keeps its own in-flight lookup (§ `FavoritesLookupState`).
     @State private var lookupState: FavoritesLookupState
@@ -40,10 +47,11 @@ struct FavoritesView: View {
     init(model: AppModel) {
         self.model = model
         _lookupState = State(initialValue: FavoritesLookupState(lookup: model.jmDictLookup))
+        _searchResults = State(initialValue: model.favorites.words)
     }
 
     var body: some View {
-        windowContent(visibleWords)
+        windowContent(searchResults)
             // The whole window's size; `.top` keeps the empty state and a short
             // list pinned to the top instead of floating in the middle.
             .frame(width: 460, height: 608, alignment: .top)
@@ -60,13 +68,17 @@ struct FavoritesView: View {
                     try? await Task.sleep(for: Self.searchDebounce)
                     guard !Task.isCancelled else { return }
                     debouncedQuery = newValue
+                    searchResults = rows(for: newValue)
                 }
             }
             // Removal is confirmed and then committed by the shared alert, so this
             // view no longer knows *which* control removed the word — the popover
-            // and the card can remove one too. Pruning here covers all three.
+            // and the card can remove one too. Pruning here covers all three, and
+            // the rows follow: a search stays live over the surviving words, and
+            // an unfiltered list picks up the store's new ordering.
             .onChange(of: model.favorites.words) { _, words in
                 pruneLookupState(favorites: Set(words.map(\.headword)))
+                searchResults = rows(for: debouncedQuery)
             }
     }
 
@@ -113,6 +125,7 @@ struct FavoritesView: View {
             // shows a term for.
             searchTask?.cancel()
             searchTask = nil
+            searchResults = model.favorites.words
             // The alert is a sheet on this window, so it dies with the window
             // while the slot would not: the next un-star would flash a question
             // the user already answered or dismissed.
@@ -372,7 +385,11 @@ struct FavoritesView: View {
                     // drops the header row, which is the only place either is
                     // rendered, so passing them would assert a control the
                     // expanded block cannot show. The row's own header above
-                    // carries both.
+                    // carries both. `also: []` is the same kind of empty: the
+                    // pager and the "also:" pills both live in the header row,
+                    // and nothing may promote a window row's lookup — threading
+                    // real hits through would render pills whose taps do
+                    // nothing.
                     DictionaryEntryContentView(
                         entry: entry,
                         entryCount: result.entries.count,
@@ -432,8 +449,12 @@ struct FavoritesView: View {
 
     // MARK: - Data
 
-    private var visibleWords: [FavoriteWord] {
-        let trimmed = debouncedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// The rows a query means: everything with no query, the database's
+    /// matches with one. Called only from the events that change its inputs —
+    /// the debounce landing, a favorites mutation, a close — never per body
+    /// evaluation; each call is a synchronous query.
+    private func rows(for query: String) -> [FavoriteWord] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return model.favorites.words }
         return model.favorites.search(trimmed)
     }
