@@ -62,7 +62,9 @@ final class FavoritesStore {
     /// that memory mirrors the file, and a transient fault on the very first
     /// read would break exactly that: membership would be answered from empty
     /// memory while the handle went on serving a file the store can no longer
-    /// see. Degraded, every operation fails into the `.failed` paths instead.
+    /// see. Degraded, every mutation that reaches the file fails into the
+    /// `.failed` paths instead; `remove` answers `.removed` at its membership
+    /// guard first, because a degraded store holds no favorites to remove.
     init(location: URL = FavoritesStore.defaultLocation) {
         let database = FavoritesDatabase(location: location)
         self.database = database
