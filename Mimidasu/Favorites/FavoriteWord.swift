@@ -43,11 +43,16 @@ struct FavoriteWord: Identifiable, Equatable, Sendable {
     }
 
     /// Whether a rendered segment counts as this word: its surface, its
-    /// lemma, the lemma's potential unwrap, or — written in kana, where the
-    /// surface *is* the reading — a stored reading. Favouring 見る therefore
-    /// lights up 見た / 見ます / 見ている, favouring 勝つ lights the potential
-    /// 勝て (whose lemma is 勝てる before a negative), and favouring 有難う
-    /// lights up ありがとう, which shares no written form with it.
+    /// lemma, the lemma's potential unwrap — by spelling or, when the unwrap
+    /// is kana, against the stored reading — an all-kana lemma against the
+    /// stored reading, or — written in kana, where the surface *is* the
+    /// reading — a stored reading. Favouring 見る therefore lights up 見た /
+    /// 見ます / 見ている, favouring 勝つ lights the potential 勝て (whose
+    /// lemma is 勝てる before a negative), favouring 貰う lights kana-written
+    /// conjugates (もらって via its all-kana lemma, もらえる via its unwrapped
+    /// form — both reaching the starred form through the stored reading
+    /// もらう), and favouring 有難う lights up ありがとう, which shares no
+    /// written form with it.
     ///
     /// The lemma arms skip bound tokens: they lemmatize away from what is on
     /// screen, so favouring ない would otherwise light ねえ / なきゃ / なし —
@@ -78,9 +83,36 @@ struct FavoriteWord: Identifiable, Equatable, Sendable {
             // so anything else — なさる, 得る — unwraps to nil, and the one
             // real overlap (売れる unwraps to 売る) is a true potential
             // relation: a starred 売る lighting 売れます is this feature's
-            // contract, not a collision to gate away.
+            // contract, not a collision to gate away. The unwrap matches by
+            // spelling, or — a kana-written potential (もらえる) misses the
+            // kanji key 貰う by spelling — through the stored reading, the
+            // same bridge the kana-lemma arm below rides. A kanji dictionary
+            // form folds to itself and can never equal a reading key — those
+            // come from the dictionary's kana readings (`reb`) — so the
+            // reading comparison only ever fires for kana unwraps.
             if let dictionaryForm = JMDictExpansion.dictionaryForm(ofPotential: lemma),
                keys.contains(normalize(dictionaryForm))
+               || (!readings.isEmpty
+                   && readings.contains(ReadingAlignment.foldedKana(dictionaryForm)))
+            {
+                return true
+            }
+            // An all-kana lemma is the word's kana-written citation form
+            // (もらって → もらう): the tokenizer matched the literal kana
+            // against the lexicon's kana entry, so the lemma can never equal
+            // a kanji headword (貰う) and the arms above stay dark. Bridge
+            // through the stored reading — the lemma folded kana-for-kana
+            // against the favorites' reading keys — so a starred 貰う lights
+            // spoken もらって the way it already lights written 貰って. The
+            // guard tests the lemma, not the surface: a segment carrying an
+            // all-kana citation form is the same word whatever script its
+            // surface rides. A lemma with kanji in it never matches here —
+            // a kanji citation form was already compared by spelling above,
+            // and a word's reading is its dictionary's business, not a
+            // second spelling guess.
+            if !readings.isEmpty,
+               lemma.unicodeScalars.allSatisfy(KanaClassification.isKana),
+               readings.contains(ReadingAlignment.foldedKana(lemma))
             {
                 return true
             }
