@@ -8,8 +8,8 @@ import SwiftUI
 /// One row of tappable result pills under a mono label — the entry view's
 /// "also:" fallback hits and the not-found view's "related:" suggestions
 /// render through the same component so they can never diverge. Pills flow
-/// and wrap: a tap resolves up to eight fallback hits, more than fit one
-/// line.
+/// and wrap: a tap resolves up to `DictionaryContent.maxAlsoPills` fallback
+/// hits, more than fit one line.
 struct DictionaryResultPillRow: View {
     let label: String
     let results: [LookupResult]
@@ -24,7 +24,7 @@ struct DictionaryResultPillRow: View {
     var body: some View {
         let pills = DictionaryContent.truncatedAlso(results)
         if !pills.isEmpty {
-            HStack(spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(verbatim: label)
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(Theme.secondaryText)
@@ -49,6 +49,7 @@ struct DictionaryResultPillRow: View {
     }
 
     private func pill(_ result: LookupResult) -> some View {
+        let label = DictionaryContent.pillLabel(for: result)
         let starred = isFavoriteLead?(result) == true
         return Button {
             onSelect(result)
@@ -58,8 +59,9 @@ struct DictionaryResultPillRow: View {
                     Image(systemName: "star.fill")
                         .font(.system(size: 9))
                         .foregroundStyle(Theme.favoriteStarYellow)
+                        .accessibilityHidden(true)
                 }
-                Text(verbatim: DictionaryContent.pillLabel(for: result))
+                Text(verbatim: label)
                     .font(.system(size: 12))
             }
             .padding(.horizontal, 9)
@@ -69,7 +71,8 @@ struct DictionaryResultPillRow: View {
         }
         .buttonStyle(.plain)
         .pointerStyle(.link)
-        .help("Look up “\(DictionaryContent.pillLabel(for: result))”")
+        .accessibilityLabel(starred ? "Look up \(label), favorited" : "Look up \(label)")
+        .help("Look up “\(label)”")
     }
 }
 
