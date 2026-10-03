@@ -256,6 +256,28 @@ struct RubyTextViewTests {
         #expect(units == [.plain("はい。", isFavorite: false)])
     }
 
+    @Test("a favorited kanji segment in romaji mode keeps its flag on the annotated unit")
+    func favoriteAnnotatedUnitCarriesFlag() {
+        // A kanji surface's romaji differs from it, so the unit is `.annotated`
+        // rather than `.plain`; the flag has to survive onto that shape too, or
+        // the commonest favorite would render dark while the path gate still
+        // passed on a neighbouring annotated unit.
+        let segments = [
+            segment("見た", romaji: "mita", lemma: "見る"),
+            segment("。")
+        ]
+
+        let units = RubyTextView.displayUnits(
+            for: segments, annotation: .romaji,
+            isFavorite: { segment in segment.surface == "見た" }
+        )
+
+        #expect(units == [
+            .annotated(surface: "見た", note: "mita", isFavorite: true),
+            .plain("。", isFavorite: false)
+        ])
+    }
+
     // MARK: - Tap payload
 
     @Test("lookupToken carries surface, furigana reading, lemma, index, and sentence text")
