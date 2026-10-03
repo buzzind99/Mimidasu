@@ -2,7 +2,8 @@
 //! `scripts/eval_dictionary.sh` fetches into
 //! `local/dictionaries/eval/unidic-mecab-2_1_2/`. Pins the UniDic
 //! feature-column remap end to end: per-surface readings (not lemmas), lemma
-//! base forms, IPADIC-folded POS, and the scheme auto-detection at open.
+//! base forms, IPADIC-folded POS, the per-token bound flag, and the scheme
+//! auto-detection at open.
 //! Skips visibly (with a hint) when the model is absent, so `cargo test`
 //! stays green on a fresh clone before the fetch.
 
@@ -153,6 +154,52 @@ fn unidic_lemma_kanji_form_and_scalar_spans_live() {
     assert_eq!(tokens[1]["text"].as_str(), Some("野家"), "payload: {json}");
     assert_eq!(tokens[1]["start"].as_u64(), Some(1), "payload: {json}");
     assert_eq!(tokens[1]["end"].as_u64(), Some(3), "payload: {json}");
+
+    unsafe { dictionary_free(handle) };
+}
+
+#[test]
+fn unidic_bound_flags_live() {
+    let Some((dir, handle)) = open_prepared() else {
+        eprintln!(
+            "skipping: unidic model not found — run scripts/eval_dictionary.sh first \
+             (or set VIBRATO_FFI_UNIDIC_ZST)"
+        );
+        return;
+    };
+    let _keep = &dir;
+
+    // The favorite matcher's lemma-arm contract against the real UniDic
+    // lexicon: the auxiliary ます reads bound outright, the 非自立可能 い via
+    // the detail column — and 行っ does too, because after て the analyzer
+    // picks 行く's 非自立可能 subentry (the aspectual auxiliary), not the
+    // self-standing entry IPADIC tags 動詞,自立. The 助詞 て stays
+    // self-standing.
+    let json = json_string(unsafe {
+        dictionary_tokenize_json(handle, CString::new("行っています").unwrap().as_ptr())
+    });
+    let tokens = serde_json::from_str::<Value>(&json).unwrap();
+    let tokens = tokens.as_array().unwrap();
+    let expected = [("行っ", true), ("て", false), ("い", true), ("ます", true)];
+    assert_eq!(tokens.len(), expected.len(), "payload: {json}");
+    for (token, (surface, bound)) in tokens.iter().zip(expected) {
+        assert_eq!(token["text"].as_str(), Some(surface), "payload: {json}");
+        assert_eq!(token["bound"].as_bool(), Some(bound), "payload: {json}");
+    }
+
+    // The negative auxiliary itself reads bound; the self-standing stem does
+    // not.
+    let json = json_string(unsafe {
+        dictionary_tokenize_json(handle, CString::new("高くない").unwrap().as_ptr())
+    });
+    let tokens = serde_json::from_str::<Value>(&json).unwrap();
+    let tokens = tokens.as_array().unwrap();
+    let expected = [("高く", false), ("ない", true)];
+    assert_eq!(tokens.len(), expected.len(), "payload: {json}");
+    for (token, (surface, bound)) in tokens.iter().zip(expected) {
+        assert_eq!(token["text"].as_str(), Some(surface), "payload: {json}");
+        assert_eq!(token["bound"].as_bool(), Some(bound), "payload: {json}");
+    }
 
     unsafe { dictionary_free(handle) };
 }
