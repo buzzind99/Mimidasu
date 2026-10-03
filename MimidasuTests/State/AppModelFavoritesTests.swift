@@ -42,9 +42,9 @@ struct AppModelFavoritesTests {
     }
 
     private func segment(
-        _ surface: String, lemma: String? = nil
+        _ surface: String, lemma: String? = nil, isBound: Bool = false
     ) -> ReadingSegment {
-        ReadingSegment(surface: surface, romaji: surface, lemma: lemma)
+        ReadingSegment(surface: surface, romaji: surface, lemma: lemma, isBound: isBound)
     }
 
     // MARK: - Outcomes
@@ -180,9 +180,20 @@ struct AppModelFavoritesTests {
         #expect(model.favoriteSegmentMatcher(segment("見ました", lemma: "見る")))
     }
 
+    @Test("the render matcher skips a bound token's lemma but keeps its exact surface")
+    func matcherSkipsBoundLemmaKeepsSurface() async {
+        let model = await makeSUT(favorites: isolatedFavorites())
+
+        model.toggleFavorite(entry(keb: nil, reb: "ない"))
+
+        #expect(!model.favoriteSegmentMatcher(segment("ねえ", lemma: "ない", isBound: true)))
+        #expect(model.favoriteSegmentMatcher(segment("ない", lemma: "ない", isBound: true)))
+    }
+
     @Test("the render matcher leaves an unrelated word alone")
     func matcherIgnoresUnrelated() async {
         let model = await makeSUT(favorites: isolatedFavorites())
+
         model.toggleFavorite(entry())
 
         #expect(!model.favoriteSegmentMatcher(segment("食べる", lemma: "食べる")))

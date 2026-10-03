@@ -244,6 +244,20 @@ struct DictionaryEngineTests {
         #expect(tokens[1].pos == nil)
     }
 
+    @Test("decodes the bound flag and leaves it nil on rows that predate it")
+    func decodesBoundFlag() throws {
+        fakeTokenizeJSONText = #"""
+        [{"text":"ねえ","start":0,"end":2,"reading":"ねえ","base":"ない","pos":"助動詞","bound":true},
+         {"text":"𠮷","start":2,"end":3,"reading":null}]
+        """#
+        let engine = makeEngine()
+
+        let tokens = try #require(engine.tokenize(anyText))
+
+        #expect(tokens[0].bound == true)
+        #expect(tokens[1].bound == nil)
+    }
+
     @Test("decodes a legacy payload without base/pos keys to nil")
     func legacyPayloadDecodesBaseAndPosToNil() throws {
         // No base/pos keys at all — still decodes, to nil (the same shape
@@ -372,9 +386,13 @@ struct DictionaryEngineLiveTests {
         let tokens = try #require(engine.tokenize("𠮷"))
 
         // 𠮷 resolves to IPADIC's unknown-word row: the coarse POS is 記号,
-        // but reading and base form are absent.
+        // but reading and base form are absent, and the row is not bound.
         #expect(
-            tokens == [DictionaryToken(text: "𠮷", start: 0, end: 1, reading: nil, pos: "記号")]
+            tokens == [
+                DictionaryToken(
+                    text: "𠮷", start: 0, end: 1, reading: nil, pos: "記号", bound: false
+                )
+            ]
         )
     }
 
@@ -385,11 +403,15 @@ struct DictionaryEngineLiveTests {
         let tokens = try #require(engine.tokenize("A B"))
 
         // Bare Latin resolves to IPADIC's unknown-word row (coarse POS 名詞,
-        // no reading, no base form); the space stays uncovered.
+        // no reading, no base form, not bound); the space stays uncovered.
         #expect(
             tokens == [
-                DictionaryToken(text: "A", start: 0, end: 1, reading: nil, pos: "名詞"),
-                DictionaryToken(text: "B", start: 2, end: 3, reading: nil, pos: "名詞")
+                DictionaryToken(
+                    text: "A", start: 0, end: 1, reading: nil, pos: "名詞", bound: false
+                ),
+                DictionaryToken(
+                    text: "B", start: 2, end: 3, reading: nil, pos: "名詞", bound: false
+                )
             ]
         )
     }

@@ -172,7 +172,8 @@ struct ReadingAnnotatorTokenRepairLiveTests {
             windowed.append(contentsOf: decoded.map { token in
                 DictionaryToken(
                     text: token.text, start: token.start + cursor, end: token.end + cursor,
-                    reading: token.reading, base: token.base, pos: token.pos
+                    reading: token.reading, base: token.base, pos: token.pos,
+                    bound: token.bound
                 )
             })
             cursor = high

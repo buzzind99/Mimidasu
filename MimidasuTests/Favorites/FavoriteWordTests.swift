@@ -9,13 +9,21 @@ import Testing
 struct FavoriteWordTests {
 
     private func segment(
-        _ surface: String, lemma: String? = nil, furigana: String? = nil
+        _ surface: String, lemma: String? = nil, furigana: String? = nil,
+        isBound: Bool = false
     ) -> ReadingSegment {
-        ReadingSegment(surface: surface, romaji: surface, furigana: furigana, lemma: lemma)
+        ReadingSegment(
+            surface: surface, romaji: surface, furigana: furigana, lemma: lemma,
+            isBound: isBound
+        )
     }
 
     private var keys: Set<String> {
         [FavoriteWord.normalize("見る")]
+    }
+
+    private var naiKeys: Set<String> {
+        [FavoriteWord.normalize("ない")]
     }
 
     /// The comparable readings of stored rows, as the store builds them: one
@@ -42,6 +50,23 @@ struct FavoriteWordTests {
     @Test("a conjugated surface matches through its lemma")
     func matchesLemma() {
         #expect(FavoriteWord.matches(segment("見た", lemma: "見る"), keys: keys, readings: []))
+    }
+
+    @Test("a bound token's lemma never matches, so a ない favorite leaves ねえ and なきゃ dark")
+    func ignoresBoundLemma() {
+        #expect(!FavoriteWord.matches(
+            segment("ねえ", lemma: "ない", isBound: true), keys: naiKeys, readings: []
+        ))
+        #expect(!FavoriteWord.matches(
+            segment("なきゃ", lemma: "ない", isBound: true), keys: naiKeys, readings: []
+        ))
+    }
+
+    @Test("a bound token still matches on its exact surface, so spoken ない lights")
+    func boundSurfaceStillMatches() {
+        #expect(FavoriteWord.matches(
+            segment("ない", lemma: "ない", isBound: true), keys: naiKeys, readings: []
+        ))
     }
 
     @Test("a kana surface matches a stored reading, so 有難う lights up ありがとう")
