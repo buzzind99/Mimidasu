@@ -22,11 +22,11 @@ extension AppModel {
     /// Deep link into the Privacy & Security pane that owns Mimidasu's
     /// system-audio recording permission (the "Screen & System Audio
     /// Recording" list).
-    static let audioPrivacySettingsURL = URL(
+    private static let audioPrivacySettingsURL = URL(
         string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
     )!
 
-    func openAudioPrivacySettings() {
+    private func openAudioPrivacySettings() {
         NSWorkspace.shared.open(Self.audioPrivacySettingsURL)
     }
 
@@ -40,7 +40,7 @@ extension AppModel {
     }
 
     /// Shares red-persistent card construction between the two capture cards.
-    func postPersistentCard(key: String, title: String, body: String, action: ToastCenter.Action) {
+    private func postPersistentCard(key: String, title: String, body: String, action: ToastCenter.Action) {
         toasts.post(key: key, style: .redPersistent, title: title, body: body, action: action)
     }
 }
