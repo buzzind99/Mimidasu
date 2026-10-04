@@ -110,11 +110,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var teardownCompleteObserver: NSObjectProtocol?
     private var keyWindowObserver: NSObjectProtocol?
     private var favoritesWindowObserver: NSObjectProtocol?
-    private var favoritesCloseObserver: NSObjectProtocol?
+    private var auxiliaryCloseObserver: NSObjectProtocol?
     private var resignKeyObserver: NSObjectProtocol?
     /// The live favorites window, if any — tracks instance identity so a
     /// refocus never re-centers it, only a fresh window does.
     private weak var favoritesWindow: NSWindow?
+    /// The live Settings window, if any — same instance-identity tracking as
+    /// `favoritesWindow`: a sheet present/dismiss cycle re-keys the cached
+    /// window without it being a fresh open.
+    private weak var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // The session panel is ordered here rather than at init: window
@@ -124,19 +128,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // cancelled the translation run and stranded the queue's pending
         // sentences.
         translationSessionPanel.bind(model: model)
-        // SwiftUI's Settings scene ignores `.windowStyle(.hiddenTitleBar)`,
-        // so the chrome is hidden at the AppKit level when the
-        // lazily-created window becomes key on open.
         keyWindowObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
         ) { [weak self] note in
             let window = note.object as? NSWindow
             MainActor.assumeIsolated {
-                guard let window,
-                      SettingsWindowController.isSettingsWindow(window),
-                      window.titleVisibility != .hidden
+                guard let self, let window,
+                      SettingsWindowController.isSettingsWindow(window)
                 else { return }
-                self?.hideTitleChrome(of: window)
+                // SwiftUI's Settings scene ignores
+                // `.windowStyle(.hiddenTitleBar)`, so the chrome is hidden at
+                // the AppKit level when the lazily-created window becomes key
+                // on open. The guard reads the post-hide state, so repeat
+                // keys skip the redundant application.
+                if window.titleVisibility != .hidden {
+                    self.hideTitleChrome(of: window)
+                }
+                // Same placement contract as the favorites observer below:
+                // the window belongs to the main window's Space — stationary
+                // (exempt from Mission Control rearrangement), allowed to
+                // coexist with the fullscreen main window's Space, and moved
+                // to the active Space when activated (the opener lives in the
+                // main window, so that is always the main window's Space)
+                // instead of reopening where it was last closed — set at the
+                // AppKit level because SwiftUI exposes no scene modifier for
+                // collection behavior.
+                window.collectionBehavior = [.stationary, .fullScreenAuxiliary, .moveToActiveSpace]
+                // A fresh instance opens centered; rekeying an open one (a
+                // sheet present/dismiss cycle) never moves it.
+                if self.settingsWindow !== window {
+                    self.settingsWindow = window
+                    window.center()
+                }
             }
         }
         // Settings and Favorites dismiss on any click outside them: losing
@@ -166,12 +189,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // so it is set at the AppKit level on first key — the same bridge
         // as the settings chrome-hiding above. Title-matched: only the
         // favorites scene carries it. Stationary opts out of Mission
-        // Control rearrangement; auxiliary keeps it above the fullscreen
-        // main window; moveToActiveSpace pulls it onto the active Space on
-        // every show (the opener lives in the main window, so that is
-        // always the main window's Space) instead of reopening where it was
-        // last closed. A fresh instance also opens centered; refocusing the
-        // open window never moves it.
+        // Control rearrangement; auxiliary lets the window coexist with the
+        // fullscreen main window's Space; moveToActiveSpace moves it to the
+        // active Space when activated (the opener lives in the main window,
+        // so that is always the main window's Space) instead of reopening
+        // where it was last closed. A fresh instance also opens centered;
+        // refocusing the open window never moves it.
         favoritesWindowObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
         ) { [weak self] note in
@@ -185,15 +208,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-        // The scene caches its window, so a reopen would restore the last
-        // dragged spot. Centering on close resets it — the close and the
-        // move land in the same tick, so no jump is visible.
-        favoritesCloseObserver = NotificationCenter.default.addObserver(
+        // Both scenes cache their windows, so a reopen would restore the
+        // last dragged spot. Centering on close resets it — the close and
+        // the move land in the same tick, so no jump is visible.
+        auxiliaryCloseObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification, object: nil, queue: .main
         ) { note in
             let window = note.object as? NSWindow
             MainActor.assumeIsolated {
-                guard let window, window.title == "Favorites" else { return }
+                guard let window, window.title == "Favorites"
+                    || SettingsWindowController.isSettingsWindow(window)
+                else { return }
                 window.center()
             }
         }

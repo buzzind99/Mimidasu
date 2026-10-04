@@ -9,8 +9,12 @@ enum SettingsWindowController {
     /// SwiftUI's Settings scene window identifier prefix.
     private static let windowID = "com_apple_SwiftUI_Settings_window"
 
-    /// Whether a notification object is the SwiftUI Settings window.
+    /// Whether a notification object is the SwiftUI Settings window. The
+    /// sheet-parent guard keeps a window hosted on it (a `.sheet`) from ever
+    /// matching — none borrows the prefix today, but an identifier collision
+    /// would corrupt the placement tracking keyed on this matcher.
     static func isSettingsWindow(_ object: Any?) -> Bool {
-        (object as? NSWindow)?.identifier?.rawValue.hasPrefix(windowID) == true
+        guard let window = object as? NSWindow, window.sheetParent == nil else { return false }
+        return window.identifier?.rawValue.hasPrefix(windowID) == true
     }
 }
