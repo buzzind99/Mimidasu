@@ -41,9 +41,13 @@ struct ReadingAnnotatorTokenRepairTests {
         // stated as a prefix so a changed tail cannot slide it onto the wrong
         // elements. Not the lemma *values*: this fixture's decoded windows
         // carry invented bases (only the tokenizer's own bindings are real), so
-        // what is asserted is that every one of them is tappable.
+        // what is asserted is that every one of them is tappable. Single-kana
+        // pieces carry no lemma — the annotator strips their bogus bases — so
+        // only the wider pieces pin one.
         #expect(segments.count == 18, "streams: \(describe(segments))")
-        #expect(segments.prefix(11).allSatisfy { segment in segment.lemma != nil })
+        #expect(segments.prefix(11).allSatisfy { segment in
+            segment.lemma != nil || segment.surface.unicodeScalars.count == 1
+        })
     }
 
     @Test("the left kana neighbour is rewritten: ち bound to ちる becomes ちょっと")

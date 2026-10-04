@@ -270,7 +270,9 @@ final class ReadingAnnotator: @unchecked Sendable {
         // boundaries; re-decoding it in short windows recovers them. Runs ahead
         // of every segment-building rule, so fusion and the fallback
         // fragmentation tier see clean tokens.
-        let tokens = Self.repairedTokens(raw, of: text, scalars: scalars, tokenize: tokenize)
+        let tokens = Self.withTrustworthyBases(
+            Self.repairedTokens(raw, of: text, scalars: scalars, tokenize: tokenize)
+        )
         var segments: [ReadingSegment] = []
         var cursor = 0
         // A numeral run held back for counter fusion (一回 → "ikkai").
@@ -332,6 +334,39 @@ final class ReadingAnnotator: @unchecked Sendable {
         flush(&pending, into: &segments)
         appendSpan(from: cursor, to: scalars.count, of: scalars, into: &segments)
         return fragmented(segments)
+    }
+
+    /// Strips the base form off stray single-kana tokens: the lexicon lexes
+    /// lattice noise as conjugated verbs (ち → ちる, っ → く), and because the
+    /// token's base becomes the segment's lemma, that bogus form leaks past a
+    /// missed surface into the tap lookup — an unrelated 散る/句 card for ASR
+    /// garble — and into the favorites lemma match. A base on a single kana
+    /// scalar is trusted only when it restates the surface; real stems (いっ,
+    /// 散っ, 言っ) are wider or kanji-bearing. Genuine single-kana inflections
+    /// (で, ず, ね) lose theirs too — accepted collateral: tapping them
+    /// resolves by surface alone or not at all, never to a wrong card. Runs
+    /// after the collapse repair, whose adoption counts the real bases as
+    /// resolution evidence, and before the sokuon merge, which copies the
+    /// first token's base onto the merged segment — a stray-anchored merge
+    /// then carries no lemma and re-enters fragmentation's headword gate.
+    static func withTrustworthyBases(_ tokens: [DictionaryToken]) -> [DictionaryToken] {
+        guard tokens.contains(where: carriesStrayKanaBase) else { return tokens }
+        return tokens.map { token in
+            guard Self.carriesStrayKanaBase(token) else { return token }
+            return DictionaryToken(
+                text: token.text, start: token.start, end: token.end,
+                reading: token.reading, base: nil, pos: token.pos, bound: token.bound
+            )
+        }
+    }
+
+    /// Whether the token's base is one of the stray-kana lexicon rows' bogus
+    /// lemmas: the surface is exactly one kana scalar the base fails to restate.
+    private static func carriesStrayKanaBase(_ token: DictionaryToken) -> Bool {
+        guard let base = token.base, base != token.text else { return false }
+        let scalars = token.text.unicodeScalars
+        guard scalars.count == 1, let only = scalars.first else { return false }
+        return KanaClassification.isKana(only)
     }
 
     /// Emits a non-numeral token: the dictionary's surface reading converted

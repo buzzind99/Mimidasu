@@ -73,7 +73,12 @@ struct ReadingAnnotatorTokenRepairLiveTests {
             ["だ", "da", nil], ["から", "kara", nil], ["か", "ka", nil], ["。", "。", nil]
         ])
         #expect(segments.count == 18, "streams: \(describe(segments))")
-        #expect(segments.prefix(11).allSatisfy { segment in segment.lemma != nil })
+        // Single-kana pieces carry no lemma — the annotator strips their bases,
+        // and the lexicon lexes な/で as だ-conjugates — so the surface is
+        // their resolution; every wider piece keeps the lexicon's base.
+        #expect(segments.prefix(11).allSatisfy { segment in
+            segment.lemma != nil || segment.surface.unicodeScalars.count == 1
+        })
         // Nothing is left over for the fallback tier to guess at.
         #expect(segments.allSatisfy { segment in
             segment.surface.unicodeScalars.count < ReadingAnnotator.fragmentLengthThreshold
