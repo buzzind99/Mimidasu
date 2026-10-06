@@ -4,13 +4,13 @@ import SwiftUI
 /// JP sentence with the configured reading annotation, and the EN
 /// translation marked by a gradient capsule bar.
 ///
-/// Rows repaint because `TranscriptView.body` reads the observed state they
-/// render from (`model.entries`, `model.pendingRetranslations`, the favorites
-/// revision, the dictionary selection) — nothing diffs these values against a
-/// previous copy. That is why every property here is a plain value snapshot
-/// rather than a settings wrapper: `@AppStorage`-backed wrappers read the
-/// *live* stored value, so a row would keep rendering the previous mode
-/// unless the parent re-rendered it.
+/// Every property is a plain value snapshot rather than a settings wrapper:
+/// `@AppStorage`-backed wrappers read the *live* stored value, so a row would
+/// render the previous annotation mode or scale unless its parent handed it a
+/// fresh value. The row carries no `Equatable` witness, so a parent
+/// invalidation re-renders it outright; the nested `RubyTextView` keeps its
+/// own value diff and repaints through its body's own reads of the matcher and
+/// popover closures.
 struct TranscriptRow: View {
     let entry: SessionEntry
     /// Snapshot, not a settings wrapper — see the note above.
@@ -22,25 +22,27 @@ struct TranscriptRow: View {
     /// nil keeps `.dictionary` on the legacy rendering path.
     var onLookup: ((LookupToken) -> Void)?
     /// Per-word popover presentation resolver, invoked with a word unit's
-    /// segment index (`RubyTextView.LookupPopover`). Resolved while the
-    /// parent body evaluates, which is what registers the selection
-    /// observation that refreshes the owning row's popover.
+    /// segment index (`RubyTextView.LookupPopover`). Invoked from
+    /// `RubyTextView`'s body, which is where the selection reads register the
+    /// observation that refreshes the owning word's popover.
     var lookupPopover: ((Int) -> RubyTextView.LookupPopover)?
     var isFavorite: ((ReadingSegment) -> Bool)?
     /// Invoked with the row's sentence when the hover retry button fires.
     var onRetry: ((Sentence) -> Void)?
-    /// Whether the retry affordance is live — only during a session that
-    /// still has a translation worker (see `TranscriptView`).
+    /// Whether the retry affordance may be shown at all — a live session, an
+    /// attached translation worker, no failure card outstanding, and this row
+    /// not already retranslating (see `TranscriptView` for the reads). Every
+    /// one of those is a precondition `retranslateSentence` enforces, so a
+    /// shown button is always a button that would do something.
     let retryEnabled: Bool
     /// True while a manual re-translation of this row's sentence is in
-    /// flight: the current translation dims until the fresh one replaces it.
+    /// flight: the translation dims until the fresh one replaces it.
     let isRetranslating: Bool
     /// True only while this row is the newest entry: a freshly appended
     /// row fades in, while older rows render opaque so recycled rows
-    /// scrolling back into view don't re-fade. The demotion to false (a
-    /// newer row landed) re-renders the row so opacity is 1 by
-    /// implementation, and a recycled row whose `shown` state was discarded
-    /// can't re-fade — the `onAppear` guard fails on false.
+    /// scrolling back into view don't re-fade. A recycled row whose `shown`
+    /// state was discarded can't re-fade — the `onAppear` guard fails on
+    /// false, and opacity is 1 by implementation.
     let fadesIn: Bool
 
     /// Fade state for a freshly appended row: starts transparent and
@@ -78,12 +80,20 @@ struct TranscriptRow: View {
                 .textSelection(.enabled)
 
                 translationRow
+                    // A manual re-translation dims the stale line (bar and
+                    // placeholder alike) until the fresh one lands; applied
+                    // here rather than inside `translationRow` so it covers
+                    // both branches, and above the overlay so the button
+                    // itself never dims.
+                    .opacity(isRetranslating ? 0.45 : 1)
                     // The retry button floats left of the bar: overlay-only
                     // (no layout impact), vertically centered on the
                     // translation block whatever its line count.
                     .overlay(alignment: .leading) {
-                        retryButton
-                            .offset(x: -32)
+                        if hovering, retryEnabled {
+                            retryButton
+                                .offset(x: -32)
+                        }
                     }
             }
         }
@@ -97,16 +107,28 @@ struct TranscriptRow: View {
             guard fadesIn, !shown else { return }
             withAnimation(.easeOut(duration: 0.25)) { shown = true }
         }
+        .onDisappear { hovering = false }
     }
 
     /// The hover-revealed retry button: floats 32pt left of the translation
     /// text — right edge 3pt clear of the 3pt bar — vertically centered on
     /// the translation block whatever its height. Overlay-only, so zero
-    /// layout impact, and attached outside the re-translation dim so the
-    /// button itself never dims. On an untranslated row the anchor carries
-    /// the placeholder's 11pt leading indent, so the button sits 11pt
-    /// further left there; it stays inside the row's leading gutter either
-    /// way.
+    /// layout impact. Both branches of `translationRow` anchor it at the same
+    /// edge (the placeholder's leading padding expands its frame outward, so
+    /// it does not shift the button).
+    ///
+    /// That 32pt exceeds the 14pt gap between the timestamp column and the
+    /// text, so the disc deliberately overhangs the row's trailing timestamp
+    /// digits at every UI scale. Accepted: it is pointer-driven and transient,
+    /// it never touches the sentence or its translation, and the alternative —
+    /// a gap wide enough to hold it — narrows the sentence column. It also
+    /// lands clear of the timestamp on any row whose timestamp is short of
+    /// its 40pt frame.
+    ///
+    /// Rendered only while the row is hovered and retry is live: gating the
+    /// overlay's *content* rather than its opacity keeps the button out of
+    /// hit-testing and out of the accessibility tree, so it can neither eat a
+    /// click meant for the transcript nor leave a phantom control per row.
     private var retryButton: some View {
         Button {
             onRetry?(entry.sentence)
@@ -115,16 +137,14 @@ struct TranscriptRow: View {
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(Theme.secondaryText)
                 .frame(width: 18, height: 18)
-                .hoverHighlight(Circle(), isEnabled: retryEnabled)
+                .contentShape(Circle())
+                .hoverHighlight(Circle())
         }
         .buttonStyle(.plain)
-        .pointerStyle(retryEnabled ? .link : nil)
-        .disabled(!retryEnabled)
         .help("Re-translate this line")
-        // Hidden-but-hittable would eat clicks meant for the transcript.
-        .allowsHitTesting(hovering && retryEnabled)
-        .opacity(hovering && retryEnabled ? 1 : 0)
-        .animation(.easeOut(duration: 0.15), value: hovering)
+        // Outermost, mirroring `TranscriptView.jumpButton`: buried under
+        // `.disabled`/`.opacity`, the pointer style never took effect.
+        .pointerStyle(.link)
     }
 
     @ViewBuilder
@@ -142,10 +162,6 @@ struct TranscriptRow: View {
                         .frame(width: 3)
                         .offset(x: -11)
                 }
-                // A manual re-translation dims the stale line (bar included)
-                // until the fresh one lands; text stays readable throughout.
-                .opacity(isRetranslating ? 0.35 : 1)
-                .animation(.easeOut(duration: 0.15), value: isRetranslating)
         } else {
             Text("…")
                 .font(.system(size: 13 * scale.factor))

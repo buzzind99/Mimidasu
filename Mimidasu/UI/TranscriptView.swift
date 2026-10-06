@@ -46,12 +46,11 @@ struct TranscriptView: View {
 
     var body: some View {
         // Read here, in the body, and not inside the row closure: the matcher
-        // accessor only *builds* a closure and observes nothing, so passing it
-        // alone would register no dependency and an already-rendered row would
-        // keep its old colors. Reading the revision registers the observation
-        // that re-runs this body. Nothing downstream consumes the number —
-        // `RubyTextView` resolves membership through the `isFavoriteSegment`
-        // matcher — so the read is deliberately discarded.
+        // accessor only *builds* a closure and observes nothing. This read is
+        // belt-and-braces — `RubyTextView`'s own body resolves membership and
+        // so observes the store directly — but it keeps the transcript's
+        // dependence on favorite state visible at the surface that hands the
+        // matcher down, and it re-runs this body when membership changes.
         _ = model.favorites.revision
         return ScrollViewReader { proxy in
             List {
@@ -89,7 +88,7 @@ struct TranscriptView: View {
                         },
                         isFavorite: model.favoriteSegmentMatcher,
                         onRetry: { sentence in model.retranslateSentence(sentence) },
-                        retryEnabled: model.phase == .running || model.phase == .sourceLost,
+                        retryEnabled: retryEnabled(for: entry),
                         isRetranslating: model.pendingRetranslations.contains(entry.sentence.index),
                         fadesIn: entry.id == model.entries.last?.id
                     )
@@ -156,17 +155,34 @@ struct TranscriptView: View {
         }
     }
 
+    /// Whether this row's retry affordance may be shown. Every clause is a
+    /// precondition `AppModel.retranslateSentence` enforces, so a shown button
+    /// is one whose click would be served rather than silently refused:
+    /// a live session, no terminal failure card, and this row not already
+    /// retranslating. Read per row here, in the body, so the invalidation that
+    /// changes any of them re-renders the rows.
+    ///
+    /// The row's own sentence being queued or airborne is deliberately *not*
+    /// consulted: `TranslationQueue` is not `@Observable`, so that state cannot
+    /// reach this view, and a queued line's button is the common case anyway —
+    /// it simply comes back with the batch.
+    private func retryEnabled(for entry: SessionEntry) -> Bool {
+        guard model.phase == .running || model.phase == .sourceLost else { return false }
+        if case .unavailable = model.translationStatus {
+            return false
+        }
+        return !model.pendingRetranslations.contains(entry.sentence.index)
+    }
+
     /// Per-word popover presentation for the row's word units: the
     /// binding is true only while this exact word is the selection's
     /// anchor (a different-word retap dismisses and re-presents), and the
     /// content is the shared entry view once the async lookup has landed.
     ///
-    /// Called per row from `body` rather than handed over as a closure, so
-    /// the `model.selectedLookup` reads below register the observation that
-    /// re-diffs the rows when the selection lands, moves, or clears. (An
-    /// earlier design also passed a per-row "is this the owning row" anchor
-    /// down to the row view; it was pure ballast — no row body ever read it,
-    /// and this call site already covers the dependency.)
+    /// Handed to each row as a closure that `RubyTextView`'s body invokes at
+    /// layout time, so the `model.selectedLookup` reads below register the
+    /// observation on the node that has to repaint — the word units — rather
+    /// than on this body, which never calls it.
     private func lookupPopover(
         _ sentenceIndex: Int, _ tokenIndex: Int
     ) -> RubyTextView.LookupPopover {
