@@ -88,27 +88,42 @@ struct AppModelRetranslationTests {
     }
 
     /// A second click while the first retry is still outstanding must not queue
-    /// a second flight: the engine would run twice and the second result would
-    /// append, producing exactly the pileup a retry exists to avoid.
+    /// a second flight: the engine would run twice and the row would take two
+    /// results for one sentence.
     @Test("a second retry click while the row already retranslates is a no-op")
     func retranslateTwiceIsIdempotent() async {
         let model = await makeSUT()
         let engine = GatedRetranslateEngine()
         let worker = await attachWorker(model, engine: engine)
-        defer { worker.cancel() }
+        defer {
+            engine.openGate()
+            worker.cancel()
+        }
         model.phase = .running
 
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
+        #expect(
+            await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
+            "the first pass is airborne"
+        )
         engine.openGate()
         #expect(await waitForTranslation(model), "the first pass translates the row")
+        // Closed again so the *retry's* flight is the one parked below: the
+        // second click must be refused with the retry genuinely outstanding.
+        engine.closeGate()
 
         model.retranslateSentence(sentence)
-        let batchesAfterFirstClick = engine.recordedBatches.count
+        #expect(model.pendingRetranslations == [7], "the first click marks the row")
+        #expect(
+            await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 2 },
+            "the retry's batch is airborne"
+        )
+
         model.retranslateSentence(sentence)
         #expect(model.pendingRetranslations == [7], "the second click must not churn the marker")
         #expect(
-            engine.recordedBatches.count == batchesAfterFirstClick,
+            engine.recordedBatches.count == 2,
             "the second click must not start another flight"
         )
 
@@ -121,7 +136,42 @@ struct AppModelRetranslationTests {
             model.entries[0].translations.count == 1,
             "exactly one retry result lands, replaced in place"
         )
-        #expect(engine.recordedBatches.map(\.count) == [1, 1], "one flight per click, no more")
+        #expect(engine.recordedBatches.map(\.count) == [1, 1], "one flight per pass, no more")
+    }
+
+    /// The marker is only the first of two guards. This is the second: a row
+    /// whose sentence is already in flight or queued has no marker yet, and a
+    /// click on it must be refused by the queue's own check rather than
+    /// queueing a competing copy.
+    @Test("a retry click on a sentence already being translated is a no-op")
+    func retranslateGatedOnAlreadyTranslating() async {
+        let model = await makeSUT()
+        let engine = GatedRetranslateEngine()
+        let worker = await attachWorker(model, engine: engine)
+        defer {
+            engine.openGate()
+            worker.cancel()
+        }
+        model.phase = .running
+
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+        #expect(
+            await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
+            "the first pass is airborne and parked on the gate"
+        )
+
+        model.retranslateSentence(sentence)
+
+        #expect(
+            model.pendingRetranslations.isEmpty,
+            "a no-op must not dim the row it refused to serve"
+        )
+        #expect(engine.recordedBatches.count == 1, "no competing flight was queued")
+
+        engine.openGate()
+        #expect(await waitForTranslation(model), "the original flight still delivers")
+        #expect(model.entries[0].translations.count == 1)
     }
 
     // MARK: - Gating
@@ -186,35 +236,81 @@ struct AppModelRetranslationTests {
 
     // MARK: - Marker clearing
 
-    /// A `.unavailable` status latches the Apple fallback, which replays the
-    /// very backlog the retry is sitting in. Dropping the marker here would
-    /// route that replay through `appendTranslation` and re-create the
-    /// `"old / new"` pileup the retry exists to prevent, so it must survive.
-    @Test("an unavailable status keeps the marker so the replay replaces in place")
-    func unavailableStatusKeepsPendingRetranslations() async {
+    /// The one `.unavailable` that is followed by a fresh engine: latching the
+    /// Apple fallback replays the very backlog the retry is sitting in, so the
+    /// marker must survive to keep the row dimmed until that result lands.
+    @Test("an unavailable external engine keeps the marker through the fallback")
+    func unavailableExternalEngineKeepsPendingRetranslations() async {
         let model = await makeSUT()
         // Gated: the retry's flight parks, so nothing can retire the marker
         // but the code under test.
-        let worker = await attachWorker(model, engine: GatedRetranslateEngine())
-        defer { worker.cancel() }
+        let engine = GatedRetranslateEngine()
+        let worker = await attachWorker(model, engine: engine)
+        defer {
+            engine.openGate()
+            worker.cancel()
+        }
         model.phase = .running
+        model.activeTranslationEngine = .external
 
         model.retranslateSentence(makeSentence(index: 7))
         #expect(model.pendingRetranslations == [7], "the retry is marked pending")
 
         model.handleTranslationStatus(.unavailable("engine failed", .permanent))
 
+        #expect(model.pendingRetranslations == [7], "the fallback will replay the sentence")
+        #expect(model.translationFallbackActive, "the fallback latched onto Apple")
+    }
+
+    /// Every *other* `.unavailable` is terminal for the backlog: Apple itself
+    /// failed (a language pack that is absent, a framework error), or this is
+    /// the fallback's own Apple replay failing. Nothing will service the
+    /// sentence, so a surviving marker would leave the row dimmed for the rest
+    /// of the session *and* have its own guard refuse the click that fixes it.
+    @Test("an unavailable Apple engine clears the marker so the row stays retryable")
+    func unavailableAppleEngineClearsPendingRetranslations() async {
+        let model = await makeSUT()
+        let engine = GatedRetranslateEngine()
+        let worker = await attachWorker(model, engine: engine)
+        defer {
+            engine.openGate()
+            worker.cancel()
+        }
+        model.phase = .running
+        model.activeTranslationEngine = .apple
+
+        model.retranslateSentence(makeSentence(index: 7))
+        #expect(model.pendingRetranslations == [7], "the retry is marked pending")
+
+        model.handleTranslationStatus(.unavailable("Apple failed", .permanent))
+
         #expect(
-            model.pendingRetranslations == [7],
-            "the fallback replays the same sentence, so its marker must survive"
+            model.pendingRetranslations.isEmpty,
+            "no engine swap follows, so the dim must not outlive the session"
         )
     }
 
+    /// The fallback's own replay failing is the same dead end: the latch is
+    /// already set, so no second swap is coming and the marker must go too.
+    @Test("an unavailable status after the fallback latched clears the marker")
+    func unavailableAfterFallbackClearsPendingRetranslations() async {
+        let model = await makeSUT()
+        model.phase = .running
+        model.pendingRetranslations = [7]
+        model.translationFallbackActive = true
+        model.activeTranslationEngine = .apple
+
+        model.handleTranslationStatus(.unavailable("Apple replay failed", .permanent))
+
+        #expect(model.pendingRetranslations.isEmpty)
+    }
+
     /// The transcript stays on screen after a stop, so a row waiting on a retry
-    /// would sit dimmed with its (now disabled) button as the only cue.
+    /// would sit dimmed with its (now hidden) button as the only cue.
     @Test("stopping clears pending re-translations so rows cannot stay dimmed")
     func stopClearsPendingRetranslations() async {
         let model = await makeSUT()
+        model.phase = .running
         model.pendingRetranslations = [7]
 
         await model.performStop()
@@ -249,6 +345,38 @@ struct AppModelRetranslationTests {
             model.pendingRetranslations.isEmpty,
             "the marker must not outlive the row it was dimming"
         )
+    }
+
+    // MARK: - Arrival routing
+
+    /// Routing is the entry's decision, not a flag the caller carries, so the
+    /// ordinary queue path is covered by the same rule as a retry: a second
+    /// result for a language the row already has replaces it.
+    @Test("a repeat delivery for a language the row already has replaces it")
+    func applyTranslationReplacesOnRepeatDelivery() async {
+        let model = await makeSUT()
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+
+        model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "First."))
+        model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Second."))
+
+        #expect(model.entries[0].translations.count == 1, "replaced, not appended")
+        #expect(model.entries[0].joinedTranslations == "Second.")
+    }
+
+    /// The converse: a genuinely new target language still joins the row,
+    /// which is what makes the replace rule safe for the multi-target future.
+    @Test("a delivery for a new language joins the row")
+    func applyTranslationAppendsNewLanguage() async {
+        let model = await makeSUT()
+        model.sessionController.onSentence?(makeSentence(index: 7))
+
+        model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "First."))
+        model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "ko", text: "두번째."))
+
+        #expect(model.entries[0].translations.count == 2)
+        #expect(model.entries[0].joinedTranslations == "First. / 두번째.")
     }
 }
 
@@ -293,9 +421,9 @@ private final class GatedRetranslateEngine: TranslationEngine, @unchecked Sendab
         state.withLock { gateState in gateState.batches }
     }
 
-    /// Releases every parked `translate`, and any that arrives later. Repeat
-    /// calls are no-ops — the waiters are drained, so there is nothing left to
-    /// resume twice.
+    /// Releases every parked `translate`, and lets any that arrives later
+    /// through. Repeat calls are safe — the waiters are drained, so there is
+    /// nothing left to resume twice.
     func openGate() {
         let parked = state.withLock { gateState -> [CheckedContinuation<Void, Never>] in
             gateState.open = true
@@ -306,6 +434,14 @@ private final class GatedRetranslateEngine: TranslationEngine, @unchecked Sendab
         for waiter in parked {
             waiter.resume()
         }
+    }
+
+    /// Re-arms the gate so the *next* `translate` parks again — lets a test
+    /// release one flight and then hold the next one, which a one-way flag
+    /// cannot express. Parked waiters are unaffected (there are none between a
+    /// drain and the next call).
+    func closeGate() {
+        state.withLock { gateState in gateState.open = false }
     }
 
     func translate(_ texts: [String]) async throws -> [String] {

@@ -37,8 +37,8 @@ extension AppModel {
     /// outlives a run by design, so a request made with no engine to serve it
     /// would park indefinitely with no result to lift the marker. The index
     /// rides in `pendingRetranslations` until the result lands, dimming the
-    /// row's current translation in the meantime — cleared by the landing
-    /// result, by session stop, and by the next session's begin.
+    /// row in the meantime — cleared by the landing result, by a failure that
+    /// engages no replay, by session stop, and by the next session's begin.
     ///
     /// `.sourceLost` counts as live: capture can die mid-session while the
     /// translation worker keeps draining, and a line worth re-running is
@@ -223,17 +223,20 @@ extension AppModel {
     func handleTranslationStatus(_ status: TranslationStatus) {
         translationStatus = status
         reconcileTranslationToasts(status)
-        // Pending re-translations are deliberately NOT cleared here. This
-        // status also drives the latched Apple fallback, which replays the
-        // very backlog the retry is sitting in — dropping the marker now
-        // would route that replay through `appendTranslation` and re-create
-        // the `"old / new"` pileup a retry exists to avoid. The sentences stay
-        // pending, so the marker always resolves when the replay lands;
-        // session stop and the next session's begin are the terminal clears.
-        guard case let .unavailable(_, severity) = status,
-              activeTranslationEngine == .external,
-              !translationFallbackActive
-        else { return }
+        guard case let .unavailable(_, severity) = status else { return }
+        guard activeTranslationEngine == .external, !translationFallbackActive else {
+            // No engine swap follows this failure, so nothing will ever
+            // service the backlog: Apple itself failed (a language pack that
+            // is absent, a framework error), or this is the fallback's own
+            // Apple replay failing. A row still wearing its in-flight marker
+            // would sit dimmed for the rest of the session *and* have its own
+            // retry guard refuse the click that would fix it. Drop the cue and
+            // let the retry re-run the sentence from the stranded backlog.
+            pendingRetranslations.removeAll()
+            return
+        }
+        // The one branch a fresh engine follows, so the backlog (and every
+        // marker on it) survives: latching Apple replays `pending` onto it.
         translationFallbackActive = true
         fallBackToApple(severity: severity)
     }
