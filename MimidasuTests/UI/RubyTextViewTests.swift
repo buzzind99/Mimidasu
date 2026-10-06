@@ -30,8 +30,7 @@ struct RubyTextViewTests {
         onLookup: ((LookupToken) -> Void)? = nil,
         lookupPopover: ((Int) -> RubyTextView.LookupPopover?)? = nil,
         reservesAnnotationLine: Bool = false,
-        isFavoriteSegment: ((ReadingSegment) -> Bool)? = nil,
-        favoritesRevision: Int = 0
+        isFavoriteSegment: ((ReadingSegment) -> Bool)? = nil
     ) -> RubyTextView {
         RubyTextView(
             text: "テスト",
@@ -43,8 +42,7 @@ struct RubyTextViewTests {
             onCopy: onCopy,
             onLookup: onLookup,
             lookupPopover: lookupPopover,
-            isFavoriteSegment: isFavoriteSegment,
-            favoritesRevision: favoritesRevision
+            isFavoriteSegment: isFavoriteSegment
         )
     }
 
@@ -162,14 +160,7 @@ struct RubyTextViewTests {
         #expect(view().fingerprint != view(reservesAnnotationLine: true).fingerprint)
     }
 
-    @Test("a favorite toggle changes == so an already-painted surface repaints")
-    func equalityFailsOnFavoritesRevision() {
-        let starred = view(favoritesRevision: 1)
-
-        #expect(starred != view())
-    }
-
-    @Test("the favorite matcher alone cannot break ==, which is why the revision rides along")
+    @Test("the favorite matcher alone cannot break ==, since == is value-only by design")
     func equalityIgnoresFavoriteMatcher() {
         let matcherA = view(isFavoriteSegment: { _ in true })
         let matcherB = view(isFavoriteSegment: { _ in false })
@@ -179,7 +170,7 @@ struct RubyTextViewTests {
 
     @Test("fingerprint ignores favorites: color paints only, so the flow cache stays valid")
     func fingerprintIgnoresFavorites() {
-        #expect(view().fingerprint == view(favoritesRevision: 1).fingerprint)
+        #expect(view().fingerprint == view(isFavoriteSegment: { _ in true }).fingerprint)
     }
 
     // MARK: - Body plan

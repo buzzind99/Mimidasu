@@ -12,13 +12,11 @@ struct LiveStripView: View {
     /// Invoked with the tapped word when cursor mode is `.dictionary`;
     /// nil keeps `.dictionary` on the legacy rendering path.
     var onLookup: ((LookupToken) -> Void)?
-    /// Favorite matcher and its revision, straight from the owner. The
-    /// revision has to be read while this body evaluates (the owner passes an
-    /// already-read value): the matcher accessor builds a closure and
-    /// observes nothing, so it alone cannot re-render an already-painted
-    /// partial.
+    /// Favorite matcher, straight from the owner. The owner reads the store's
+    /// revision while its own body evaluates and discards it: the matcher
+    /// accessor builds a closure and observes nothing, so it alone cannot
+    /// re-render an already-painted partial.
     var isFavorite: ((ReadingSegment) -> Bool)?
-    var favoritesRevision: Int = 0
     @AppStorage(ReadingAnnotation.storageKey) private var readingAnnotation = ReadingAnnotation.romaji
     @AppStorage(CursorMode.storageKey) private var cursorMode = CursorMode.none
     @AppStorage(UIScale.storageKey) private var uiScale = UIScale.default
@@ -90,8 +88,7 @@ struct LiveStripView: View {
                     cursorMode: cursorMode,
                     onCopy: onCopy,
                     onLookup: onLookup,
-                    isFavoriteSegment: isFavorite,
-                    favoritesRevision: favoritesRevision
+                    isFavoriteSegment: isFavorite
                 )
                 .foregroundStyle(Theme.primaryText.opacity(0.9))
             }

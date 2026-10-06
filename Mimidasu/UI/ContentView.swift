@@ -162,8 +162,10 @@ struct ContentView: View {
     private var mainContent: some View {
         // Read in this body, not inside a nested closure: the matcher accessor
         // builds a closure and observes nothing, so the live strip would keep
-        // the colors it painted before the last star press.
-        let favoriteRevision = model.favorites.revision
+        // the colors it painted before the last star press. Nothing consumes
+        // the number — the strip's surfaces resolve membership through the
+        // matcher — so the read is deliberately discarded.
+        _ = model.favorites.revision
         return HStack(spacing: 0) {
             SidebarView(
                 model: model,
@@ -182,8 +184,7 @@ struct ContentView: View {
                     live: live,
                     onCopy: { text in model.copySnippet(text) },
                     onLookup: { token in model.handleLookupTap(token, source: .liveStrip) },
-                    isFavorite: model.favoriteSegmentMatcher,
-                    favoritesRevision: favoriteRevision
+                    isFavorite: model.favoriteSegmentMatcher
                 )
                 // Strip-anchored popover: single non-virtualized view, so
                 // the strip owns it while the selection's anchor is the

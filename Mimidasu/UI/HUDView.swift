@@ -14,14 +14,16 @@ struct HUDView: View {
     /// Set on offscreen measurement copies: fixes the layout width so the
     /// measured ideal height reflects text wrapped at the real HUD width.
     var fixedWidth: CGFloat?
-    /// Favorite matcher for both JP surfaces, plus the revision read at the two
-    /// call sites below — which evaluate inside `hudContent`'s body, so a star
-    /// press repaints text the HUD already shows. (The matcher accessor alone
-    /// would not: it builds a closure and observes nothing.) The HUD passes no
-    /// `onLookup`, so it never reaches the segmented path, and in None
+    /// Favorite matcher for both JP surfaces, paired with the store-revision
+    /// read those two call sites make. That read is the point: it happens
+    /// inside `hudContent`'s body, so a star press repaints text the HUD
+    /// already shows. (The matcher accessor alone would not — it builds a
+    /// closure and observes nothing.) The value itself is discarded; the
+    /// matcher resolves membership when the surface renders. The HUD passes
+    /// no `onLookup`, so it never reaches the segmented path, and in None
     /// annotation both surfaces stay on the plain fallback.
-    private var favoriteRevision: Int {
-        model.favorites.revision
+    private func observeFavorites() {
+        _ = model.favorites.revision
     }
 
     var body: some View {
@@ -116,7 +118,8 @@ struct HUDView: View {
     }
 
     private var liveSection: some View {
-        Group {
+        observeFavorites()
+        return Group {
             if !live.partial.isEmpty {
                 // RubyTextView renders .none as plain text, so one call
                 // covers every annotation mode.
@@ -131,8 +134,7 @@ struct HUDView: View {
                     // Growing partial revisions never repeat — don't churn
                     // the annotator cache with them.
                     cachesSegments: false,
-                    isFavoriteSegment: model.favoriteSegmentMatcher,
-                    favoritesRevision: favoriteRevision
+                    isFavoriteSegment: model.favoriteSegmentMatcher
                 )
                 .foregroundStyle(.white)
                 .fixedSize(horizontal: false, vertical: true)
@@ -209,7 +211,8 @@ struct HUDView: View {
 
     /// Shared JP text call (RubyTextView renders .none as plain text).
     private func jpText(of entry: SessionEntry) -> some View {
-        RubyTextView(
+        observeFavorites()
+        return RubyTextView(
             text: entry.sentence.text,
             annotation: readingAnnotation,
             surfaceFont: .system(size: 14 * uiScale.factor),
@@ -218,8 +221,7 @@ struct HUDView: View {
             annotationColor: Theme.hudAnnotation,
             cursorMode: cursorMode,
             onCopy: { text in model.copySnippet(text) },
-            isFavoriteSegment: model.favoriteSegmentMatcher,
-            favoritesRevision: favoriteRevision
+            isFavoriteSegment: model.favoriteSegmentMatcher
         )
         .foregroundStyle(.white)
     }

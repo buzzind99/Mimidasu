@@ -24,10 +24,12 @@ final class FavoritesStore {
     /// `words.count`, kept as its own property because the header renders it
     /// on every tick of a search.
     private(set) var count = 0
-    /// Bumped on every mutation that changed what is on screen. This is the
-    /// only mechanism that repaints the transcript, and it travels down to
-    /// `RubyTextView` as a plain `Int` because a matcher closure carries no
-    /// value identity and can never break an `Equatable` comparison.
+    /// Bumped on every mutation that changed what is on screen. Host bodies
+    /// read it — `TranscriptView`, `ContentView`, `HUDView` — purely to
+    /// register an `@Observable` dependency, then discard the number: the
+    /// matcher closure they hand down carries no value identity, so it cannot
+    /// repaint anything on its own, and the surfaces resolve membership while
+    /// they render.
     private(set) var revision = 0
     /// Whether the database failed on its first read and was degraded
     /// terminally: every file-backed answer is now a stub (empty list, empty

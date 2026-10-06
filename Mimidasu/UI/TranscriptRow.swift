@@ -2,86 +2,54 @@ import SwiftUI
 
 /// One transcript row: mono start timestamp in a fixed-width gutter,
 /// JP sentence with the configured reading annotation, and the EN
-/// translation marked by a gradient capsule bar. `Equatable` so SwiftUI
-/// skips unchanged rows when the transcript re-diffs.
-struct TranscriptRow: View, Equatable {
+/// translation marked by a gradient capsule bar.
+///
+/// Rows repaint because `TranscriptView.body` reads the observed state they
+/// render from (`model.entries`, `model.pendingRetranslations`, the favorites
+/// revision, the dictionary selection) — nothing diffs these values against a
+/// previous copy. That is why every property here is a plain value snapshot
+/// rather than a settings wrapper: `@AppStorage`-backed wrappers read the
+/// *live* stored value, so a row would keep rendering the previous mode
+/// unless the parent re-rendered it.
+struct TranscriptRow: View {
     let entry: SessionEntry
-    /// Snapshots, not settings: under List, rows SwiftUI deems unchanged are
-    /// skipped via `==`, and `@AppStorage`-backed wrappers read the *live*
-    /// stored value — so comparing wrapper values would always hold and stale
-    /// rows would keep rendering the previous mode. Plain values passed from
-    /// the parent let a mode/scale change fail `==` and re-render every row.
+    /// Snapshot, not a settings wrapper — see the note above.
     let annotation: ReadingAnnotation
     let scale: UIScale
     let cursorMode: CursorMode
-    /// Excluded from `==`: the closures are stable per parent render, and
-    /// mode changes re-render rows via `cursorMode`.
     let onCopy: (String) -> Void
     /// Invoked with the tapped word when cursor mode is `.dictionary`;
     /// nil keeps `.dictionary` on the legacy rendering path.
     var onLookup: ((LookupToken) -> Void)?
-    /// The selection's source while this row owns the word-anchored
-    /// dictionary popover (this row's sentenceIndex matches), else nil.
-    /// Part of `==`: the owning row must re-render when the selection
-    /// lands, moves between this row's words, or clears — the word units'
-    /// popover bindings read the selection at render time.
-    let lookupAnchor: SelectedLookup.Source?
     /// Per-word popover presentation resolver, invoked with a word unit's
-    /// segment index (`RubyTextView.LookupPopover`). Excluded from `==`:
-    /// `lookupAnchor` covers the changes that must re-render the row, and
-    /// the closure is stable per parent render.
+    /// segment index (`RubyTextView.LookupPopover`). Resolved while the
+    /// parent body evaluates, which is what registers the selection
+    /// observation that refreshes the owning row's popover.
     var lookupPopover: ((Int) -> RubyTextView.LookupPopover)?
-    /// Bumped by `FavoritesStore` on every membership change. Part of `==`:
-    /// `List` skips rows whose `==` holds, so without this a star toggle
-    /// would never repaint a row that is already on screen. It is *also*
-    /// forwarded to `RubyTextView`, which is `Equatable` in its own right —
-    /// a failing row witness alone re-runs this body but leaves the ruby
-    /// view equal to its previous value, and a matcher closure can never
-    /// break that tie.
-    let favoritesRevision: Int
-    /// Excluded from `==`: the closure is stable per parent render, and
-    /// `favoritesRevision` covers the data change it would react to.
     var isFavorite: ((ReadingSegment) -> Bool)?
     /// Invoked with the row's sentence when the hover retry button fires.
-    /// Excluded from `==`: the closure is stable per parent render.
     var onRetry: ((Sentence) -> Void)?
-    /// Whether the retry affordance is live — only during a running
-    /// session, when the queue's worker exists to serve the request.
-    /// Part of `==`.
+    /// Whether the retry affordance is live — only during a session that
+    /// still has a translation worker (see `TranscriptView`).
     let retryEnabled: Bool
     /// True while a manual re-translation of this row's sentence is in
-    /// flight: the current translation dims until the fresh one replaces
-    /// it. Part of `==`.
+    /// flight: the current translation dims until the fresh one replaces it.
     let isRetranslating: Bool
     /// True only while this row is the newest entry: a freshly appended
     /// row fades in, while older rows render opaque so recycled rows
-    /// scrolling back into view don't re-fade. Part of `==`: the demotion
-    /// to false (a newer row landed) must re-render the row so opacity is
-    /// 1 by implementation, and a recycled row whose `shown` state was
-    /// discarded can't re-fade — the `onAppear` guard fails on false.
+    /// scrolling back into view don't re-fade. The demotion to false (a
+    /// newer row landed) re-renders the row so opacity is 1 by
+    /// implementation, and a recycled row whose `shown` state was discarded
+    /// can't re-fade — the `onAppear` guard fails on false.
     let fadesIn: Bool
 
     /// Fade state for a freshly appended row: starts transparent and
     /// eases to opaque on first appearance.
     @State private var shown = false
-    /// True while the pointer is anywhere on the row: widens the leading
-    /// slot around the retry button. Local-only; never part of `==`.
+    /// True while the pointer is anywhere on the row — reveals the retry
+    /// button, and gates its hit-testing so an invisible button never eats
+    /// a click meant for the transcript. Local-only.
     @State private var hovering = false
-
-    /// `nonisolated` so it can satisfy `Equatable` on this
-    /// `@MainActor`-inferred view; every compared property is an immutable
-    /// Sendable stored `let`.
-    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.entry == rhs.entry
-            && lhs.annotation == rhs.annotation
-            && lhs.scale == rhs.scale
-            && lhs.cursorMode == rhs.cursorMode
-            && lhs.lookupAnchor == rhs.lookupAnchor
-            && lhs.favoritesRevision == rhs.favoritesRevision
-            && lhs.fadesIn == rhs.fadesIn
-            && lhs.retryEnabled == rhs.retryEnabled
-            && lhs.isRetranslating == rhs.isRetranslating
-    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -105,8 +73,7 @@ struct TranscriptRow: View, Equatable {
                     onCopy: onCopy,
                     onLookup: onLookup,
                     lookupPopover: lookupPopover,
-                    isFavoriteSegment: isFavorite,
-                    favoritesRevision: favoritesRevision
+                    isFavoriteSegment: isFavorite
                 )
                 .textSelection(.enabled)
 
@@ -133,10 +100,13 @@ struct TranscriptRow: View, Equatable {
     }
 
     /// The hover-revealed retry button: floats 32pt left of the translation
-    /// text (right edge 3pt clear of the 3pt bar), vertically centered on
-    /// the translation block whatever its height. Overlay-only: zero layout
-    /// impact, and attached outside the re-translation dim so the button
-    /// itself never dims.
+    /// text — right edge 3pt clear of the 3pt bar — vertically centered on
+    /// the translation block whatever its height. Overlay-only, so zero
+    /// layout impact, and attached outside the re-translation dim so the
+    /// button itself never dims. On an untranslated row the anchor carries
+    /// the placeholder's 11pt leading indent, so the button sits 11pt
+    /// further left there; it stays inside the row's leading gutter either
+    /// way.
     private var retryButton: some View {
         Button {
             onRetry?(entry.sentence)

@@ -45,12 +45,14 @@ struct TranscriptView: View {
     static let topAnchorID = "transcript-top-anchor"
 
     var body: some View {
-        // Read here, in the body, and not inside the row closure: the
-        // matcher accessor only *builds* a closure and observes nothing, so
-        // passing it alone would register no dependency and an already-rendered
-        // row would keep its old colors. Reading the revision registers the
-        // observation that re-diffs the rows (see `lookupAnchor(for:)`).
-        let favoriteRevision = model.favorites.revision
+        // Read here, in the body, and not inside the row closure: the matcher
+        // accessor only *builds* a closure and observes nothing, so passing it
+        // alone would register no dependency and an already-rendered row would
+        // keep its old colors. Reading the revision registers the observation
+        // that re-runs this body. Nothing downstream consumes the number —
+        // `RubyTextView` resolves membership through the `isFavoriteSegment`
+        // matcher — so the read is deliberately discarded.
+        _ = model.favorites.revision
         return ScrollViewReader { proxy in
             List {
                 Color.clear
@@ -82,11 +84,9 @@ struct TranscriptView: View {
                                 )
                             )
                         },
-                        lookupAnchor: lookupAnchor(for: entry.sentence.index),
                         lookupPopover: { tokenIndex in
                             lookupPopover(entry.sentence.index, tokenIndex)
                         },
-                        favoritesRevision: favoriteRevision,
                         isFavorite: model.favoriteSegmentMatcher,
                         onRetry: { sentence in model.retranslateSentence(sentence) },
                         retryEnabled: model.phase == .running,
@@ -156,23 +156,17 @@ struct TranscriptView: View {
         }
     }
 
-    /// Whether this row owns the word-anchored dictionary popover: the
-    /// selection's transcript source matching this row's sentenceIndex.
-    /// Reading it in the body (not inside a closure) registers the
-    /// observation dependency that re-diffs the rows when the selection
-    /// lands, moves, or clears.
-    private func lookupAnchor(for sentenceIndex: Int) -> SelectedLookup.Source? {
-        guard
-            case let .transcript(anchorSentenceIndex, _)? = model.selectedLookup?.source,
-            anchorSentenceIndex == sentenceIndex
-        else { return nil }
-        return model.selectedLookup?.source
-    }
-
     /// Per-word popover presentation for the row's word units: the
     /// binding is true only while this exact word is the selection's
     /// anchor (a different-word retap dismisses and re-presents), and the
     /// content is the shared entry view once the async lookup has landed.
+    ///
+    /// Called per row from `body` rather than handed over as a closure, so
+    /// the `model.selectedLookup` reads below register the observation that
+    /// re-diffs the rows when the selection lands, moves, or clears. (An
+    /// earlier design also passed a per-row "is this the owning row" anchor
+    /// down to the row view; it was pure ballast — no row body ever read it,
+    /// and this call site already covers the dependency.)
     private func lookupPopover(
         _ sentenceIndex: Int, _ tokenIndex: Int
     ) -> RubyTextView.LookupPopover {

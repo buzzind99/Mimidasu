@@ -62,11 +62,6 @@ struct RubyTextView: View, Equatable {
     /// this view already renders per-segment surfaces. nil — any host that
     /// passes no matcher — leaves every surface its inherited host color.
     var isFavoriteSegment: ((ReadingSegment) -> Bool)?
-    /// Bumped by `FavoritesStore` on every membership change, and part of
-    /// `==`: `isFavoriteSegment` is a closure with no value identity, so
-    /// without this the view compares equal to its previous value across a
-    /// star toggle and SwiftUI skips the subtree that has to repaint.
-    var favoritesRevision: Int = 0
 
     /// One word unit's popover presentation, resolved by the host per
     /// segment index: the binding presents only while that word is the
@@ -351,12 +346,13 @@ struct RubyTextView: View, Equatable {
     }
 
     /// Excludes `onCopy`, `onLookup`, `lookupPopover`, and `isFavoriteSegment`
-    /// (closures have no value identity). The changes they serve arrive as
-    /// values: favorite membership as `favoritesRevision` here, and the
-    /// popover's content as `TranscriptRow.lookupAnchor` on the row that
-    /// builds this view. The witness is `nonisolated` so the conformance needs
-    /// no `@preconcurrency`: every compared property is an immutable Sendable
-    /// value.
+    /// (closures have no value identity). The conformance exists for this
+    /// view's unit tests, which assert the rendered value directly; SwiftUI
+    /// never consults it, because nothing applies `.equatable()` anywhere in
+    /// this view tree. Repaints come from the host body re-evaluating and
+    /// re-supplying the matcher instead. The witness is
+    /// `nonisolated` so the conformance needs no `@preconcurrency`: every
+    /// compared property is an immutable Sendable value.
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.text == rhs.text
             && lhs.annotation == rhs.annotation
@@ -367,7 +363,6 @@ struct RubyTextView: View, Equatable {
             && lhs.surfaceItalic == rhs.surfaceItalic
             && lhs.reservesAnnotationLine == rhs.reservesAnnotationLine
             && lhs.cursorMode == rhs.cursorMode
-            && lhs.favoritesRevision == rhs.favoritesRevision
     }
 
     /// One rendered child on the legacy path. Internal (not private) so the
