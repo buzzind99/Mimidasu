@@ -28,15 +28,18 @@ enum TranslationStatus: Equatable {
     case unavailable(String, TranslationFailureSeverity)
 }
 
-/// Translates finalized sentences ja→en, strictly in order.
+/// Translates finalized sentences ja→the configured target, in order.
 ///
 /// `translate` throws when called concurrently, so all work is funneled
 /// through this single worker loop. Untranslated sentences
 /// live in the plain `pending` array — always observable on the main actor —
-/// and the worker consumes them FIFO, so output order can never diverge from
-/// input order. Sentences are keyed by index; timestamps travel with the
-/// sentence. Repeats of already-translated sentences are served from a cache
-/// at `enqueue` time and bypass the worker entirely.
+/// and the worker consumes them FIFO. Output order matches input order for a
+/// clean run; the two re-ordering paths are a failed batch, which re-queues at
+/// the head, and a manual retry (`retranslate`), which re-queues at the tail —
+/// so a retried line's result can land after later lines. Sentences are keyed
+/// by index; timestamps travel with the sentence. Repeats of already-translated
+/// sentences are served from a cache at `enqueue` time and bypass the worker
+/// entirely.
 ///
 /// The class is `@MainActor` so that `enqueue` is a synchronous call from the
 /// sentence pipeline (also on the main actor): by the time `stop` calls
@@ -126,67 +129,78 @@ final class TranslationQueue {
             }
         }
 
-        /// Translate everything currently in `pending`, FIFO. Returns `false`
-        /// when this run must exit (stale generation, cancellation, error).
-        /// Bursts (a pause flushes several finals at once) drain in batched
-        /// round-trips instead of one call per sentence.
-        func pump() async -> Bool {
-            while !pending.isEmpty {
-                guard token == generation, let engine = self.engine else { return false }
-                // Take a bounded slice: visible progress and a bounded
-                // round-trip, while bursts still amortize the engine call.
-                let batch = Array(pending.prefix(engine.preferredBatchSize))
-                pending.removeFirst(batch.count)
-                translatingIDs.formUnion(batch.map(\.id))
-                setStatus(.translating)
-                inFlight = true
-                do {
-                    for (sentence, pair) in try await translateBatch(batch, using: engine) {
-                        // Drop the id as each result lands, so a retry for a
-                        // delivered sentence is a fresh request, not a no-op.
-                        translatingIDs.remove(sentence.id)
-                        deliver(sentence, pair)
-                    }
-                    setStatus(.ready)
-                } catch {
-                    // Cancellation (configuration invalidated / task torn
-                    // down) re-queues and exits like any failure; `pending`
-                    // survives for the next run.
-                    translatingIDs.subtract(batch.map(\.id))
-                    pending.insert(contentsOf: batch, at: 0)
-                    if token == generation {
-                        inFlight = false
-                        if error is CancellationError {
-                            setStatus(.idle)
-                        } else {
-                            setStatus(
-                                .unavailable(
-                                    Self.describe(error),
-                                    Self.severity(of: error, engine: engine)
-                                )
-                            )
-                        }
-                    } else {
-                        // A stale run re-queued work after a newer run
-                        // already pumped (and parked). The newer run owns
-                        // `wake` now — nudge it so the batch replays.
-                        wake?.yield(())
-                    }
-                    return false
-                }
-                inFlight = false
-            }
-            return true
-        }
-
         // Replay anything that arrived before a session existed.
-        guard await pump() else { return }
+        guard await pump(token: token) else { return }
 
         // Sleep until signalled; buffered wakeups are harmless no-ops.
         for await _ in wakeStream {
             guard token == generation else { return }
-            guard await pump() else { return }
+            guard await pump(token: token) else { return }
         }
+    }
+
+    /// Translate everything currently in `pending`, FIFO. Returns `false`
+    /// when this run must exit (stale generation, cancellation, error).
+    /// Bursts (a pause flushes several finals at once) drain in batched
+    /// round-trips instead of one call per sentence.
+    private func pump(token: Int) async -> Bool {
+        while !pending.isEmpty {
+            guard token == generation, let engine else { return false }
+            // Take a bounded slice: visible progress and a bounded
+            // round-trip, while bursts still amortize the engine call.
+            let batch = Array(pending.prefix(engine.preferredBatchSize))
+            pending.removeFirst(batch.count)
+            translatingIDs.formUnion(batch.map(\.id))
+            setStatus(.translating)
+            inFlight = true
+            do {
+                // `deliver` is deliberately NOT generation-guarded: the batch
+                // left `pending` before the flight, so dropping a stale run's
+                // results would lose those sentences outright. The shared-state
+                // writes are a different matter — a live run owns them, and a
+                // dead run clobbering `inFlight` would let `drain` return early
+                // (cutting the session tail off) while a stale `.ready` would
+                // dismiss a failure card for an engine that is still broken.
+                for (sentence, pair) in try await translateBatch(batch, using: engine) {
+                    // Drop the id as each result lands, so a retry for a
+                    // delivered sentence is a fresh request, not a no-op.
+                    translatingIDs.remove(sentence.id)
+                    deliver(sentence, pair)
+                }
+                if token == generation {
+                    setStatus(.ready)
+                }
+            } catch {
+                // Cancellation (configuration invalidated / task torn down)
+                // re-queues and exits like any failure; `pending` survives for
+                // the next run.
+                translatingIDs.subtract(batch.map(\.id))
+                pending.insert(contentsOf: batch, at: 0)
+                if token == generation {
+                    inFlight = false
+                    if error is CancellationError {
+                        setStatus(.idle)
+                    } else {
+                        setStatus(
+                            .unavailable(
+                                Self.describe(error),
+                                Self.severity(of: error, engine: engine)
+                            )
+                        )
+                    }
+                } else {
+                    // A stale run re-queued work after a newer run
+                    // already pumped (and parked). The newer run owns
+                    // `wake` now — nudge it so the batch replays.
+                    wake?.yield(())
+                }
+                return false
+            }
+            if token == generation {
+                inFlight = false
+            }
+        }
+        return true
     }
 
     /// Enqueue a finalized sentence for translation. A repeat of an

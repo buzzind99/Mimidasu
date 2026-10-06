@@ -43,11 +43,11 @@ struct TranslationQueueRetranslateTests {
     /// delivered re-enters the worker for a fresh engine round-trip instead
     /// of the synchronous cached result at `enqueue` time.
     @Test("retranslate re-runs a translated sentence through the engine")
-    func retranslateBypassesCacheAndRerunsEngine() async throws {
+    func retranslateBypassesCacheAndRerunsEngine() async {
         let engine = makeEchoEngine()
         let queue = TranslationQueue()
         let sink = RetranslateSink()
-        try await confirmation("results delivered", expectedCount: 2) { delivered in
+        await confirmation("results delivered", expectedCount: 2) { delivered in
             queue.setHandlers(
                 result: { index, translation in
                     sink.receive(index: index, translation: translation)
@@ -82,12 +82,12 @@ struct TranslationQueueRetranslateTests {
     /// twice: `retranslate` drops the stale copy, so the replay produces
     /// exactly one flight and one result.
     @Test("retranslate drops a pending copy so a failed sentence cannot fly twice")
-    func retranslateDeduplicatesPendingCopy() async throws {
+    func retranslateDeduplicatesPendingCopy() async {
         let failing = MockRetranslateEngine { _ in throw TranslationEngineError.network }
         let echo = makeEchoEngine()
         let queue = TranslationQueue()
         let sink = RetranslateSink()
-        try await confirmation("unavailable status") { failed in
+        await confirmation("unavailable status") { failed in
             queue.setHandlers(
                 result: { index, translation in
                     sink.receive(index: index, translation: translation)
@@ -111,7 +111,12 @@ struct TranslationQueueRetranslateTests {
                 },
                 "the first run fails out with the sentence still pending"
             )
+            // Awaited, not just cancelled: `engine` is still attached until the
+            // run's `defer` runs, and a `pending` copy with a live engine reads
+            // as "awaiting" — so an early `retranslate` would no-op on the
+            // awaiting guard and never exercise the dedupe.
             worker.cancel()
+            await worker.value
 
             queue.retranslate(makeSentence(index: 0, text: sentenceText))
             let replay = Task { await queue.run(with: echo) }
@@ -125,6 +130,52 @@ struct TranslationQueueRetranslateTests {
         #expect(sink.results.count == 1, "no duplicate flight from the pending copy")
         #expect(sink.results.first?.index == 0)
         #expect(echo.recordedBatches.map(\.count) == [1])
+    }
+
+    /// The other half of the dedupe precondition: with the engine gone, a
+    /// sentence parked in `pending` is explicitly *not* awaiting, so a retry
+    /// re-queues it instead of being refused. This is what lets a user re-run
+    /// a line after a failed batch.
+    @Test("a stranded sentence with no worker is retryable, not awaiting")
+    func strandedSentenceWithoutWorkerIsNotAwaiting() async {
+        let queue = TranslationQueue()
+        let sink = RetranslateSink()
+        queue.setHandlers(
+            result: { index, translation in sink.receive(index: index, translation: translation) },
+            status: { status in sink.receive(status: status) }
+        )
+        let sentence = makeSentence(index: 0, text: sentenceText)
+
+        let worker = Task { await queue.run(with: MockRetranslateEngine { _ in
+            throw TranslationEngineError.network
+        }) }
+        queue.enqueue(sentence)
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                if case .unavailable = queue.status {
+                    return true
+                }
+                return false
+            },
+            "the sentence is stranded in pending by the failure"
+        )
+        worker.cancel()
+        await worker.value
+
+        #expect(!queue.hasWorker, "the failed run released its engine")
+        #expect(
+            !queue.isAwaitingTranslation(sentence),
+            "a stranded sentence with no worker must not read as awaiting"
+        )
+        #expect(sink.results.isEmpty, "the failed run delivered nothing")
+
+        queue.retranslate(sentence)
+        let replay = Task { await queue.run(with: makeEchoEngine()) }
+        defer { replay.cancel() }
+        #expect(
+            await pollUntil(timeout: resultTimeout) { sink.results.count == 1 },
+            "the retry re-queues the stranded sentence and it lands"
+        )
     }
 
     // MARK: - Idempotency (retry while already translating)
@@ -163,9 +214,9 @@ struct TranslationQueueRetranslateTests {
                 await pollUntil(timeout: resultTimeout) { sink.results.count == 1 },
                 "the original flight delivers exactly one result"
             )
-            // The batch only gets re-pumped if a duplicate copy was queued, and
-            // that pump happens after the confirmation above closes — so give
-            // it a window to show up before asserting on the recorded batches.
+            // A duplicate copy would be pumped after the batch above resolves,
+            // so the negative has to be polled for a window rather than
+            // asserted at an instant.
             #expect(
                 await pollUntil(timeout: settleTimeout) { engine.recordedBatches.count > 1 } == false,
                 "the retry must not start a second flight"
@@ -315,6 +366,12 @@ struct TranslationQueueRetranslateTests {
         drops.queue.resetForNewSession()
         let dropWorker = Task { await drops.queue.run(with: makeEchoEngine()) }
         defer { dropWorker.cancel() }
+        // Latch the positive first: without it the negative below would also
+        // pass for a run that never attached an engine at all.
+        #expect(
+            await pollUntil(timeout: resultTimeout) { drops.queue.hasWorker },
+            "the post-reset run attached an engine — it just has nothing to do"
+        )
         // Poll for the failure and require it never to arrive: `pollUntil`
         // returns true the moment its condition *holds*, so the condition is
         // the bad outcome here, and `== false` asserts the whole window passed
@@ -323,7 +380,6 @@ struct TranslationQueueRetranslateTests {
             await pollUntil(timeout: settleTimeout) { !drops.sink.results.isEmpty } == false,
             "a session boundary drops the backlog instead of replaying it"
         )
-        #expect(drops.sink.results.isEmpty, "no session-N result may reach a session-N+1 row")
         // The failing run pumped one batch; the post-reset run must pump none.
         #expect(
             drops.sink.statuses.filter { status in status == .translating }.count == 1,
@@ -426,15 +482,14 @@ private final class GatedRetranslateEngine: TranslationEngine, @unchecked Sendab
     }
 }
 
-/// Closure-backed `TranslationEngine` so the retry tests stay hermetic. Lock
-/// guards the batch recording because `translate` runs off the main actor.
+/// Closure-backed `TranslationEngine` so the retry tests stay hermetic. The
+/// mutex guards the batch recording because `translate` runs off the main actor.
 private final class MockRetranslateEngine: TranslationEngine, @unchecked Sendable {
     let preferredBatchSize: Int
     var onRetry: (@Sendable (RetryProgress) -> Void)?
 
     private let handler: @Sendable ([String]) async throws -> [String]
-    private let lock = NSLock()
-    private var batches: [[String]] = []
+    private let state = Mutex(MockRetranslateEngineState())
 
     init(handler: @escaping @Sendable ([String]) async throws -> [String]) {
         preferredBatchSize = 16
@@ -442,15 +497,17 @@ private final class MockRetranslateEngine: TranslationEngine, @unchecked Sendabl
     }
 
     var recordedBatches: [[String]] {
-        lock.lock()
-        defer { lock.unlock() }
-        return batches
+        state.withLock { mockState in mockState.batches }
     }
 
     func translate(_ texts: [String]) async throws -> [String] {
-        lock.withLock { batches.append(texts) }
+        state.withLock { mockState in mockState.batches.append(texts) }
         return try await handler(texts)
     }
+}
+
+private struct MockRetranslateEngineState {
+    var batches: [[String]] = []
 }
 
 /// Records handler callbacks so the tests assert on real deliveries.
