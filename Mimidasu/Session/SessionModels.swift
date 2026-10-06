@@ -53,6 +53,20 @@ struct SessionEntry: Identifiable, Equatable, Sendable {
         joinedTranslations = translations.map(\.text).joined(separator: " / ")
     }
 
+    /// Manual-retry path: swaps the translation for the same language in
+    /// place; a language with no prior translation appends. The row's
+    /// rendered line is the fresh text, not an " / " pileup of retries.
+    mutating func replaceTranslation(_ translation: SentenceTranslation) {
+        if let at = translations.firstIndex(where: { existing in
+            existing.lang == translation.lang
+        }) {
+            translations[at] = translation
+        } else {
+            translations.append(translation)
+        }
+        joinedTranslations = translations.map(\.text).joined(separator: " / ")
+    }
+
     var id: Int {
         sentence.index
     }

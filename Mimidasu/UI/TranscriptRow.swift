@@ -42,6 +42,17 @@ struct TranscriptRow: View, Equatable {
     /// Excluded from `==`: the closure is stable per parent render, and
     /// `favoritesRevision` covers the data change it would react to.
     var isFavorite: ((ReadingSegment) -> Bool)?
+    /// Invoked with the row's sentence when the hover retry button fires.
+    /// Excluded from `==`: the closure is stable per parent render.
+    var onRetry: ((Sentence) -> Void)?
+    /// Whether the retry affordance is live — only during a running
+    /// session, when the queue's worker exists to serve the request.
+    /// Part of `==`.
+    let retryEnabled: Bool
+    /// True while a manual re-translation of this row's sentence is in
+    /// flight: the current translation dims until the fresh one replaces
+    /// it. Part of `==`.
+    let isRetranslating: Bool
     /// True only while this row is the newest entry: a freshly appended
     /// row fades in, while older rows render opaque so recycled rows
     /// scrolling back into view don't re-fade. Part of `==`: the demotion
@@ -53,6 +64,9 @@ struct TranscriptRow: View, Equatable {
     /// Fade state for a freshly appended row: starts transparent and
     /// eases to opaque on first appearance.
     @State private var shown = false
+    /// True while the pointer is anywhere on the row: widens the leading
+    /// slot around the retry button. Local-only; never part of `==`.
+    @State private var hovering = false
 
     /// `nonisolated` so it can satisfy `Equatable` on this
     /// `@MainActor`-inferred view; every compared property is an immutable
@@ -65,6 +79,8 @@ struct TranscriptRow: View, Equatable {
             && lhs.lookupAnchor == rhs.lookupAnchor
             && lhs.favoritesRevision == rhs.favoritesRevision
             && lhs.fadesIn == rhs.fadesIn
+            && lhs.retryEnabled == rhs.retryEnabled
+            && lhs.isRetranslating == rhs.isRetranslating
     }
 
     var body: some View {
@@ -95,6 +111,13 @@ struct TranscriptRow: View, Equatable {
                 .textSelection(.enabled)
 
                 translationRow
+                    // The retry button floats left of the bar: overlay-only
+                    // (no layout impact), vertically centered on the
+                    // translation block whatever its line count.
+                    .overlay(alignment: .leading) {
+                        retryButton
+                            .offset(x: -32)
+                    }
             }
         }
         // Generous row spacing stands in for a divider.
@@ -102,10 +125,36 @@ struct TranscriptRow: View, Equatable {
         // Opacity only: animating layout would displace neighboring rows
         // while the re-anchor chase is also repositioning content.
         .opacity(fadesIn && !shown ? 0 : 1)
+        .onHover { isHovering in hovering = isHovering }
         .onAppear {
             guard fadesIn, !shown else { return }
             withAnimation(.easeOut(duration: 0.25)) { shown = true }
         }
+    }
+
+    /// The hover-revealed retry button: floats 32pt left of the translation
+    /// text (right edge 3pt clear of the 3pt bar), vertically centered on
+    /// the translation block whatever its height. Overlay-only: zero layout
+    /// impact, and attached outside the re-translation dim so the button
+    /// itself never dims.
+    private var retryButton: some View {
+        Button {
+            onRetry?(entry.sentence)
+        } label: {
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Theme.secondaryText)
+                .frame(width: 18, height: 18)
+                .hoverHighlight(Circle(), isEnabled: retryEnabled)
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(retryEnabled ? .link : nil)
+        .disabled(!retryEnabled)
+        .help("Re-translate this line")
+        // Hidden-but-hittable would eat clicks meant for the transcript.
+        .allowsHitTesting(hovering && retryEnabled)
+        .opacity(hovering && retryEnabled ? 1 : 0)
+        .animation(.easeOut(duration: 0.15), value: hovering)
     }
 
     @ViewBuilder
@@ -123,6 +172,10 @@ struct TranscriptRow: View, Equatable {
                         .frame(width: 3)
                         .offset(x: -11)
                 }
+                // A manual re-translation dims the stale line (bar included)
+                // until the fresh one lands; text stays readable throughout.
+                .opacity(isRetranslating ? 0.35 : 1)
+                .animation(.easeOut(duration: 0.15), value: isRetranslating)
         } else {
             Text("…")
                 .font(.system(size: 13 * scale.factor))

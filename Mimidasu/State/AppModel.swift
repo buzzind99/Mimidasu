@@ -170,6 +170,13 @@ final class AppModel {
     /// `AppModelTranslation.swift`.
     var providerAwaitingDisclosure: TranslationProvider?
 
+    /// Sentence indexes with a manual re-translation in flight (the
+    /// transcript row's hover button). Membership drives both the row's dim
+    /// state and the replace-on-arrival routing in `applyTranslation`; a
+    /// landing result removes its index. Read by views. Internal: managed
+    /// from `AppModelTranslation.swift`.
+    var pendingRetranslations: Set<Int> = []
+
     /// The refresh spawned by the most recent `selectModel` (tracked so
     /// `adoptDownloadedModel` can await it instead of stacking passes).
     /// Internal: managed from `AppModelModelSelection.swift`.
@@ -559,9 +566,15 @@ final class AppModel {
     }
 
     /// Internal (not private) so tests can exercise known/unknown indexes.
+    /// A pending manual re-translation replaces the row's same-language
+    /// translation in place; the ordinary queue path keeps appending.
     func applyTranslation(index: Int, translation: SentenceTranslation) {
         if let at = entryPositionBySentence[index] {
-            entries[at].appendTranslation(translation)
+            if pendingRetranslations.remove(index) != nil {
+                entries[at].replaceTranslation(translation)
+            } else {
+                entries[at].appendTranslation(translation)
+            }
         }
     }
 }

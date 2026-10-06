@@ -70,6 +70,11 @@ final class TranslationQueue {
     private var generation = 0
     /// True while a `session.translate`/batch call is suspended inside the worker.
     private var inFlight = false
+    /// Sentence ids popped into the worker's current batch — mid-flight,
+    /// therefore invisible to `pending`. The manual retry consults these to
+    /// stay a no-op while a translation is airborne: a re-queued copy would
+    /// translate twice (replace on the first result, append on the second).
+    private var translatingIDs: Set<Int> = []
 
     /// App-run-scoped cache: repeated sentences ("よろしくお願いします"…) skip
     /// the session round-trip entirely — the result posts at `enqueue` time.
@@ -113,6 +118,7 @@ final class TranslationQueue {
             if token == generation {
                 wake = nil
                 inFlight = false
+                translatingIDs.removeAll()
                 self.engine = nil
             }
         }
@@ -128,10 +134,14 @@ final class TranslationQueue {
                 // round-trip, while bursts still amortize the engine call.
                 let batch = Array(pending.prefix(engine.preferredBatchSize))
                 pending.removeFirst(batch.count)
+                translatingIDs.formUnion(batch.map(\.id))
                 setStatus(.translating)
                 inFlight = true
                 do {
                     for (sentence, pair) in try await translateBatch(batch, using: engine) {
+                        // Drop the id as each result lands, so a retry for a
+                        // delivered sentence is a fresh request, not a no-op.
+                        translatingIDs.remove(sentence.id)
                         deliver(sentence, pair)
                     }
                     setStatus(.ready)
@@ -139,6 +149,7 @@ final class TranslationQueue {
                     // Cancellation (configuration invalidated / task torn
                     // down) re-queues and exits like any failure; `pending`
                     // survives for the next run.
+                    translatingIDs.subtract(batch.map(\.id))
                     pending.insert(contentsOf: batch, at: 0)
                     if token == generation {
                         inFlight = false
@@ -199,6 +210,32 @@ final class TranslationQueue {
     /// replays the backlog.
     func resetForRetry() {
         setStatus(.idle)
+    }
+
+    /// True while the sentence is already being handled: mid-flight in the
+    /// worker's current batch, or queued behind a live worker (engine
+    /// attached — it nils when a run exits). The manual retry must no-op
+    /// for such sentences, so a click can never double-translate a line.
+    /// A sentence parked in `pending` with no worker (a failed-out
+    /// backlog) is *not* awaiting — retrying it is the user's explicit
+    /// re-run intent.
+    func isAwaitingTranslation(_ sentence: Sentence) -> Bool {
+        translatingIDs.contains(sentence.id)
+            || (engine != nil && pending.contains { queued in queued.id == sentence.id })
+    }
+
+    /// Manual retry for one sentence (the transcript row's hover button).
+    /// No-op while `isAwaitingTranslation` holds — the sentence is already
+    /// translating, and a second copy would fly twice (replace on the
+    /// first result, append on the second). Otherwise: any stale `pending`
+    /// copy (a failed batch re-queues at the front) is dropped, the cache
+    /// entry is evicted (it would otherwise serve the old translation
+    /// synchronously), and the sentence re-enters the normal worker path.
+    func retranslate(_ sentence: Sentence) {
+        guard !isAwaitingTranslation(sentence) else { return }
+        pending.removeAll { queued in queued.id == sentence.id }
+        cache.removeObject(forKey: sentence.text as NSString)
+        enqueue(sentence)
     }
 
     /// Reports an external engine's transient-retry progress to the footer

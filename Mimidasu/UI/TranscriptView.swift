@@ -88,6 +88,9 @@ struct TranscriptView: View {
                         },
                         favoritesRevision: favoriteRevision,
                         isFavorite: model.favoriteSegmentMatcher,
+                        onRetry: { sentence in model.retranslateSentence(sentence) },
+                        retryEnabled: model.phase == .running,
+                        isRetranslating: model.pendingRetranslations.contains(entry.sentence.index),
                         fadesIn: entry.id == model.entries.last?.id
                     )
                     .id(entry.id)

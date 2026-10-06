@@ -149,4 +149,37 @@ struct SessionModelsTests {
 
         #expect(entry.joinedTranslations == "\(firstTranslationText) / \(secondTranslationText)")
     }
+
+    // MARK: - SessionEntry.replaceTranslation
+
+    @Test("a re-translation replaces the same-language translation in place")
+    func replaceTranslationSwapsSameLanguage() {
+        var entry = makeEntry()
+        entry.appendTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
+
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: "Howdy"))
+
+        #expect(entry.joinedTranslations == "Howdy")
+        #expect(entry.translations == [SentenceTranslation(lang: "en", text: "Howdy")])
+    }
+
+    @Test("a re-translation for a new language appends instead of replacing")
+    func replaceTranslationAppendsNewLanguage() {
+        var entry = makeEntry()
+        entry.appendTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
+
+        entry.replaceTranslation(SentenceTranslation(lang: "ko", text: "안녕"))
+
+        #expect(entry.joinedTranslations == "\(firstTranslationText) / 안녕")
+        #expect(entry.translations.count == 2)
+    }
+
+    @Test("replacing on an untranslated entry behaves like an append")
+    func replaceTranslationOnUntranslatedAppends() {
+        var entry = makeEntry()
+
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
+
+        #expect(entry.joinedTranslations == firstTranslationText)
+    }
 }

@@ -27,6 +27,26 @@ extension AppModel {
         reengageTranslation()
     }
 
+    /// Manual retry for one transcript row: re-runs the sentence through the
+    /// queue (cache evicted) and swaps the fresh result into the row in
+    /// place. Idempotent: a click while this row already retranslates (the
+    /// marker is still set), or while the sentence's translation is queued
+    /// or airborne for any reason (the queue owns that check), is a no-op —
+    /// both guards run before the marker insert so a no-op never dims the
+    /// row. Gated on a live session — the worker only exists while an
+    /// engine is attached, so outside `.running` the request would sit in
+    /// `pending` until the next session with no visible effect. The index
+    /// rides in `pendingRetranslations` until the result lands, dimming the
+    /// row's current translation in the meantime.
+    func retranslateSentence(_ sentence: Sentence) {
+        guard phase == .running else { return }
+        guard !pendingRetranslations.contains(sentence.index),
+              !translationQueue.isAwaitingTranslation(sentence)
+        else { return }
+        pendingRetranslations.insert(sentence.index)
+        translationQueue.retranslate(sentence)
+    }
+
     /// Re-arms the one-way auto-fallback and re-attaches the selected engine:
     /// resets the latch, dismisses the latched degraded card (its Reconnect
     /// action would otherwise linger), then activates. Shared by the manual
@@ -197,6 +217,12 @@ extension AppModel {
     func handleTranslationStatus(_ status: TranslationStatus) {
         translationStatus = status
         reconcileTranslationToasts(status)
+        if case .unavailable = status {
+            // The backlog just failed out; undim any rows waiting on a
+            // re-translation (their sentences stay queued for the next
+            // run's replay — only the dim cue is dropped).
+            pendingRetranslations.removeAll()
+        }
         guard case let .unavailable(_, severity) = status,
               activeTranslationEngine == .external,
               !translationFallbackActive
