@@ -172,9 +172,13 @@ final class AppModel {
 
     /// Sentence indexes with a manual re-translation in flight (the
     /// transcript row's hover button). Membership drives both the row's dim
-    /// state and the replace-on-arrival routing in `applyTranslation`; a
-    /// landing result removes its index. Read by views. Internal: managed
-    /// from `AppModelTranslation.swift`.
+    /// state and the replace-on-arrival routing in `applyTranslation`.
+    /// Internal: inserted in `AppModelTranslation.retranslateSentence`, and
+    /// cleared by three sites — the landing result (`applyTranslation`),
+    /// session stop (`performStop`), and the next session's begin
+    /// (`onSessionBegin`). Not cleared on `.unavailable`: that status also
+    /// latches the Apple fallback, which replays the same backlog, and the
+    /// marker must survive to route that replay as a replace. Read by views.
     var pendingRetranslations: Set<Int> = []
 
     /// The refresh spawned by the most recent `selectModel` (tracked so
@@ -304,6 +308,11 @@ final class AppModel {
             guard let self else { return }
             entries.removeAll()
             entryPositionBySentence.removeAll()
+            // Sentence indexes restart at 0 in every session, so a backlog
+            // left by the last one has no row to land on — drop it, and with
+            // it any re-translation marker still waiting on its result.
+            translationQueue.resetForNewSession()
+            pendingRetranslations.removeAll()
             sessionCharacterCount = 0
             hudPinnedIndex = nil
             sessionStartedAt = .now
@@ -519,6 +528,10 @@ final class AppModel {
         // must not mark a session that no longer exists.
         highFidelitySequence += 1
         translationStatus = .idle
+        // The transcript stays on screen after a stop, so a row waiting on a
+        // re-translation would sit dimmed with its button disabled. Nothing
+        // will deliver that result any more; drop the cue.
+        pendingRetranslations.removeAll()
         sessionEndedAt = .now
         // Stop/teardown clears all toasts and notices (phase → `.idle`).
         toasts.clearAll()
@@ -569,8 +582,12 @@ final class AppModel {
     /// A pending manual re-translation replaces the row's same-language
     /// translation in place; the ordinary queue path keeps appending.
     func applyTranslation(index: Int, translation: SentenceTranslation) {
+        // Cleared before the row lookup: a result whose row is gone (the
+        // transcript cleared underneath it) must still retire its marker,
+        // or the row stays dimmed with its retry button dead.
+        let isRetry = pendingRetranslations.remove(index) != nil
         if let at = entryPositionBySentence[index] {
-            if pendingRetranslations.remove(index) != nil {
+            if isRetry {
                 entries[at].replaceTranslation(translation)
             } else {
                 entries[at].appendTranslation(translation)

@@ -89,7 +89,7 @@ struct TranscriptView: View {
                         },
                         isFavorite: model.favoriteSegmentMatcher,
                         onRetry: { sentence in model.retranslateSentence(sentence) },
-                        retryEnabled: model.phase == .running,
+                        retryEnabled: model.phase == .running || model.phase == .sourceLost,
                         isRetranslating: model.pendingRetranslations.contains(entry.sentence.index),
                         fadesIn: entry.id == model.entries.last?.id
                     )

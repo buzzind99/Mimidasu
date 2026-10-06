@@ -74,6 +74,9 @@ final class TranslationQueue {
     /// therefore invisible to `pending`. The manual retry consults these to
     /// stay a no-op while a translation is airborne: a re-queued copy would
     /// translate twice (replace on the first result, append on the second).
+    /// Every id in a batch leaves by the time the batch resolves: each result
+    /// drops its own as it lands, and the `catch` sweeps the rest, so the set
+    /// cannot strand an index once the sentence has been dealt with.
     private var translatingIDs: Set<Int> = []
 
     /// App-run-scoped cache: repeated sentences ("よろしくお願いします"…) skip
@@ -212,6 +215,31 @@ final class TranslationQueue {
         setStatus(.idle)
     }
 
+    /// Session boundary: drops the untranslated backlog. `pending` outlives a
+    /// *run* by design — an engine swap (the latched Apple fallback, Reconnect)
+    /// must replay onto the new engine — but it must not outlive a *session*:
+    /// `Sentence.index` restarts at 0 in each one, and the transcript that
+    /// would have received these results is discarded at the same boundary, so
+    /// a carried backlog has no correct destination. It would only ever append
+    /// one session's translation onto the next session's row of the same index.
+    /// `translatingIDs` goes with it: an id left by a torn-down run would
+    /// otherwise read as "airborne" and disable retries for that index forever.
+    /// The app-run cache stays — a sentence repeated in a new session is
+    /// exactly what it is for.
+    func resetForNewSession() {
+        pending.removeAll()
+        translatingIDs.removeAll()
+    }
+
+    /// True while a run holds an engine, i.e. a worker that would service a
+    /// fresh `enqueue`. `pending` survives a run by design, so "queued" alone
+    /// does not mean "will be delivered": the manual retry gates on this, or a
+    /// click made before `.translationTask` fires (or while the language pack
+    /// is absent) would park a dimmed row behind a worker that does not exist.
+    var hasWorker: Bool {
+        engine != nil
+    }
+
     /// True while the sentence is already being handled: mid-flight in the
     /// worker's current batch, or queued behind a live worker (engine
     /// attached — it nils when a run exits). The manual retry must no-op
@@ -280,10 +308,21 @@ final class TranslationQueue {
     /// Translates one batch in a single engine round-trip (batches amortize
     /// the call during bursts). Returns sentences paired with translations;
     /// each result is stamped with the session's target language code.
+    ///
+    /// A count mismatch is a failed batch, not a short answer: pairing with
+    /// `zip` would silently drop the unmatched sentences, and — because their
+    /// ids would never be released — leave them permanently un-retryable.
+    /// Throwing instead sends the whole batch down the failure path, which
+    /// re-queues it at the front of `pending` for the next run.
     private func translateBatch(
         _ batch: [Sentence], using engine: any TranslationEngine
     ) async throws -> [(Sentence, SentenceTranslation)] {
         let translations = try await engine.translate(batch.map(\.text))
+        guard translations.count == batch.count else {
+            throw TranslationEngineError.badResponse(
+                "Expected \(batch.count) translations, got \(translations.count)"
+            )
+        }
         return zip(batch, translations).map { sentence, text in
             (sentence, SentenceTranslation(lang: targetLangCode, text: text))
         }

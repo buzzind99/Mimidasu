@@ -33,13 +33,19 @@ extension AppModel {
     /// marker is still set), or while the sentence's translation is queued
     /// or airborne for any reason (the queue owns that check), is a no-op —
     /// both guards run before the marker insert so a no-op never dims the
-    /// row. Gated on a live session — the worker only exists while an
-    /// engine is attached, so outside `.running` the request would sit in
-    /// `pending` until the next session with no visible effect. The index
+    /// row. Gated on a live session *and* an attached worker: `pending`
+    /// outlives a run by design, so a request made with no engine to serve it
+    /// would park indefinitely with no result to lift the marker. The index
     /// rides in `pendingRetranslations` until the result lands, dimming the
-    /// row's current translation in the meantime.
+    /// row's current translation in the meantime — cleared by the landing
+    /// result, by session stop, and by the next session's begin.
+    ///
+    /// `.sourceLost` counts as live: capture can die mid-session while the
+    /// translation worker keeps draining, and a line worth re-running is
+    /// exactly what a user reaches for then.
     func retranslateSentence(_ sentence: Sentence) {
-        guard phase == .running else { return }
+        guard phase == .running || phase == .sourceLost else { return }
+        guard translationQueue.hasWorker else { return }
         guard !pendingRetranslations.contains(sentence.index),
               !translationQueue.isAwaitingTranslation(sentence)
         else { return }
@@ -217,12 +223,13 @@ extension AppModel {
     func handleTranslationStatus(_ status: TranslationStatus) {
         translationStatus = status
         reconcileTranslationToasts(status)
-        if case .unavailable = status {
-            // The backlog just failed out; undim any rows waiting on a
-            // re-translation (their sentences stay queued for the next
-            // run's replay — only the dim cue is dropped).
-            pendingRetranslations.removeAll()
-        }
+        // Pending re-translations are deliberately NOT cleared here. This
+        // status also drives the latched Apple fallback, which replays the
+        // very backlog the retry is sitting in — dropping the marker now
+        // would route that replay through `appendTranslation` and re-create
+        // the `"old / new"` pileup a retry exists to avoid. The sentences stay
+        // pending, so the marker always resolves when the replay lands;
+        // session stop and the next session's begin are the terminal clears.
         guard case let .unavailable(_, severity) = status,
               activeTranslationEngine == .external,
               !translationFallbackActive
