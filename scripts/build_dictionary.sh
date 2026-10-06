@@ -32,9 +32,9 @@
 #   build/jmdict-build.log                              full build log
 #
 # The bundled artifact name is keyed on the JMDict tag + local build revision
-# (the names release rides inside the tag), so a names-only pin bump skips as
-# up-to-date and needs `--rebuild` to take effect — while a build-revision
-# bump renames the artifact and naturally rebuilds.
+# (the names release rides inside the artifact), so a names-only pin bump
+# skips as up-to-date and needs `--rebuild` to take effect — while a
+# build-revision bump renames the artifact and naturally rebuilds.
 
 set -euo pipefail
 
@@ -53,7 +53,7 @@ PIN_URL="https://github.com/Bluskyo/JMDict_Extended/releases/download/${PIN_TAG}
 # stay the upstream release identifier (it keys the download URL); this
 # revision is the artifact staleness key — bump it when the build mapping
 # changes under the same upstream pin so prepared installs re-stage.
-PIN_BUILD="3"
+PIN_BUILD="4"
 
 # --- Names pin: JMnedict proper nouns, ingested into the same DB ----------------
 # Source is scriptin/jmdict-simplified (the JMDict pin above stays on
@@ -158,10 +158,10 @@ fi
 
 # Up-to-date skip (build mode only): the artifact name is versioned by the
 # pin tag + build revision, so a pin bump or a revision bump naturally misses
-# and rebuilds. A truncated artifact
-# from an interrupted build fails `zstd -t` and falls through to a rebuild.
-# --rebuild bypasses this entirely (needed when the build mapping changes
-# under the same pin). --probe-only never consults the DB.
+# and rebuilds. A truncated artifact from an interrupted build fails
+# `zstd -t` and falls through to a rebuild. --rebuild bypasses this entirely
+# (needed when the build mapping changes under the same pin). --probe-only
+# never consults the DB.
 if [[ "${MODE}" == "build" && "${REBUILD}" == "0" && -s "${ZST_PATH}" ]]; then
   if ! command -v zstd >/dev/null 2>&1; then
     echo "WARNING: zstd not found; cannot verify ${ZST_NAME}, rebuilding."

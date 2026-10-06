@@ -117,11 +117,16 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
             pitch = (None, None, None)
         return (obj["text"], kind, obj.get("jlptLevel"), *pitch)
 
-    def kana_reading_text(kobj):
+    def reading_for_keb(keb):
         # The reading a kanji writing's furigana names: the rt chunks
-        # concatenate to kana text. Missing/empty furigana yields None
-        # (nothing to join to).
-        text = "".join(piece.get("rt") or "" for piece in kobj.get("furigana") or [])
+        # concatenate to kana text. Upstream omits rt when the reading equals
+        # the ruby (jmdict_probe.py's furigana_no_rt contract) — okurigana
+        # pieces — so those fall back to the ruby itself; kanji pieces always
+        # carry rt. Missing/empty furigana yields None (nothing to join to).
+        text = "".join(
+            piece.get("rt") or piece.get("ruby") or ""
+            for piece in keb.get("furigana") or []
+        )
         return text or None
 
     def normalized_headword_rows(ent_seq, kobjs, robjs):
@@ -145,7 +150,7 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
             if jlpt is None:
                 jlpt = jlpt_fallback
             if kind == "keb" and hatsuon is None and acc is None and zo is None:
-                kana_row = kana_rows.get(kana_reading_text(obj))
+                kana_row = kana_rows.get(reading_for_keb(obj))
                 if kana_row is not None:
                     hatsuon, acc, zo = kana_row[3:]
             enriched.append((ent_seq, text, kind, jlpt, hatsuon, acc, zo))

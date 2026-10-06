@@ -20,7 +20,7 @@ enum JMDictPin {
     /// download URL in `build_dictionary.sh`); this revision is the artifact
     /// staleness key — bumped when the build mapping changes under the same
     /// upstream pin so prepared installs re-stage.
-    static let buildRevision = "3"
+    static let buildRevision = "4"
 
     /// Full upstream release tag of the pinned JMnedict names asset — never
     /// the date alone. The names source is scriptin/jmdict-simplified while

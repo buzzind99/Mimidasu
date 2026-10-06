@@ -461,6 +461,33 @@ struct JMDictLookupLiveTests {
         #expect(entry.senses[0].glosses == ["to eat"])
     }
 
+    @Test("inherits 喰べる's pitch from the たべる row its furigana names")
+    func kuberuInheritsPitch() throws {
+        // The rt-omitted furigana shape: the okurigana pieces carry no rt,
+        // so only the ruby fallback rejoins the reading たべる the pitch
+        // inheritance matches on.
+        let result = try #require(try engine.lookup(LookupCandidate(text: "喰べる")))
+
+        let entry = try #require(result.entries.first)
+        #expect(entry.entSeq == 1_358_280)
+        #expect(entry.hatsuon == "た~べる")
+        #expect(entry.accPatts == "2")
+        #expect(entry.zoPatts == "LHLL")
+    }
+
+    @Test("inherits お土産's pitch from the おみやげ row its furigana names")
+    func omiyageInheritsPitch() throws {
+        // The leading-rt-omitted shape: お opens the furigana with no rt, so
+        // the ruby fallback restores the おみやげ reading the match needs.
+        let result = try #require(try engine.lookup(LookupCandidate(text: "お土産")))
+
+        let entry = try #require(result.entries.first)
+        #expect(entry.entSeq == 1_002_500)
+        #expect(entry.hatsuon == "お･みやげ")
+        #expect(entry.accPatts == "0")
+        #expect(entry.zoPatts == "LHHHH")
+    }
+
     @Test("hits the kana-only gairaigo アルバイト from the real database")
     func arubaito() throws {
         let result = try #require(try engine.lookup(LookupCandidate(text: "アルバイト")))
