@@ -110,10 +110,10 @@ struct TranscriptRow: View {
         // Opacity only: animating layout would displace neighboring rows
         // while the re-anchor chase is also repositioning content.
         .opacity(fadesIn && !shown ? 0 : 1)
-        // The hover-revealed retry button is invisible to VoiceOver and full
-        // keyboard access (it does not exist in the tree until a pointer
-        // hovers), so the same affordance is exposed as a named custom
-        // action on the row itself — the non-pointer path to the feature.
+        // The hover-revealed retry button is pointer-only: it is hidden from
+        // the accessibility tree even while rendered (see `retryButton`), so
+        // the same affordance is exposed as a named custom action on the row
+        // itself — the non-pointer path to the feature.
         .accessibilityAction(named: Text(Self.retryActionTitle)) {
             guard retryEnabled else { return }
             onRetry?(entry.sentence)

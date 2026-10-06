@@ -32,7 +32,7 @@ struct DictionaryFFI {
     /// Free a string returned by `tokenizeJSON` (null is a no-op).
     let freeString: FnFreeString
     /// Decompress a zstd artifact to the destination path — both staged
-    /// artifacts (`system.dic.zst`, `jmdict-<tag>.sqlite.zst`) go through it.
+    /// artifacts (`system.dic.zst`, `jmdict-<tag>.<rev>.sqlite.zst`) go through it.
     /// Returns 0 on success, 1 on failure.
     let prepare: FnPrepare
 

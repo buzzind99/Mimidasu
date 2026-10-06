@@ -5,8 +5,9 @@ import Synchronization
 /// Both artifacts ship compressed in the app bundle and are decompressed once
 /// through the runtime's prepare FFI on first launch — no network, no build
 /// step. The tokenizer dictionary (`system.dic.zst` → `ipadic.dic`) is
-/// unversioned; the JMDict lookup database (`jmdict-<tag>.sqlite.zst` →
-/// `jmdict-<tag>.sqlite`) carries the pin tag in its filename, which is the
+/// unversioned; the JMDict lookup database (`jmdict-<tag>.<rev>.sqlite.zst` →
+/// `jmdict-<tag>.<rev>.sqlite`) carries the pin tag + build revision in its
+/// filename, which is the
 /// staleness key: an app update shipping a new pin stages a *new* file and
 /// stale ones are removed after the next successful promote.
 ///
@@ -237,7 +238,7 @@ final class DictionaryStore: Sendable {
     }
 
     /// JMDict counterpart of `prepare()`: decompresses the bundled
-    /// `jmdict-<tag>.sqlite.zst` into the versioned destination, smoke-queries
+    /// `jmdict-<tag>.<rev>.sqlite.zst` into the versioned destination, smoke-queries
     /// it through the JMDict lookup engine, and promotes it into place. The
     /// versioned filename is the staleness key — a new pin stages a new file
     /// and stale `jmdict-*.sqlite` artifacts from earlier pins are removed

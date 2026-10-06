@@ -13,7 +13,7 @@ extension AppModel {
     /// Kicks the first-launch dictionary preparations — the tokenizer
     /// dictionary (bundled `system.dic.zst` → decompressed dictionary, see
     /// `DictionaryStore`) and the JMDict lookup database
-    /// (`jmdict-<tag>.sqlite.zst` → versioned SQLite file) — in the
+    /// (`jmdict-<tag>.<rev>.sqlite.zst` → versioned SQLite file) — in the
     /// background so ruby annotations and lookups come up soon after
     /// startup. The two artifacts are covered independently: one resolving
     /// does not excuse the other. Purely opportunistic: until it succeeds
