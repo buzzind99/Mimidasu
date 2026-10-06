@@ -25,7 +25,7 @@ struct SessionExporterTests {
 
     private func makeTranslatedEntry() -> SessionEntry {
         var entry = makeUntranslatedEntry()
-        entry.appendTranslation(SentenceTranslation(lang: "en", text: englishTranslation))
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: englishTranslation))
         return entry
     }
 
@@ -92,11 +92,13 @@ struct SessionExporterTests {
         #expect(output == "")
     }
 
+    /// A row carries one translation per language, so the multi-line cue shape
+    /// is the multi-target case: two languages, two lines.
     @Test("cue renders multiple translations as separate lines")
     func cueRendersEachTranslationOnItsOwnLine() {
         var entry = makeUntranslatedEntry()
-        entry.appendTranslation(SentenceTranslation(lang: "en", text: "First."))
-        entry.appendTranslation(SentenceTranslation(lang: "en", text: "Second."))
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: "First."))
+        entry.replaceTranslation(SentenceTranslation(lang: "ko", text: "Second."))
 
         let output = SessionExporter.subtitles(entries: [entry], format: .srt)
 
@@ -115,7 +117,7 @@ struct SessionExporterTests {
     @Test("subtitle timings roll over milliseconds, minutes and hours")
     func subtitlesRollOverTimeUnits() {
         var entry = makeEntry(start: 3661.9999, end: 3722.5, index: 0)
-        entry.appendTranslation(SentenceTranslation(lang: "en", text: englishTranslation))
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: englishTranslation))
 
         let srt = SessionExporter.subtitles(entries: [entry], format: .srt)
         #expect(srt == "1\n01:01:01,999 --> 01:02:02,500\n\(englishTranslation)\n\n")
@@ -127,7 +129,7 @@ struct SessionExporterTests {
     @Test("negative timestamps clamp to zero")
     func negativeTimestampClampsToZero() {
         var entry = makeEntry(start: -3.5, end: 0, index: 0)
-        entry.appendTranslation(SentenceTranslation(lang: "en", text: englishTranslation))
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: englishTranslation))
 
         let output = SessionExporter.subtitles(entries: [entry], format: .srt)
 
@@ -137,10 +139,10 @@ struct SessionExporterTests {
     @Test("cue numbers stay contiguous across untranslated entries")
     func cueNumbersStayContiguous() {
         var first = makeEntry(start: sentenceStart, end: sentenceEnd, index: 0)
-        first.appendTranslation(SentenceTranslation(lang: "en", text: englishTranslation))
+        first.replaceTranslation(SentenceTranslation(lang: "en", text: englishTranslation))
         let untranslated = makeEntry(start: 2, end: 3, index: 1)
         var third = makeEntry(start: 4, end: 5, index: 2)
-        third.appendTranslation(SentenceTranslation(lang: "en", text: "Also nice."))
+        third.replaceTranslation(SentenceTranslation(lang: "en", text: "Also nice."))
 
         let output = SessionExporter.subtitles(
             entries: [first, untranslated, third], format: .srt
@@ -199,7 +201,7 @@ struct SessionExporterTests {
     @Test("entry translations win over pending results")
     func jsonPrefersEntryTranslationOverPendingResult() throws {
         var entry = makeUntranslatedEntry()
-        entry.appendTranslation(SentenceTranslation(lang: "en", text: englishTranslation))
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: englishTranslation))
         let pending = SentenceTranslation(lang: "en", text: "Stale pending result.")
 
         let data = try SessionExporter.json(entries: [entry], metadata: nil, results: [0: pending])
@@ -214,7 +216,7 @@ struct SessionExporterTests {
     @Test("JSON output uses the v1 snake_case keys")
     func jsonEmitsV1SnakeCaseKeys() throws {
         var entry = makeUntranslatedEntry()
-        entry.appendTranslation(SentenceTranslation(lang: "en", text: englishTranslation))
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: englishTranslation))
         let metadata = SessionMetadata(
             startedAt: Date(timeIntervalSince1970: 1_700_000_000),
             sourceLang: "ja-JP",

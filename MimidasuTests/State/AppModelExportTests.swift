@@ -252,8 +252,9 @@ struct AppModelExportTests {
                 - metadata.startedAt.timeIntervalSince1970) < 1
         )
         #expect(doc.sentences.count == 2)
+        // Two deliveries for one index, same language: the later one replaces
+        // the earlier, so the export carries the freshest text once.
         #expect(doc.sentences[0].translations == [
-            SentenceTranslation(lang: "en", text: "First"),
             SentenceTranslation(lang: "en", text: "First final")
         ])
         #expect(doc.sentences[1].translations == [

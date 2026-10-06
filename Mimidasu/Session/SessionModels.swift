@@ -17,8 +17,9 @@ struct Sentence: Identifiable, Equatable, Sendable {
     }
 }
 
-/// A translation for a sentence; `SessionEntry.translations` is append-only
-/// by design (future multi-target support).
+/// A translation for a sentence. A row carries at most one of these per
+/// language (`SessionEntry.replaceTranslation` is the only mutator), which is
+/// also what keeps the future multi-target case to one line per language.
 struct SentenceTranslation: Equatable, Codable, Sendable {
     let lang: String
     let text: String
@@ -48,14 +49,11 @@ struct SessionEntry: Identifiable, Equatable, Sendable {
         endTimestamp = SessionClock.timestamp(sentence.endS)
     }
 
-    mutating func appendTranslation(_ translation: SentenceTranslation) {
-        translations.append(translation)
-        joinedTranslations = translations.map(\.text).joined(separator: " / ")
-    }
-
-    /// Manual-retry path: swaps the translation for the same language in
-    /// place; a language with no prior translation appends. The row's
-    /// rendered line is the fresh text, not an " / " pileup of retries.
+    /// The only mutator, so `translations` holds at most one entry per
+    /// language by construction: a language already present is swapped in
+    /// place, a new one is appended. Every result therefore lands as the fresh
+    /// text — a repeat, a replay, or a manual retry can never grow an `" / "`
+    /// pileup on the row.
     mutating func replaceTranslation(_ translation: SentenceTranslation) {
         if let at = translations.firstIndex(where: { existing in
             existing.lang == translation.lang

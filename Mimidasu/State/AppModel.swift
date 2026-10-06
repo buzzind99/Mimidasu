@@ -171,14 +171,14 @@ final class AppModel {
     var providerAwaitingDisclosure: TranslationProvider?
 
     /// Sentence indexes with a manual re-translation in flight (the
-    /// transcript row's hover button). Membership drives both the row's dim
-    /// state and the replace-on-arrival routing in `applyTranslation`.
+    /// transcript row's hover button). Membership is a dim cue and a
+    /// double-click guard only — `applyTranslation` routes on the row's
+    /// languages, so nothing about a result's *correctness* depends on it.
     /// Internal: inserted in `AppModelTranslation.retranslateSentence`, and
-    /// cleared by three sites — the landing result (`applyTranslation`),
+    /// cleared by four sites — the landing result (`applyTranslation`), the
+    /// `.unavailable` that engages no replay (`handleTranslationStatus`),
     /// session stop (`performStop`), and the next session's begin
-    /// (`onSessionBegin`). Not cleared on `.unavailable`: that status also
-    /// latches the Apple fallback, which replays the same backlog, and the
-    /// marker must survive to route that replay as a replace. Read by views.
+    /// (`onSessionBegin`). Read by views.
     var pendingRetranslations: Set<Int> = []
 
     /// The refresh spawned by the most recent `selectModel` (tracked so
@@ -579,19 +579,16 @@ final class AppModel {
     }
 
     /// Internal (not private) so tests can exercise known/unknown indexes.
-    /// A pending manual re-translation replaces the row's same-language
-    /// translation in place; the ordinary queue path keeps appending.
+    /// Routing is the entry's decision, not the caller's: it swaps the
+    /// row's same-language translation in place and appends only a genuinely
+    /// new language. So a repeat, an engine-swap replay, and a manual retry
+    /// all land as the fresh text — none of them can grow an `" / "` pileup.
     func applyTranslation(index: Int, translation: SentenceTranslation) {
         // Cleared before the row lookup: a result whose row is gone (the
         // transcript cleared underneath it) must still retire its marker,
         // or the row stays dimmed with its retry button dead.
-        let isRetry = pendingRetranslations.remove(index) != nil
-        if let at = entryPositionBySentence[index] {
-            if isRetry {
-                entries[at].replaceTranslation(translation)
-            } else {
-                entries[at].appendTranslation(translation)
-            }
-        }
+        pendingRetranslations.remove(index)
+        guard let at = entryPositionBySentence[index] else { return }
+        entries[at].replaceTranslation(translation)
     }
 }

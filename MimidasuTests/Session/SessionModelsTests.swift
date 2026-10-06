@@ -132,7 +132,7 @@ struct SessionModelsTests {
     func singleTranslationJoinsWithoutSeparator() {
         var entry = makeEntry()
 
-        entry.appendTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
 
         #expect(entry.joinedTranslations == firstTranslationText)
         #expect(entry.translations == [
@@ -140,12 +140,12 @@ struct SessionModelsTests {
         ])
     }
 
-    @Test("two translations join with a slash")
-    func twoTranslationsJoinWithSlash() {
+    @Test("a second language joins with a slash")
+    func secondLanguageJoinsWithSlash() {
         var entry = makeEntry()
 
-        entry.appendTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
-        entry.appendTranslation(SentenceTranslation(lang: "en", text: secondTranslationText))
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
+        entry.replaceTranslation(SentenceTranslation(lang: "ko", text: secondTranslationText))
 
         #expect(entry.joinedTranslations == "\(firstTranslationText) / \(secondTranslationText)")
     }
@@ -155,7 +155,7 @@ struct SessionModelsTests {
     @Test("a re-translation replaces the same-language translation in place")
     func replaceTranslationSwapsSameLanguage() {
         var entry = makeEntry()
-        entry.appendTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
 
         entry.replaceTranslation(SentenceTranslation(lang: "en", text: "Howdy"))
 
@@ -166,7 +166,7 @@ struct SessionModelsTests {
     @Test("a re-translation for a new language appends instead of replacing")
     func replaceTranslationAppendsNewLanguage() {
         var entry = makeEntry()
-        entry.appendTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
 
         entry.replaceTranslation(SentenceTranslation(lang: "ko", text: "안녕"))
 
@@ -181,5 +181,39 @@ struct SessionModelsTests {
         entry.replaceTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
 
         #expect(entry.joinedTranslations == firstTranslationText)
+    }
+
+    /// The invariant that makes the retry safe: `replaceTranslation` is the
+    /// entry's only mutator, so no number of repeats — a manual retry, an
+    /// engine-swap replay, a duplicated delivery — can grow a second entry for
+    /// a language the row already has.
+    @Test("repeated results for one language never grow a second entry")
+    func replaceTranslationIsIdempotentPerLanguage() {
+        var entry = makeEntry()
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
+
+        for text in ["Howdy", "Hiya", "Hello"] {
+            entry.replaceTranslation(SentenceTranslation(lang: "en", text: text))
+        }
+
+        #expect(entry.translations == [SentenceTranslation(lang: "en", text: "Hello")])
+        #expect(entry.joinedTranslations == "Hello")
+    }
+
+    /// Multi-target: the swap must hit the entry for the language being
+    /// replaced, not the first one, so a second language can't be clobbered by
+    /// a re-run of the first.
+    @Test("replacing one language leaves the others untouched")
+    func replaceTranslationSwapsTheMatchingLanguageOnly() {
+        var entry = makeEntry()
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
+        entry.replaceTranslation(SentenceTranslation(lang: "ko", text: secondTranslationText))
+
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: "Howdy"))
+
+        #expect(entry.translations == [
+            SentenceTranslation(lang: "en", text: "Howdy"),
+            SentenceTranslation(lang: "ko", text: secondTranslationText)
+        ])
     }
 }
