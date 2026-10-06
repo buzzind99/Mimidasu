@@ -20,7 +20,7 @@ enum JMDictPin {
     /// download URL in `build_dictionary.sh`); this revision is the artifact
     /// staleness key — bumped when the build mapping changes under the same
     /// upstream pin so prepared installs re-stage.
-    static let buildRevision = "2"
+    static let buildRevision = "3"
 
     /// Full upstream release tag of the pinned JMnedict names asset — never
     /// the date alone. The names source is scriptin/jmdict-simplified while
@@ -41,9 +41,10 @@ enum JMDictPin {
     static let artifactPrefix = "jmdict-"
     static let artifactExtension = "sqlite"
 
-    /// Versioned artifact names derived from the tag. The tag is the
-    /// staleness key: an app update shipping a new pin stages a new file and
-    /// the stale one is simply inert.
+    /// Versioned artifact names derived from the tag and build revision. Tag
+    /// + revision is the staleness key: an app update shipping a new pin, or
+    /// a new ingestion recipe under the same pin, stages a new file and the
+    /// stale one is simply inert.
     static let preparedFileName = "\(artifactPrefix)\(releaseTag).\(buildRevision).\(artifactExtension)"
     static let bundledFileName = preparedFileName + ".zst"
 

@@ -8,7 +8,7 @@ names on a +10M ent_seq offset), reconciles row counts against the probe
 report, and compresses to zstd.
 
 Usage: jmdict_build.py <json_path> <names_json_path> <db_path> <zst_path>
-                       <probe_log_path> <pin_tag> <pin_sha256> <pin_asset>
+                       <probe_log_path> <artifact_tag> <pin_sha256> <pin_asset>
                        <name_pin_tag> <name_pin_sha256> <name_pin_asset>
 """
 
@@ -51,7 +51,7 @@ def open_word_stream(path):
 
 
 def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
-         pin_tag, pin_sha256, pin_asset, name_pin_tag, name_pin_sha256, name_pin_asset):
+         artifact_tag, pin_sha256, pin_asset, name_pin_tag, name_pin_sha256, name_pin_asset):
     errors = []
     def fail(msg):
         errors.append(msg)
@@ -108,7 +108,7 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
             return None
         return json.dumps(lst, ensure_ascii=False)
 
-    def hw_row(ent_seq, obj, kind):
+    def hw_row(obj, kind):
         # Furigana is dropped (IPADIC-based alignment already exists).
         pa = obj.get("pitchAccent")
         if isinstance(pa, dict):
@@ -117,24 +117,39 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
             pitch = (None, None, None)
         return (obj["text"], kind, obj.get("jlptLevel"), *pitch)
 
-    def normalized_headword_rows(ent_seq, writings):
-        # Enrichment inheritance: JLPT and pitch ride individual writings
-        # upstream (a bare-kanji writing like 確 of 確か carries neither,
-        # while the main kanji writing carries both), yet a tap resolves
-        # through whichever writing it matched. Each slot takes the word's
-        # first non-null value in source order (kanji writings then kana) so
-        # every writing of a word renders the same card.
-        rows = [hw_row(ent_seq, obj, kind) for obj, kind in writings]
-        best = [
-            next((row[slot] for row in rows if row[slot] is not None), None)
-            for slot in range(2, 6)
-        ]
-        return [
-            (ent_seq, text, kind,
-             *(own if own is not None else fallback
-               for own, fallback in zip(values, best)))
-            for text, kind, *values in rows
-        ]
+    def kana_reading_text(kobj):
+        # The reading a kanji writing's furigana names: the rt chunks
+        # concatenate to kana text. Missing/empty furigana yields None
+        # (nothing to join to).
+        text = "".join(piece.get("rt") or "" for piece in kobj.get("furigana") or [])
+        return text or None
+
+    def normalized_headword_rows(ent_seq, kobjs, robjs):
+        # Bare-row backfill. JLPT rides individual kanji writings upstream but
+        # reads as word-level in the card, so a writing with no jlptLevel
+        # takes the word's first non-null level in source order (kanji
+        # writings then kana). Pitch is per-reading, so it never crosses
+        # readings: rows with their own accent keep it verbatim (the 飴
+        # homograph keeps acc 0 on kanji vs acc 1 on あめ), a kanji row with
+        # no accent inherits only from the kana row its furigana names (確 of
+        # 確か takes たしか's), and a kana row with none stays NULL rather
+        # than wear another reading's accent.
+        writings = [(o, "keb") for o in kobjs] + [(o, "reb") for o in robjs]
+        rows = [hw_row(obj, kind) for obj, kind in writings]
+        kana_rows = {obj["text"]: row
+                     for (obj, kind), row in zip(writings, rows) if kind == "reb"}
+        jlpt_fallback = next((row[2] for row in rows if row[2] is not None), None)
+        enriched = []
+        for (obj, kind), row in zip(writings, rows):
+            text, _, jlpt, hatsuon, acc, zo = row
+            if jlpt is None:
+                jlpt = jlpt_fallback
+            if kind == "keb" and hatsuon is None and acc is None and zo is None:
+                kana_row = kana_rows.get(kana_reading_text(obj))
+                if kana_row is not None:
+                    hatsuon, acc, zo = kana_row[3:]
+            enriched.append((ent_seq, text, kind, jlpt, hatsuon, acc, zo))
+        return enriched
 
     BATCH = 5000
     entries_batch, senses_batch, headwords_batch = [], [], []
@@ -172,9 +187,7 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
             robjs[0]["text"] if robjs else None,
             common,
         ))
-        headwords_batch.extend(normalized_headword_rows(
-            ent_seq, [(o, "keb") for o in kobjs] + [(o, "reb") for o in robjs]
-        ))
+        headwords_batch.extend(normalized_headword_rows(ent_seq, kobjs, robjs))
         for ord_i, s in enumerate(w.get("sense") or []):
             glosses = [g["text"] for g in (s.get("gloss") or []) if g.get("lang") == "eng"]
             senses_batch.append((
@@ -335,7 +348,7 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
     # --- meta -------------------------------------------------------------------
     conn.executemany("INSERT OR REPLACE INTO meta VALUES (?,?)", [
         ("version", version),
-        ("tag", pin_tag),
+        ("tag", artifact_tag),
         ("digest", pin_sha256),
         ("source_asset", pin_asset),
         ("dict_date", dict_date),
@@ -377,7 +390,7 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
         f"senses {counts['senses']} (reconciled with probe)")
     out(f"    names:   entries {counts['name_entries']} / headwords {counts['name_headwords']} "
         f"(ent_seq >= {NAME_SEQ_OFFSET})")
-    out(f"    meta:    version={version} dictDate={dict_date} tag={pin_tag} "
+    out(f"    meta:    version={version} dictDate={dict_date} tag={artifact_tag} "
         f"names.version={name_version} names.dictDate={name_dict_date} names.tag={name_pin_tag}")
     out(f"    DMG delta: ~{zst_mb:.1f} MB")
 
@@ -385,7 +398,7 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
 if __name__ == "__main__":
     if len(sys.argv) != 12:
         print("usage: jmdict_build.py <json_path> <names_json_path> <db_path> <zst_path> "
-              "<probe_log_path> <pin_tag> <pin_sha256> <pin_asset> "
+              "<probe_log_path> <artifact_tag> <pin_sha256> <pin_asset> "
               "<name_pin_tag> <name_pin_sha256> <name_pin_asset>", file=sys.stderr)
         sys.exit(2)
     main(*sys.argv[1:12])

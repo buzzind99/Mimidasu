@@ -25,15 +25,16 @@
 #   local/dictionaries/jmdictExtended-<date>.json       unzipped JMDict input
 #   local/dictionaries/jmnedict-all-<version+ts>.json.zip  pinned JMnedict (names) asset
 #   local/dictionaries/jmnedict-all-<version>.json      unzipped names input
-#   local/dictionaries/jmdict-<tag>.sqlite.zst          bundled lookup DB
+#   local/dictionaries/jmdict-<tag>.<rev>.sqlite.zst    bundled lookup DB
 #                                                       (package.sh -> Contents/Resources)
-#   build/jmdict-<tag>.sqlite                           uncompressed intermediate
+#   build/jmdict-<tag>.<rev>.sqlite                     uncompressed intermediate
 #   build/jmdict-probe.log                              full probe report
 #   build/jmdict-build.log                              full build log
 #
-# The bundled artifact name is keyed on the JMDict tag alone (the names
-# release rides inside it), so a names-only pin bump skips as up-to-date and
-# needs `--rebuild` to take effect.
+# The bundled artifact name is keyed on the JMDict tag + local build revision
+# (the names release rides inside the tag), so a names-only pin bump skips as
+# up-to-date and needs `--rebuild` to take effect — while a build-revision
+# bump renames the artifact and naturally rebuilds.
 
 set -euo pipefail
 
@@ -52,7 +53,7 @@ PIN_URL="https://github.com/Bluskyo/JMDict_Extended/releases/download/${PIN_TAG}
 # stay the upstream release identifier (it keys the download URL); this
 # revision is the artifact staleness key — bump it when the build mapping
 # changes under the same upstream pin so prepared installs re-stage.
-PIN_BUILD="2"
+PIN_BUILD="3"
 
 # --- Names pin: JMnedict proper nouns, ingested into the same DB ----------------
 # Source is scriptin/jmdict-simplified (the JMDict pin above stays on
@@ -156,7 +157,8 @@ if ! grep -Fq 'bundledFileName = preparedFileName + ".zst"' "${PIN_SWIFT}"; then
 fi
 
 # Up-to-date skip (build mode only): the artifact name is versioned by the
-# pin tag, so a pin bump naturally misses and rebuilds. A truncated artifact
+# pin tag + build revision, so a pin bump or a revision bump naturally misses
+# and rebuilds. A truncated artifact
 # from an interrupted build fails `zstd -t` and falls through to a rebuild.
 # --rebuild bypasses this entirely (needed when the build mapping changes
 # under the same pin). --probe-only never consults the DB.
@@ -259,4 +261,4 @@ python3 "${REPO_ROOT}/scripts/jmdict_build.py" "${JSON_PATH}" "${NAME_JSON_PATH}
 zstd -q -t "${ZST_PATH}"
 echo
 echo "Done. package.sh bundles ${ZST_NAME} into Mimidasu.app/Contents/Resources;"
-echo "DictionaryStore (Phase 5) stages/decompresses it to jmdict-<tag>.sqlite."
+echo "DictionaryStore stages/decompresses it to ${PREPARED_NAME}."
