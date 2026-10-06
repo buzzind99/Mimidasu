@@ -14,14 +14,14 @@ struct HUDView: View {
     /// Set on offscreen measurement copies: fixes the layout width so the
     /// measured ideal height reflects text wrapped at the real HUD width.
     var fixedWidth: CGFloat?
-    /// Favorite matcher for both JP surfaces, paired with the store-revision
-    /// read those two call sites make. That read is the point: it happens
-    /// inside `hudContent`'s body, so a star press repaints text the HUD
-    /// already shows. (The matcher accessor alone would not — it builds a
-    /// closure and observes nothing.) The value itself is discarded; the
-    /// matcher resolves membership when the surface renders. The HUD passes
-    /// no `onLookup`, so it never reaches the segmented path, and in None
-    /// annotation both surfaces stay on the plain fallback.
+    /// Favorite matcher for both JP surfaces. The store-revision read here is
+    /// belt-and-braces: `RubyTextView`'s own body resolves membership and so
+    /// observes the store directly, but this keeps the HUD's dependence on
+    /// favorite state visible at the surface handing the matcher down. The
+    /// value is discarded — the matcher resolves membership when a surface
+    /// renders. The HUD passes no `onLookup`, so it never reaches the
+    /// segmented path, and in None annotation both surfaces stay on the plain
+    /// fallback.
     private func observeFavorites() {
         _ = model.favorites.revision
     }
@@ -209,10 +209,12 @@ struct HUDView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    /// Shared JP text call (RubyTextView renders .none as plain text).
+    /// Shared JP text call (RubyTextView renders .none as plain text). No
+    /// `observeFavorites()` here: both this and `liveSection` are evaluated
+    /// inside `hudContent`'s body, so the read in `liveSection` already
+    /// registers the observation for the whole HUD.
     private func jpText(of entry: SessionEntry) -> some View {
-        observeFavorites()
-        return RubyTextView(
+        RubyTextView(
             text: entry.sentence.text,
             annotation: readingAnnotation,
             surfaceFont: .system(size: 14 * uiScale.factor),

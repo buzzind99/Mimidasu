@@ -25,11 +25,12 @@ final class FavoritesStore {
     /// on every tick of a search.
     private(set) var count = 0
     /// Bumped on every mutation that changed what is on screen. Host bodies
-    /// read it — `TranscriptView`, `ContentView`, `HUDView` — purely to
-    /// register an `@Observable` dependency, then discard the number: the
-    /// matcher closure they hand down carries no value identity, so it cannot
-    /// repaint anything on its own, and the surfaces resolve membership while
-    /// they render.
+    /// read it — `TranscriptView`, `ContentView`, `HUDView` — and discard the
+    /// number: it registers an `@Observable` dependency at the surface that
+    /// hands the matcher down. `RubyTextView` would repaint without it (its
+    /// body invokes the matcher, so it observes `matchKeys` itself), which
+    /// makes these reads redundant rather than wrong — they keep the
+    /// dependence on favorite state visible where the matcher is supplied.
     private(set) var revision = 0
     /// Whether the database failed on its first read and was degraded
     /// terminally: every file-backed answer is now a stub (empty list, empty

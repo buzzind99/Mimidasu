@@ -54,8 +54,8 @@ struct RubyTextView: View, Equatable {
     /// attaches `.popover` to that word, and only the anchor word's
     /// binding is true, so the arrow points at the word. nil — the HUD,
     /// the live strip — keeps word units popover-free. Excluded from `==`
-    /// (closures carry no value identity); the host's anchor field covers
-    /// the data change that must re-render the row.
+    /// (closures carry no value identity); this body invokes it, so the
+    /// reads behind it register their observation here.
     var lookupPopover: ((Int) -> LookupPopover?)?
     /// Whether a rendered segment is a favorite; the host supplies the
     /// matcher (the store's in-memory key set) and the color follows wherever
@@ -346,13 +346,18 @@ struct RubyTextView: View, Equatable {
     }
 
     /// Excludes `onCopy`, `onLookup`, `lookupPopover`, and `isFavoriteSegment`
-    /// (closures have no value identity). The conformance exists for this
-    /// view's unit tests, which assert the rendered value directly; SwiftUI
-    /// never consults it, because nothing applies `.equatable()` anywhere in
-    /// this view tree. Repaints come from the host body re-evaluating and
-    /// re-supplying the matcher instead. The witness is
-    /// `nonisolated` so the conformance needs no `@preconcurrency`: every
-    /// compared property is an immutable Sendable value.
+    /// (closures have no value identity), which is safe because this body
+    /// *invokes* both render-time closures: `displayUnits` reads
+    /// `isFavoriteSegment` and `wordUnit` calls `lookupPopover`, so the reads
+    /// behind them register this node's own observation and an invalidation
+    /// re-runs this body directly, without consulting `==`. That invariant is
+    /// load-bearing — hoisting either call into a cached value would silently
+    /// freeze favorites and dictionary refreshes.
+    ///
+    /// The conformance otherwise exists for this view's unit tests, which
+    /// assert the rendered value directly. The witness is `nonisolated` so the
+    /// conformance needs no `@preconcurrency`: every compared property is an
+    /// immutable Sendable value.
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.text == rhs.text
             && lhs.annotation == rhs.annotation

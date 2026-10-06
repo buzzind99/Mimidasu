@@ -161,10 +161,10 @@ struct ContentView: View {
 
     private var mainContent: some View {
         // Read in this body, not inside a nested closure: the matcher accessor
-        // builds a closure and observes nothing, so the live strip would keep
-        // the colors it painted before the last star press. Nothing consumes
-        // the number — the strip's surfaces resolve membership through the
-        // matcher — so the read is deliberately discarded.
+        // builds a closure and observes nothing. The read is discarded — the
+        // strip's surfaces resolve membership and observe the store
+        // themselves — but it keeps the dependence on favorite state visible
+        // at the surface that hands the matcher down.
         _ = model.favorites.revision
         return HStack(spacing: 0) {
             SidebarView(
