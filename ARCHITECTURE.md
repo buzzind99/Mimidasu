@@ -207,12 +207,12 @@ packaged apps in `Contents/Frameworks/`.
   + JMnedict (`3.6.2+20260914172325`). The pins live in
   `Dictionary/JMDictPin.swift` and are asserted by
   `scripts/build_dictionary.sh`, whose format probe hard-fails on upstream
-  drift. Both sources build into one `jmdict-<tag>.sqlite`
+  drift. Both sources build into one `jmdict-<tag>.<rev>.sqlite`
   (entries/senses/headwords/meta — no FTS, exact `headwords.text` hits);
   JMnedict names ride `ent_seq + 10M` in the same tables. The DB bundles
-  as `jmdict-<tag>.sqlite.zst` — the tag is the staleness key, stale
-  prepared artifacts are swept. Both DBs decompress once to
-  Application Support on first launch (offline, smoke-checked).
+  as `jmdict-<tag>.<rev>.sqlite.zst` — the tag + build revision is the
+  staleness key, stale prepared artifacts are swept. Both DBs decompress
+  once to Application Support on first launch (offline, smoke-checked).
 - **Lookup engine:** `JMDictLookup` — typed errors (no-hit ≠ infrastructure
   failure), all homograph entries returned ranked common-first, sense
   restriction filters honored. `JMDictExpansion` builds ≤9 ranked
@@ -442,8 +442,8 @@ Mimidasu.app/
     Resources/
       system.dic.zst                    # IPADIC tokenizer model (~8 MB),
                                         # decompressed once on first launch
-      jmdict-<tag>.sqlite.zst           # JMDict + JMnedict lookup DB,
-                                        # versioned by pin tag
+      jmdict-<tag>.<rev>.sqlite.zst     # JMDict + JMnedict lookup DB,
+                                        # versioned by pin tag + build revision
       (assets, README, THIRD_PARTY_NOTICES)
 ```
 
