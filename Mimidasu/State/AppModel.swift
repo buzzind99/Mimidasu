@@ -28,8 +28,8 @@ final class AppModel {
     /// clear instead of re-summing the transcript per render.
     private(set) var sessionCharacterCount = 0
     var translationStatus: TranslationStatus = .idle
-    /// Observable mirror of `translationQueue.hasWorker` (the queue is not
-    /// `@Observable`), reported via `workerChanged`; read by the retry gate.
+    /// Observable mirror of `translationQueue.hasWorker` for the retry gate
+    /// (the queue is not `@Observable`); stays true across stop (parked Apple run).
     private(set) var translationWorkerActive = false
     var engineIsMock = false
     var modelURL: URL?

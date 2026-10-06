@@ -12,6 +12,10 @@ import SwiftUI
 /// own value diff and repaints through its body's own reads of the matcher and
 /// popover closures.
 struct TranscriptRow: View {
+    /// Shared label for the one retry affordance: the row's named
+    /// accessibility action and the hover button's help tag must not drift.
+    static let retryActionTitle = "Re-translate this line"
+
     let entry: SessionEntry
     /// Snapshot, not a settings wrapper — see the note above.
     let annotation: ReadingAnnotation
@@ -92,6 +96,10 @@ struct TranscriptRow: View {
                     .overlay(alignment: .leading) {
                         if hovering, retryEnabled {
                             retryButton
+                                // Pointer-only: the row's named action above
+                                // is the VoiceOver/keyboard path, and the
+                                // button in the tree would duplicate it.
+                                .accessibilityHidden(true)
                                 .offset(x: -32)
                         }
                     }
@@ -106,7 +114,7 @@ struct TranscriptRow: View {
         // keyboard access (it does not exist in the tree until a pointer
         // hovers), so the same affordance is exposed as a named custom
         // action on the row itself — the non-pointer path to the feature.
-        .accessibilityAction(named: Text("Re-translate this line")) {
+        .accessibilityAction(named: Text(Self.retryActionTitle)) {
             guard retryEnabled else { return }
             onRetry?(entry.sentence)
         }
@@ -135,11 +143,11 @@ struct TranscriptRow: View {
     ///
     /// Rendered only while the row is hovered and retry is live: gating the
     /// overlay's *content* rather than its opacity keeps the button out of
-    /// hit-testing and out of the accessibility tree, so it can neither eat a
-    /// click meant for the transcript nor leave a phantom control per row.
-    /// The accessibility-tree exit is compensated by the row's named
-    /// accessibility action, which is the VoiceOver/keyboard path to the
-    /// same affordance.
+    /// hit-testing when hidden, so it can neither eat a click meant for the
+    /// transcript nor leave a phantom control per row. The button stays out
+    /// of the accessibility tree even when rendered: VoiceOver and full
+    /// keyboard access reach the same affordance through the row's named
+    /// action, and a hover-only control in the tree would just duplicate it.
     private var retryButton: some View {
         Button {
             onRetry?(entry.sentence)
@@ -152,7 +160,7 @@ struct TranscriptRow: View {
                 .hoverHighlight(Circle())
         }
         .buttonStyle(.plain)
-        .help("Re-translate this line")
+        .help(Self.retryActionTitle)
         // Outermost, mirroring `TranscriptView.jumpButton`: buried under
         // `.disabled`/`.opacity`, the pointer style never took effect.
         .pointerStyle(.link)
