@@ -12,8 +12,14 @@
 #
 # Not executable on its own.
 
-jmdict_pin_tag() {
-  sed -n 's/.*static let releaseTag = "\(.*\)"/\1/p' "${REPO_ROOT}/Mimidasu/Dictionary/JMDictPin.swift" | head -1
+jmdict_artifact_tag() {
+  # releaseTag + "." + buildRevision — the artifact name keys on both (see
+  # scripts/build_dictionary.sh's ARTIFACT_TAG).
+  local pin_swift="${REPO_ROOT}/Mimidasu/Dictionary/JMDictPin.swift"
+  local tag rev
+  tag="$(sed -n 's/.*static let releaseTag = "\(.*\)"/\1/p' "${pin_swift}" | head -1)"
+  rev="$(sed -n 's/.*static let buildRevision = "\(.*\)"/\1/p' "${pin_swift}" | head -1)"
+  printf '%s.%s' "${tag}" "${rev}"
 }
 
 # Fail before spending build time when any runtime artifact is absent. A
@@ -21,7 +27,7 @@ jmdict_pin_tag() {
 # completeness) and one without the dictionary can never start a session, so
 # neither should ever be produced by a packaging step.
 require_runtime_artifacts() {
-  local ok=1 tag
+  local ok=1 artifact_tag
   if [[ ! -f "${REPO_ROOT}/local/frameworks/libdictionary.dylib" ]]; then
     echo "ERROR: dictionary runtime not built. Run scripts/build_tokenizer.sh first." >&2
     ok=0
@@ -30,9 +36,9 @@ require_runtime_artifacts() {
     echo "ERROR: system.dic.zst not fetched. Run scripts/build_tokenizer.sh first." >&2
     ok=0
   fi
-  tag="$(jmdict_pin_tag)"
-  if [[ -z "${tag}" || ! -f "${REPO_ROOT}/local/dictionaries/jmdict-${tag}.sqlite.zst" ]]; then
-    echo "ERROR: jmdict-${tag:-<tag>}.sqlite.zst not built. Run scripts/build_dictionary.sh first." >&2
+  artifact_tag="$(jmdict_artifact_tag)"
+  if [[ -z "${artifact_tag}" || ! -f "${REPO_ROOT}/local/dictionaries/jmdict-${artifact_tag}.sqlite.zst" ]]; then
+    echo "ERROR: jmdict-${artifact_tag:-<tag>.<rev>}.sqlite.zst not built. Run scripts/build_dictionary.sh first." >&2
     ok=0
   fi
   if [[ ! -d "${REPO_ROOT}/local/frameworks/crispasr" ]]; then
@@ -85,12 +91,15 @@ stage_runtime() {
   # bundled decompressed, never downloaded).
   cp -f "${REPO_ROOT}/local/dictionaries/ipadic-mecab-2_7_0/system.dic.zst" "${resdir}/system.dic.zst"
 
-  # JMDict lookup DB — versioned by pin tag (Mimidasu/Dictionary/JMDictPin.swift,
-  # produced by scripts/build_dictionary.sh). The versioned filename is the
-  # staleness key: a new pin ships a new file; the stale one is inert.
-  local jmdict_tag
-  jmdict_tag="$(jmdict_pin_tag)"
-  cp -f "${REPO_ROOT}/local/dictionaries/jmdict-${jmdict_tag}.sqlite.zst" "${resdir}/jmdict-${jmdict_tag}.sqlite.zst"
+  # JMDict lookup DB — versioned by pin tag + build revision
+  # (Mimidasu/Dictionary/JMDictPin.swift, produced by
+  # scripts/build_dictionary.sh). The versioned filename is the staleness
+  # key: a new pin or a new ingestion recipe ships a new file; the stale one
+  # is inert.
+  local jmdict_artifact_tag
+  jmdict_artifact_tag="$(jmdict_artifact_tag)"
+  cp -f "${REPO_ROOT}/local/dictionaries/jmdict-${jmdict_artifact_tag}.sqlite.zst" \
+    "${resdir}/jmdict-${jmdict_artifact_tag}.sqlite.zst"
 
   # The CrispASR dylib set is self-contained (its dylibs resolve their own
   # @rpath dependencies via a @loader_path RPATH), so it bundles as a plain

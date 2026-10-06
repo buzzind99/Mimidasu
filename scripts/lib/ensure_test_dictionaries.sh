@@ -21,7 +21,11 @@ MODEL_ZST="local/dictionaries/ipadic-mecab-2_7_0/system.dic.zst"
 PREPARED="build/prepared/dictionaries"
 PIN_SWIFT="Mimidasu/Dictionary/JMDictPin.swift"
 PIN_TAG=$(python3 -c 'import re, sys; print(re.search(r"releaseTag\s*=\s*\"([^\"]+)\"", open(sys.argv[1]).read()).group(1))' "$PIN_SWIFT")
-JMDICT_ZST="local/dictionaries/jmdict-${PIN_TAG}.sqlite.zst"
+PIN_BUILD=$(python3 -c 'import re, sys; print(re.search(r"buildRevision\s*=\s*\"([^\"]+)\"", open(sys.argv[1]).read()).group(1))' "$PIN_SWIFT")
+# The artifact name keys on tag + build revision (build_dictionary.sh's
+# ARTIFACT_TAG); tests resolve the prepared DB by JMDictPin.preparedFileName.
+ARTIFACT_TAG="${PIN_TAG}.${PIN_BUILD}"
+JMDICT_ZST="local/dictionaries/jmdict-${ARTIFACT_TAG}.sqlite.zst"
 
 if [[ ! -f "$DYLIB" || ! -f "$MODEL_ZST" ]]; then
   echo "  building dictionary runtime + model (scripts/build_tokenizer.sh)"
@@ -61,4 +65,4 @@ SEED
 }
 
 seed "$MODEL_ZST" "$PREPARED/ipadic.dic"
-seed "$JMDICT_ZST" "$PREPARED/jmdict-${PIN_TAG}.sqlite"
+seed "$JMDICT_ZST" "$PREPARED/jmdict-${ARTIFACT_TAG}.sqlite"
