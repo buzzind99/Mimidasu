@@ -71,8 +71,24 @@ final class TranslationQueue {
     /// fresh run starting: only the run holding the current generation may
     /// clear `wake` or update `inFlight`.
     private var generation = 0
+    /// Bumped only at a session boundary (`resetForNewSession`). A batch that
+    /// is airborne across that boundary has lost its destination — sentence
+    /// indexes restart at 0 in the next session — so `pump` compares the
+    /// epoch it captured per batch against this and drops the batch's
+    /// results and re-queue once they differ. Within a session (engine swap,
+    /// Reconnect) the epoch holds and the designed replay stays intact.
+    private var sessionEpoch = 0
+    /// The generation token of the run whose batch call is suspended inside
+    /// the worker, or nil when nothing is airborne. Owned by the *flight*,
+    /// not the run: a stale run retires its own token on resolution but
+    /// never touches a newer run's, and a newer run is never made to wait on
+    /// a stale one — the two failure modes a plain Bool cannot tell apart.
+    private var inFlightToken: Int?
     /// True while a `session.translate`/batch call is suspended inside the worker.
-    private var inFlight = false
+    var inFlight: Bool {
+        inFlightToken != nil
+    }
+
     /// Sentence ids popped into the worker's current batch — mid-flight,
     /// therefore invisible to `pending`. The manual retry consults these to
     /// stay a no-op while a translation is airborne: a re-queued copy would
@@ -95,14 +111,20 @@ final class TranslationQueue {
     /// Called when a translation completes (main-actor context).
     private var onResult: ((Int, SentenceTranslation) -> Void)?
     private var onStatus: ((TranslationStatus) -> Void)?
+    /// Called when a run attaches or releases its engine (main-actor
+    /// context). `TranslationQueue` is not `@Observable`, so `AppModel`
+    /// mirrors this into observable state for the transcript's retry gate.
+    private var onWorkerChanged: ((Bool) -> Void)?
 
     /// Wire callbacks (invoked synchronously on the main actor).
     func setHandlers(
         result: @escaping (Int, SentenceTranslation) -> Void,
-        status: @escaping (TranslationStatus) -> Void
+        status: @escaping (TranslationStatus) -> Void,
+        workerChanged: @escaping (Bool) -> Void = { _ in }
     ) {
         onResult = result
         onStatus = status
+        onWorkerChanged = workerChanged
     }
 
     /// The engine is injected at run start; a new run swaps it wholesale.
@@ -114,6 +136,7 @@ final class TranslationQueue {
         generation += 1
         let token = generation
         self.engine = engine
+        onWorkerChanged?(true)
         setStatus(.ready)
         let (wakeStream, continuation) = AsyncStream<Void>.makeStream()
         wake = continuation
@@ -123,9 +146,10 @@ final class TranslationQueue {
             // deliberately survives so the next run replays it.
             if token == generation {
                 wake = nil
-                inFlight = false
+                inFlightToken = nil
                 translatingIDs.removeAll()
                 self.engine = nil
+                onWorkerChanged?(false)
             }
         }
 
@@ -152,7 +176,12 @@ final class TranslationQueue {
             pending.removeFirst(batch.count)
             translatingIDs.formUnion(batch.map(\.id))
             setStatus(.translating)
-            inFlight = true
+            inFlightToken = token
+            // The session this batch belongs to. `resetForNewSession` bumps
+            // the epoch at the session boundary; a batch airborne across it
+            // has lost its destination (indexes restart at 0 in the next
+            // session) and is dropped at resolution below.
+            let epoch = sessionEpoch
             do {
                 // `deliver` is deliberately NOT generation-guarded: the batch
                 // left `pending` before the flight, so dropping a stale run's
@@ -162,6 +191,11 @@ final class TranslationQueue {
                 // (cutting the session tail off) while a stale `.ready` would
                 // dismiss a failure card for an engine that is still broken.
                 for (sentence, pair) in try await translateBatch(batch, using: engine) {
+                    // A session boundary mid-flight retires the whole batch:
+                    // its results have no correct row any more, and landing
+                    // them would write one session's translations onto the
+                    // next session's rows of the same indexes.
+                    guard epoch == sessionEpoch else { break }
                     // Drop the id as each result lands, so a retry for a
                     // delivered sentence is a fresh request, not a no-op.
                     translatingIDs.remove(sentence.id)
@@ -171,36 +205,49 @@ final class TranslationQueue {
                     setStatus(.ready)
                 }
             } catch {
-                // Cancellation (configuration invalidated / task torn down)
-                // re-queues and exits like any failure; `pending` survives for
-                // the next run.
-                translatingIDs.subtract(batch.map(\.id))
-                pending.insert(contentsOf: batch, at: 0)
-                if token == generation {
-                    inFlight = false
-                    if error is CancellationError {
-                        setStatus(.idle)
-                    } else {
-                        setStatus(
-                            .unavailable(
-                                Self.describe(error),
-                                Self.severity(of: error, engine: engine)
-                            )
-                        )
-                    }
-                } else {
-                    // A stale run re-queued work after a newer run
-                    // already pumped (and parked). The newer run owns
-                    // `wake` now — nudge it so the batch replays.
-                    wake?.yield(())
+                // The flight is over whoever owns it — including a stale
+                // run's, which would otherwise leave `inFlight` stuck true
+                // and stall `drain` on every later stop.
+                if inFlightToken == token {
+                    inFlightToken = nil
                 }
+                recoverFailedBatch(batch, error: error, token: token, engine: engine, epoch: epoch)
                 return false
             }
-            if token == generation {
-                inFlight = false
+            if inFlightToken == token {
+                inFlightToken = nil
             }
         }
         return true
+    }
+
+    /// Re-queues a failed batch for the next run — unless a session boundary
+    /// passed mid-flight, in which case the batch is dropped: its sentences
+    /// belong to a discarded transcript (indexes restart at 0 in the next
+    /// session), and re-queuing them would replay old-session indexes onto
+    /// new-session rows. A stale run that did re-queue nudges the newer run,
+    /// which owns `wake` now, so the batch replays.
+    private func recoverFailedBatch(
+        _ batch: [Sentence], error: Error, token: Int,
+        engine: any TranslationEngine, epoch: Int
+    ) {
+        guard epoch == sessionEpoch else { return }
+        translatingIDs.subtract(batch.map(\.id))
+        pending.insert(contentsOf: batch, at: 0)
+        if token == generation {
+            if error is CancellationError {
+                setStatus(.idle)
+            } else {
+                setStatus(
+                    .unavailable(
+                        Self.describe(error),
+                        Self.severity(of: error, engine: engine)
+                    )
+                )
+            }
+        } else {
+            wake?.yield(())
+        }
     }
 
     /// Enqueue a finalized sentence for translation. A repeat of an
@@ -238,11 +285,15 @@ final class TranslationQueue {
     /// one session's translation onto the next session's row of the same index.
     /// `translatingIDs` goes with it: an id left by a torn-down run would
     /// otherwise read as "airborne" and disable retries for that index forever.
-    /// The app-run cache stays — a sentence repeated in a new session is
-    /// exactly what it is for.
+    /// The epoch bump retires any batch already *airborne* across the boundary
+    /// (it left `pending` before its flight, so the clears above cannot reach
+    /// it): `pump` drops its results and skips its re-queue once epochs
+    /// differ. The app-run cache stays — a sentence repeated in a new session
+    /// is exactly what it is for.
     func resetForNewSession() {
         pending.removeAll()
         translatingIDs.removeAll()
+        sessionEpoch += 1
     }
 
     /// True while a run holds an engine, i.e. a worker that would service a
