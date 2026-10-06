@@ -102,6 +102,14 @@ struct TranscriptRow: View {
         // Opacity only: animating layout would displace neighboring rows
         // while the re-anchor chase is also repositioning content.
         .opacity(fadesIn && !shown ? 0 : 1)
+        // The hover-revealed retry button is invisible to VoiceOver and full
+        // keyboard access (it does not exist in the tree until a pointer
+        // hovers), so the same affordance is exposed as a named custom
+        // action on the row itself — the non-pointer path to the feature.
+        .accessibilityAction(named: Text("Re-translate this line")) {
+            guard retryEnabled else { return }
+            onRetry?(entry.sentence)
+        }
         .onHover { isHovering in hovering = isHovering }
         .onAppear {
             guard fadesIn, !shown else { return }
@@ -129,6 +137,9 @@ struct TranscriptRow: View {
     /// overlay's *content* rather than its opacity keeps the button out of
     /// hit-testing and out of the accessibility tree, so it can neither eat a
     /// click meant for the transcript nor leave a phantom control per row.
+    /// The accessibility-tree exit is compensated by the row's named
+    /// accessibility action, which is the VoiceOver/keyboard path to the
+    /// same affordance.
     private var retryButton: some View {
         Button {
             onRetry?(entry.sentence)

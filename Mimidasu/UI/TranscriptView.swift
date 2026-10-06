@@ -158,16 +158,20 @@ struct TranscriptView: View {
     /// Whether this row's retry affordance may be shown. Every clause is a
     /// precondition `AppModel.retranslateSentence` enforces, so a shown button
     /// is one whose click would be served rather than silently refused:
-    /// a live session, no terminal failure card, and this row not already
-    /// retranslating. Read per row here, in the body, so the invalidation that
-    /// changes any of them re-renders the rows.
+    /// a live session, an attached translation worker, no terminal failure
+    /// card, and this row not already retranslating. Read per row here, in
+    /// the body, so the invalidation that changes any of them re-renders
+    /// the rows.
     ///
-    /// The row's own sentence being queued or airborne is deliberately *not*
-    /// consulted: `TranslationQueue` is not `@Observable`, so that state cannot
-    /// reach this view, and a queued line's button is the common case anyway —
-    /// it simply comes back with the batch.
+    /// The worker clause rides `model.translationWorkerActive` — a mirror the
+    /// queue reports through — because `TranslationQueue` is not `@Observable`
+    /// and could not drive this view directly. The row's own sentence being
+    /// queued or airborne is deliberately *not* consulted: that state cannot
+    /// reach this view either, and a queued line's button is the common case
+    /// anyway — it simply comes back with the batch.
     private func retryEnabled(for entry: SessionEntry) -> Bool {
         guard model.phase == .running || model.phase == .sourceLost else { return false }
+        guard model.translationWorkerActive else { return false }
         if case .unavailable = model.translationStatus {
             return false
         }

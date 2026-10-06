@@ -234,6 +234,33 @@ struct AppModelRetranslationTests {
         #expect(drained, "the gated retry must not enter the queue without a worker")
     }
 
+    /// The transcript's retry gate reads `translationWorkerActive` — the
+    /// observable mirror of the queue's `hasWorker`, reported through the
+    /// queue's `workerChanged` handler — because the queue is not observable
+    /// and could not drive the view directly. The mirror must track attach
+    /// and release exactly, or the shown button diverges from what a click
+    /// would serve.
+    @Test("the worker-active mirror tracks the queue worker's attach and release")
+    func workerActiveMirrorTracksQueueWorker() async {
+        let model = await makeSUT()
+        #expect(!model.translationWorkerActive, "no run has attached an engine yet")
+
+        let worker = await attachWorker(model, engine: EchoRetranslateEngine())
+        #expect(
+            model.translationWorkerActive,
+            "the mirror flips on when the run attaches its engine"
+        )
+
+        // Awaited, not just cancelled: the mirror flips off in the run's
+        // `defer`, so the value's return makes the assertion deterministic.
+        worker.cancel()
+        await worker.value
+        #expect(
+            !model.translationWorkerActive,
+            "the mirror flips off when the run releases its engine"
+        )
+    }
+
     // MARK: - Marker clearing
 
     /// The one `.unavailable` that is followed by a fresh engine: latching the
@@ -264,9 +291,10 @@ struct AppModelRetranslationTests {
 
     /// Every *other* `.unavailable` is terminal for the backlog: Apple itself
     /// failed (a language pack that is absent, a framework error), or this is
-    /// the fallback's own Apple replay failing. Nothing will service the
-    /// sentence, so a surviving marker would leave the row dimmed for the rest
-    /// of the session *and* have its own guard refuse the click that fixes it.
+    /// the fallback's own Apple replay failing. The failed run has exited, so
+    /// nothing will service the sentence: a surviving marker would leave the
+    /// row dimmed for the rest of the session. The way back is the failure
+    /// card's Reconnect — the stale marker must not outlive it.
     @Test("an unavailable Apple engine clears the marker so the row stays retryable")
     func unavailableAppleEngineClearsPendingRetranslations() async {
         let model = await makeSUT()

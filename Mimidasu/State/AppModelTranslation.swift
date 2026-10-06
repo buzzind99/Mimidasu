@@ -228,10 +228,12 @@ extension AppModel {
             // No engine swap follows this failure, so nothing will ever
             // service the backlog: Apple itself failed (a language pack that
             // is absent, a framework error), or this is the fallback's own
-            // Apple replay failing. A row still wearing its in-flight marker
-            // would sit dimmed for the rest of the session *and* have its own
-            // retry guard refuse the click that would fix it. Drop the cue and
-            // let the retry re-run the sentence from the stranded backlog.
+            // Apple replay failing. The failed run exited, so its engine is
+            // released — a row still wearing its in-flight marker would sit
+            // dimmed for the rest of the session, and neither the row button
+            // (hidden under the failure card, no worker) nor the retry guard
+            // could act. Drop the cue; the way back is the card's Reconnect,
+            // which re-attaches an engine and replays the backlog.
             pendingRetranslations.removeAll()
             return
         }

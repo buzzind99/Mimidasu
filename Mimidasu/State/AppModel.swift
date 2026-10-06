@@ -28,6 +28,9 @@ final class AppModel {
     /// clear instead of re-summing the transcript per render.
     private(set) var sessionCharacterCount = 0
     var translationStatus: TranslationStatus = .idle
+    /// Observable mirror of `translationQueue.hasWorker` (the queue is not
+    /// `@Observable`), reported via `workerChanged`; read by the retry gate.
+    private(set) var translationWorkerActive = false
     var engineIsMock = false
     var modelURL: URL?
     /// Floating subtitle overlay, shown/hidden from the sidebar's overlay
@@ -291,6 +294,9 @@ final class AppModel {
             },
             status: { [weak self] status in
                 self?.handleTranslationStatus(status)
+            },
+            workerChanged: { [weak self] active in
+                self?.translationWorkerActive = active
             }
         )
         initialModelCheck = Task { await refreshModelAvailability() }
