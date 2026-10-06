@@ -9,8 +9,8 @@
 #   scripts/build_dictionary.sh --probe-only   # probe only, no DB emitted
 #   scripts/build_dictionary.sh --rebuild      # probe + rebuild DB even if built
 #
-# The pin (tag + asset + SHA-256) is recorded here AND in
-# Mimidasu/Dictionary/JMDictPin.swift; this script cross-checks the two and
+# The pin (tag + asset + SHA-256 + local build revision) is recorded here AND
+# in Mimidasu/Dictionary/JMDictPin.swift; this script cross-checks the two and
 # hard-fails on drift, so a pin bump must touch both files or nothing builds.
 # The probe runs before every build and hard-fails on any mismatch with the
 # documented input contract — on a pin bump it is the tripwire against silent
@@ -48,6 +48,11 @@ PIN_ASSET="jmdictExtended-2026-09-01.json.zip"
 # on the release asset page.
 PIN_SHA256="4bee23eb7bd088d0a9c48301d0d25964b8ac9ecd6465c91b40adf8191d4b040a"
 PIN_URL="https://github.com/Bluskyo/JMDict_Extended/releases/download/${PIN_TAG}/${PIN_ASSET}"
+# Local ingestion-recipe revision, appended to the artifact tag. PIN_TAG must
+# stay the upstream release identifier (it keys the download URL); this
+# revision is the artifact staleness key — bump it when the build mapping
+# changes under the same upstream pin so prepared installs re-stage.
+PIN_BUILD="2"
 
 # --- Names pin: JMnedict proper nouns, ingested into the same DB ----------------
 # Source is scriptin/jmdict-simplified (the JMDict pin above stays on
@@ -64,7 +69,10 @@ JSON_PATH="${DICT_DIR}/${PIN_ASSET%.zip}"
 NAME_ZIP_PATH="${DICT_DIR}/${NAME_PIN_ASSET}"
 NAME_JSON_PATH="${DICT_DIR}/jmnedict-all-${NAME_PIN_TAG%%+*}.json"
 PROBE_LOG="${BUILD_DIR}/jmdict-probe.log"
-PREPARED_NAME="jmdict-${PIN_TAG}.sqlite"
+# The artifact tag adds the local build revision to the upstream release tag;
+# the versioned filename built from it is the staleness key everywhere.
+ARTIFACT_TAG="${PIN_TAG}.${PIN_BUILD}"
+PREPARED_NAME="jmdict-${ARTIFACT_TAG}.sqlite"
 ZST_NAME="${PREPARED_NAME}.zst"
 ZST_PATH="${DICT_DIR}/${ZST_NAME}"
 
@@ -121,6 +129,7 @@ CHECKEOF
 check_pin_constant releaseTag "${PIN_TAG}"
 check_pin_constant sourceAssetFileName "${PIN_ASSET}"
 check_pin_constant sourceSHA256 "${PIN_SHA256}"
+check_pin_constant buildRevision "${PIN_BUILD}"
 check_pin_constant nameReleaseTag "${NAME_PIN_TAG}"
 check_pin_constant nameSourceAssetFileName "${NAME_PIN_ASSET}"
 check_pin_constant nameSourceSHA256 "${NAME_PIN_SHA256}"
@@ -129,8 +138,8 @@ check_pin_constant nameSourceSHA256 "${NAME_PIN_SHA256}"
 # versioned name is the staleness key (§0.1 item 4). preparedFileName is
 # interpolated in Swift, so guard the derivation expressions themselves
 # (releaseTag is already cross-checked above, which pins the concrete name).
-if ! grep -Fq 'static let preparedFileName = "\(artifactPrefix)\(releaseTag).\(artifactExtension)"' "${PIN_SWIFT}"; then
-  echo "ERROR: JMDictPin.preparedFileName no longer derives from artifactPrefix + releaseTag + artifactExtension; update this drift guard." >&2
+if ! grep -Fq 'static let preparedFileName = "\(artifactPrefix)\(releaseTag).\(buildRevision).\(artifactExtension)"' "${PIN_SWIFT}"; then
+  echo "ERROR: JMDictPin.preparedFileName no longer derives from artifactPrefix + releaseTag + buildRevision + artifactExtension; update this drift guard." >&2
   exit 1
 fi
 if ! grep -Fq 'static let artifactPrefix = "jmdict-"' "${PIN_SWIFT}"; then
@@ -244,7 +253,7 @@ echo "==> Building ${PREPARED_NAME} (log: ${BUILD_LOG})"
 rm -f "${RAW_DB}" "${ZST_PATH}"
 
 python3 "${REPO_ROOT}/scripts/jmdict_build.py" "${JSON_PATH}" "${NAME_JSON_PATH}" "${RAW_DB}" "${ZST_PATH}" \
-  "${PROBE_LOG}" "${PIN_TAG}" "${PIN_SHA256}" "${PIN_ASSET}" \
+  "${PROBE_LOG}" "${ARTIFACT_TAG}" "${PIN_SHA256}" "${PIN_ASSET}" \
   "${NAME_PIN_TAG}" "${NAME_PIN_SHA256}" "${NAME_PIN_ASSET}" 2>&1 | tee "${BUILD_LOG}"
 
 zstd -q -t "${ZST_PATH}"

@@ -115,7 +115,26 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
             pitch = (pa.get("hatsuon"), pa.get("accPatts"), pa.get("zoPatts"))
         else:
             pitch = (None, None, None)
-        return (ent_seq, obj["text"], kind, obj.get("jlptLevel"), *pitch)
+        return (obj["text"], kind, obj.get("jlptLevel"), *pitch)
+
+    def normalized_headword_rows(ent_seq, writings):
+        # Enrichment inheritance: JLPT and pitch ride individual writings
+        # upstream (a bare-kanji writing like 確 of 確か carries neither,
+        # while the main kanji writing carries both), yet a tap resolves
+        # through whichever writing it matched. Each slot takes the word's
+        # first non-null value in source order (kanji writings then kana) so
+        # every writing of a word renders the same card.
+        rows = [hw_row(ent_seq, obj, kind) for obj, kind in writings]
+        best = [
+            next((row[slot] for row in rows if row[slot] is not None), None)
+            for slot in range(2, 6)
+        ]
+        return [
+            (ent_seq, text, kind,
+             *(own if own is not None else fallback
+               for own, fallback in zip(values, best)))
+            for text, kind, *values in rows
+        ]
 
     BATCH = 5000
     entries_batch, senses_batch, headwords_batch = [], [], []
@@ -153,10 +172,9 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
             robjs[0]["text"] if robjs else None,
             common,
         ))
-        for o in kobjs:
-            headwords_batch.append(hw_row(ent_seq, o, "keb"))
-        for o in robjs:
-            headwords_batch.append(hw_row(ent_seq, o, "reb"))
+        headwords_batch.extend(normalized_headword_rows(
+            ent_seq, [(o, "keb") for o in kobjs] + [(o, "reb") for o in robjs]
+        ))
         for ord_i, s in enumerate(w.get("sense") or []):
             glosses = [g["text"] for g in (s.get("gloss") or []) if g.get("lang") == "eng"]
             senses_batch.append((

@@ -15,6 +15,13 @@ enum JMDictPin {
     /// publishes on the release asset at build time.
     static let sourceSHA256 = "4bee23eb7bd088d0a9c48301d0d25964b8ac9ecd6465c91b40adf8191d4b040a"
 
+    /// Local ingestion-recipe revision, appended to the artifact tag. The
+    /// release tag above stays the upstream GitHub identifier (it keys the
+    /// download URL in `build_dictionary.sh`); this revision is the artifact
+    /// staleness key — bumped when the build mapping changes under the same
+    /// upstream pin so prepared installs re-stage.
+    static let buildRevision = "2"
+
     /// Full upstream release tag of the pinned JMnedict names asset — never
     /// the date alone. The names source is scriptin/jmdict-simplified while
     /// the JMDict source above stays Bluskyo/JMDict_Extended; the two bump
@@ -37,7 +44,7 @@ enum JMDictPin {
     /// Versioned artifact names derived from the tag. The tag is the
     /// staleness key: an app update shipping a new pin stages a new file and
     /// the stale one is simply inert.
-    static let preparedFileName = "\(artifactPrefix)\(releaseTag).\(artifactExtension)"
+    static let preparedFileName = "\(artifactPrefix)\(releaseTag).\(buildRevision).\(artifactExtension)"
     static let bundledFileName = preparedFileName + ".zst"
 
     /// The uncompressed intermediate `scripts/build_dictionary.sh` leaves in the
