@@ -198,28 +198,21 @@ struct TranscriptRow: View {
     /// The translation with its provenance suffix when the row was retried
     /// through a different engine.
     ///
-    /// Two `Text`s in an `HStack`, not a concatenation: an attribute applied
-    /// to a concatenated `Text` reaches EVERY run, so a single muted suffix
-    /// was rendered in the base teal — indistinguishable from the translation
-    /// — and, sitting inside the row's `.textSelection(.enabled)`, it leaked
-    /// into ⌘C as "…translation  · via DeepL". Separate views give each run
-    /// its own colour, let the marker opt out of selection (`.disabled`, the
-    /// only opt-out `textSelection(_:)` offers given the container's
-    /// `.enabled`), and keep it on one line (`fixedSize`) so it cannot break
-    /// between "· via" and the name. Baseline alignment levels the suffix
-    /// with the translation's FIRST line — the trade for the unbreakable,
-    /// unselectable marker: a trailing-the-last-line suffix would need a
-    /// concatenation, which is what this layout exists to avoid.
+    /// Concatenated `Text` runs, not an `HStack`: layout trailing pins the
+    /// suffix after a wrapped translation's FIRST line — visually
+    /// mid-sentence — while a run inside the text trails the sentence's
+    /// actual last line. Each run is styled before concatenation, so the
+    /// suffix keeps its muted colour; styling the concatenation itself would
+    /// repaint every run. Non-breaking spaces glue the suffix to the
+    /// sentence's last word, so it can neither split internally nor wrap
+    /// alone onto a new line. The trade of living inside the selectable
+    /// text: the suffix copies with the sentence.
     private func translationText(_ joined: String) -> some View {
         let translation = Text(joined).foregroundStyle(Theme.translationTeal)
-        return HStack(alignment: .firstTextBaseline, spacing: 0) {
-            translation
-            if let retranslateMarker {
-                Text("  \(retranslateMarker)")
-                    .foregroundStyle(Theme.secondaryText)
-                    .textSelection(.disabled)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-        }
+        guard let retranslateMarker else { return translation }
+        let glued = retranslateMarker.replacingOccurrences(of: " ", with: "\u{00A0}")
+        let suffix = Text("\u{00A0}\u{00A0}\(glued)")
+            .foregroundStyle(Theme.secondaryText)
+        return translation + suffix
     }
 }
