@@ -51,6 +51,11 @@ extension AppModel {
         retranslateLaneTask?.cancel()
         retranslateLaneTask = nil
         lanePendingRetranslations.removeAll()
+        // Cancelling reaches only the newest chained link; earlier lane tasks
+        // keep running to completion. The epoch retires them — without it a
+        // straggler would pass the phase guard in the NEXT session (indexes
+        // restart at 0) and swap an unrelated row's translation.
+        retranslateSessionEpoch += 1
         teardownRetranslateSession()
         sessionEndedAt = .now
         // Stop/teardown clears all toasts and notices (phase → `.idle`).

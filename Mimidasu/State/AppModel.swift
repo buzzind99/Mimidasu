@@ -170,6 +170,24 @@ final class AppModel {
     /// finished is dropped. Internal: managed from `AppModelTranslation.swift`.
     var highFidelitySequence = 0
 
+    /// Session boundary token for the re-translate lane, in the same spirit as
+    /// `TranslationQueue.sessionEpoch`: bumped in `onSessionBegin` and
+    /// `performStop`, captured when a retry is clicked, and compared after the
+    /// flight. A lane task that outlives its session — `performStop` cancels
+    /// only the newest chained link, so earlier ones run to completion — would
+    /// otherwise pass the phase guard (the next session is `.running` again)
+    /// and write the *previous* session's translation onto an unrelated row,
+    /// since `Sentence.index` restarts at 0. Internal: managed from
+    /// `AppModelRetranslate.swift`.
+    var retranslateSessionEpoch = 0
+
+    /// How long the re-translate lane waits for an arming dedicated Apple
+    /// session before giving up on a click. Injectable so the timeout test can
+    /// exercise the real path in milliseconds instead of faking it with a
+    /// cancellation, which is a different outcome. Internal: driven from
+    /// `AppModelRetranslate.swift`.
+    var laneArmTimeout = Duration.seconds(5)
+
     /// The intent held behind the cloud disclosure sheet: completing a
     /// provider switch (the live translation engine) or a re-translate
     /// engine selection. Nil when no disclosure is pending. Internal:
@@ -368,6 +386,9 @@ final class AppModel {
             translationQueue.resetForNewSession()
             pendingRetranslations.removeAll()
             lanePendingRetranslations.removeAll()
+            // Retire any lane task still in flight from the previous session:
+            // its sentence indexes no longer mean anything here.
+            retranslateSessionEpoch += 1
             sessionCharacterCount = 0
             hudPinnedIndex = nil
             sessionStartedAt = .now

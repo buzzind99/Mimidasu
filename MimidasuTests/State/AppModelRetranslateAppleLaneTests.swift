@@ -127,10 +127,11 @@ struct AppModelRetranslateAppleLaneTests {
         model.sessionController.onSentence?(sentence)
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
 
+        // No engine ever arrives; the bounded wait runs out on its own (a
+        // short injected bound, so the timeout is exercised for real — task
+        // cancellation is the separate `.cancelled` outcome, covered below).
+        model.laneArmTimeout = .milliseconds(50)
         model.retranslateSentence(sentence)
-        // No engine ever arrives; cancel the lane's bounded wait the way an
-        // interleaved stop would reach it (phase stays live here).
-        model.retranslateLaneTask?.cancel()
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
@@ -156,8 +157,10 @@ struct AppModelRetranslateAppleLaneTests {
     @Test("apple intelligence stamps via its armed session and arms only the hifi config")
     func appleIntelligenceStampsViaArmedSession() async {
         let model = await makeSUT()
-        // The probe is parked at not-installed, so the live session is de
-        // facto fast and the selection is a real alternate.
+        // The probe never lands, so the live session is de facto fast and the
+        // Intelligence selection is a real alternate. (A probe that LANDED
+        // not-installed would degrade the selection to `.appleFast` instead —
+        // see `unavailableHighFidelityDegradesToFast`.)
         model.translationSettings.selectRetranslate(.appleHighFidelity)
         model.phase = .running
         let worker = await attachWorker(model)
@@ -188,16 +191,18 @@ struct AppModelRetranslateAppleLaneTests {
     @Test("a still-arming intelligence session posts its own starting toast")
     func stillArmingHifiSessionPostsStartingToast() async {
         let model = await makeSUT()
+        // The probe never lands, so the live session is de facto fast and the
+        // Intelligence selection arms the hifi lane (a probe that landed
+        // not-installed would degrade it to `.appleFast` instead).
         model.translationSettings.selectRetranslate(.appleHighFidelity)
         model.phase = .running
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
 
+        // No engine ever arrives; the bounded wait runs out on its own.
+        model.laneArmTimeout = .milliseconds(50)
         model.retranslateSentence(sentence)
-        // No engine ever arrives; cancel the lane's bounded wait the way an
-        // interleaved stop would reach it (phase stays live here).
-        model.retranslateLaneTask?.cancel()
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
@@ -217,6 +222,79 @@ struct AppModelRetranslateAppleLaneTests {
             "the config stays armed — the next click is instant once the session lands"
         )
         #expect(model.retranslateConfig == nil, "the fast lane's session is never armed")
+    }
+
+    @Test("a cancelled wait retires the markers without reporting a starting session")
+    func cancelledWaitRetiresMarkersSilently() async {
+        let model = await makeSUT()
+        model.appleHighFidelityProbe = (true, "en")
+        model.translationSettings.selectRetranslate(.appleFast)
+        model.phase = .running
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+        model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
+
+        // A long bound, so the wait is still sleeping when the cancellation
+        // lands — the interleaved-stop shape.
+        model.laneArmTimeout = .seconds(30)
+        model.retranslateSentence(sentence)
+        model.retranslateLaneTask?.cancel()
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
+            },
+            "a cancelled wait still retires the markers"
+        )
+        #expect(
+            model.toasts.toasts.allSatisfy { candidate in candidate.key != ToastKey.retranslate },
+            "a cancellation is not a timeout — the stop already cleared the toasts"
+        )
+    }
+
+    // MARK: - Unavailable high fidelity
+
+    @Test("an intelligence selection the OS cannot serve degrades to the fast model")
+    func unavailableHighFidelityDegradesToFast() async {
+        let model = await makeSUT()
+        model.translationSettings.selectRetranslate(.appleHighFidelity)
+        // The probe landed not-installed for this pair: requesting high
+        // fidelity anyway would silently return the fast model's text while
+        // stamping the row "Apple Intelligence".
+        model.appleHighFidelityProbe = (false, "en")
+        // An external live session, so the degraded fast selection is a
+        // genuine alternate (a live fast Apple session would be served by the
+        // session engine instead).
+        model.activeTranslationEngine = .external
+        model.activeExternalProvider = .google
+        model.phase = .running
+        let worker = await attachWorker(model)
+        defer { worker.cancel() }
+        let sentence = makeSentence(index: 3)
+        model.sessionController.onSentence?(sentence)
+        #expect(
+            await pollUntil(timeout: resultTimeout) { model.entries[0].joinedTranslations == "EN:テスト" },
+            "the initial session translation is delivered before the retry"
+        )
+
+        #expect(model.effectiveRetranslateSelection == .appleFast)
+
+        model.retranslateSentence(sentence)
+        model.retranslateSessionArrived(LaneEchoEngine())
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                model.entries[0].translations
+                    == [SentenceTranslation(lang: "en", text: "JA:テスト", engine: .appleFast)]
+            },
+            "the row lands stamped with the model that actually ran"
+        )
+        #expect(model.retranslateConfig != nil, "the fast lane is the one armed")
+        #expect(model.retranslateHifiConfig == nil, "the high-fidelity session is never armed")
+        #expect(
+            model.translationSettings.retranslateEngine == .appleHighFidelity,
+            "the persisted selection is not rewritten — only its resolution degrades"
+        )
     }
 }
 
