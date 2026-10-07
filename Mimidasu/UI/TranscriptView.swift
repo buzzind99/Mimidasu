@@ -187,11 +187,11 @@ struct TranscriptView: View {
     /// Marker text for a retried row: only when the lane produced it, the
     /// lane's engine differs from the current active engine, and the toggle
     /// is on. The Apple branch's identity is provisional until the
-    /// activation's probe lands (every Apple activation resets the tuple to
-    /// `(false, nil)`, then it lands async): comparing against the
-    /// provisional `.appleFast` would flash a marker on a just-retried row
-    /// that the landing probe immediately removes. External identity needs
-    /// no probe.
+    /// activation's probe lands — every activation, Apple or external,
+    /// resets the tuple to `(false, nil)` and it lands async — so comparing
+    /// against a not-yet-landed identity would flash a marker on a
+    /// just-retried row that the landing probe immediately removes. External
+    /// identity needs no probe.
     private func retranslateMarker(for entry: SessionEntry) -> String? {
         guard model.translationSettings.showsRetranslateMarker,
               // Matched by language, not `.last`: the row renders every
@@ -202,15 +202,20 @@ struct TranscriptView: View {
               }),
               let engine = translation.engine
         else { return nil }
-        // Only the Apple kinds are provisional. Comparing an external kind
-        // needs no probe, so returning nil here would blank "· via DeepL"
-        // for the whole window a probe is pending — and forever after, since
-        // a probe killed by a stop leaves the tuple at `(false, nil)` while
-        // the transcript stays on screen.
+        // Only the Apple kinds depend on the probe. While it is pending the
+        // identity is unknown under ANY live engine (external sessions probe
+        // too, and a probe killed by a stop leaves the tuple at
+        // `(false, nil)` while the transcript stays on screen), so an Apple
+        // marker waits for it. And once the probe has landed
+        // not-installed, a row stamped `.appleHighFidelity` actually holds
+        // the fast model's text — the framework silently falls back — so
+        // its marker must not claim Apple Intelligence.
         if engine == .appleFast || engine == .appleHighFidelity,
-           model.activeTranslationEngine == .apple,
            model.appleHighFidelityProbe.targetCode == nil
         {
+            return nil
+        }
+        if engine == .appleHighFidelity, model.highFidelityKnownUnavailable {
             return nil
         }
         guard engine != model.activeEngineKind else { return nil }

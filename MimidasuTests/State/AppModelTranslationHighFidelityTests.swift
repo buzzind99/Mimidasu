@@ -5,9 +5,10 @@ import Testing
 
 /// Tests the high-fidelity (Apple Intelligence) probe wiring: a positive
 /// probe marks the attached Apple engine for the ENGINES card, a negative
-/// one leaves the row unchanged, and an external attach clears the marker.
-/// The probe is the injected seam, so outcomes don't depend on the host's
-/// Apple Intelligence state.
+/// one leaves the row unchanged, and an external attach re-probes — the
+/// pair's availability is a machine fact, so the marker reflects the pair
+/// under any live engine. The probe is the injected seam, so outcomes don't
+/// depend on the host's Apple Intelligence state.
 @MainActor
 @Suite("AppModel high-fidelity probe")
 struct AppModelTranslationHighFidelityTests {
@@ -123,19 +124,27 @@ struct AppModelTranslationHighFidelityTests {
         await stopTranslation(model)
     }
 
-    /// Switching to an external provider clears the marker even after a
-    /// positive Apple probe, and any probe still airborne from before the
-    /// switch is dropped. (A later Apple fallback re-probes and may re-mark
-    /// — that's the fallback path working, not a stale probe.)
-    @Test("an external attach clears the marker")
-    func externalAttachClearsMarker() async {
+    /// Switching to an external provider re-probes: the sequence token
+    /// drops any probe airborne from the Apple attach, and the fresh probe
+    /// lands for the pair no matter which engine is live — so the marker
+    /// reflects the machine, not the live engine (an external-live session
+    /// with a stale "unknown" would let a persisted Apple Intelligence
+    /// re-translate selection stamp fast-model output).
+    @Test("an external attach re-probes and the marker reflects the pair")
+    func externalAttachReprobesAndMarkerReflectsPair() async {
+        let probeCalls = Mutex(0)
         let settings = makeSettings(provider: .apple)
         let model = AppModel(
             translationSettings: settings,
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelHighFidelity"),
             favorites: isolatedFavorites(),
             translationTransport: constantStatusTransport(401),
-            highFidelityProbe: { _ in true },
+            highFidelityProbe: { _ in
+                probeCalls.withLock { calls in
+                    calls += 1
+                    return true
+                }
+            },
             initialModelResolve: { _ in nil }
         )
 
@@ -147,7 +156,15 @@ struct AppModelTranslationHighFidelityTests {
         settings.select(.google)
         model.translationProviderDidChange()
         #expect(model.activeTranslationEngine == .external)
-        #expect(!model.appleHighFidelity, "the external attach clears the marker")
+        // The attach reset the tuple synchronously (probe re-fires), so a
+        // landed marker after the second probe call is the re-probe's
+        // landing, not the Apple probe's.
+        #expect(
+            await pollUntil {
+                probeCalls.withLock { calls in calls >= 2 } && model.appleHighFidelity
+            },
+            "the external attach re-probes and lands the pair's availability"
+        )
 
         await stopTranslation(model)
     }

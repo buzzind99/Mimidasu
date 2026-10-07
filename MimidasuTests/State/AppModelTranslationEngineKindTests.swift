@@ -85,7 +85,12 @@ struct AppModelTranslationEngineKindTests {
     }
 
     @Test("an installed high-fidelity probe for the current pair reads high fidelity")
-    func installedProbeForCurrentPairReadsHighFidelity() {
+    func installedProbeForCurrentPairReadsHighFidelity() throws {
+        // `activeEngineKind` only reports the high-fidelity identity on
+        // 26.4+; below it the answer is always the fast model.
+        guard #available(macOS 26.4, *) else {
+            try Test.cancel("the high-fidelity identity requires macOS 26.4")
+        }
         let model = makeModel(settings: makeSettings(provider: .apple))
         model.appleHighFidelityProbe = (true, "en")
 

@@ -59,11 +59,15 @@ extension AppModel {
             }
             activeTranslationEngine = .external
             activeExternalProvider = translationSettings.selectedProvider
-            // Invalidate any airborne Apple probe: the fallback latch can
-            // re-enter Apple while a pre-attach probe is still in flight,
-            // and that stale landing must not re-mark the engine.
-            highFidelitySequence += 1
-            appleHighFidelityProbe = (false, nil)
+            // Re-probe high fidelity: the pair's availability is a machine
+            // fact, not an engine one, and an external-live session is
+            // exactly where a stale "unknown" would let a persisted Apple
+            // Intelligence re-translate selection stamp fast-model output.
+            // `probeHighFidelity` invalidates any airborne probe via the
+            // sequence token (the fallback latch can re-enter Apple while a
+            // pre-attach probe is still in flight, and that stale landing
+            // must not re-mark the engine).
+            probeHighFidelity()
             translationConfig?.invalidate()
             translationWorker?.cancel()
             translationWorker = Task {
@@ -341,10 +345,12 @@ extension AppModel {
 
     /// Probes whether the OS can serve the high-fidelity (Apple
     /// Intelligence) strategy for the current ja→target pair and records the
-    /// outcome (with the probed code) for the ENGINES card and the Settings
-    /// labels. Fired on every Apple activation (session start, retry,
-    /// provider change, the latched fallback); the sequence token drops a
-    /// probe whose activation was superseded before it landed.
+    /// outcome (with the probed code) for the ENGINES card, the Settings
+    /// labels, and the re-translate hifi degrade. Fired on every activation
+    /// — Apple (session start, retry, provider change, the latched fallback)
+    /// or external. The sequence token drops a probe whose activation was
+    /// superseded before it landed; the landing does not check the live
+    /// engine, because the pair's availability does not depend on one.
     private func probeHighFidelity() {
         appleHighFidelityProbe = (false, nil)
         highFidelitySequence += 1
@@ -354,8 +360,7 @@ extension AppModel {
         Task { [weak self] in
             let available = await probe(targetCode)
             guard let self,
-                  sequence == highFidelitySequence,
-                  activeTranslationEngine == .apple
+                  sequence == highFidelitySequence
             else { return }
             appleHighFidelityProbe = (available, targetCode)
         }

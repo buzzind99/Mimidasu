@@ -246,6 +246,38 @@ struct AppModelRetranslateRouteTests {
         )
     }
 
+    // MARK: - High-fidelity probe
+
+    @Test("an external activation re-probes high fidelity and degrades a persisted hifi selection")
+    func externalActivationProbesHighFidelityAndDegradesHifi() async {
+        let model = await makeSUT()
+        try? model.translationSettings.saveKey("sk-google", for: .google)
+        model.translationSettings.select(.google)
+        model.translationSettings.selectRetranslate(.appleHighFidelity)
+
+        model.activateTranslation()
+        defer { model.translationWorker?.cancel() }
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                model.appleHighFidelityProbe == (false, model.translationSettings.targetLanguage.code)
+            },
+            "the external activation lands the high-fidelity probe for the current pair"
+        )
+        #expect(
+            model.highFidelityKnownUnavailable,
+            "a landed not-installed probe is known unavailability, under any live engine"
+        )
+        #expect(
+            model.effectiveRetranslateSelection == .appleFast,
+            "the persisted hifi selection degrades once the probe lands unavailable"
+        )
+        #expect(
+            model.alternateRetranslateEngineActive,
+            "the degraded fast selection is a genuine alternate against the external live session"
+        )
+    }
+
     // MARK: - Settings selection
 
     @Test("selecting an external re-translate engine raises the disclosure; on-device rows complete")
