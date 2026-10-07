@@ -90,6 +90,7 @@ struct TranscriptView: View {
                         onRetry: { sentence in model.retranslateSentence(sentence) },
                         retryEnabled: retryEnabled(for: entry),
                         isRetranslating: model.pendingRetranslations.contains(entry.sentence.index),
+                        retranslateMarker: retranslateMarker(for: entry),
                         fadesIn: entry.id == model.entries.last?.id
                     )
                     .id(entry.id)
@@ -158,24 +159,50 @@ struct TranscriptView: View {
     /// Whether this row's retry affordance may be shown. Every clause is a
     /// precondition `AppModel.retranslateSentence` enforces, so a shown button
     /// is one whose click would be served rather than silently refused:
-    /// a live session, an attached translation worker, no terminal failure
-    /// card, and this row not already retranslating. Read per row here, in
-    /// the body, so the invalidation that changes any of them re-renders
-    /// the rows.
+    /// a live session, and this row not already retranslating. Read per row
+    /// here, in the body, so the invalidation that changes any of them
+    /// re-renders the rows.
     ///
-    /// The worker clause rides `model.translationWorkerActive` — a mirror the
-    /// queue reports through — because `TranslationQueue` is not `@Observable`
-    /// and could not drive this view directly. The row's own sentence being
-    /// queued or airborne is deliberately *not* consulted: that state cannot
-    /// reach this view either, and a queued line's button is the common case
-    /// anyway — it simply comes back with the batch.
+    /// The worker and status clauses ride state the queue reports through
+    /// (`model.translationWorkerActive`, `model.translationStatus`) because
+    /// `TranslationQueue` is not `@Observable` and could not drive this view
+    /// directly. Both are skipped while an alternate retry engine resolves:
+    /// a dead session engine is exactly when routing the retry elsewhere is
+    /// useful, and the lane's availability (`alternateRetranslateEngineActive`)
+    /// already answers "will this click be served". The row's own sentence
+    /// being queued or airborne is deliberately *not* consulted: that state
+    /// cannot reach this view either, and a queued line's button is the
+    /// common case anyway — it simply comes back with the batch.
     private func retryEnabled(for entry: SessionEntry) -> Bool {
         guard model.phase == .running || model.phase == .sourceLost else { return false }
-        guard model.translationWorkerActive else { return false }
-        if case .unavailable = model.translationStatus {
-            return false
+        if !model.alternateRetranslateEngineActive {
+            guard model.translationWorkerActive else { return false }
+            if case .unavailable = model.translationStatus {
+                return false
+            }
         }
         return !model.pendingRetranslations.contains(entry.sentence.index)
+    }
+
+    /// Marker text for a retried row: only when the lane produced it, the
+    /// lane's engine differs from the current active engine, and the toggle
+    /// is on. The Apple branch's identity is provisional until the
+    /// activation's probe lands (every Apple activation resets the tuple to
+    /// `(false, nil)`, then it lands async): comparing against the
+    /// provisional `.appleFast` would flash a marker on a just-retried row
+    /// that the landing probe immediately removes. External identity needs
+    /// no probe.
+    private func retranslateMarker(for entry: SessionEntry) -> String? {
+        guard model.translationSettings.showsRetranslateMarker,
+              let engine = entry.translations.last?.engine
+        else { return nil }
+        if model.activeTranslationEngine == .apple,
+           model.appleHighFidelityProbe.targetCode == nil
+        {
+            return nil
+        }
+        guard engine != model.activeEngineKind else { return nil }
+        return "· via \(engine.markerName)"
     }
 
     /// Per-word popover presentation for the row's word units: the

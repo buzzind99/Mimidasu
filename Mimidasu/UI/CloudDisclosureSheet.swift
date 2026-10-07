@@ -1,16 +1,18 @@
 import SwiftUI
 
 /// Confirmation shown whenever a cloud translation provider is about to
-/// become active (held selection in `AppModel.providerAwaitingDisclosure`):
+/// become active — as the live session engine (provider switch) or as the
+/// re-translate engine (held intent in `AppModel.providerAwaitingDisclosure`):
 /// states plainly that transcript sentences will be sent to the chosen
 /// provider over the internet, so the app's local-processing claim stays
-/// accurate about its behavior. Confirming completes the selection;
-/// declining leaves the current provider active. There is no persisted
-/// acknowledgment — the sheet is raised on every switch to an external
-/// provider.
+/// accurate about its behavior. The sheet itself is intent-agnostic; the
+/// completion closures dispatch on the held intent. There is no persisted
+/// acknowledgment — the sheet is raised on every selection of an external
+/// provider, either kind.
 struct CloudDisclosureSheet: View {
     let provider: TranslationProvider
-    let model: AppModel
+    let onConfirm: () -> Void
+    let onDecline: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -27,10 +29,10 @@ struct CloudDisclosureSheet: View {
             HStack(spacing: 10) {
                 Spacer()
                 SettingsPill(label: "Cancel") {
-                    model.declineCloudDisclosure()
+                    onDecline()
                 }
                 SettingsPill(label: "Use \(provider.shortName)", prominent: true) {
-                    model.confirmCloudDisclosure()
+                    onConfirm()
                 }
             }
         }

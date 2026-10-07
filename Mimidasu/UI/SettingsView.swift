@@ -63,11 +63,15 @@ struct SettingsView: View {
             model.translationProviderDidChange()
         }
         // The cloud-provider disclosure, raised whenever an external
-        // activation is held in `providerAwaitingDisclosure`; confirming
-        // completes the selection (the `.onChange` above attaches the
-        // engine), dismissing either way clears the bound item.
-        .sheet(item: $model.providerAwaitingDisclosure) { provider in
-            CloudDisclosureSheet(provider: provider, model: model)
+        // activation is held in `providerAwaitingDisclosure` (a provider
+        // switch or a re-translate engine selection); confirming completes
+        // the held intent, dismissing either way clears the bound item.
+        .sheet(item: $model.providerAwaitingDisclosure) { disclosure in
+            CloudDisclosureSheet(
+                provider: disclosure.provider,
+                onConfirm: { model.confirmCloudDisclosure() },
+                onDecline: { model.declineCloudDisclosure() }
+            )
         }
         // The Settings scene keeps its window — and this view's @State —
         // cached after close, so transient card state survives a reopen and
@@ -130,6 +134,7 @@ struct SettingsView: View {
                     modelDraft: $modelDraft
                 )
             }
+            SettingsRetranslateCard(model: model, settings: settings)
             SettingsTargetLanguageCard(model: model, settings: settings)
             appearanceCard
             modelCard

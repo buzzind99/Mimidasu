@@ -22,6 +22,42 @@ struct TranslationSessionHost: View {
     }
 }
 
+/// Receives the low-latency (fast model) session for alternate-engine
+/// re-translations. Fired lazily: the config stays nil until the first
+/// Apple-fast retry arms it, so no second OS session exists for users who
+/// never use the feature. Hosted in the same process-lifetime panel as
+/// `TranslationSessionHost` — the config is armed outside a session boundary
+/// too (a retry can only click while one is live, but a language-pack prompt
+/// must survive window churn), and it shares the panel's fullscreen/Spaces
+/// guarantees.
+struct RetranslateSessionHost: View {
+    var model: AppModel
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .translationTask(model.retranslateConfig) { session in
+                model.retranslateSessionArrived(AppleSessionEngine(session))
+            }
+    }
+}
+
+/// Receives the high-fidelity (Apple Intelligence) session for
+/// alternate-engine re-translations. Fired lazily: the config stays nil
+/// until the first Apple-Intelligence retry arms it. Hosted in the same
+/// process-lifetime panel as `RetranslateSessionHost` for the same reasons.
+struct RetranslateHiFiSessionHost: View {
+    var model: AppModel
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .translationTask(model.retranslateHifiConfig) { session in
+                model.retranslateHifiSessionArrived(AppleSessionEngine(session))
+            }
+    }
+}
+
 /// Owns the always-installed panel hosting `TranslationSessionHost`.
 /// Mirrors `HUDWindowController`/`TranslationOverlayWindowController` minus
 /// visibility control: the panel is created and ordered at bind time and
@@ -69,7 +105,16 @@ final class TranslationSessionPanelController {
         panel.isReleasedWhenClosed = false
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         panel.setFrameOrigin(NSPoint(x: screen.minX, y: screen.minY))
-        panel.contentView = NSHostingView(rootView: TranslationSessionHost(model: model))
+        // All three session hosts in one view tree: stacking multiple
+        // `.translationTask` modifiers on a single view is not reliable, and
+        // a second window would duplicate the panel lifecycle for no gain.
+        panel.contentView = NSHostingView(
+            rootView: ZStack {
+                TranslationSessionHost(model: model)
+                RetranslateSessionHost(model: model)
+                RetranslateHiFiSessionHost(model: model)
+            }
+        )
         return panel
     }
 }

@@ -42,6 +42,10 @@ struct TranscriptRow: View {
     /// True while a manual re-translation of this row's sentence is in
     /// flight: the translation dims until the fresh one replaces it.
     let isRetranslating: Bool
+    /// Provenance suffix for a lane-retried translation ("· via Apple
+    /// fast"), precomputed by `TranscriptView` (render-time comparison
+    /// against the active engine); nil = no suffix.
+    let retranslateMarker: String?
     /// True only while this row is the newest entry: a freshly appended
     /// row fades in, while older rows render opaque so recycled rows
     /// scrolling back into view don't re-fade. A recycled row whose `shown`
@@ -171,7 +175,7 @@ struct TranscriptRow: View {
         if let joined = entry.joinedTranslations {
             // The bar overlays the text's leading edge so it stretches to the
             // full height of the (possibly multi-line) translation.
-            Text(joined)
+            translationText(joined)
                 .font(.system(size: 13 * scale.factor))
                 .foregroundStyle(Theme.translationTeal)
                 .textSelection(.enabled)
@@ -190,5 +194,15 @@ struct TranscriptRow: View {
                 // up with where the translation will land.
                 .padding(.leading, 11)
         }
+    }
+
+    /// The translation with its provenance suffix when the row was retried
+    /// through a different engine. `Text` concatenation keeps wrapping one
+    /// flow; the suffix carries its own color (the outer modifier only
+    /// fills unstyled runs, so the base teal is untouched).
+    private func translationText(_ joined: String) -> Text {
+        guard let retranslateMarker else { return Text(joined) }
+        return Text(joined) + Text("  \(retranslateMarker)")
+            .foregroundStyle(Theme.secondaryText)
     }
 }
