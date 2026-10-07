@@ -125,6 +125,9 @@ struct SettingsRetranslateCard: View {
     private func optionCard(_ option: Option) -> some View {
         let isSelected = option.engine == settings.retranslateEngine
         return Button {
+            // The selected row is inert: re-running the action would re-raise
+            // the privacy disclosure sheet for a no-op pick.
+            guard !isSelected else { return }
             model.selectRetranslateEngine(option.engine)
             showsOptions = false
         } label: {
@@ -170,7 +173,16 @@ struct SettingsRetranslateCard: View {
         if !model.liveSessionRunsKind(.appleFast) {
             options.append(appleFastOption)
         }
-        if #available(macOS 26.4, *), !model.liveSessionRunsKind(.appleHighFidelity) {
+        // Hidden once the OS is known not to serve the strategy for this pair:
+        // the framework would silently fall back to fast, so offering it would
+        // resolve the retry to the fast model while labelling the row "Apple
+        // Intelligence". A probe that has not landed is not evidence either
+        // way, so the option stays listed until the probe says no. Below 26.4
+        // there is no strategy API at all, so it is never offered.
+        if #available(macOS 26.4, *),
+           !model.highFidelityKnownUnavailable,
+           !model.liveSessionRunsKind(.appleHighFidelity)
+        {
             options.append(appleIntelligenceOption)
         }
         options.append(
