@@ -177,7 +177,6 @@ struct TranscriptRow: View {
             // full height of the (possibly multi-line) translation.
             translationText(joined)
                 .font(.system(size: 13 * scale.factor))
-                .foregroundStyle(Theme.translationTeal)
                 .textSelection(.enabled)
                 .overlay(alignment: .leading) {
                     Capsule()
@@ -197,12 +196,28 @@ struct TranscriptRow: View {
     }
 
     /// The translation with its provenance suffix when the row was retried
-    /// through a different engine. `Text` concatenation keeps wrapping one
-    /// flow; the suffix carries its own color (the outer modifier only
-    /// fills unstyled runs, so the base teal is untouched).
-    private func translationText(_ joined: String) -> Text {
-        guard let retranslateMarker else { return Text(joined) }
-        return Text(joined) + Text("  \(retranslateMarker)")
-            .foregroundStyle(Theme.secondaryText)
+    /// through a different engine.
+    ///
+    /// Two `Text`s in an `HStack`, not a concatenation: an attribute applied
+    /// to a concatenated `Text` reaches EVERY run, so a single muted suffix
+    /// was rendered in the base teal — indistinguishable from the translation
+    /// — and, sitting inside the row's `.textSelection(.enabled)`, it leaked
+    /// into ⌘C as "…translation  · via DeepL". Separate views give each run
+    /// its own colour, let the marker opt out of selection (`.disabled`, the
+    /// only opt-out `textSelection(_:)` offers given the container's
+    /// `.enabled`), and keep it on one line (`fixedSize`) so it cannot break
+    /// between "· via" and the name. Baseline alignment keeps the suffix on
+    /// the text's last line.
+    private func translationText(_ joined: String) -> some View {
+        let translation = Text(joined).foregroundStyle(Theme.translationTeal)
+        return HStack(alignment: .firstTextBaseline, spacing: 0) {
+            translation
+            if let retranslateMarker {
+                Text("  \(retranslateMarker)")
+                    .foregroundStyle(Theme.secondaryText)
+                    .textSelection(.disabled)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+        }
     }
 }

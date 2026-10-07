@@ -194,9 +194,21 @@ struct TranscriptView: View {
     /// no probe.
     private func retranslateMarker(for entry: SessionEntry) -> String? {
         guard model.translationSettings.showsRetranslateMarker,
-              let engine = entry.translations.last?.engine
+              // Matched by language, not `.last`: the row renders every
+              // translation, so the marker must describe the one shown for
+              // the current target rather than whichever came last.
+              let translation = entry.translations.first(where: { existing in
+                  existing.lang == model.translationSettings.targetLanguage.code
+              }),
+              let engine = translation.engine
         else { return nil }
-        if model.activeTranslationEngine == .apple,
+        // Only the Apple kinds are provisional. Comparing an external kind
+        // needs no probe, so returning nil here would blank "· via DeepL"
+        // for the whole window a probe is pending — and forever after, since
+        // a probe killed by a stop leaves the tuple at `(false, nil)` while
+        // the transcript stays on screen.
+        if engine == .appleFast || engine == .appleHighFidelity,
+           model.activeTranslationEngine == .apple,
            model.appleHighFidelityProbe.targetCode == nil
         {
             return nil
