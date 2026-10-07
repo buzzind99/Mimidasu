@@ -79,7 +79,7 @@ struct AppModelCloudDisclosureTests {
         #expect(verified)
         #expect(settings.testResult(for: .openrouter) == .success)
         #expect(settings.selectedProvider == .apple, "the selection is held")
-        #expect(model.providerAwaitingDisclosure == .openrouter)
+        #expect(model.providerAwaitingDisclosure == .providerSwitch(.openrouter))
         #expect(model.activeExternalProvider == nil, "activation waits for the selection")
 
         await stopTranslation(model)
@@ -132,7 +132,7 @@ struct AppModelCloudDisclosureTests {
         let verified = await model.verifyAndSelectTranslationProvider(.openrouter)
 
         #expect(verified)
-        #expect(model.providerAwaitingDisclosure == .openrouter, "the disclosure re-arms")
+        #expect(model.providerAwaitingDisclosure == .providerSwitch(.openrouter), "the disclosure re-arms")
         #expect(settings.selectedProvider == .apple)
 
         await stopTranslation(model)
@@ -160,7 +160,7 @@ struct AppModelCloudDisclosureTests {
 
         _ = await model.verifyAndSelectTranslationProvider(.google)
 
-        #expect(model.providerAwaitingDisclosure == .google, "the switch re-raises the disclosure")
+        #expect(model.providerAwaitingDisclosure == .providerSwitch(.google), "the switch re-raises the disclosure")
         #expect(settings.selectedProvider == .openrouter, "the selection waits for confirmation")
 
         await stopTranslation(model)

@@ -69,7 +69,9 @@ final class AppModel {
     /// True while model discovery (resolve + SHA-256 verify) is in flight —
     /// at launch and on a Settings re-check. Start is gated on it: the
     /// verify hashes up to ~1.2 GB and must never run on the main thread.
-    private(set) var isCheckingModel = true
+    /// Internal setter: driven from `AppModelModelSelection.swift` (the
+    /// availability refresh lives there, file split for the lint gate).
+    var isCheckingModel = true
 
     /// The popover's current anchor: the surface (transcript row or live
     /// strip) whose tap owns the app's single dictionary popover, with the
@@ -100,8 +102,9 @@ final class AppModel {
 
     /// The model resolver driving every availability refresh (launch check,
     /// selection re-resolve, Settings re-check). Injectable for tests; the
-    /// default drives the real locator.
-    private let modelResolve: @Sendable (ASRModelChoice) -> URL?
+    /// default drives the real locator. Internal: invoked from
+    /// `AppModelModelSelection.swift`.
+    let modelResolve: @Sendable (ASRModelChoice) -> URL?
 
     let live = LivePartialState()
     let latency = LatencyState()
@@ -134,8 +137,9 @@ final class AppModel {
 
     /// Latest resolve result per choice (bundled → downloaded → dev, SHA-256
     /// verified). The Settings Model section reads it to enable selection;
-    /// `modelURL` is the active choice's entry.
-    private(set) var modelAvailability: [ASRModelChoice: URL] = [:]
+    /// `modelURL` is the active choice's entry. Internal setter: written by
+    /// the availability refresh in `AppModelModelSelection.swift`.
+    var modelAvailability: [ASRModelChoice: URL] = [:]
 
     /// True once this session has latched onto Apple on-device after an
     /// external engine failed (the Settings "Currently using" row surfaces it).
@@ -166,23 +170,64 @@ final class AppModel {
     /// finished is dropped. Internal: managed from `AppModelTranslation.swift`.
     var highFidelitySequence = 0
 
-    /// A key-verified external provider whose selection is held behind the
-    /// one-time cloud disclosure: the Settings sheet confirms that transcript
-    /// sentences will be sent to this provider before it becomes the
-    /// selection. Nil when no disclosure is pending. Internal: managed from
-    /// `AppModelTranslation.swift`.
-    var providerAwaitingDisclosure: TranslationProvider?
+    /// The intent held behind the cloud disclosure sheet: completing a
+    /// provider switch (the live translation engine) or a re-translate
+    /// engine selection. Nil when no disclosure is pending. Internal:
+    /// managed from `AppModelTranslation.swift` and
+    /// `AppModelRetranslate.swift`; both confirm paths dispatch through
+    /// `confirmCloudDisclosure`.
+    var providerAwaitingDisclosure: PendingCloudDisclosure?
 
     /// Sentence indexes with a manual re-translation in flight (the
     /// transcript row's hover button). Membership is a dim cue and a
     /// double-click guard only — `applyTranslation` routes on the row's
     /// languages, so nothing about a result's *correctness* depends on it.
-    /// Internal: inserted in `AppModelTranslation.retranslateSentence`, and
+    /// Internal: inserted in `AppModelRetranslate.retranslateSentence`, and
     /// cleared by four sites — the landing result (`applyTranslation`), the
     /// `.unavailable` that engages no replay (`handleTranslationStatus`),
     /// session stop (`performStop`), and the next session's begin
     /// (`onSessionBegin`). Read by views.
     var pendingRetranslations: Set<Int> = []
+
+    /// Config for the dedicated low-latency (fast model) re-translate
+    /// session, armed by the first Apple-fast retry. Internal: managed from
+    /// `AppModelRetranslate.swift`.
+    var retranslateConfig: TranslationSession.Configuration?
+
+    /// The fast-model session handed out by the second `.translationTask`
+    /// host, stored as the queue-side engine adapter. Internal: managed from
+    /// `AppModelRetranslate.swift`.
+    var retranslateSessionEngine: (any TranslationEngine)?
+
+    /// Config for the dedicated high-fidelity (Apple Intelligence) re-translate
+    /// session, armed by the first Apple-Intelligence retry. Internal:
+    /// managed from `AppModelRetranslate.swift`.
+    var retranslateHifiConfig: TranslationSession.Configuration?
+
+    /// The high-fidelity session handed out by the third `.translationTask`
+    /// host, stored as the queue-side engine adapter. Internal: managed from
+    /// `AppModelRetranslate.swift`.
+    var retranslateHifiSessionEngine: (any TranslationEngine)?
+
+    /// Serialized one-at-a-time runner for alternate-engine retries: each
+    /// new lane task awaits the previous one, so a session-backed engine
+    /// never sees concurrent `translate` calls. Internal setter: driven from
+    /// `AppModelRetranslate.swift` (the lane lives there, file split for the
+    /// lint gate).
+    var retranslateLaneTask: Task<Void, Never>?
+
+    /// The lane-owned subset of `pendingRetranslations`: markers the
+    /// re-translate lane itself inserted. The queue engine's terminal
+    /// `.unavailable` clear drops queue-owned markers only — a lane
+    /// translation in flight still has its deliverer, and losing the marker
+    /// would re-open the double-click guard. Internal: managed from
+    /// `AppModelRetranslate.swift`.
+    var lanePendingRetranslations: Set<Int> = []
+
+    /// Injectable factory for the lane's external engines (tests); nil
+    /// drives `makeExternalEngine(for:)`. Internal: invoked from
+    /// `AppModelRetranslate.swift`.
+    var retranslateEngineFactory: (@Sendable (TranslationProvider) -> (any TranslationEngine)?)?
 
     /// The refresh spawned by the most recent `selectModel` (tracked so
     /// `adoptDownloadedModel` can await it instead of stacking passes).
@@ -211,7 +256,9 @@ final class AppModel {
     /// Monotonic instants: a wall-clock change mid-session must not distort
     /// the elapsed display.
     private(set) var sessionStartedAt: ContinuousClock.Instant?
-    private(set) var sessionEndedAt: ContinuousClock.Instant?
+    /// Internal setter: `performStop` lives in `AppModelTermination.swift`
+    /// (file split for the lint gate).
+    var sessionEndedAt: ContinuousClock.Instant?
     /// When the capture source died mid-session (`.sourceLost`). The SESSION
     /// card freezes at it during the outage — the session clock itself
     /// survives a successful restart, so duration resumes counting then.
@@ -224,8 +271,9 @@ final class AppModel {
     /// Sentence index → position in `entries`. Entries are append-only within
     /// a session (positions never shift), so translations resolve in O(1)
     /// instead of scanning the transcript per arrival. Cleared with
-    /// `entries` on session begin.
-    private var entryPositionBySentence: [Int: Int] = [:]
+    /// `entries` on session begin. Internal setter: written from
+    /// `AppModelTranslation.swift` (`applyTranslation`).
+    var entryPositionBySentence: [Int: Int] = [:]
 
     /// Injectable HTTP transport for the external engines (tests); nil drives
     /// the real per-provider `URLSession` transports.
@@ -319,6 +367,7 @@ final class AppModel {
             // it any re-translation marker still waiting on its result.
             translationQueue.resetForNewSession()
             pendingRetranslations.removeAll()
+            lanePendingRetranslations.removeAll()
             sessionCharacterCount = 0
             hudPinnedIndex = nil
             sessionStartedAt = .now
@@ -368,46 +417,8 @@ final class AppModel {
 
     // MARK: - Model / app discovery
 
-    /// Re-checks both model choices and moves `idle`↔`needsModel` by the
-    /// active choice's result. The resolve (existence + SHA-256 verify,
-    /// hashing up to ~1.2 GB) runs off-main and the result is hopped back
-    /// here; `isCheckingModel` gates Start while the check is in flight.
-    /// `resolve` overrides the stored resolver for tests; by default the
-    /// resolver injected at init drives the lookup. The active choice's URL
-    /// also lands in `modelURL` and every choice's result in
-    /// `modelAvailability` (Settings rows).
-    func refreshModelAvailability(
-        resolve: (@Sendable (ASRModelChoice) -> URL?)? = nil
-    ) async {
-        let resolve = resolve ?? modelResolve
-        isCheckingModel = true
-        let selected = asrModelSettings.selected
-        let resolved = await Task.detached(priority: .userInitiated) { () -> [ASRModelChoice: URL] in
-            // Both choices resolve concurrently: each verify hashes up to
-            // ~1.2 GB, and parallel keeps the wall time at the slower one
-            // instead of the sum.
-            await withTaskGroup(of: (ASRModelChoice, URL?).self) { group in
-                for choice in ASRModelChoice.allCases {
-                    group.addTask { (choice, resolve(choice)) }
-                }
-                var availability: [ASRModelChoice: URL] = [:]
-                for await (choice, url) in group {
-                    availability[choice] = url
-                }
-                return availability
-            }
-        }.value
-        modelAvailability = resolved
-        let url = resolved[selected]
-        modelURL = url
-        if url == nil, phase == .idle {
-            phase = .needsModel
-        } else if url != nil, phase == .needsModel {
-            phase = .idle
-        }
-        sessionController.warmUpIfNeeded(modelURL: url)
-        isCheckingModel = false
-    }
+    // Availability refresh lives in `AppModelModelSelection.swift` (file
+    // split for the lint gate).
 
     // MARK: - Model selection
 
@@ -498,53 +509,6 @@ final class AppModel {
         sessionController.armNoAudioWatchdog()
     }
 
-    func stop() {
-        // `.starting` is stoppable too: begin() is a multi-await operation
-        // (TCC prompt, capture, engine), and a session the user cancels
-        // mid-start must never come up afterwards.
-        guard phase == .starting || phase == .running || phase == .sourceLost else { return }
-        phase = .stopping
-
-        stopTask = Task { @MainActor in
-            await performStop()
-            stopTask = nil
-        }
-    }
-
-    /// Teardown via `SessionController` (capture, ASR, buffering, timers),
-    /// after which the translation queue has drained and the session winds
-    /// down. That keeps the tail of the session exportable with translations
-    /// intact.
-    ///
-    /// The translation config is deliberately left alive: once drained, the
-    /// worker is suspended harmlessly, and keeping the config non-nil lets
-    /// `beginSession` restart via the reliable invalidate + reassign path
-    /// (same as `retryTranslation`). Nil-ing here and reassigning an
-    /// identical config on start is a path SwiftUI's `.translationTask`
-    /// does not reliably re-fire on. Internal: driven by `stop()` and from
-    /// `AppModelTermination.swift`.
-    func performStop() async {
-        await sessionController.stop()
-        // The external worker parks in the queue's wake loop after draining;
-        // once `sessionController.stop()` has drained (translations intact),
-        // tear it down. Apple runs are owned by SwiftUI and stay parked.
-        translationWorker?.cancel()
-        translationWorker = nil
-        // Teardown supersedes any airborne high-fidelity probe: a landing
-        // must not mark a session that no longer exists.
-        highFidelitySequence += 1
-        translationStatus = .idle
-        // The transcript stays on screen after a stop, so a row waiting on a
-        // re-translation would sit dimmed with its button disabled. Nothing
-        // will deliver that result any more; drop the cue.
-        pendingRetranslations.removeAll()
-        sessionEndedAt = .now
-        // Stop/teardown clears all toasts and notices (phase → `.idle`).
-        toasts.clearAll()
-        notices.dismiss()
-        phase = .idle
-    }
-
     /// Restarts the capture stream mid-session — the `capture.lost` toast's
     /// fix action. Guarded on `.sourceLost`: a
     /// double-tap is a no-op and a `stop()` during the restart wins the race
@@ -582,19 +546,5 @@ final class AppModel {
         // Synchronous main-actor enqueue: by the time `stop` drains, every
         // emitted sentence is observably in the queue.
         translationQueue.enqueue(sentence)
-    }
-
-    /// Internal (not private) so tests can exercise known/unknown indexes.
-    /// Routing is the entry's decision, not the caller's: it swaps the
-    /// row's same-language translation in place and appends only a genuinely
-    /// new language. So a repeat, an engine-swap replay, and a manual retry
-    /// all land as the fresh text — none of them can grow an `" / "` pileup.
-    func applyTranslation(index: Int, translation: SentenceTranslation) {
-        // Cleared before the row lookup: a result whose row is gone (the
-        // transcript cleared underneath it) must still retire its marker,
-        // or the row stays dimmed with its retry button dead.
-        pendingRetranslations.remove(index)
-        guard let at = entryPositionBySentence[index] else { return }
-        entries[at].replaceTranslation(translation)
     }
 }

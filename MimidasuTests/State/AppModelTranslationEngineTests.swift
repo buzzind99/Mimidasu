@@ -391,7 +391,7 @@ struct AppModelTranslationEngineTests {
         #expect(verified)
         #expect(settings.testResult(for: .openrouter) == .success)
         #expect(settings.selectedProvider == .google, "the switch waits for the disclosure")
-        #expect(model.providerAwaitingDisclosure == .openrouter)
+        #expect(model.providerAwaitingDisclosure == .providerSwitch(.openrouter))
 
         model.confirmCloudDisclosure()
         #expect(settings.selectedProvider == .openrouter, "confirming moves the selection")

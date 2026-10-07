@@ -1,0 +1,374 @@
+import Foundation
+@testable import Mimidasu
+import Synchronization
+import Testing
+
+/// Tests the alternate-engine re-translate lane's runner semantics against
+/// mock engines: engine-stamped delivery, unstamped cache seeding,
+/// serialization of lane flights, the post-stop phase gate, marker
+/// ownership vs the queue's terminal `.unavailable` clear, and the lane
+/// toasts.
+@MainActor
+@Suite("AppModel re-translate lane")
+struct AppModelRetranslateLaneTests {
+
+    // MARK: - Fixtures
+
+    private let sentenceText = "テスト"
+    private let resultTimeout: TimeInterval = 5
+
+    private func makeSUT() async -> AppModel {
+        let model = AppModel(
+            translationSettings: isolatedTranslationSettings(suite: "test.AppModelRetranslateLane"),
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelRetranslateLane"),
+            favorites: isolatedFavorites(),
+            highFidelityProbe: { _ in false },
+            initialModelResolve: { _ in nil }
+        )
+        await model.initialModelCheck?.value
+        return model
+    }
+
+    private func makeSentence(
+        index: Int, text: String = "テスト"
+    ) -> Sentence {
+        Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: text)
+    }
+
+    /// Attaches a queue worker the way `activateTranslation` does, so the
+    /// session-engine path can serve a retry.
+    @discardableResult
+    private func attachWorker(_ model: AppModel) async -> Task<Void, Never> {
+        let worker = Task { await model.translationQueue.run(with: QueueEchoEngine()) }
+        #expect(
+            await pollUntil(timeout: resultTimeout) { model.translationQueue.hasWorker },
+            "the queue worker must be attached before a retry can be served"
+        )
+        return worker
+    }
+
+    // MARK: - Lane delivery
+
+    @Test("a lane result stamps the engine and seeds the cache unstamped")
+    func laneResultStampsEngineAndSeedsCacheUnstamped() async {
+        let model = await makeSUT()
+        let engine = LaneEchoEngine()
+        model.retranslateEngineFactory = { provider in
+            #expect(provider == .google)
+            return engine
+        }
+        model.translationSettings.selectRetranslate(.google)
+        model.phase = .running
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+
+        model.retranslateSentence(sentence)
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                model.entries[0].translations
+                    == [SentenceTranslation(lang: "en", text: "JA:テスト", engine: .google)]
+            },
+            "the lane result lands stamped"
+        )
+        #expect(model.pendingRetranslations.isEmpty, "the result retires the marker")
+        #expect(model.lanePendingRetranslations.isEmpty)
+        #expect(engine.recordedBatches == [[sentenceText]], "one lane flight")
+
+        // A later repeat of the sentence (a fresh row) serves through the
+        // normal queue path: the retried text, no provenance.
+        model.sessionController.onSentence?(makeSentence(index: 9))
+        let repeatEntry = model.entries.first(where: { entry in entry.sentence.index == 9 })
+        #expect(repeatEntry?.translations == [SentenceTranslation(lang: "en", text: "JA:テスト")])
+        #expect(repeatEntry?.translations.first?.engine == nil, "the seed is unstamped")
+    }
+
+    @Test("an unavailable lane engine posts a toast and skips the row")
+    func unavailableLaneEnginePostsToastAndSkips() async {
+        let model = await makeSUT()
+        let calls = Mutex(0)
+        model.retranslateEngineFactory = { provider in
+            calls.withLock { counter in counter += 1 }
+            #expect(provider == .openrouter)
+            return nil
+        }
+        model.translationSettings.selectRetranslate(.openrouter)
+        model.phase = .running
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+        model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
+
+        model.retranslateSentence(sentence)
+
+        #expect(model.pendingRetranslations.isEmpty, "nothing is in flight — no marker")
+        #expect(model.lanePendingRetranslations.isEmpty)
+        #expect(
+            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            "the row keeps its previous translation"
+        )
+        let toast = model.toasts.toasts.first(where: { candidate in candidate.key == ToastKey.retranslate })
+        #expect(toast?.title == "Re-translate unavailable")
+        #expect(toast?.body == "No API key stored for OpenRouter.")
+    }
+
+    // MARK: - Serialization
+
+    @Test("lane translations serialize — the second click chains, never races")
+    func laneTranslationsSerialize() async {
+        let model = await makeSUT()
+        let engine = LaneGatedEngine()
+        model.retranslateEngineFactory = { _ in engine }
+        model.translationSettings.selectRetranslate(.google)
+        model.phase = .running
+        let first = makeSentence(index: 1, text: "一")
+        let second = makeSentence(index: 2, text: "二")
+        model.sessionController.onSentence?(first)
+        model.sessionController.onSentence?(second)
+
+        model.retranslateSentence(first)
+        #expect(
+            await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
+            "the first flight enters the parked engine"
+        )
+        model.retranslateSentence(second)
+        #expect(engine.recordedBatches.count == 1, "the second click chains behind the first")
+
+        engine.openGate()
+        #expect(
+            await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 2 },
+            "the chained flight runs once the gate opens"
+        )
+        #expect(engine.recordedBatches == [["一"], ["二"]], "strict one-at-a-time order")
+        #expect(model.pendingRetranslations.isEmpty)
+        #expect(model.lanePendingRetranslations.isEmpty)
+    }
+
+    @Test("a duplicate lane click while the row already retranslates is a no-op")
+    func duplicateLaneClickIsRefused() async {
+        let model = await makeSUT()
+        let engine = LaneGatedEngine()
+        model.retranslateEngineFactory = { _ in engine }
+        model.translationSettings.selectRetranslate(.google)
+        model.phase = .running
+        let sentence = makeSentence(index: 7, text: "一")
+        model.sessionController.onSentence?(sentence)
+
+        model.retranslateSentence(sentence)
+        #expect(await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 })
+
+        model.retranslateSentence(sentence)
+        #expect(engine.recordedBatches.count == 1, "the marker refuses the duplicate")
+        #expect(model.pendingRetranslations == [7])
+
+        engine.openGate()
+        #expect(await pollUntil(timeout: resultTimeout) { model.pendingRetranslations.isEmpty })
+    }
+
+    // MARK: - Phase gates
+
+    @Test("a lane result landing after a stop is dropped")
+    func laneResultAfterStopIsDropped() async {
+        let model = await makeSUT()
+        let engine = LaneGatedEngine()
+        model.retranslateEngineFactory = { _ in engine }
+        model.translationSettings.selectRetranslate(.google)
+        model.phase = .running
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+        model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
+
+        model.retranslateSentence(sentence)
+        #expect(await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 })
+
+        await model.performStop()
+        #expect(model.pendingRetranslations.isEmpty, "stop cleared the marker")
+        #expect(model.phase == .idle)
+
+        engine.openGate()
+        // Give the late flight a beat to land before asserting it was dropped.
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(
+            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            "the late landing must not swap the row"
+        )
+        #expect(
+            !model.toasts.toasts.contains(where: { toast in toast.key == ToastKey.retranslate }),
+            "no failure toast after the stop cleared the stack"
+        )
+    }
+
+    @Test("a queue unavailable mid-lane keeps the lane marker")
+    func queueUnavailableKeepsLaneMarker() async {
+        let model = await makeSUT()
+        let engine = LaneGatedEngine()
+        model.retranslateEngineFactory = { _ in engine }
+        model.translationSettings.selectRetranslate(.google)
+        model.phase = .running
+        model.activeTranslationEngine = .apple
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+
+        model.retranslateSentence(sentence)
+        #expect(await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 })
+
+        model.handleTranslationStatus(.unavailable("Apple failed", .permanent))
+        #expect(
+            model.pendingRetranslations == [7],
+            "the lane translation still has a deliverer"
+        )
+        #expect(model.lanePendingRetranslations == [7])
+
+        model.retranslateSentence(sentence)
+        #expect(engine.recordedBatches.count == 1, "the surviving marker refuses a duplicate")
+
+        engine.openGate()
+        #expect(await pollUntil(timeout: resultTimeout) { model.pendingRetranslations.isEmpty })
+    }
+
+    @Test("a failed lane run posts the failure toast and clears the marker")
+    func failedLaneRunPostsFailureToastAndClearsMarker() async {
+        let model = await makeSUT()
+        model.retranslateEngineFactory = { _ in LaneEmptyEngine() }
+        model.translationSettings.selectRetranslate(.google)
+        model.phase = .running
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+        model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
+
+        model.retranslateSentence(sentence)
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
+            },
+            "the failed run has no deliverer — the marker clears"
+        )
+        let toast = model.toasts.toasts.first(where: { candidate in candidate.key == ToastKey.retranslate })
+        #expect(toast?.title == "Re-translate failed")
+        #expect(
+            toast?.body == TranslationQueue.describe(
+                TranslationEngineError.badResponse("Expected 1 translation, got 0")
+            )
+        )
+        #expect(
+            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            "the row keeps its previous translation"
+        )
+    }
+
+    @Test("a cancelled lane flight is dropped silently")
+    func cancelledLaneFlightIsDroppedSilently() async {
+        let model = await makeSUT()
+        let engine = LaneCancellableEngine()
+        model.retranslateEngineFactory = { _ in engine }
+        model.translationSettings.selectRetranslate(.google)
+        model.phase = .running
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+        model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
+
+        model.retranslateSentence(sentence)
+        #expect(await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 })
+        // Direct cancellation (production reaches this only via stop, which
+        // clears the markers and the toast stack itself).
+        model.retranslateLaneTask?.cancel()
+        try? await Task.sleep(for: .milliseconds(100))
+
+        #expect(
+            !model.toasts.toasts.contains(where: { toast in toast.key == ToastKey.retranslate }),
+            "a cancelled flight posts nothing"
+        )
+        #expect(
+            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            "the cancelled flight must not swap the row"
+        )
+    }
+}
+
+/// Lane fixture whose `translate` parks until the gate opens, so a test can
+/// hold a flight mid-air and prove a second click does not start a competing
+/// one and that a late landing is dropped.
+private final class LaneGatedEngine: TranslationEngine, @unchecked Sendable {
+    let preferredBatchSize = 4
+    var onRetry: (@Sendable (RetryProgress) -> Void)?
+
+    private let state = Mutex(LaneGateState())
+
+    var recordedBatches: [[String]] {
+        state.withLock { gateState in gateState.batches }
+    }
+
+    /// Releases every parked `translate`, and lets any that arrives later
+    /// through.
+    func openGate() {
+        let parked = state.withLock { gateState -> [CheckedContinuation<Void, Never>] in
+            gateState.open = true
+            let parked = gateState.waiters
+            gateState.waiters.removeAll()
+            return parked
+        }
+        for waiter in parked {
+            waiter.resume()
+        }
+    }
+
+    func translate(_ texts: [String]) async throws -> [String] {
+        state.withLock { gateState in gateState.batches.append(texts) }
+        await withCheckedContinuation { continuation in
+            let immediate = state.withLock { gateState -> CheckedContinuation<Void, Never>? in
+                guard !gateState.open else { return continuation }
+                gateState.waiters.append(continuation)
+                return nil
+            }
+            immediate?.resume()
+        }
+        return texts.map { text in "JA:\(text)" }
+    }
+}
+
+private struct LaneGateState {
+    var open = false
+    var batches: [[String]] = []
+    var waiters: [CheckedContinuation<Void, Never>] = []
+}
+
+/// Session-engine fixture: prefixes with "EN:".
+private final class QueueEchoEngine: TranslationEngine, @unchecked Sendable {
+    let preferredBatchSize = 16
+    var onRetry: (@Sendable (RetryProgress) -> Void)?
+
+    func translate(_ texts: [String]) async throws -> [String] {
+        texts.map { text in "EN:\(text)" }
+    }
+}
+
+/// Lane fixture that answers an empty batch — a count mismatch the queue
+/// treats as a failed batch, here surfaced as the lane's failure toast.
+private final class LaneEmptyEngine: TranslationEngine, @unchecked Sendable {
+    let preferredBatchSize = 4
+    var onRetry: (@Sendable (RetryProgress) -> Void)?
+
+    func translate(_ texts: [String]) async throws -> [String] {
+        []
+    }
+}
+
+/// Lane fixture whose `translate` parks cancellably — cancelling the lane
+/// task surfaces as `CancellationError` out of the engine call itself.
+private final class LaneCancellableEngine: TranslationEngine, @unchecked Sendable {
+    let preferredBatchSize = 4
+    var onRetry: (@Sendable (RetryProgress) -> Void)?
+
+    private let state = Mutex([[String]]())
+
+    var recordedBatches: [[String]] {
+        state.withLock { batches in batches }
+    }
+
+    func translate(_ texts: [String]) async throws -> [String] {
+        state.withLock { batches in batches.append(texts) }
+        try Task.checkCancellation()
+        try await Task.sleep(for: .seconds(30))
+        return texts.map { text in "JA:\(text)" }
+    }
+}

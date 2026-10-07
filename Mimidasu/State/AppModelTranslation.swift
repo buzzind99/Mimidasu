@@ -27,32 +27,6 @@ extension AppModel {
         reengageTranslation()
     }
 
-    /// Manual retry for one transcript row: re-runs the sentence through the
-    /// queue (cache evicted) and swaps the fresh result into the row in
-    /// place. Idempotent: a click while this row already retranslates (the
-    /// marker is still set), or while the sentence's translation is queued
-    /// or airborne for any reason (the queue owns that check), is a no-op —
-    /// both guards run before the marker insert so a no-op never dims the
-    /// row. Gated on a live session *and* an attached worker: `pending`
-    /// outlives a run by design, so a request made with no engine to serve it
-    /// would park indefinitely with no result to lift the marker. The index
-    /// rides in `pendingRetranslations` until the result lands, dimming the
-    /// row in the meantime — cleared by the landing result, by a failure that
-    /// engages no replay, by session stop, and by the next session's begin.
-    ///
-    /// `.sourceLost` counts as live: capture can die mid-session while the
-    /// translation worker keeps draining, and a line worth re-running is
-    /// exactly what a user reaches for then.
-    func retranslateSentence(_ sentence: Sentence) {
-        guard phase == .running || phase == .sourceLost else { return }
-        guard translationQueue.hasWorker else { return }
-        guard !pendingRetranslations.contains(sentence.index),
-              !translationQueue.isAwaitingTranslation(sentence)
-        else { return }
-        pendingRetranslations.insert(sentence.index)
-        translationQueue.retranslate(sentence)
-    }
-
     /// Re-arms the one-way auto-fallback and re-attaches the selected engine:
     /// resets the latch, dismisses the latched degraded card (its Reconnect
     /// action would otherwise linger), then activates. Shared by the manual
@@ -76,7 +50,13 @@ extension AppModel {
         // Stamp the queue with the current target before any engine
         // attaches: `translateBatch` labels every result with it.
         translationQueue.targetLangCode = translationSettings.targetLanguage.code
-        if let engine = makeExternalEngine() {
+        if var engine = makeExternalEngine(for: translationSettings.selectedProvider) {
+            // The lane leaves the retry hook nil (a per-row retry-progress
+            // toast is noise); only the live queue path reports it.
+            let queue = translationQueue
+            engine.onRetry = { progress in
+                Task { @MainActor in queue.noteRetry(progress) }
+            }
             activeTranslationEngine = .external
             activeExternalProvider = translationSettings.selectedProvider
             // Invalidate any airborne Apple probe: the fallback latch can
@@ -86,7 +66,6 @@ extension AppModel {
             appleHighFidelityProbe = (false, nil)
             translationConfig?.invalidate()
             translationWorker?.cancel()
-            let queue = translationQueue
             translationWorker = Task {
                 await queue.run(with: engine)
             }
@@ -97,6 +76,13 @@ extension AppModel {
             // (`TranslationSettings.init`), so externals always land here.
             activeTranslationEngine = .apple
             activeExternalProvider = nil
+            // Drop any fast-model retranslate session from a prior session
+            // or prior target: the armed config pins the target it was built
+            // for. Target changes are restart-only, so within a session the
+            // armed config is always current — the reset is for the session
+            // boundary (performStop covers the external-provider side, where
+            // this branch never runs).
+            teardownRetranslateSession()
             refreshTranslationConfig()
             probeHighFidelity()
         }
@@ -136,7 +122,7 @@ extension AppModel {
             // Already selected: a re-test, not a switch — re-attach directly.
             translationProviderDidChange()
         } else if provider.isExternal {
-            providerAwaitingDisclosure = provider
+            providerAwaitingDisclosure = .providerSwitch(provider)
         } else {
             translationSettings.select(provider)
         }
@@ -163,40 +149,50 @@ extension AppModel {
         return true
     }
 
-    /// Confirms the pending cloud disclosure: completes the held selection
-    /// (SettingsView's `.onChange` then re-attaches the engine). The sheet
-    /// dismisses through the cleared `providerAwaitingDisclosure`.
+    /// Confirms the pending cloud disclosure: completes the held intent — a
+    /// provider selection (SettingsView's `.onChange` then re-attaches the
+    /// engine) or a re-translate engine selection. The sheet dismisses
+    /// through the cleared `providerAwaitingDisclosure`.
     func confirmCloudDisclosure() {
-        guard let provider = providerAwaitingDisclosure else { return }
+        guard let disclosure = providerAwaitingDisclosure else { return }
         providerAwaitingDisclosure = nil
-        translationSettings.select(provider)
+        switch disclosure {
+        case let .providerSwitch(provider):
+            translationSettings.select(provider)
+        case let .retranslateEngine(provider):
+            guard let engine = RetranslateEngine(provider: provider) else { return }
+            translationSettings.selectRetranslate(engine)
+        }
     }
 
-    /// Declines the pending cloud disclosure: the selection stays put and
-    /// nothing is recorded — the next switch to that provider raises the
-    /// disclosure again.
+    /// Declines the pending cloud disclosure: nothing is recorded — the
+    /// next switch (provider or re-translate engine) raises the disclosure
+    /// again.
     func declineCloudDisclosure() {
         providerAwaitingDisclosure = nil
     }
 
-    /// Builds the selected external provider's engine, or nil when Apple is
-    /// selected (or the external provider has no usable key — the unconfigured
-    /// edge falls back to Apple with a note in `activateTranslation`). The
-    /// selected target language threads into every engine: the OpenRouter
-    /// prompt names it, Google/DeepL map it to their wire codes.
-    private func makeExternalEngine() -> (any TranslationEngine)? {
-        let provider = translationSettings.selectedProvider
+    /// Builds `provider`'s engine, or nil when the provider isn't external
+    /// or has no usable key (Apple is served by the `.translationTask` host
+    /// in `activateTranslation`; the unconfigured edge falls back to Apple
+    /// with a note there). The selected target language threads into every
+    /// engine: the OpenRouter prompt names it, Google/DeepL map it to their
+    /// wire codes. No retry hook is wired — the activation path attaches
+    /// `onRetry` after building; the re-translate lane leaves it nil.
+    /// Internal: the re-translate lane's injectable factory defaults to it.
+    func makeExternalEngine(for provider: TranslationProvider) -> (any TranslationEngine)? {
         guard provider.isExternal, let key = translationSettings.key(for: provider) else {
             return nil
         }
-        // The guard narrowed the domain to the external providers; Apple is
-        // served by the `.translationTask` host in `activateTranslation`.
         let target = translationSettings.targetLanguage
-        var engine: any TranslationEngine = if provider == .google {
+        return switch provider {
+        case .apple:
+            nil
+        case .google:
             GoogleTranslateEngine(apiKey: key, target: target, transport: translationTransport)
-        } else if provider == .deepl {
+        case .deepl:
             DeepLEngine(apiKey: key, target: target, transport: translationTransport)
-        } else {
+        case .openrouter:
             OpenRouterEngine(
                 apiKey: key,
                 model: translationSettings.openRouterModel,
@@ -204,11 +200,6 @@ extension AppModel {
                 transport: translationTransport
             )
         }
-        let queue = translationQueue
-        engine.onRetry = { progress in
-            Task { @MainActor in queue.noteRetry(progress) }
-        }
-        return engine
     }
 
     /// Routes queue status updates to the published state, reconciles the
@@ -233,8 +224,11 @@ extension AppModel {
             // dimmed for the rest of the session, and neither the row button
             // (hidden under the failure card, no worker) nor the retry guard
             // could act. Drop the cue; the way back is the card's Reconnect,
-            // which re-attaches an engine and replays the backlog.
-            pendingRetranslations.removeAll()
+            // which re-attaches an engine and replays the backlog. A lane
+            // translation in flight still has its own deliverer, so its
+            // marker survives — dropping it would re-open the double-click
+            // guard and stack a duplicate lane task.
+            pendingRetranslations.formIntersection(lanePendingRetranslations)
             return
         }
         // The one branch a fresh engine follows, so the backlog (and every
@@ -375,5 +369,20 @@ extension AppModel {
             to: Locale.Language(identifier: targetCode)
         )
         return status == .installed
+    }
+
+    /// Internal (not private) so tests can exercise known/unknown indexes.
+    /// Routing is the entry's decision, not the caller's: it swaps the
+    /// row's same-language translation in place and appends only a genuinely
+    /// new language. So a repeat, an engine-swap replay, and a manual retry
+    /// all land as the fresh text — none of them can grow an `" / "` pileup.
+    func applyTranslation(index: Int, translation: SentenceTranslation) {
+        // Cleared before the row lookup: a result whose row is gone (the
+        // transcript cleared underneath it) must still retire its marker,
+        // or the row stays dimmed with its retry button dead.
+        pendingRetranslations.remove(index)
+        lanePendingRetranslations.remove(index)
+        guard let at = entryPositionBySentence[index] else { return }
+        entries[at].replaceTranslation(translation)
     }
 }
