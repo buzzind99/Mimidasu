@@ -419,7 +419,10 @@ lock; cross-thread handoff uses value types only.
       "end_s": 15.04,
       "lang": "ja",                // per-sentence
       "transcript": "今日はいい天気ですね。",
-      "translations": [ { "lang": "en", "text": "Nice weather today, isn't it?" } ]
+      "translations": [
+        { "lang": "en", "text": "Nice weather today, isn't it?" },
+        { "lang": "en", "text": "Lovely day, isn't it?", "engine": "deepl" }
+      ]
     }
   ]
 }
@@ -428,6 +431,18 @@ lock; cross-thread handoff uses value types only.
 Invariants: consumers read languages from fields (never assume);
 `translations` is append-only; `schema_version` governs evolution;
 sentence `index` is stable and keys JP↔translation alignment.
+
+A translation entry may carry an optional `engine` field — the engine that
+produced it via a manual row re-translate through an engine other than the
+session engine (`appleFast` / `appleHighFidelity` / `google` / `deepl` /
+`openrouter`; the Apple models only exist on macOS 26.4+, where `appleFast`
+is the traditional low-latency model and `appleHighFidelity` the Apple
+Intelligence model). Session-engine results never carry
+the field (absent = the session engine, never manually retried), so old
+documents and fresh live-captions-only sessions are byte-identical; the
+field is additive under schema v1. Whether retried rows also show the
+engine inline in the UI is a Settings toggle (`translation.retranslateMarker`,
+default on).
 
 ## App bundle layout
 
