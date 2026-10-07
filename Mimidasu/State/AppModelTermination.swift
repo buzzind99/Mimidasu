@@ -47,15 +47,14 @@ extension AppModel {
         // late result), the armed fast-session state goes with the session —
         // a next session on an external provider never takes the Apple
         // branch, so a config armed for a prior target must not survive —
-        // and the lane-owned markers join the queue's clear.
+        // and the lane-owned markers join the queue's clear. The teardown's
+        // epoch bump retires stragglers: cancelling reaches only the newest
+        // chained link, earlier lane tasks keep running to completion, and
+        // without it they would pass the phase guard in the NEXT session
+        // (indexes restart at 0) and swap an unrelated row's translation.
         retranslateLaneTask?.cancel()
         retranslateLaneTask = nil
         lanePendingRetranslations.removeAll()
-        // Cancelling reaches only the newest chained link; earlier lane tasks
-        // keep running to completion. The epoch retires them — without it a
-        // straggler would pass the phase guard in the NEXT session (indexes
-        // restart at 0) and swap an unrelated row's translation.
-        retranslateSessionEpoch += 1
         teardownRetranslateSession()
         sessionEndedAt = .now
         // Stop/teardown clears all toasts and notices (phase → `.idle`).

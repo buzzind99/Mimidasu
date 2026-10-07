@@ -331,6 +331,20 @@ final class TranslationQueue {
         enqueue(sentence)
     }
 
+    /// Evicts any queued copy of the sentence WITHOUT enqueueing or touching
+    /// the cache — the re-translate lane's eviction, for when the sentence
+    /// sits in a failed-out backlog (`pending` survives a run by design).
+    /// The backlog copy would otherwise be replayed by a later engine
+    /// attach (Reconnect), whose unstamped result would overwrite the
+    /// lane's stamped one and drop the row's provenance marker — a second
+    /// paid round-trip for a sentence the user already paid to re-run. The
+    /// cache is deliberately left alone: the lane seeds the retried text on
+    /// landing, and if the lane fails instead, the old cached translation
+    /// remains the correct serve for a repeat.
+    func dropPending(_ sentence: Sentence) {
+        pending.removeAll { queued in queued.id == sentence.id }
+    }
+
     /// Reports an external engine's transient-retry progress to the footer
     /// (wired from the engine's `onRetry`, hopped to the main actor). The
     /// retry hop is asynchronous, so a late report can land outside the

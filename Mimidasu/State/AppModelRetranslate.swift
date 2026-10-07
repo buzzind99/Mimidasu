@@ -157,6 +157,11 @@ extension AppModel {
             // deliverer.
             pendingRetranslations.insert(sentence.index)
             lanePendingRetranslations.insert(sentence.index)
+            // The lane owns this sentence now: if it sits in a failed-out
+            // backlog, drop the queued copy so a later Reconnect replay
+            // cannot re-translate it and overwrite the lane's stamped
+            // result with an unstamped one.
+            translationQueue.dropPending(sentence)
             runRetranslateLane(sentence, kind: kind, engine: engine)
         case let .unavailable(reason):
             // Toast + skip — no state touched, the row keeps its translation.
@@ -277,7 +282,7 @@ extension AppModel {
             // unwrap is the only exit that skips `retireLaneMarker`.
             guard let self else { return }
             guard retranslateLaneCanDeliver(epoch: epoch) else {
-                retireLaneMarker(sentence.index)
+                retireLaneMarker(sentence.index, epoch: epoch)
                 return
             }
             let resolved = await laneEngine(engine, kind: kind)
@@ -285,7 +290,7 @@ extension AppModel {
             case .cancelled:
                 // The stop already cleared every toast; a "still starting"
                 // message here would outlive it and misreport a cancellation.
-                retireLaneMarker(sentence.index)
+                retireLaneMarker(sentence.index, epoch: epoch)
                 return
             case .timedOut:
                 // The dedicated Apple session is still starting (or a
@@ -293,7 +298,7 @@ extension AppModel {
                 // armed, so the next click is instant once it lands. Only
                 // Apple selections can arrive here — externals build their
                 // engine (or fail) at resolve time.
-                retireLaneMarker(sentence.index)
+                retireLaneMarker(sentence.index, epoch: epoch)
                 // The wait consumed the whole arm window — the outcome most
                 // likely to have crossed a stop (older links are not
                 // cancelled), so the same delivery guard as `.ready` applies
@@ -310,7 +315,7 @@ extension AppModel {
                 // The wait may have consumed the stop window; re-check before
                 // flying so a stopped session never issues an engine call.
                 guard retranslateLaneCanDeliver(epoch: epoch) else {
-                    retireLaneMarker(sentence.index)
+                    retireLaneMarker(sentence.index, epoch: epoch)
                     return
                 }
                 await fly(sentence, through: engine, kind: kind, epoch: epoch)
@@ -330,7 +335,7 @@ extension AppModel {
             // cleared the markers, and the transcript stays visible after stop
             // — a late landing must not swap the row.
             guard retranslateLaneCanDeliver(epoch: epoch) else {
-                retireLaneMarker(sentence.index)
+                retireLaneMarker(sentence.index, epoch: epoch)
                 return
             }
             guard let text = results.first else {
@@ -353,9 +358,9 @@ extension AppModel {
                 translationQueue.seedCache(sentence, pair)
             }
         } catch is CancellationError {
-            retireLaneMarker(sentence.index)
+            retireLaneMarker(sentence.index, epoch: epoch)
         } catch {
-            retireLaneMarker(sentence.index)
+            retireLaneMarker(sentence.index, epoch: epoch)
             // Stop already cleared all toasts; don't repost after it.
             guard retranslateLaneCanDeliver(epoch: epoch) else { return }
             postRetranslateFailedToast(error)
@@ -377,7 +382,17 @@ extension AppModel {
     /// restart — the phase simply parks in `.starting` while the device
     /// reopens, and a lane task crossing that window has to retire its own
     /// marker.
-    private func retireLaneMarker(_ index: Int) {
+    ///
+    /// Gated on the captured epoch: retirement is the one lane operation a
+    /// *stale* task still performs after its own delivery guards fail, and a
+    /// blind remove by index could clobber a marker a NEW session's retry
+    /// just inserted for the same (restarted-at-0) index — undimming a row
+    /// whose translation is still in flight and reopening the double-click
+    /// guard. A stale task's own markers were already retired by whichever
+    /// boundary bumped the epoch, so skipping is always correct; the one
+    /// epoch-preserving boundary (capture restart) still retires.
+    private func retireLaneMarker(_ index: Int, epoch: Int) {
+        guard epoch == retranslateSessionEpoch else { return }
         pendingRetranslations.remove(index)
         lanePendingRetranslations.remove(index)
     }
@@ -489,10 +504,20 @@ extension AppModel {
     /// toast over the activation the user just made. Its captured epoch no
     /// longer matches, so every delivery guard retires it silently.
     /// `performStop` cancels and bumps too; both are idempotent.
+    ///
+    /// The bump makes every lane-owned marker dead — no lane task can
+    /// deliver past it — so they are retired here, synchronously, rather
+    /// than left to the cancelled task's own exit: that exit now skips
+    /// (stale epoch, see `retireLaneMarker`), and until session stop the
+    /// row would sit dimmed with its retry button dead. Only the lane-owned
+    /// subset goes; a queue-owned marker (a queued retry whose result the
+    /// queue still owes) keeps its cue.
     func teardownRetranslateSession() {
         retranslateLaneTask?.cancel()
         retranslateLaneTask = nil
         retranslateSessionEpoch += 1
+        pendingRetranslations.subtract(lanePendingRetranslations)
+        lanePendingRetranslations.removeAll()
         retranslateConfig?.invalidate()
         retranslateConfig = nil
         retranslateSessionEngine = nil
