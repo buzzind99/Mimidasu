@@ -149,7 +149,7 @@ struct AppModelTranslationHighFidelityTests {
         )
 
         model.retryTranslation()
-        #expect(await pollUntil { model.appleHighFidelity })
+        #expect(await pollUntil { model.appleHighFidelity }, "the Apple attach's probe marks the engine")
 
         model.phase = .running
         try? settings.saveKey("test-key-1234", for: .google)

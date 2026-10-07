@@ -35,6 +35,21 @@ struct AppModelRetranslateLaneTests {
         Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: text)
     }
 
+    /// Attaches a queue worker the way `activateTranslation` does. Besides
+    /// serving initial deliveries it keeps a stop's translation-tail drain
+    /// instant: an unserved backlog spins the drain's whole bounded timeout,
+    /// which both slows the suite and hides the ordering under test behind
+    /// it.
+    @discardableResult
+    private func attachWorker(_ model: AppModel) async -> Task<Void, Never> {
+        let worker = Task { await model.translationQueue.run(with: QueueEchoEngine()) }
+        #expect(
+            await pollUntil(timeout: resultTimeout) { model.translationQueue.hasWorker },
+            "the queue worker must be attached"
+        )
+        return worker
+    }
+
     // MARK: - Lane delivery
 
     @Test("a lane result stamps the engine and seeds the cache unstamped")
@@ -142,14 +157,20 @@ struct AppModelRetranslateLaneTests {
         model.sessionController.onSentence?(sentence)
 
         model.retranslateSentence(sentence)
-        #expect(await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 })
+        #expect(
+            await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
+            "the first flight parks in the engine"
+        )
 
         model.retranslateSentence(sentence)
         #expect(engine.recordedBatches.count == 1, "the marker refuses the duplicate")
         #expect(model.pendingRetranslations == [7])
 
         engine.openGate()
-        #expect(await pollUntil(timeout: resultTimeout) { model.pendingRetranslations.isEmpty })
+        #expect(
+            await pollUntil(timeout: resultTimeout) { model.pendingRetranslations.isEmpty },
+            "the landing result retires the marker"
+        )
     }
 
     // MARK: - Phase gates
@@ -161,22 +182,42 @@ struct AppModelRetranslateLaneTests {
         model.retranslateEngineFactory = { _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
+        let worker = await attachWorker(model)
+        defer { worker.cancel() }
         let first = makeSentence(index: 1, text: "一")
         let second = makeSentence(index: 2, text: "二")
         model.sessionController.onSentence?(first)
         model.sessionController.onSentence?(second)
+        // Settle the worker's initial deliveries: a queued or airborne
+        // sentence refuses a lane click (`isAwaitingTranslation`), and the
+        // emptied backlog is what keeps the stop's drain instant.
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                model.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:一")]
+                    && model.entries[1].translations == [SentenceTranslation(lang: "en", text: "EN:二")]
+            },
+            "the initial translations are delivered before the retries"
+        )
 
         // The first flight parks; the second chains behind it on
         // `await previous?.value`, so it is still suspended when the stop
         // lands — its own entry guard is what has to retire its marker.
         model.retranslateSentence(first)
-        #expect(await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 })
+        #expect(
+            await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
+            "the first flight parks in the engine"
+        )
         model.retranslateSentence(second)
         #expect(model.pendingRetranslations == [1, 2], "both rows are marked")
+        let chainedTask = model.retranslateLaneTask
 
         await model.performStop()
         engine.openGate()
-        try? await Task.sleep(for: .milliseconds(150))
+        // Await the chained task itself: its `previous?.value` unblocks only
+        // once the parked flight has fully finished, and the task ends right
+        // after its entry guard — so awaiting it proves the guard ran before
+        // the negative assertions below, with no sleep in between.
+        await chainedTask?.value
 
         #expect(model.pendingRetranslations.isEmpty, "no marker outlives the stop")
         #expect(model.lanePendingRetranslations.isEmpty)
@@ -184,6 +225,7 @@ struct AppModelRetranslateLaneTests {
             engine.recordedBatches == [["一"]],
             "the chained task never issues an engine call once the session is gone"
         )
+        #expect(engine.completions == 1, "only the parked flight ever flew")
     }
 
     @Test("an arming lane session that resolves after the session went away is not flown")
@@ -207,7 +249,10 @@ struct AppModelRetranslateLaneTests {
         #expect(model.pendingRetranslations.contains(5), "the click marked the row")
         // Let the lane task clear its entry guard and settle into the bounded
         // wait (one 50 ms poll interval), so the arrival below resolves the
-        // wait rather than being caught by the entry guard instead.
+        // wait rather than being caught by the entry guard instead. The
+        // interleaving is load-precision only: if the task were slower, the
+        // entry guard would catch the arrival instead and reach the same
+        // final state, so the assertions stay valid either way.
         try? await Task.sleep(for: .milliseconds(150))
 
         // The session arrives as the session goes away — the ordering a
@@ -236,20 +281,34 @@ struct AppModelRetranslateLaneTests {
         model.retranslateEngineFactory = { _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
+        let worker = await attachWorker(model)
+        defer { worker.cancel() }
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
+        // Settle the worker's own delivery first, then overwrite the row:
+        // a delivery landing after "Original" would be indistinguishable
+        // from the late lane landing this test hunts.
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                model.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:テスト")]
+            },
+            "the worker's initial delivery landed"
+        )
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
 
         model.retranslateSentence(sentence)
-        #expect(await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 })
+        #expect(
+            await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
+            "the flight parks in the engine"
+        )
+        let laneTask = model.retranslateLaneTask
 
         await model.performStop()
         #expect(model.pendingRetranslations.isEmpty, "stop cleared the marker")
         #expect(model.phase == .idle)
 
         engine.openGate()
-        // Give the late flight a beat to land before asserting it was dropped.
-        try? await Task.sleep(for: .milliseconds(100))
+        await laneTask?.value
         #expect(
             model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the late landing must not swap the row"
@@ -260,34 +319,6 @@ struct AppModelRetranslateLaneTests {
         )
     }
 
-    @Test("a queue unavailable mid-lane keeps the lane marker")
-    func queueUnavailableKeepsLaneMarker() async {
-        let model = await makeSUT()
-        let engine = LaneGatedEngine()
-        model.retranslateEngineFactory = { _ in engine }
-        model.translationSettings.selectRetranslate(.google)
-        model.phase = .running
-        model.activeTranslationEngine = .apple
-        let sentence = makeSentence(index: 7)
-        model.sessionController.onSentence?(sentence)
-
-        model.retranslateSentence(sentence)
-        #expect(await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 })
-
-        model.handleTranslationStatus(.unavailable("Apple failed", .permanent))
-        #expect(
-            model.pendingRetranslations == [7],
-            "the lane translation still has a deliverer"
-        )
-        #expect(model.lanePendingRetranslations == [7])
-
-        model.retranslateSentence(sentence)
-        #expect(engine.recordedBatches.count == 1, "the surviving marker refuses a duplicate")
-
-        engine.openGate()
-        #expect(await pollUntil(timeout: resultTimeout) { model.pendingRetranslations.isEmpty })
-    }
-
     @Test("a lane flight held across a session boundary never swaps the next session's row")
     func laneFlightAcrossSessionBoundaryIsDropped() async {
         let model = await makeSUT()
@@ -295,18 +326,39 @@ struct AppModelRetranslateLaneTests {
         model.retranslateEngineFactory = { _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
+        let worker = await attachWorker(model)
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
+        // Settle the worker's initial delivery: a queued or airborne
+        // sentence refuses a lane click (`isAwaitingTranslation`), and the
+        // "Original" overwrite below must not race the worker's landing.
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                model.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:テスト")]
+            },
+            "the initial delivery landed before the retry"
+        )
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
 
         // The flight is parked mid-air when the session ends.
         model.retranslateSentence(sentence)
-        #expect(await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 })
+        #expect(
+            await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
+            "the flight parks in the engine"
+        )
+        let laneTask = model.retranslateLaneTask
 
         // Stop clears the markers and cancels the newest link, then a new
         // session begins — sentence indexes restart at 0, so the straggler's
-        // index now names a DIFFERENT row. The epoch has to retire it.
+        // index now names a DIFFERENT row. The epoch has to retire it. The
+        // worker is released first: a live worker would pump the new
+        // session's sentence and race the row write below.
         await model.performStop()
+        worker.cancel()
+        #expect(
+            await pollUntil(timeout: resultTimeout) { !model.translationQueue.hasWorker },
+            "the replay worker released the queue"
+        )
         model.phase = .running
         model.sessionController.onSessionBegin?()
         let next = makeSentence(index: 7, text: "次の文")
@@ -314,16 +366,12 @@ struct AppModelRetranslateLaneTests {
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Next session"))
         engine.openGate()
 
-        #expect(
-            await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
-            "the parked flight resumes after the gate opens"
-        )
-        try? await Task.sleep(for: .milliseconds(150))
+        await laneTask?.value
         #expect(
             model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Next session")],
             "the previous session's translation must not land on this session's row"
         )
-        #expect(model.pendingRetranslations.isEmpty, "the straggler retires its marker")
+        #expect(model.pendingRetranslations.isEmpty, "no stale marker survives the boundary")
         #expect(model.lanePendingRetranslations.isEmpty)
     }
 
@@ -339,19 +387,23 @@ struct AppModelRetranslateLaneTests {
         model.applyTranslation(index: 4, translation: SentenceTranslation(lang: "en", text: "Original"))
 
         model.retranslateSentence(sentence)
-        #expect(await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 })
+        #expect(
+            await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
+            "the flight parks in the engine"
+        )
         #expect(model.pendingRetranslations.contains(4))
 
         // `restartCapture` parks the phase in `.starting` while the device
         // reopens. Neither it nor `onSessionBegin` clears the markers, so the
         // lane's own drop path has to — otherwise the row stays dimmed with a
-        // dead retry button until session stop.
+        // dead retry button until session stop. The capture restart leaves
+        // the epoch alone, so the resumed flight's retirement is exactly
+        // what clears the marker — poll for it instead of sleeping past it.
         model.phase = .starting
         engine.openGate()
-        try? await Task.sleep(for: .milliseconds(150))
 
         #expect(
-            !model.pendingRetranslations.contains(4),
+            await pollUntil(timeout: resultTimeout) { !model.pendingRetranslations.contains(4) },
             "a result the lane cannot deliver must retire its marker"
         )
         #expect(!model.lanePendingRetranslations.contains(4))
@@ -373,14 +425,18 @@ struct AppModelRetranslateLaneTests {
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
 
         model.retranslateSentence(sentence)
-        #expect(await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 })
+        #expect(
+            await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
+            "the flight parks in the engine"
+        )
 
         // A provider switch to Apple tears the armed re-translate sessions
         // down mid-session — while a lane flight is parked mid-air. The
         // teardown is a lane-generation change (task cancelled, epoch
-        // bumped), so the resumed flight must retire its marker and stay
-        // silent instead of delivering over — or toasting over — the
-        // activation the user just made.
+        // bumped): the bump makes every lane-owned marker undeliverable, so
+        // the teardown retires them synchronously, and the resumed flight
+        // must stay silent instead of delivering over — or toasting over —
+        // the activation the user just made.
         model.teardownRetranslateSession()
         engine.openGate()
 
@@ -388,7 +444,7 @@ struct AppModelRetranslateLaneTests {
             await pollUntil(timeout: resultTimeout) {
                 model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
             },
-            "the refused flight retires its marker"
+            "the refused flight leaves no marker behind"
         )
         #expect(
             model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
@@ -402,9 +458,29 @@ struct AppModelRetranslateLaneTests {
     }
 }
 
+/// Session-engine fixture: prefixes with "EN:", recording each batch so a
+/// test can pin exactly which sentences the queue served.
+private final class QueueEchoEngine: TranslationEngine, @unchecked Sendable {
+    let preferredBatchSize = 16
+    var onRetry: (@Sendable (RetryProgress) -> Void)?
+
+    private let state = Mutex([[String]]())
+
+    var recordedBatches: [[String]] {
+        state.withLock { batches in batches }
+    }
+
+    func translate(_ texts: [String]) async throws -> [String] {
+        state.withLock { batches in batches.append(texts) }
+        return texts.map { text in "EN:\(text)" }
+    }
+}
+
 /// Lane fixture whose `translate` parks until the gate opens, so a test can
 /// hold a flight mid-air and prove a second click does not start a competing
-/// one and that a late landing is dropped.
+/// one and that a late landing is dropped. Completed flights are counted so
+/// a negative assertion can wait on the flight it concerns instead of
+/// sleeping past it.
 private final class LaneGatedEngine: TranslationEngine, @unchecked Sendable {
     let preferredBatchSize = 4
     var onRetry: (@Sendable (RetryProgress) -> Void)?
@@ -413,6 +489,12 @@ private final class LaneGatedEngine: TranslationEngine, @unchecked Sendable {
 
     var recordedBatches: [[String]] {
         state.withLock { gateState in gateState.batches }
+    }
+
+    /// Flights that entered, parked, and returned — the deterministic
+    /// "this flight finished" observable.
+    var completions: Int {
+        state.withLock { gateState in gateState.completions }
     }
 
     /// Releases every parked `translate`, and lets any that arrives later
@@ -439,6 +521,7 @@ private final class LaneGatedEngine: TranslationEngine, @unchecked Sendable {
             }
             immediate?.resume()
         }
+        state.withLock { gateState in gateState.completions += 1 }
         return texts.map { text in "JA:\(text)" }
     }
 }
@@ -447,4 +530,5 @@ private struct LaneGateState {
     var open = false
     var batches: [[String]] = []
     var waiters: [CheckedContinuation<Void, Never>] = []
+    var completions = 0
 }

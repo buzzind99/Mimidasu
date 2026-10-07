@@ -15,11 +15,24 @@ struct AppModelRetranslateRouteTests {
 
     private let resultTimeout: TimeInterval = 5
 
-    private func makeSUT() async -> AppModel {
+    /// An HTTP transport that always answers `status` — hermetic insurance
+    /// for suites that activate a real external engine (no factory): one
+    /// enqueued sentence away from a live network call otherwise.
+    private func constantStatusTransport(_ status: Int) -> HTTPTranslationTransport {
+        HTTPTranslationTransport(timeout: 5) { request in
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil
+            )!
+            return (Data(), response)
+        }
+    }
+
+    private func makeSUT(transport: HTTPTranslationTransport? = nil) async -> AppModel {
         let model = AppModel(
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelRetranslateRoute"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelRetranslateRoute"),
             favorites: isolatedFavorites(),
+            translationTransport: transport,
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
@@ -250,7 +263,10 @@ struct AppModelRetranslateRouteTests {
 
     @Test("an external activation re-probes high fidelity and degrades a persisted hifi selection")
     func externalActivationProbesHighFidelityAndDegradesHifi() async {
-        let model = await makeSUT()
+        // Hermetic transport: the activation builds a real Google engine (no
+        // factory in this suite), and this test must stay one enqueued
+        // sentence away from the live network.
+        let model = await makeSUT(transport: constantStatusTransport(401))
         try? model.translationSettings.saveKey("sk-google", for: .google)
         model.translationSettings.select(.google)
         model.translationSettings.selectRetranslate(.appleHighFidelity)

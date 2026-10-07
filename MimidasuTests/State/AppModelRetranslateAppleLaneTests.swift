@@ -239,7 +239,13 @@ struct AppModelRetranslateAppleLaneTests {
     }
 
     @Test("a cancelled wait retires the markers without reporting a starting session")
-    func cancelledWaitRetiresMarkersSilently() async {
+    func cancelledWaitRetiresMarkersSilently() async throws {
+        // Below 26.4 the fast selection resolves to the session path (or
+        // no-ops outright), never to an armed lane — the whole scenario
+        // would be vacuous.
+        guard #available(macOS 26.4, *) else {
+            try Test.cancel("the armed fast lane requires macOS 26.4")
+        }
         let model = await makeSUT()
         model.appleHighFidelityProbe = (true, "en")
         model.translationSettings.selectRetranslate(.appleFast)
@@ -275,12 +281,24 @@ struct AppModelRetranslateAppleLaneTests {
         model.appleHighFidelityProbe = (true, "en")
         model.translationSettings.selectRetranslate(.appleFast)
         model.phase = .running
+        let worker = await attachWorker(model)
+        defer { worker.cancel() }
         let first = makeSentence(index: 1, text: "一")
         let second = makeSentence(index: 2, text: "二")
         model.sessionController.onSentence?(first)
         model.sessionController.onSentence?(second)
-        model.applyTranslation(index: 1, translation: SentenceTranslation(lang: "en", text: "One"))
-        model.applyTranslation(index: 2, translation: SentenceTranslation(lang: "en", text: "Two"))
+        // Settle the initial deliveries: they keep a stop's translation-tail
+        // drain instant. An unserved backlog would spin the drain's whole
+        // bounded timeout, and the lane's expiry would then land DURING the
+        // stop (phase still live) — the toast would be removed by the
+        // stop's clearAll, not refused by the delivery guard under test.
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                model.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:一")]
+                    && model.entries[1].translations == [SentenceTranslation(lang: "en", text: "EN:二")]
+            },
+            "the initial translations are delivered before the retries"
+        )
 
         // Two chained waits: the stop cancels only the newest link, so the
         // first task is still parked in its bounded wait when the session
@@ -289,11 +307,18 @@ struct AppModelRetranslateAppleLaneTests {
         // "still starting" toast over the cleared stack.
         model.laneArmTimeout = .milliseconds(500)
         model.retranslateSentence(first)
+        let firstTask = model.retranslateLaneTask
         model.retranslateSentence(second)
+        let secondTask = model.retranslateLaneTask
         await model.performStop()
 
-        // Outlive the first task's deadline; a stale toast would land there.
-        try? await Task.sleep(for: .milliseconds(700))
+        // Await both tasks instead of sleeping past the deadline: the stop
+        // returns in milliseconds now, so the first task's expiry genuinely
+        // lands after it — in `.idle`, stale epoch — where refusing the
+        // toast is the delivery guard's doing. The second was cancelled with
+        // the stop and must stay silent as well.
+        await firstTask?.value
+        await secondTask?.value
         #expect(
             !model.toasts.toasts.contains(where: { toast in toast.key == ToastKey.retranslate }),
             "a timed-out wait whose session is gone posts nothing"
@@ -301,7 +326,7 @@ struct AppModelRetranslateAppleLaneTests {
         #expect(model.pendingRetranslations.isEmpty)
         #expect(model.lanePendingRetranslations.isEmpty)
         #expect(
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "One")],
+            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:一")],
             "the expired wait never touched its row"
         )
     }

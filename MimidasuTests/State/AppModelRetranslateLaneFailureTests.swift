@@ -77,11 +77,22 @@ struct AppModelRetranslateLaneFailureTests {
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
 
         model.retranslateSentence(sentence)
-        #expect(await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 })
+        #expect(
+            await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
+            "the flight entered the engine"
+        )
         // Direct cancellation (production reaches this only via stop, which
         // clears the markers and the toast stack itself).
         model.retranslateLaneTask?.cancel()
-        try? await Task.sleep(for: .milliseconds(100))
+        // The cancellation surfaces as CancellationError out of the parked
+        // engine call; its catch path is what retires the markers — poll for
+        // it rather than sleeping past it.
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
+            },
+            "the cancelled flight retired its markers"
+        )
 
         #expect(
             !model.toasts.toasts.contains(where: { toast in toast.key == ToastKey.retranslate }),
