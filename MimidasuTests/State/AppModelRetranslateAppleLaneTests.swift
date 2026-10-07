@@ -79,7 +79,12 @@ struct AppModelRetranslateAppleLaneTests {
     // MARK: - Fast (MTL) lane
 
     @Test("apple fast stamps via the armed session and seeds the cache unstamped")
-    func appleFastStampsViaArmedSession() async {
+    func appleFastStampsViaArmedSession() async throws {
+        // The probe-installed Apple identity only exists on 26.4+; below it
+        // the fast selection degrades to the session path instead.
+        guard #available(macOS 26.4, *) else {
+            try Test.cancel("the armed fast lane requires macOS 26.4")
+        }
         let model = await makeSUT()
         // A high-fidelity live session makes the fast model a real alternate.
         model.appleHighFidelityProbe = (true, "en")
@@ -118,7 +123,10 @@ struct AppModelRetranslateAppleLaneTests {
     }
 
     @Test("a still-arming fast session posts the starting toast and keeps the config armed")
-    func stillArmingFastSessionPostsStartingToast() async {
+    func stillArmingFastSessionPostsStartingToast() async throws {
+        guard #available(macOS 26.4, *) else {
+            try Test.cancel("the armed fast lane requires macOS 26.4")
+        }
         let model = await makeSUT()
         model.appleHighFidelityProbe = (true, "en")
         model.translationSettings.selectRetranslate(.appleFast)
@@ -155,7 +163,10 @@ struct AppModelRetranslateAppleLaneTests {
     // MARK: - Apple Intelligence lane
 
     @Test("apple intelligence stamps via its armed session and arms only the hifi config")
-    func appleIntelligenceStampsViaArmedSession() async {
+    func appleIntelligenceStampsViaArmedSession() async throws {
+        guard #available(macOS 26.4, *) else {
+            try Test.cancel("the armed hifi lane requires macOS 26.4")
+        }
         let model = await makeSUT()
         // The probe never lands, so the live session is de facto fast and the
         // Intelligence selection is a real alternate. (A probe that LANDED
@@ -189,7 +200,10 @@ struct AppModelRetranslateAppleLaneTests {
     }
 
     @Test("a still-arming intelligence session posts its own starting toast")
-    func stillArmingHifiSessionPostsStartingToast() async {
+    func stillArmingHifiSessionPostsStartingToast() async throws {
+        guard #available(macOS 26.4, *) else {
+            try Test.cancel("the armed hifi lane requires macOS 26.4")
+        }
         let model = await makeSUT()
         // The probe never lands, so the live session is de facto fast and the
         // Intelligence selection arms the hifi lane (a probe that landed
@@ -249,6 +263,46 @@ struct AppModelRetranslateAppleLaneTests {
         #expect(
             model.toasts.toasts.allSatisfy { candidate in candidate.key != ToastKey.retranslate },
             "a cancellation is not a timeout — the stop already cleared the toasts"
+        )
+    }
+
+    @Test("a timed-out wait that outlives the session posts nothing")
+    func timedOutWaitOutlivingStopPostsNothing() async throws {
+        guard #available(macOS 26.4, *) else {
+            try Test.cancel("the armed fast lane requires macOS 26.4")
+        }
+        let model = await makeSUT()
+        model.appleHighFidelityProbe = (true, "en")
+        model.translationSettings.selectRetranslate(.appleFast)
+        model.phase = .running
+        let first = makeSentence(index: 1, text: "一")
+        let second = makeSentence(index: 2, text: "二")
+        model.sessionController.onSentence?(first)
+        model.sessionController.onSentence?(second)
+        model.applyTranslation(index: 1, translation: SentenceTranslation(lang: "en", text: "One"))
+        model.applyTranslation(index: 2, translation: SentenceTranslation(lang: "en", text: "Two"))
+
+        // Two chained waits: the stop cancels only the newest link, so the
+        // first task is still parked in its bounded wait when the session
+        // dies. Its expiry is the `.timedOut` outcome most likely to cross a
+        // stop — it must pass the delivery guard instead of reposting a
+        // "still starting" toast over the cleared stack.
+        model.laneArmTimeout = .milliseconds(500)
+        model.retranslateSentence(first)
+        model.retranslateSentence(second)
+        await model.performStop()
+
+        // Outlive the first task's deadline; a stale toast would land there.
+        try? await Task.sleep(for: .milliseconds(700))
+        #expect(
+            !model.toasts.toasts.contains(where: { toast in toast.key == ToastKey.retranslate }),
+            "a timed-out wait whose session is gone posts nothing"
+        )
+        #expect(model.pendingRetranslations.isEmpty)
+        #expect(model.lanePendingRetranslations.isEmpty)
+        #expect(
+            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "One")],
+            "the expired wait never touched its row"
         )
     }
 

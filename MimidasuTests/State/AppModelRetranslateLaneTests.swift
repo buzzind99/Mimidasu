@@ -35,18 +35,6 @@ struct AppModelRetranslateLaneTests {
         Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: text)
     }
 
-    /// Attaches a queue worker the way `activateTranslation` does, so the
-    /// session-engine path can serve a retry.
-    @discardableResult
-    private func attachWorker(_ model: AppModel) async -> Task<Void, Never> {
-        let worker = Task { await model.translationQueue.run(with: QueueEchoEngine()) }
-        #expect(
-            await pollUntil(timeout: resultTimeout) { model.translationQueue.hasWorker },
-            "the queue worker must be attached before a retry can be served"
-        )
-        return worker
-    }
-
     // MARK: - Lane delivery
 
     @Test("a lane result stamps the engine and seeds the cache unstamped")
@@ -300,65 +288,6 @@ struct AppModelRetranslateLaneTests {
         #expect(await pollUntil(timeout: resultTimeout) { model.pendingRetranslations.isEmpty })
     }
 
-    @Test("a failed lane run posts the failure toast and clears the marker")
-    func failedLaneRunPostsFailureToastAndClearsMarker() async {
-        let model = await makeSUT()
-        model.retranslateEngineFactory = { _ in LaneEmptyEngine() }
-        model.translationSettings.selectRetranslate(.google)
-        model.phase = .running
-        let sentence = makeSentence(index: 7)
-        model.sessionController.onSentence?(sentence)
-        model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
-
-        model.retranslateSentence(sentence)
-
-        #expect(
-            await pollUntil(timeout: resultTimeout) {
-                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
-            },
-            "the failed run has no deliverer — the marker clears"
-        )
-        let toast = model.toasts.toasts.first(where: { candidate in candidate.key == ToastKey.retranslate })
-        #expect(toast?.title == "Re-translate failed")
-        #expect(
-            toast?.body == TranslationQueue.describe(
-                TranslationEngineError.badResponse("Expected 1 translation, got 0")
-            )
-        )
-        #expect(
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
-            "the row keeps its previous translation"
-        )
-    }
-
-    @Test("a cancelled lane flight is dropped silently")
-    func cancelledLaneFlightIsDroppedSilently() async {
-        let model = await makeSUT()
-        let engine = LaneCancellableEngine()
-        model.retranslateEngineFactory = { _ in engine }
-        model.translationSettings.selectRetranslate(.google)
-        model.phase = .running
-        let sentence = makeSentence(index: 7)
-        model.sessionController.onSentence?(sentence)
-        model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
-
-        model.retranslateSentence(sentence)
-        #expect(await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 })
-        // Direct cancellation (production reaches this only via stop, which
-        // clears the markers and the toast stack itself).
-        model.retranslateLaneTask?.cancel()
-        try? await Task.sleep(for: .milliseconds(100))
-
-        #expect(
-            !model.toasts.toasts.contains(where: { toast in toast.key == ToastKey.retranslate }),
-            "a cancelled flight posts nothing"
-        )
-        #expect(
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
-            "the cancelled flight must not swap the row"
-        )
-    }
-
     @Test("a lane flight held across a session boundary never swaps the next session's row")
     func laneFlightAcrossSessionBoundaryIsDropped() async {
         let model = await makeSUT()
@@ -431,6 +360,46 @@ struct AppModelRetranslateLaneTests {
             "the row keeps its previous translation"
         )
     }
+
+    @Test("a mid-session teardown refuses an in-flight lane delivery silently")
+    func midSessionTeardownRefusesInFlightLaneDelivery() async {
+        let model = await makeSUT()
+        let engine = LaneGatedEngine()
+        model.retranslateEngineFactory = { _ in engine }
+        model.translationSettings.selectRetranslate(.google)
+        model.phase = .running
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+        model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
+
+        model.retranslateSentence(sentence)
+        #expect(await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 })
+
+        // A provider switch to Apple tears the armed re-translate sessions
+        // down mid-session — while a lane flight is parked mid-air. The
+        // teardown is a lane-generation change (task cancelled, epoch
+        // bumped), so the resumed flight must retire its marker and stay
+        // silent instead of delivering over — or toasting over — the
+        // activation the user just made.
+        model.teardownRetranslateSession()
+        engine.openGate()
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
+            },
+            "the refused flight retires its marker"
+        )
+        #expect(
+            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            "the torn-down lane's result never lands"
+        )
+        #expect(
+            !model.toasts.toasts.contains(where: { toast in toast.key == ToastKey.retranslate }),
+            "the refusal posts nothing — the user caused the teardown"
+        )
+        #expect(model.retranslateLaneTask == nil, "the teardown clears the stored task")
+    }
 }
 
 /// Lane fixture whose `translate` parks until the gate opens, so a test can
@@ -478,45 +447,4 @@ private struct LaneGateState {
     var open = false
     var batches: [[String]] = []
     var waiters: [CheckedContinuation<Void, Never>] = []
-}
-
-/// Session-engine fixture: prefixes with "EN:".
-private final class QueueEchoEngine: TranslationEngine, @unchecked Sendable {
-    let preferredBatchSize = 16
-    var onRetry: (@Sendable (RetryProgress) -> Void)?
-
-    func translate(_ texts: [String]) async throws -> [String] {
-        texts.map { text in "EN:\(text)" }
-    }
-}
-
-/// Lane fixture that answers an empty batch — a count mismatch the queue
-/// treats as a failed batch, here surfaced as the lane's failure toast.
-private final class LaneEmptyEngine: TranslationEngine, @unchecked Sendable {
-    let preferredBatchSize = 4
-    var onRetry: (@Sendable (RetryProgress) -> Void)?
-
-    func translate(_ texts: [String]) async throws -> [String] {
-        []
-    }
-}
-
-/// Lane fixture whose `translate` parks cancellably — cancelling the lane
-/// task surfaces as `CancellationError` out of the engine call itself.
-private final class LaneCancellableEngine: TranslationEngine, @unchecked Sendable {
-    let preferredBatchSize = 4
-    var onRetry: (@Sendable (RetryProgress) -> Void)?
-
-    private let state = Mutex([[String]]())
-
-    var recordedBatches: [[String]] {
-        state.withLock { batches in batches }
-    }
-
-    func translate(_ texts: [String]) async throws -> [String] {
-        state.withLock { batches in batches.append(texts) }
-        try Task.checkCancellation()
-        try await Task.sleep(for: .seconds(30))
-        return texts.map { text in "JA:\(text)" }
-    }
 }

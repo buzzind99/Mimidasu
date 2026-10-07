@@ -171,13 +171,15 @@ final class AppModel {
     var highFidelitySequence = 0
 
     /// Session boundary token for the re-translate lane, in the same spirit as
-    /// `TranslationQueue.sessionEpoch`: bumped in `onSessionBegin` and
-    /// `performStop`, captured when a retry is clicked, and compared after the
-    /// flight. A lane task that outlives its session — `performStop` cancels
-    /// only the newest chained link, so earlier ones run to completion — would
-    /// otherwise pass the phase guard (the next session is `.running` again)
-    /// and write the *previous* session's translation onto an unrelated row,
-    /// since `Sentence.index` restarts at 0. Internal: managed from
+    /// `TranslationQueue.sessionEpoch`: bumped in `onSessionBegin`,
+    /// `performStop`, and `teardownRetranslateSession` (a mid-session Apple
+    /// activation is a lane-generation change, not a session one), captured
+    /// when a retry is clicked, and compared after the flight. A lane task
+    /// that outlives its session — `performStop` cancels only the newest
+    /// chained link, so earlier ones run to completion — would otherwise pass
+    /// the phase guard (the next session is `.running` again) and write the
+    /// *previous* session's translation onto an unrelated row, since
+    /// `Sentence.index` restarts at 0. Internal: managed from
     /// `AppModelRetranslate.swift`.
     var retranslateSessionEpoch = 0
 
@@ -201,9 +203,10 @@ final class AppModel {
     /// double-click guard only — `applyTranslation` routes on the row's
     /// languages, so nothing about a result's *correctness* depends on it.
     /// Internal: inserted in `AppModelRetranslate.retranslateSentence`, and
-    /// cleared by four sites — the landing result (`applyTranslation`), the
-    /// `.unavailable` that engages no replay (`handleTranslationStatus`),
-    /// session stop (`performStop`), and the next session's begin
+    /// cleared by the landing result (`applyTranslation`), by any lane exit
+    /// that will not deliver (`retireLaneMarker`), by the queue's terminal
+    /// `.unavailable` that engages no replay (`handleTranslationStatus`), by
+    /// session stop (`performStop`), and by the next session's begin
     /// (`onSessionBegin`). Read by views.
     var pendingRetranslations: Set<Int> = []
 

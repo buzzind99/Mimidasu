@@ -444,4 +444,18 @@ struct AppModelSessionTests {
         #expect(sut.model.phase == .idle, "a terminating model never begins a new session")
         #expect(!sut.log.names.contains("capture.start"), "no capture came up after teardown")
     }
+
+    @Test("shutdownForTermination awaits a staged stop task before retiring")
+    func shutdownAwaitsStagedStopTask() async {
+        let sut = await makeSUT()
+
+        // A stop task that has already drained: shutdown must still take the
+        // await-its-value branch (production reaches this when quit lands
+        // while the stop task is between its last suspension and its cleanup).
+        sut.model.stopTask = Task {}
+        await sut.model.shutdownForTermination()
+
+        #expect(sut.model.phase == .idle)
+        #expect(sut.log.names.contains("engine.retire"))
+    }
 }

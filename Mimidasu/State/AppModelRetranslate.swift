@@ -219,7 +219,11 @@ extension AppModel {
             // high fidelity does not exist, and a live Apple session already
             // runs the fast model. With an external live session the fast
             // model is a genuine alternate via a plain (fast-by-definition)
-            // session.
+            // session. The `kind == .appleHighFidelity` test here is
+            // unreachable via callers — `effectiveRetranslateSelection`
+            // already degrades the selection below 26.4 — and exists only as
+            // defense in depth; do not "simplify" it away together with that
+            // degrade.
             return kind == .appleHighFidelity || liveSessionRunsKind(.appleFast)
                 ? .session : armedRoute(kind)
         }
@@ -290,6 +294,12 @@ extension AppModel {
                 // Apple selections can arrive here — externals build their
                 // engine (or fail) at resolve time.
                 retireLaneMarker(sentence.index)
+                // The wait consumed the whole arm window — the outcome most
+                // likely to have crossed a stop (older links are not
+                // cancelled), so the same delivery guard as `.ready` applies
+                // before reporting; a stale expiry must not repost over the
+                // cleared stack.
+                guard retranslateLaneCanDeliver(epoch: epoch) else { return }
                 postRetranslateUnavailableToast(
                     kind == .appleHighFidelity
                         ? "Apple Intelligence session is still starting — try again in a moment."
@@ -331,13 +341,17 @@ extension AppModel {
                 text: text,
                 engine: kind
             )
-            applyTranslation(index: sentence.index, translation: pair)
+            let landed = applyTranslation(index: sentence.index, translation: pair)
             // Seed the repeat-sentence cache with the retried *text* unstamped:
             // a fresh row repeating the sentence serves through the normal
-            // queue path without the lane's provenance marker. Seeded AFTER the
-            // row lands, so a result whose row vanished (transcript cleared
-            // underneath it) never leaves the retried text in the cache.
-            translationQueue.seedCache(sentence, pair)
+            // queue path without the lane's provenance marker. Seeded only
+            // when the row actually took the result — `applyTranslation`
+            // reports whether the row was still present, so a result whose
+            // row vanished (transcript cleared underneath it) never leaves
+            // the retried text in the cache.
+            if landed {
+                translationQueue.seedCache(sentence, pair)
+            }
         } catch is CancellationError {
             retireLaneMarker(sentence.index)
         } catch {
@@ -459,13 +473,26 @@ extension AppModel {
         retranslateHifiSessionEngine = engine
     }
 
-    /// Drops both armed-session states (configs + stored engines). Called
-    /// from every Apple activation and from `performStop`. Within a session
-    /// an armed config is always current — target changes are restart-only
-    /// — so the reset covers the session boundary: a next session on an
-    /// external provider never takes the Apple branch, and a config armed
-    /// for a prior target must not survive to serve it.
+    /// Drops both armed-session states (configs + stored engines) and
+    /// invalidates in-flight lane work with them. Called from every Apple
+    /// activation and from `performStop`. Within a session an armed config
+    /// is always current — target changes are restart-only — so the reset
+    /// covers the session boundary: a next session on an external provider
+    /// never takes the Apple branch, and a config armed for a prior target
+    /// must not survive to serve it.
+    ///
+    /// Cancelling the stored task and bumping the epoch makes the reset a
+    /// lane-generation change, not just a session one: a chained task
+    /// resuming after a mid-session teardown (an Apple activation while a
+    /// lane flight is airborne) would otherwise pass the phase/epoch guards
+    /// — the session is still live — and fly a session that just died, or
+    /// toast over the activation the user just made. Its captured epoch no
+    /// longer matches, so every delivery guard retires it silently.
+    /// `performStop` cancels and bumps too; both are idempotent.
     func teardownRetranslateSession() {
+        retranslateLaneTask?.cancel()
+        retranslateLaneTask = nil
+        retranslateSessionEpoch += 1
         retranslateConfig?.invalidate()
         retranslateConfig = nil
         retranslateSessionEngine = nil

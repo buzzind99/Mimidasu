@@ -6,8 +6,9 @@ import Testing
 /// Tests the re-translate lane's route resolution and settings surface:
 /// `alternateRetranslateEngineActive`, the Apple selections' de facto
 /// degradation, the duplicate-external degradation, the armed dedicated
-/// Apple sessions' teardown at stop, and the cloud disclosure that holds an
-/// external selection.
+/// Apple sessions' teardown at stop, the high-fidelity probe an external
+/// activation fires, and the cloud disclosure that holds an external
+/// selection.
 @MainActor
 @Suite("AppModel re-translate routes")
 struct AppModelRetranslateRouteTests {
@@ -33,15 +34,20 @@ struct AppModelRetranslateRouteTests {
     }
 
     /// Attaches a queue worker the way `activateTranslation` does, so the
-    /// session-engine path can serve a retry.
-    @discardableResult
-    private func attachWorker(_ model: AppModel) async -> Task<Void, Never> {
-        let worker = Task { await model.translationQueue.run(with: QueueEchoEngine()) }
+    /// session-engine path can serve a retry. Returns the engine too: the
+    /// degrade tests must pin that the retry actually flew the queue a
+    /// second time, and a row condition alone cannot tell a served retry
+    /// from the untouched initial delivery.
+    private func attachWorker(
+        _ model: AppModel
+    ) async -> (worker: Task<Void, Never>, engine: QueueEchoEngine) {
+        let engine = QueueEchoEngine()
+        let worker = Task { await model.translationQueue.run(with: engine) }
         #expect(
             await pollUntil(timeout: resultTimeout) { model.translationQueue.hasWorker },
             "the queue worker must be attached before a retry can be served"
         )
-        return worker
+        return (worker, engine)
     }
 
     // MARK: - Armed dedicated-session lifecycle
@@ -55,6 +61,7 @@ struct AppModelRetranslateRouteTests {
         model.retranslateHifiConfig = model.makeRetranslateConfig(highFidelity: true)
         model.retranslateHifiSessionEngine = LaneEchoEngine()
         model.lanePendingRetranslations = [3]
+        model.retranslateLaneTask = Task {}
 
         await model.performStop()
 
@@ -63,13 +70,18 @@ struct AppModelRetranslateRouteTests {
         #expect(model.retranslateHifiConfig == nil)
         #expect(model.retranslateHifiSessionEngine == nil)
         #expect(model.lanePendingRetranslations.isEmpty)
-        #expect(model.retranslateLaneTask == nil)
+        #expect(model.retranslateLaneTask == nil, "stop clears the stored lane task")
     }
 
     // MARK: - Route resolution
 
     @Test("alternate-engine active tracks the selection and key state")
-    func alternateEngineActiveTracksSelection() async {
+    func alternateEngineActiveTracksSelection() async throws {
+        // The second half of the truth table pivots on the probe-installed
+        // Apple identity, which `activeEngineKind` only reports on 26.4+.
+        guard #available(macOS 26.4, *) else {
+            try Test.cancel("the installed-probe half of the truth table requires macOS 26.4")
+        }
         let model = await makeSUT()
 
         #expect(!model.alternateRetranslateEngineActive, "the session selection is never alternate")
@@ -120,7 +132,7 @@ struct AppModelRetranslateRouteTests {
         }
         model.translationSettings.selectRetranslate(.appleHighFidelity)
         model.phase = .running
-        let worker = await attachWorker(model)
+        let (worker, queueEngine) = await attachWorker(model)
         defer { worker.cancel() }
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
@@ -131,12 +143,15 @@ struct AppModelRetranslateRouteTests {
 
         model.retranslateSentence(sentence)
 
+        // A second flight through the queue's engine is the retry: the row
+        // condition alone is already true from the initial delivery.
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.entries[0].joinedTranslations == "EN:テスト"
+                queueEngine.recordedBatches.count == 2
+                    && model.entries[0].joinedTranslations == "EN:テスト"
                     && model.entries[0].translations.first?.engine == nil
             },
-            "the queue's engine served the retry unstamped"
+            "the queue's engine served the retry as a second unstamped flight"
         )
         #expect(laneCalls.withLock { counter in counter } == 0, "the lane factory is never consulted")
         #expect(model.retranslateHifiConfig == nil, "the degraded route never arms the hifi session")
@@ -154,7 +169,7 @@ struct AppModelRetranslateRouteTests {
         model.translationSettings.selectRetranslate(.google)
         model.activeExternalProvider = .google
         model.phase = .running
-        let worker = await attachWorker(model)
+        let (worker, queueEngine) = await attachWorker(model)
         defer { worker.cancel() }
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
@@ -167,10 +182,11 @@ struct AppModelRetranslateRouteTests {
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.entries[0].joinedTranslations == "EN:テスト"
+                queueEngine.recordedBatches.count == 2
+                    && model.entries[0].joinedTranslations == "EN:テスト"
                     && model.entries[0].translations.first?.engine == nil
             },
-            "the queue's engine served the retry unstamped"
+            "the queue's engine served the retry as a second unstamped flight"
         )
         #expect(laneCalls.withLock { counter in counter } == 0, "the lane factory is never consulted")
     }
@@ -186,7 +202,7 @@ struct AppModelRetranslateRouteTests {
         }
         model.translationSettings.selectRetranslate(.appleFast)
         model.phase = .running
-        let worker = await attachWorker(model)
+        let (worker, queueEngine) = await attachWorker(model)
         defer { worker.cancel() }
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
@@ -199,10 +215,11 @@ struct AppModelRetranslateRouteTests {
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.entries[0].joinedTranslations == "EN:テスト"
+                queueEngine.recordedBatches.count == 2
+                    && model.entries[0].joinedTranslations == "EN:テスト"
                     && model.entries[0].translations.first?.engine == nil
             },
-            "the queue's engine served the retry unstamped"
+            "the queue's engine served the retry as a second unstamped flight"
         )
         #expect(laneCalls.withLock { counter in counter } == 0, "the lane factory is never consulted")
     }
@@ -273,12 +290,21 @@ final class LaneEchoEngine: TranslationEngine, @unchecked Sendable {
     }
 }
 
-/// Session-engine fixture for the degrade test: prefixes with "EN:".
+/// Session-engine fixture for the degrade tests: prefixes with "EN:",
+/// recording each batch so a test can pin how many flights the queue
+/// actually ran.
 private final class QueueEchoEngine: TranslationEngine, @unchecked Sendable {
     let preferredBatchSize = 16
     var onRetry: (@Sendable (RetryProgress) -> Void)?
 
+    private let state = Mutex([[String]]())
+
+    var recordedBatches: [[String]] {
+        state.withLock { batches in batches }
+    }
+
     func translate(_ texts: [String]) async throws -> [String] {
-        texts.map { text in "EN:\(text)" }
+        state.withLock { batches in batches.append(texts) }
+        return texts.map { text in "EN:\(text)" }
     }
 }

@@ -376,13 +376,18 @@ extension AppModel {
     /// row's same-language translation in place and appends only a genuinely
     /// new language. So a repeat, an engine-swap replay, and a manual retry
     /// all land as the fresh text — none of them can grow an `" / "` pileup.
-    func applyTranslation(index: Int, translation: SentenceTranslation) {
+    /// Returns whether the row was still present; a false return means the
+    /// transcript no longer contains the index (the callers that must not
+    /// act on a vanished row — the lane's cache seeding — check it).
+    @discardableResult
+    func applyTranslation(index: Int, translation: SentenceTranslation) -> Bool {
         // Cleared before the row lookup: a result whose row is gone (the
         // transcript cleared underneath it) must still retire its marker,
         // or the row stays dimmed with its retry button dead.
         pendingRetranslations.remove(index)
         lanePendingRetranslations.remove(index)
-        guard let at = entryPositionBySentence[index] else { return }
+        guard let at = entryPositionBySentence[index] else { return false }
         entries[at].replaceTranslation(translation)
+        return true
     }
 }
