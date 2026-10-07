@@ -72,6 +72,7 @@ struct SettingsRetranslateCard: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Palette.mutedText)
                         .rotationEffect(.degrees(showsOptions ? 180 : 0))
+                        .animation(.easeOut(duration: 0.15), value: showsOptions)
                 }
                 Text(displayedOption.subtitle)
                     .font(.system(size: 10.5))
@@ -101,11 +102,17 @@ struct SettingsRetranslateCard: View {
     }
 
     /// The option the selection card renders: the persisted selection while
-    /// it's listed, otherwise the session engine — a filtered-out selection
-    /// (it duplicates the live session engine) resolves to the session path
-    /// anyway.
+    /// it's listed, otherwise the option matching the effective (degraded)
+    /// resolution — a filtered-out selection can still resolve to a listed
+    /// alternate (a known-unavailable Apple Intelligence degrades to the
+    /// fast model, a duplicate external to the session path), and the card
+    /// must describe what a click actually does. Only when neither matches
+    /// does it fall back to the session engine.
     private var displayedOption: Option {
         engineOptions.first(where: { option in option.engine == settings.retranslateEngine })
+            ?? engineOptions.first(where: { option in
+                option.engine == model.effectiveRetranslateSelection
+            })
             ?? sessionOption
     }
 
@@ -121,13 +128,22 @@ struct SettingsRetranslateCard: View {
         .frame(width: 300)
     }
 
-    /// One option card: title over description, checkmarked while selected.
+    /// One option card: title over description, checkmarked while it is the
+    /// displayed selection. The checkmark keys off `displayedOption` (not
+    /// the persisted value) so the row matching the collapsed card is always
+    /// the highlighted one — they diverge when a filtered-out selection
+    /// degrades to a different listed option. The inert-click guard stays on
+    /// the persisted value: clicking the displayed-but-not-persisted row
+    /// still writes (pinning the degrade, e.g. `.session`), while clicking
+    /// the already-persisted row stays a no-op that cannot re-raise the
+    /// disclosure.
     private func optionCard(_ option: Option) -> some View {
-        let isSelected = option.engine == settings.retranslateEngine
+        let isDisplayed = option.engine == displayedOption.engine
+        let isPersisted = option.engine == settings.retranslateEngine
         return Button {
-            // The selected row is inert: re-running the action would re-raise
-            // the privacy disclosure sheet for a no-op pick.
-            guard !isSelected else { return }
+            // The persisted row is inert: re-running the action would
+            // re-raise the privacy disclosure sheet for a no-op pick.
+            guard !isPersisted else { return }
             model.selectRetranslateEngine(option.engine)
             showsOptions = false
         } label: {
@@ -137,7 +153,7 @@ struct SettingsRetranslateCard: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Palette.primaryText)
                     Spacer()
-                    if isSelected {
+                    if isDisplayed {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 13))
                             .foregroundStyle(Palette.accent)
@@ -155,15 +171,16 @@ struct SettingsRetranslateCard: View {
         .buttonStyle(.plain)
         .cardSurface(
             radius: 10,
-            fill: isSelected ? Palette.accent.opacity(0.08) : Palette.cardFill,
-            stroke: isSelected ? Palette.accent.opacity(0.55) : Palette.cardStroke
+            fill: isDisplayed ? Palette.accent.opacity(0.08) : Palette.cardFill,
+            stroke: isDisplayed ? Palette.accent.opacity(0.55) : Palette.cardStroke
         )
         .hoverHighlight(
             RoundedRectangle(cornerRadius: 10, style: .continuous),
-            isEnabled: !isSelected,
+            isEnabled: !isDisplayed,
             tint: Palette.accent, opacity: 0.06
         )
         .accessibilityLabel("\(option.title). \(option.subtitle)")
+        .accessibilityAddTraits(isDisplayed ? [.isSelected] : [])
     }
 
     // MARK: - Options
