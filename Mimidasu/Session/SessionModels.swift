@@ -23,6 +23,15 @@ struct Sentence: Identifiable, Equatable, Sendable {
 struct SentenceTranslation: Equatable, Codable, Sendable {
     let lang: String
     let text: String
+    /// Engine that produced this translation via the re-translate lane.
+    /// nil = the session engine (live queue path, never manually retried).
+    let engine: TranslationEngineKind?
+
+    init(lang: String, text: String, engine: TranslationEngineKind? = nil) {
+        self.lang = lang
+        self.text = text
+        self.engine = engine
+    }
 }
 
 /// ASR streaming events delivered from the ASR queue.

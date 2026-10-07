@@ -118,6 +118,18 @@ final class TranslationSettings {
         didSet { defaults.set(targetLanguage.code, forKey: Self.targetLanguageKey) }
     }
 
+    /// Which engine the transcript row's re-translate button uses. Persisted;
+    /// unknown raw values fall back to the session engine on load.
+    private(set) var retranslateEngine: RetranslateEngine {
+        didSet { defaults.set(retranslateEngine.rawValue, forKey: Self.retranslateEngineKey) }
+    }
+
+    /// Whether retried rows render their "· via <engine>" provenance marker.
+    /// User-editable (the settings card binds it), persisted.
+    var showsRetranslateMarker: Bool {
+        didSet { defaults.set(showsRetranslateMarker, forKey: Self.retranslateMarkerKey) }
+    }
+
     /// Observed so views update on `removeKey`/`setTestResult`; dictionary
     /// assignment routes through the property setter, firing observation.
     private(set) var hasKey: [TranslationProvider: Bool]
@@ -131,6 +143,8 @@ final class TranslationSettings {
     private static let openRouterModelKey = "translation.openRouterModel"
     private static let deeplFreeKey = "translation.deeplFreeTier"
     private static let targetLanguageKey = "translation.targetLanguage"
+    private static let retranslateEngineKey = "translation.retranslateEngine"
+    private static let retranslateMarkerKey = "translation.retranslateMarker"
     private static func hasKeyKey(_ provider: TranslationProvider) -> String {
         "translation.hasKey.\(provider.rawValue)"
     }
@@ -166,6 +180,9 @@ final class TranslationSettings {
         deeplIsFreeTier = defaults.bool(forKey: Self.deeplFreeKey)
         targetLanguage = defaults.string(forKey: Self.targetLanguageKey)
             .map(TargetLanguage.init(code:)) ?? .english
+        retranslateEngine = defaults.string(forKey: Self.retranslateEngineKey)
+            .flatMap(RetranslateEngine.init(rawValue:)) ?? .session
+        showsRetranslateMarker = (defaults.object(forKey: Self.retranslateMarkerKey) as? Bool) ?? true
 
         var hasKey: [TranslationProvider: Bool] = [:]
         var keyHints: [TranslationProvider: String] = [:]
@@ -240,6 +257,12 @@ final class TranslationSettings {
         if selectedProvider == provider {
             select(.apple)
         }
+        // The persisted re-translate selection must stay resolvable in
+        // Settings (only configured providers are listed there); click-time
+        // unavailability is then only the Apple-fast cold start.
+        if retranslateEngine.provider == provider {
+            selectRetranslate(.session)
+        }
     }
 
     // MARK: - Selection
@@ -247,6 +270,14 @@ final class TranslationSettings {
     /// Persists the picker selection.
     func select(_ provider: TranslationProvider) {
         selectedProvider = provider
+    }
+
+    /// Persists the re-translate engine selection (the settings card).
+    /// Deliberately not a `select` overload: the two enums share case names
+    /// (`google`, `deepl`), which would make every `.google` call site
+    /// ambiguous.
+    func selectRetranslate(_ engine: RetranslateEngine) {
+        retranslateEngine = engine
     }
 
     /// Persists the target-language picker selection. Restart-only: engines

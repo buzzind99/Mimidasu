@@ -219,6 +219,38 @@ struct TranslationQueueTests {
         #expect(engine.recordedBatches.count == 1, "cache hit must bypass the engine")
     }
 
+    /// The re-translate lane seeds the cache so a repeated sentence gets the
+    /// retried *text* — but unstamped, so the fresh row (never retried)
+    /// carries no provenance marker.
+    @Test("seedCache serves an identical sentence unstamped, bypassing the engine")
+    func seededCacheServesUnstampedPair() async throws {
+        let engine = makeEchoEngine()
+        let (queue, sink) = makeSUT()
+        queue.setHandlers(
+            result: { index, translation in
+                sink.receive(index: index, translation: translation)
+            },
+            status: { status in sink.receive(status: status) }
+        )
+        queue.seedCache(
+            makeSentence(index: 0, text: sentenceText),
+            SentenceTranslation(lang: "en", text: "EN:テスト", engine: .deepl)
+        )
+
+        let worker = Task { await queue.run(with: engine) }
+        defer { worker.cancel() }
+        queue.enqueue(makeSentence(index: 5, text: sentenceText))
+
+        #expect(sink.results.count == 1, "the seeded cache posts without awaiting")
+        let cached = try #require(sink.results.first)
+        #expect(cached.index == 5)
+        #expect(cached.translation == SentenceTranslation(lang: "en", text: "EN:テスト"))
+        #expect(cached.translation.engine == nil, "the seed must be unstamped")
+        let drained = await queue.drain(timeout: 0.05)
+        #expect(drained, "the cache hit must bypass pending")
+        #expect(engine.recordedBatches.isEmpty, "the cache hit must bypass the engine")
+    }
+
     // MARK: - enqueue skip-empty
 
     /// Empty and whitespace-only finals never reach the engine: they are

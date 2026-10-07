@@ -332,6 +332,72 @@ struct TranslationSettingsTests {
         #expect(settings.activeEngineDescription(fallbackActive: true) == "Google Translate → \(target) — fallback active")
     }
 
+    // MARK: - Re-translate engine
+
+    @Test("re-translate engine defaults to the session engine, marker on")
+    func retranslateDefaults() {
+        let (settings, _) = makeSUT()
+
+        #expect(settings.retranslateEngine == .session)
+        #expect(settings.showsRetranslateMarker, "the provenance marker is on by default")
+    }
+
+    @Test("re-translate selection and marker toggle persist")
+    func retranslateSelectionAndMarkerPersist() {
+        let (first, defaults) = makeSUT()
+        first.selectRetranslate(.appleFast)
+        first.showsRetranslateMarker = false
+
+        let (second, _) = makeSUT(defaults: defaults)
+
+        #expect(second.retranslateEngine == .appleFast)
+        #expect(!second.showsRetranslateMarker)
+    }
+
+    @Test("the Apple Intelligence selection persists")
+    func appleHighFidelitySelectionPersists() {
+        let (first, defaults) = makeSUT()
+        first.selectRetranslate(.appleHighFidelity)
+
+        let (second, _) = makeSUT(defaults: defaults)
+
+        #expect(second.retranslateEngine == .appleHighFidelity)
+    }
+
+    @Test("unknown persisted re-translate engine falls back to the session engine")
+    func unknownPersistedRetranslateEngineFallsBackToSession() throws {
+        let suiteName = "test.TranslationSettings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.set("not-an-engine", forKey: "translation.retranslateEngine")
+
+        let (settings, _) = makeSUT(defaults: defaults)
+
+        #expect(settings.retranslateEngine == .session)
+    }
+
+    @Test("removing a provider's key resets a provider-named re-translate engine")
+    func removingProviderKeyResetsRetranslateEngine() throws {
+        let (settings, _) = makeSUT()
+        try settings.saveKey("sk-deepl", for: .deepl)
+        settings.selectRetranslate(.deepl)
+
+        settings.removeKey(for: .deepl)
+
+        #expect(settings.retranslateEngine == .session)
+    }
+
+    @Test("removing another provider's key keeps the re-translate engine")
+    func removingOtherProviderKeyKeepsRetranslateEngine() throws {
+        let (settings, _) = makeSUT()
+        try settings.saveKey("sk-deepl", for: .deepl)
+        try settings.saveKey("sk-google", for: .google)
+        settings.selectRetranslate(.deepl)
+
+        settings.removeKey(for: .google)
+
+        #expect(settings.retranslateEngine == .deepl)
+    }
+
     // MARK: - Provider metadata
 
     /// Raw values are Keychain account names and UserDefaults keys — this

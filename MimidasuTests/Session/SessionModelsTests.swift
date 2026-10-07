@@ -1,3 +1,4 @@
+import Foundation
 @testable import Mimidasu
 import Testing
 
@@ -215,5 +216,47 @@ struct SessionModelsTests {
             SentenceTranslation(lang: "en", text: "Howdy"),
             SentenceTranslation(lang: "ko", text: secondTranslationText)
         ])
+    }
+
+    // MARK: - SentenceTranslation engine provenance
+
+    @Test("old JSON without an engine field decodes with engine nil")
+    func legacyJSONDecodesWithNilEngine() throws {
+        let json = #"{"lang":"en","text":"Hello"}"#
+        let data = try #require(json.data(using: .utf8))
+
+        let translation = try JSONDecoder().decode(SentenceTranslation.self, from: data)
+
+        #expect(translation == SentenceTranslation(lang: "en", text: "Hello"))
+        #expect(translation.engine == nil)
+    }
+
+    @Test("a nil engine encodes as an absent key — old consumers stay compatible")
+    func nilEngineEncodesAbsentKey() throws {
+        let data = try JSONEncoder().encode(SentenceTranslation(lang: "en", text: "Hello"))
+
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        #expect(Set(object.keys) == ["lang", "text"])
+    }
+
+    @Test("an engine stamp round-trips")
+    func engineStampRoundTrips() throws {
+        let original = SentenceTranslation(lang: "en", text: "Hello", engine: .deepl)
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(SentenceTranslation.self, from: data)
+
+        #expect(decoded == original)
+        #expect(decoded.engine == .deepl)
+    }
+
+    @Test("equal text from a different engine is a different value")
+    func equalityIncludesEngine() {
+        let unstamped = SentenceTranslation(lang: "en", text: "Hello")
+        let stamped = SentenceTranslation(lang: "en", text: "Hello", engine: .deepl)
+
+        #expect(unstamped != stamped)
+        #expect(stamped == SentenceTranslation(lang: "en", text: "Hello", engine: .deepl))
     }
 }

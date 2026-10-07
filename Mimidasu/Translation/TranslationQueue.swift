@@ -399,12 +399,28 @@ final class TranslationQueue {
         onResult?(sentence.index, pair)
     }
 
+    /// Seeds the repeat-sentence cache from the re-translate lane without
+    /// firing `onResult` — the lane delivers through `applyTranslation`
+    /// itself. The stored copy is deliberately *unstamped* (`engine` nil):
+    /// `enqueue` serves cached entries through the normal queue path, so a
+    /// never-retried row repeating the sentence gets the retried *text*
+    /// (today's retry semantics) without the lane's provenance marker.
+    func seedCache(_ sentence: Sentence, _ pair: SentenceTranslation) {
+        cache.setObject(
+            TranslationBox(SentenceTranslation(lang: pair.lang, text: pair.text)),
+            forKey: sentence.text as NSString
+        )
+    }
+
     private func setStatus(_ newStatus: TranslationStatus) {
         status = newStatus
         onStatus?(newStatus)
     }
 
-    private static func describe(_ error: TranslationEngineError) -> String {
+    /// Shared user-facing copy for engine failures — the queue's failure
+    /// card and the re-translate lane's failure toast must not drift.
+    /// Internal so the lane (outside the queue) reuses it verbatim.
+    static func describe(_ error: TranslationEngineError) -> String {
         switch error {
         case .invalidKey:
             "Invalid API key. Check the key in Settings, then reconnect."
@@ -423,7 +439,7 @@ final class TranslationQueue {
         }
     }
 
-    private static func describe(_ error: Error) -> String {
+    static func describe(_ error: Error) -> String {
         switch error {
         case let engineError as TranslationEngineError:
             return describe(engineError)

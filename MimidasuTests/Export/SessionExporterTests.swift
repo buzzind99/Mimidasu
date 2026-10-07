@@ -245,6 +245,32 @@ struct SessionExporterTests {
         #expect(Set(translation.keys) == ["lang", "text"])
     }
 
+    /// A lane retry replaces the row's translation in place, stamping the
+    /// engine — additive under the same schema version; session-engine
+    /// translations stay without it.
+    @Test("json emits the engine field on engine-stamped translations")
+    func jsonEmitsEngineField() throws {
+        var entry = makeUntranslatedEntry()
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: englishTranslation))
+        entry.replaceTranslation(
+            SentenceTranslation(lang: "en", text: "Retried", engine: .deepl)
+        )
+        let metadata = SessionMetadata(
+            startedAt: Date(), sourceLang: "ja", targetLang: "en", model: nil, chunkMS: 160
+        )
+
+        let data = try SessionExporter.json(entries: [entry], metadata: metadata, results: [:])
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let sentences = try #require(object["sentences"] as? [[String: Any]])
+        let sentence = try #require(sentences.first)
+        let translations = try #require(sentence["translations"] as? [[String: Any]])
+
+        #expect(translations.count == 1, "the retry replaces in place — one entry per language")
+        #expect(translations[0]["text"] as? String == "Retried")
+        #expect(translations[0]["engine"] as? String == "deepl")
+        #expect(object["schema_version"] as? Int == schemaVersion, "additive field, same version")
+    }
+
     @Test("nil metadata falls back to session defaults")
     func jsonNilMetadataFallsBackToDefaults() throws {
         let before = Date()
