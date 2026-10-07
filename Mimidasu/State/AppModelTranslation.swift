@@ -149,14 +149,18 @@ extension AppModel {
         return true
     }
 
-    /// Confirms the pending cloud disclosure: completes the held intent — a
-    /// provider selection (SettingsView's `.onChange` then re-attaches the
-    /// engine) or a re-translate engine selection. The sheet dismisses
-    /// through the cleared `providerAwaitingDisclosure`.
-    func confirmCloudDisclosure() {
-        guard let disclosure = providerAwaitingDisclosure else { return }
+    /// Confirms the cloud disclosure for the sheet the user read. Completes
+    /// the held intent — a provider selection (SettingsView's `.onChange`
+    /// then re-attaches the engine) or a re-translate engine selection — and
+    /// the sheet dismisses through the cleared `providerAwaitingDisclosure`.
+    /// Applies only while the slot still equals the presented intent: a slot
+    /// clobbered between presentation and the click holds a newer intent
+    /// whose own sheet will present, and confirming the stale sheet must not
+    /// select the newer provider (a consent mismatch).
+    func confirmCloudDisclosure(_ presented: PendingCloudDisclosure) {
+        guard providerAwaitingDisclosure == presented else { return }
         providerAwaitingDisclosure = nil
-        switch disclosure {
+        switch presented {
         case let .providerSwitch(provider):
             translationSettings.select(provider)
         case let .retranslateEngine(provider):

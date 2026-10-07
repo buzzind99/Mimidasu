@@ -393,7 +393,7 @@ struct AppModelTranslationEngineTests {
         #expect(settings.selectedProvider == .google, "the switch waits for the disclosure")
         #expect(model.providerAwaitingDisclosure == .providerSwitch(.openrouter))
 
-        model.confirmCloudDisclosure()
+        model.confirmCloudDisclosure(.providerSwitch(.openrouter))
         #expect(settings.selectedProvider == .openrouter, "confirming moves the selection")
         #expect(model.activeExternalProvider == .google, "activation waits for the settings-change observer")
 
@@ -401,6 +401,34 @@ struct AppModelTranslationEngineTests {
         model.translationProviderDidChange()
         #expect(model.activeTranslationEngine == .external)
         #expect(model.activeExternalProvider == .openrouter)
+
+        await stopTranslation(model)
+    }
+
+    /// A verified probe for Apple itself selects it directly: Apple needs no
+    /// key verification round-trip (the connection tester answers
+    /// immediately) and no disclosure, so the held-selection machinery
+    /// never engages.
+    @Test("a verified Apple probe selects Apple directly")
+    func verifiedAppleProbeSelectsAppleDirectly() async {
+        let settings = makeSettings(provider: .google)
+        // A stored Apple "key" satisfies `verifyKey`'s has-key read; the
+        // tester's `.apple` case returns without touching the network.
+        try? settings.saveKey("test-key-1234", for: .apple)
+        let model = makeModel(
+            settings: settings,
+            transport: constantStatusTransport(200)
+        )
+        // The launch check resolves nil (stubbed) and would otherwise land
+        // mid-test, flipping the freshly stopped `.idle` to `.needsModel`.
+        await model.initialModelCheck?.value
+        model.phase = .running
+
+        let verified = await model.verifyAndSelectTranslationProvider(.apple)
+
+        #expect(verified)
+        #expect(settings.selectedProvider == .apple, "the selection applies immediately")
+        #expect(model.providerAwaitingDisclosure == nil, "on-device needs no disclosure")
 
         await stopTranslation(model)
     }

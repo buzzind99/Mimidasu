@@ -267,7 +267,7 @@ struct AppModelRetranslateRouteTests {
             "the selection is held until the disclosure confirms"
         )
 
-        model.confirmCloudDisclosure()
+        model.confirmCloudDisclosure(.retranslateEngine(.deepl))
         #expect(model.translationSettings.retranslateEngine == .deepl)
         #expect(model.providerAwaitingDisclosure == nil)
     }

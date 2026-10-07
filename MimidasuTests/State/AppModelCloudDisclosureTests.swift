@@ -100,10 +100,51 @@ struct AppModelCloudDisclosureTests {
         )
 
         _ = await model.verifyAndSelectTranslationProvider(.openrouter)
-        model.confirmCloudDisclosure()
+        model.confirmCloudDisclosure(.providerSwitch(.openrouter))
 
         #expect(model.providerAwaitingDisclosure == nil)
         #expect(settings.selectedProvider == .openrouter)
+
+        await stopTranslation(model)
+    }
+
+    /// Confirming applies the sheet the user read, not whatever occupies the
+    /// slot at button-time: a slot clobbered between presentation and the
+    /// click holds a newer intent whose own sheet will present, and applying
+    /// it from the stale sheet's confirm would be a consent mismatch.
+    @Test("confirming a stale disclosure does not apply a newer intent")
+    func confirmingStaleDisclosureDoesNotApplyNewerIntent() async {
+        let settings = makeSettings(provider: .apple)
+        try? settings.saveKey("test-key-1234", for: .openrouter)
+        try? settings.saveKey("test-key-1234", for: .deepl)
+        let model = AppModel(
+            translationSettings: settings,
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelCloudDisclosure"),
+            favorites: isolatedFavorites(),
+            translationTransport: constantStatusTransport(200),
+            highFidelityProbe: { _ in false },
+            initialModelResolve: { _ in nil }
+        )
+        // The launch check resolves nil (stubbed) and would otherwise land
+        // mid-test, flipping the freshly stopped `.idle` to `.needsModel`.
+        await model.initialModelCheck?.value
+
+        _ = await model.verifyAndSelectTranslationProvider(.openrouter)
+        #expect(model.providerAwaitingDisclosure == .providerSwitch(.openrouter))
+
+        // A re-translate selection lands while the provider sheet is up.
+        model.providerAwaitingDisclosure = .retranslateEngine(.deepl)
+        model.confirmCloudDisclosure(.providerSwitch(.openrouter))
+
+        #expect(settings.selectedProvider == .apple, "the read sheet's switch is not applied")
+        #expect(
+            model.providerAwaitingDisclosure == .retranslateEngine(.deepl),
+            "the newer intent stays staged for its own sheet"
+        )
+        #expect(
+            model.translationSettings.retranslateEngine != .deepl,
+            "the newer intent is not applied either — it waits for its own confirm"
+        )
 
         await stopTranslation(model)
     }
@@ -155,7 +196,7 @@ struct AppModelCloudDisclosureTests {
         )
 
         _ = await model.verifyAndSelectTranslationProvider(.openrouter)
-        model.confirmCloudDisclosure()
+        model.confirmCloudDisclosure(.providerSwitch(.openrouter))
         #expect(settings.selectedProvider == .openrouter)
 
         _ = await model.verifyAndSelectTranslationProvider(.google)

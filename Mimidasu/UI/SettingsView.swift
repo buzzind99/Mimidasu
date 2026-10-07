@@ -69,7 +69,10 @@ struct SettingsView: View {
         .sheet(item: $model.providerAwaitingDisclosure) { disclosure in
             CloudDisclosureSheet(
                 provider: disclosure.provider,
-                onConfirm: { model.confirmCloudDisclosure() },
+                // The presented intent, not the live slot: if the slot is
+                // clobbered while the sheet is up, confirming this sheet must
+                // not apply the newer intent.
+                onConfirm: { model.confirmCloudDisclosure(disclosure) },
                 onDecline: { model.declineCloudDisclosure() }
             )
         }
