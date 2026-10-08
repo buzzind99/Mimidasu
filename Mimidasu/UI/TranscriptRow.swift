@@ -38,8 +38,11 @@ struct TranscriptRow: View {
     /// engine resolves to the session path, the attached-worker and
     /// failure-card clauses apply too; when an alternate engine resolves,
     /// they are deliberately skipped (see `TranscriptView.retryEnabled` for
-    /// the reads). Every clause is a precondition `retranslateSentence`
-    /// enforces, so a shown button is always a button that would do
+    /// the reads). The live-session, marker, and — on the session path —
+    /// worker clauses are preconditions `retranslateSentence` enforces
+    /// directly; the failure-card clause is belt-and-braces on the worker
+    /// clause (a terminal failure releases the worker in the same tick the
+    /// queue exits), so a shown button is always a button that would do
     /// something.
     let retryEnabled: Bool
     /// True while a manual re-translation of this row's sentence is in
