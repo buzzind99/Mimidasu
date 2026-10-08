@@ -56,12 +56,63 @@ struct AppModelRetranslateLaneFailureTests {
         #expect(toast?.title == "Re-translate failed")
         #expect(
             toast?.body == TranslationQueue.describe(
-                TranslationEngineError.badResponse("Expected 1 translation, got 0")
+                TranslationEngineError.badResponse("Expected 1 non-empty translation, got 0")
             )
         )
         #expect(
             model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the row keeps its previous translation"
+        )
+    }
+
+    @Test("a lane failure crossing a stop posts nothing — the stop already cleared the toasts")
+    func laneFailureCrossingStopPostsNoToast() async {
+        let model = await makeSUT()
+        let engine = LaneGatedFailingEngine()
+        model.retranslateEngineFactory = { _ in engine }
+        model.translationSettings.selectRetranslate(.google)
+        model.phase = .running
+        // A served backlog keeps a stop's translation-tail drain instant.
+        let worker = Task { await model.translationQueue.run(with: QueueEchoEngine()) }
+        defer { worker.cancel() }
+        #expect(
+            await pollUntil(timeout: resultTimeout) { model.translationQueue.hasWorker },
+            "the queue worker must be attached"
+        )
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+        // Settle the worker's initial delivery, then overwrite the row: the
+        // "Original" text is what the failed flight must not replace.
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                model.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:テスト")]
+            },
+            "the worker's initial delivery landed"
+        )
+        model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
+
+        // The flight parks mid-air; the failure only surfaces when the gate
+        // opens. The stop lands first.
+        model.retranslateSentence(sentence)
+        #expect(
+            await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
+            "the flight parks in the engine"
+        )
+        let laneTask = model.retranslateLaneTask
+
+        await model.performStop()
+        engine.openGate()
+        await laneTask?.value
+
+        #expect(
+            !model.toasts.toasts.contains(where: { toast in toast.key == ToastKey.retranslate }),
+            "a failure whose catch runs after the stop must not repost over the cleared stack"
+        )
+        #expect(model.pendingRetranslations.isEmpty, "no marker outlives the stop")
+        #expect(model.lanePendingRetranslations.isEmpty)
+        #expect(
+            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            "the failed flight must not swap the row"
         )
     }
 
@@ -134,4 +185,53 @@ private final class LaneCancellableEngine: TranslationEngine, @unchecked Sendabl
         try await Task.sleep(for: .seconds(30))
         return texts.map { text in "JA:\(text)" }
     }
+}
+
+/// Queue fixture: prefixes with "EN:", serving the backlog so a stop's
+/// translation-tail drain stays instant.
+private final class QueueEchoEngine: TranslationEngine, @unchecked Sendable {
+    let preferredBatchSize = 16
+    var onRetry: (@Sendable (RetryProgress) -> Void)?
+
+    func translate(_ texts: [String]) async throws -> [String] {
+        texts.map { text in "EN:\(text)" }
+    }
+}
+
+/// Lane fixture that parks until the gate opens and then THROWS — a failure
+/// that only surfaces when the test releases it, so a stop can cross it.
+/// Deliberately cancellation-blind: the stop's cancel must not turn the
+/// parked flight into a `CancellationError` — the point is a real failure
+/// surfacing after the stop.
+private final class LaneGatedFailingEngine: TranslationEngine, @unchecked Sendable {
+    let preferredBatchSize = 4
+    var onRetry: (@Sendable (RetryProgress) -> Void)?
+
+    private let state = Mutex(LaneFailureGateState())
+
+    var recordedBatches: [[String]] {
+        state.withLock { gateState in gateState.batches }
+    }
+
+    func openGate() {
+        state.withLock { gateState in gateState.open = true }
+    }
+
+    func translate(_ texts: [String]) async throws -> [String] {
+        state.withLock { gateState in gateState.batches.append(texts) }
+        // Bounded so a gate that never opens cannot hang the suite.
+        for _ in 0 ..< 500 {
+            if state.withLock({ gateState in gateState.open }) {
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        struct Failed: Error {}
+        throw Failed()
+    }
+}
+
+private struct LaneFailureGateState {
+    var open = false
+    var batches: [[String]] = []
 }

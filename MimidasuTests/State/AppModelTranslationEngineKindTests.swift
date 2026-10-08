@@ -98,7 +98,13 @@ struct AppModelTranslationEngineKindTests {
     }
 
     @Test("a probe for a different pair does not label the current target")
-    func probeForDifferentPairDoesNotLabelCurrentTarget() {
+    func probeForDifferentPairDoesNotLabelCurrentTarget() throws {
+        // `activeEngineKind` only consults the probe on 26.4+; below it the
+        // pair-matching logic under test is compiled out and the assertion
+        // would pass vacuously.
+        guard #available(macOS 26.4, *) else {
+            try Test.cancel("the probe-pair matching requires macOS 26.4")
+        }
         let model = makeModel(settings: makeSettings(provider: .apple))
         model.appleHighFidelityProbe = (true, "zh-Hans")
 

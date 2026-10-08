@@ -65,7 +65,7 @@ struct AppModelRetranslateRouteTests {
 
     // MARK: - Armed dedicated-session lifecycle
 
-    @Test("stop drops both armed dedicated Apple sessions")
+    @Test("stop drops both armed dedicated Apple sessions' engines and rebuilds their configs")
     func stopDropsArmedDedicatedSessions() async {
         let model = await makeSUT()
         model.phase = .running
@@ -78,9 +78,13 @@ struct AppModelRetranslateRouteTests {
 
         await model.performStop()
 
-        #expect(model.retranslateConfig == nil, "the armed config must not cross the session boundary")
-        #expect(model.retranslateSessionEngine == nil)
-        #expect(model.retranslateHifiConfig == nil)
+        // The configs are rebuilt in place, never nil-ed: a nil →
+        // fresh-equal-config transition is the `.translationTask` path that
+        // does not reliably re-fire, and the next Apple-kind retry would arm
+        // onto it (see `teardownRetranslateSession`).
+        #expect(model.retranslateConfig != nil, "the armed config is rebuilt, not nil-ed")
+        #expect(model.retranslateSessionEngine == nil, "the stored engine goes with the old config")
+        #expect(model.retranslateHifiConfig != nil, "the hifi config is rebuilt, not nil-ed")
         #expect(model.retranslateHifiSessionEngine == nil)
         #expect(model.lanePendingRetranslations.isEmpty)
         #expect(model.retranslateLaneTask == nil, "stop clears the stored lane task")
@@ -105,15 +109,18 @@ struct AppModelRetranslateRouteTests {
         try? model.translationSettings.saveKey("sk-google", for: .google)
         #expect(model.alternateRetranslateEngineActive, "a keyed external resolves")
 
-        // The live Apple session is de facto fast (the probe never landed in
-        // this fixture): the fast selection is the same engine, the
-        // Intelligence selection is a real alternate.
+        // The probe never landed in this fixture: the live Apple identity is
+        // UNKNOWN, so both Apple selections are alternates — the lane defers
+        // to the landing instead of trusting the provisional `.appleFast`
+        // read (which would misroute against a live hifi session).
         model.translationSettings.selectRetranslate(.appleFast)
-        #expect(!model.alternateRetranslateEngineActive)
+        #expect(model.alternateRetranslateEngineActive)
         model.translationSettings.selectRetranslate(.appleHighFidelity)
         #expect(model.alternateRetranslateEngineActive)
 
-        // Once the probe lands installed, the mirror flips.
+        // Once the probe lands installed, the truth table resolves: the
+        // live session IS Apple Intelligence, so the hifi selection is the
+        // same engine and the fast selection is the alternate.
         model.appleHighFidelityProbe = (true, "en")
         #expect(model.alternateRetranslateEngineActive == false, "the live session IS Apple Intelligence now")
         model.translationSettings.selectRetranslate(.appleFast)
@@ -207,6 +214,12 @@ struct AppModelRetranslateRouteTests {
     @Test("apple fast with a de facto fast live session degrades to the session engine")
     func appleFastDegradesToSessionWhenDeFactoFast() async {
         let model = await makeSUT()
+        // LANDED not-installed: the live Apple session runs the fast model
+        // (the framework fell back), so a fast selection names the session's
+        // own engine. An UNLANDED probe would defer to the dedicated fast
+        // lane instead — the identity must be known to call it the same
+        // engine.
+        model.appleHighFidelityProbe = (false, "en")
         let laneCalls = Mutex(0)
         model.retranslateEngineFactory = { provider in
             laneCalls.withLock { counter in counter += 1 }

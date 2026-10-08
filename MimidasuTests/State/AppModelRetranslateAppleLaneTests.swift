@@ -44,26 +44,36 @@ struct AppModelRetranslateAppleLaneTests {
 
     // MARK: - Session plumbing
 
-    @Test("the fast-lane arrival hook stores its engine")
+    @Test("the fast-lane arrival hook stores its engine only while its config is armed")
     func fastArrivalStoresEngine() async {
         let model = await makeSUT()
 
+        // An unarmed config refuses the hand-over: a session for a lane that
+        // was never armed must not be stored for the next lane to acquire
+        // instantly.
+        model.retranslateSessionArrived(LaneEchoEngine())
+        #expect(model.retranslateSessionEngine == nil)
+
+        model.armRetranslateSessionIfNeeded(for: .appleFast)
         model.retranslateSessionArrived(LaneEchoEngine())
 
         #expect(model.retranslateSessionEngine != nil)
         #expect(model.retranslateHifiSessionEngine == nil, "the intelligence lane's slot is untouched")
-        #expect(model.retranslateConfig == nil, "an arrival never arms a config — arming precedes the session")
     }
 
-    @Test("the intelligence-lane arrival hook stores its engine")
+    @Test("the intelligence-lane arrival hook stores its engine only while its config is armed")
     func hifiArrivalStoresEngine() async {
         let model = await makeSUT()
 
+        // Same gate as the fast lane: no armed config, no stored session.
+        model.retranslateHifiSessionArrived(LaneEchoEngine())
+        #expect(model.retranslateHifiSessionEngine == nil)
+
+        model.armRetranslateSessionIfNeeded(for: .appleHighFidelity)
         model.retranslateHifiSessionArrived(LaneEchoEngine())
 
         #expect(model.retranslateHifiSessionEngine != nil)
         #expect(model.retranslateSessionEngine == nil, "the fast lane's slot is untouched")
-        #expect(model.retranslateHifiConfig == nil, "an arrival never arms a config — arming precedes the session")
     }
 
     @Test("arming an external kind arms no dedicated session")
@@ -74,6 +84,21 @@ struct AppModelRetranslateAppleLaneTests {
 
         #expect(model.retranslateConfig == nil)
         #expect(model.retranslateHifiConfig == nil)
+    }
+
+    @Test("arming an already-armed kind never reassigns its config")
+    func armingArmedKindKeepsConfig() async {
+        let model = await makeSUT()
+        model.armRetranslateSessionIfNeeded(for: .appleFast)
+        let armed = model.retranslateConfig
+        #expect(armed != nil)
+
+        model.armRetranslateSessionIfNeeded(for: .appleFast)
+
+        #expect(
+            model.retranslateConfig == armed,
+            "a reassignment would be a `.translationTask` re-fire gamble — the armed config stays put"
+        )
     }
 
     // MARK: - Fast (MTL) lane
@@ -168,10 +193,14 @@ struct AppModelRetranslateAppleLaneTests {
             try Test.cancel("the armed hifi lane requires macOS 26.4")
         }
         let model = await makeSUT()
-        // The probe never lands, so the live session is de facto fast and the
-        // Intelligence selection is a real alternate. (A probe that LANDED
-        // not-installed would degrade the selection to `.appleFast` instead —
-        // see `unavailableHighFidelityDegradesToFast`.)
+        // An EXTERNAL live session, so a high-fidelity retry is a genuine
+        // alternate at every stage of the probe — a live Apple session would
+        // take the session path once a landed-installed probe reveals it
+        // already runs the Intelligence model. (A probe that landed
+        // not-installed would degrade the selection to `.appleFast` instead
+        // — see `unavailableHighFidelityDegradesToFast`.)
+        model.activeTranslationEngine = .external
+        model.activeExternalProvider = .google
         model.translationSettings.selectRetranslate(.appleHighFidelity)
         model.phase = .running
         let worker = await attachWorker(model)
@@ -184,6 +213,9 @@ struct AppModelRetranslateAppleLaneTests {
         )
 
         model.retranslateSentence(sentence)
+        // The probe lands installed mid-lane: the pair genuinely serves the
+        // Intelligence model, so the deferred lane flies as armed.
+        model.appleHighFidelityProbe = (true, "en")
         model.retranslateHifiSessionArrived(LaneEchoEngine())
 
         #expect(
@@ -205,9 +237,14 @@ struct AppModelRetranslateAppleLaneTests {
             try Test.cancel("the armed hifi lane requires macOS 26.4")
         }
         let model = await makeSUT()
-        // The probe never lands, so the live session is de facto fast and the
-        // Intelligence selection arms the hifi lane (a probe that landed
-        // not-installed would degrade it to `.appleFast` instead).
+        // The probe landed installed for an EXTERNAL live session: the
+        // Intelligence selection is a genuine alternate and the probe
+        // deferral passes straight through — what stalls is the arm wait
+        // itself. (A live Apple session would take the session path; a
+        // pending probe would defer first instead of arming-waiting.)
+        model.activeTranslationEngine = .external
+        model.activeExternalProvider = .google
+        model.appleHighFidelityProbe = (true, "en")
         model.translationSettings.selectRetranslate(.appleHighFidelity)
         model.phase = .running
         let sentence = makeSentence(index: 7)

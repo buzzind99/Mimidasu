@@ -258,16 +258,18 @@ struct AppModelRetranslateLaneTests {
         // The session arrives as the session goes away — the ordering a
         // capture restart produces (the phase parks in `.starting`, no stop
         // involved). The wait resolves `.ready`, and the post-wait guard is
-        // what has to refuse the flight and retire the marker.
+        // what has to refuse the flight and retire the marker. The markers
+        // are retired by the lane task itself, so poll for them instead of
+        // sleeping past it.
         model.retranslateSessionArrived(LaneEchoEngine())
         model.phase = .starting
-        try? await Task.sleep(for: .milliseconds(150))
 
         #expect(
-            model.pendingRetranslations.isEmpty,
+            await pollUntil(timeout: resultTimeout) {
+                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
+            },
             "a flight the lane cannot deliver retires its marker"
         )
-        #expect(model.lanePendingRetranslations.isEmpty)
         #expect(
             model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the row keeps its previous translation"
@@ -436,9 +438,16 @@ struct AppModelRetranslateLaneTests {
         // bumped): the bump makes every lane-owned marker undeliverable, so
         // the teardown retires them synchronously, and the resumed flight
         // must stay silent instead of delivering over — or toasting over —
-        // the activation the user just made.
+        // the activation the user just made. The parked task is captured
+        // BEFORE the teardown (the teardown nils the stored task) and
+        // awaited after the gate opens, so the negative assertions below
+        // run only once the flight has fully resolved — a dropped epoch
+        // guard in the delivery path would land after them and fail here.
+        let laneTask = model.retranslateLaneTask
+
         model.teardownRetranslateSession()
         engine.openGate()
+        await laneTask?.value
 
         #expect(
             await pollUntil(timeout: resultTimeout) {

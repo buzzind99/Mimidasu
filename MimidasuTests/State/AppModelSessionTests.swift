@@ -449,13 +449,25 @@ struct AppModelSessionTests {
     func shutdownAwaitsStagedStopTask() async {
         let sut = await makeSUT()
 
-        // A stop task that has already drained: shutdown must still take the
-        // await-its-value branch (production reaches this when quit lands
-        // while the stop task is between its last suspension and its cleanup).
-        sut.model.stopTask = Task {}
+        // A staged stop that is genuinely in flight: shutdown must take the
+        // await-its-value branch — the ordered log below fails both if
+        // shutdown ran a second teardown over the staged one and if the
+        // await branch were deleted (retirement would then land before
+        // "staged.stop" is ever recorded).
+        sut.model.stopTask = Task {
+            try? await Task.sleep(for: .milliseconds(200))
+            sut.log.record("staged.stop")
+        }
         await sut.model.shutdownForTermination()
 
         #expect(sut.model.phase == .idle)
-        #expect(sut.log.names.contains("engine.retire"))
+        #expect(
+            sut.log.contains(inOrder: ["staged.stop", "engine.retire"]),
+            "the warm engine is retired only after the staged stop's teardown finished"
+        )
+        #expect(
+            !sut.log.names.contains("capture.stop"),
+            "the staged stop owns the teardown — shutdown must not run a second one"
+        )
     }
 }

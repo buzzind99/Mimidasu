@@ -98,6 +98,11 @@ struct AppModelRetranslateLaneOwnershipTests {
         await expectPoll("the first session's flight parks in the engine") {
             stragglerEngine.recordedBatches.count == 1
         }
+        // The straggler's own task: captured before the stop (the teardown
+        // nils the stored task and the new session's retry replaces it), so
+        // the marker assertion below can wait on the flight's full
+        // resolution instead of racing its post-flight retire.
+        let stragglerTask = model.retranslateLaneTask
 
         // The session dies and a new one begins — indexes restart, so 7
         // names a different row now. The worker is released first: a live
@@ -125,6 +130,7 @@ struct AppModelRetranslateLaneOwnershipTests {
         // epoch), and its retirement must SKIP: the marker it would remove
         // by index belongs to the new epoch's parked flight.
         stragglerEngine.openGate()
+        await stragglerTask?.value
         await expectPoll("the straggler's flight finished") { stragglerEngine.completions == 1 }
         #expect(
             model.pendingRetranslations == [7],
@@ -225,6 +231,61 @@ struct AppModelRetranslateLaneOwnershipTests {
             "the replay never overwrote the lane-stamped row"
         )
         #expect(replay.recordedBatches == [["二"]], "the retried sentence was never re-flown")
+    }
+
+    // MARK: - Cache ownership
+
+    @Test("a lane result whose row vanished never seeds the cache")
+    func laneResultForVanishedRowSkipsCacheSeed() async {
+        let model = await makeSUT()
+        let engine = LaneGatedEngine()
+        model.retranslateEngineFactory = { _ in engine }
+        model.translationSettings.selectRetranslate(.google)
+        model.phase = .running
+        let worker = Task { await model.translationQueue.run(with: QueueEchoEngine()) }
+        defer { worker.cancel() }
+        await expectPoll("the queue worker must be attached") { model.translationQueue.hasWorker }
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+        await expectPoll("the initial delivery landed and seeded the queue cache") {
+            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:\(sentenceText)")]
+        }
+
+        // The retry parks mid-air; the transcript clears the row underneath
+        // it (the position map is what `applyTranslation` resolves through).
+        model.retranslateSentence(sentence)
+        await expectPoll("the flight parks in the engine") { engine.recordedBatches.count == 1 }
+        let laneTask = model.retranslateLaneTask
+        model.entryPositionBySentence.removeValue(forKey: 7)
+
+        engine.openGate()
+        await laneTask?.value
+
+        #expect(model.pendingRetranslations.isEmpty, "a vanished row still retires its marker")
+        #expect(model.lanePendingRetranslations.isEmpty)
+        #expect(
+            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:\(sentenceText)")],
+            "the vanished row never took the retried text"
+        )
+
+        // The repeat serves the ORIGINAL cached translation — a seeded
+        // retried text would surface here instead.
+        model.sessionController.onSentence?(makeSentence(index: 9))
+        await expectPoll("the repeat served the original cache entry") {
+            model.entries[1].translations == [SentenceTranslation(lang: "en", text: "EN:\(sentenceText)")]
+        }
+        #expect(model.entries[1].translations.first?.engine == nil)
+    }
+}
+
+/// Session-engine fixture: prefixes with "EN:", keeping the moved cache test's
+/// initial deliveries distinct from the lane fixture's "JA:" prefix.
+private final class QueueEchoEngine: TranslationEngine, @unchecked Sendable {
+    let preferredBatchSize = 16
+    var onRetry: (@Sendable (RetryProgress) -> Void)?
+
+    func translate(_ texts: [String]) async throws -> [String] {
+        texts.map { text in "EN:\(text)" }
     }
 }
 
