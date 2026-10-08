@@ -15,6 +15,29 @@ enum ActiveTranslationEngine: Equatable {
     case external
 }
 
+/// The intent held behind the cloud disclosure sheet: completing a provider
+/// switch (the live translation engine) or a re-translate engine selection.
+/// Both raise the same sheet with the same semantics — raised on every
+/// selection, no persisted acknowledgment.
+enum PendingCloudDisclosure: Equatable, Identifiable {
+    case providerSwitch(TranslationProvider)
+    case retranslateEngine(TranslationProvider)
+
+    var id: String {
+        switch self {
+        case let .providerSwitch(provider): "switch.\(provider.rawValue)"
+        case let .retranslateEngine(provider): "retranslate.\(provider.rawValue)"
+        }
+    }
+
+    var provider: TranslationProvider {
+        switch self {
+        case let .providerSwitch(provider): provider
+        case let .retranslateEngine(provider): provider
+        }
+    }
+}
+
 extension AppModel {
     /// Retry after a translation failure (the toast's Reconnect action).
     /// Re-reads the selected provider (and its key) and re-attaches an
@@ -163,12 +186,17 @@ extension AppModel {
     /// select the newer provider (a consent mismatch).
     func confirmCloudDisclosure(_ presented: PendingCloudDisclosure) {
         guard providerAwaitingDisclosure == presented else { return }
-        providerAwaitingDisclosure = nil
         switch presented {
         case let .providerSwitch(provider):
+            providerAwaitingDisclosure = nil
             translationSettings.select(provider)
         case let .retranslateEngine(provider):
+            // Validate the mapping BEFORE clearing the slot: a failed
+            // mapping must not close the sheet having applied nothing
+            // (defense in depth — retranslate intents are only built for
+            // external providers, where the mapping is total).
             guard let engine = RetranslateEngine(provider: provider) else { return }
+            providerAwaitingDisclosure = nil
             translationSettings.selectRetranslate(engine)
         }
     }
