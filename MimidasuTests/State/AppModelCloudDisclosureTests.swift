@@ -149,6 +149,40 @@ struct AppModelCloudDisclosureTests {
         await stopTranslation(model)
     }
 
+    /// A verified provider probe that lands while another intent is already
+    /// held does not clobber it: the raise would swap the presented sheet's
+    /// content mid-flight, so the switch is simply not offered — the key
+    /// still records its success, the held intent stays staged for its own
+    /// sheet, and the user re-clicks once it resolves.
+    @Test("a verified provider switch does not clobber a held intent")
+    func verifiedProbeDoesNotClobberHeldIntent() async {
+        let settings = makeSettings(provider: .apple)
+        try? settings.saveKey("test-key-1234", for: .openrouter)
+        let model = AppModel(
+            translationSettings: settings,
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelCloudDisclosure"),
+            favorites: isolatedFavorites(),
+            translationTransport: constantStatusTransport(200),
+            highFidelityProbe: { _ in false },
+            initialModelResolve: { _ in nil }
+        )
+        // A re-translate selection holds the slot, the way
+        // `selectRetranslateEngine` stages it behind the disclosure.
+        model.providerAwaitingDisclosure = .retranslateEngine(.deepl)
+
+        let verified = await model.verifyAndSelectTranslationProvider(.openrouter)
+
+        #expect(verified)
+        #expect(settings.testResult(for: .openrouter) == .success)
+        #expect(
+            model.providerAwaitingDisclosure == .retranslateEngine(.deepl),
+            "the held re-translate intent stays staged — the probe does not clobber it"
+        )
+        #expect(settings.selectedProvider == .apple, "the switch is not applied either")
+
+        await stopTranslation(model)
+    }
+
     /// Declining leaves the selection untouched; the next switch to that
     /// provider raises the disclosure again.
     @Test("declining the disclosure keeps the current provider and re-arms the gate")

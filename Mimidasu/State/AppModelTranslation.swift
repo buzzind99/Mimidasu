@@ -142,13 +142,18 @@ extension AppModel {
     /// `providerAwaitingDisclosure` until the user confirms the off-machine
     /// disclosure (`confirmCloudDisclosure`); there is no persisted
     /// acknowledgment, so the sheet reappears on each switch to an external
-    /// provider. Returns whether the key verified.
+    /// provider. A switch is not raised while another intent is already
+    /// held: the raise would clobber it and swap the presented sheet's
+    /// content mid-flight, so the switch is simply not offered — the user
+    /// re-clicks once the held intent resolves. Returns whether the key
+    /// verified.
     func verifyAndSelectTranslationProvider(_ provider: TranslationProvider) async -> Bool {
         guard await verifyKey(for: provider) else { return false }
         if translationSettings.selectedProvider == provider {
             // Already selected: a re-test, not a switch — re-attach directly.
             translationProviderDidChange()
         } else if provider.isExternal {
+            guard providerAwaitingDisclosure == nil else { return true }
             providerAwaitingDisclosure = .providerSwitch(provider)
         } else {
             translationSettings.select(provider)
