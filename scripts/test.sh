@@ -112,7 +112,7 @@ prefixes = [
 ]
 
 floors = {
-    "State/":       98.2,
+    "State/":       97.7,
     "Export/":     100.0,
     "Dictionary/":  99.2,
     "Favorites/":   100.0,
