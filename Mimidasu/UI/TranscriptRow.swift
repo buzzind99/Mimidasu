@@ -33,11 +33,14 @@ struct TranscriptRow: View {
     var isFavorite: ((ReadingSegment) -> Bool)?
     /// Invoked with the row's sentence when the hover retry button fires.
     var onRetry: ((Sentence) -> Void)?
-    /// Whether the retry affordance may be shown at all — a live session, an
-    /// attached translation worker, no failure card outstanding, and this row
-    /// not already retranslating (see `TranscriptView` for the reads). Every
-    /// one of those is a precondition `retranslateSentence` enforces, so a
-    /// shown button is always a button that would do something.
+    /// Whether the retry affordance may be shown at all — a live session,
+    /// and this row not already retranslating. When the configured retry
+    /// engine resolves to the session path, the attached-worker and
+    /// failure-card clauses apply too; when an alternate engine resolves,
+    /// they are deliberately skipped (see `TranscriptView.retryEnabled` for
+    /// the reads). Every clause is a precondition `retranslateSentence`
+    /// enforces, so a shown button is always a button that would do
+    /// something.
     let retryEnabled: Bool
     /// True while a manual re-translation of this row's sentence is in
     /// flight: the translation dims until the fresh one replaces it.
