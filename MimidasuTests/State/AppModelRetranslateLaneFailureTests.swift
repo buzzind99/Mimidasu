@@ -91,8 +91,10 @@ struct AppModelRetranslateLaneFailureTests {
         )
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
 
-        // The flight parks mid-air; the failure only surfaces when the gate
-        // opens. The stop lands first.
+        // The flight parks mid-air; the stop's cancellation spins the
+        // bounded wait out and the failure surfaces once the stop has
+        // landed — the fixture's `try?` keeps it a real failure, not a
+        // `CancellationError`.
         model.retranslateSentence(sentence)
         #expect(
             await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
@@ -198,11 +200,13 @@ private final class QueueEchoEngine: TranslationEngine, @unchecked Sendable {
     }
 }
 
-/// Lane fixture that parks until the gate opens and then THROWS — a failure
-/// that only surfaces when the test releases it, so a stop can cross it.
-/// Deliberately cancellation-blind: the stop's cancel must not turn the
-/// parked flight into a `CancellationError` — the point is a real failure
-/// surfacing after the stop.
+/// Lane fixture whose `translate` waits, then THROWS. Deliberately
+/// cancellation-blind: a stop cancels the lane task, and in a cancelled task
+/// the bounded wait's sleeps throw instantly and are swallowed by `try?` —
+/// the loop spins out and the `Failed()` error surfaces right after the
+/// stop, classified as a real failure rather than a `CancellationError`
+/// (the point: a failure whose catch runs after the stop). The gate is the
+/// non-cancelled path's release and stays as belt-and-braces here.
 private final class LaneGatedFailingEngine: TranslationEngine, @unchecked Sendable {
     let preferredBatchSize = 4
     var onRetry: (@Sendable (RetryProgress) -> Void)?

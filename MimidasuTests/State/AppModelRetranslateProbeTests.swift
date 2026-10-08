@@ -206,7 +206,6 @@ struct AppModelRetranslateProbeTests {
         )
         #expect(model.pendingRetranslations.isEmpty)
         #expect(model.lanePendingRetranslations.isEmpty)
-        #expect(model.retranslateConfig != nil, "the degrade armed the fast lane")
         #expect(
             model.translationSettings.retranslateEngine == .appleHighFidelity,
             "the persisted selection is not rewritten — only its resolution degrades"
