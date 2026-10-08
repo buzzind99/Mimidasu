@@ -6,29 +6,6 @@ import Translation
 // sessions, and the lane toasts), split out to keep `AppModel.swift` under
 // the 600-line lint gate.
 
-/// The intent held behind the cloud disclosure sheet: completing a provider
-/// switch (the live translation engine) or a re-translate engine selection.
-/// Both raise the same sheet with the same semantics — raised on every
-/// selection, no persisted acknowledgment.
-enum PendingCloudDisclosure: Equatable, Identifiable {
-    case providerSwitch(TranslationProvider)
-    case retranslateEngine(TranslationProvider)
-
-    var id: String {
-        switch self {
-        case let .providerSwitch(provider): "switch.\(provider.rawValue)"
-        case let .retranslateEngine(provider): "retranslate.\(provider.rawValue)"
-        }
-    }
-
-    var provider: TranslationProvider {
-        switch self {
-        case let .providerSwitch(provider): provider
-        case let .retranslateEngine(provider): provider
-        }
-    }
-}
-
 extension AppModel {
 
     // MARK: - Engine identity
@@ -40,7 +17,8 @@ extension AppModel {
     /// model. Until a probe lands, every Apple activation holds the tuple at
     /// `(false, nil)`, so the Apple branch reads `.appleFast` *provisionally*
     /// — the marker rule compensates by not comparing against a provisional
-    /// identity.
+    /// identity, and `liveSessionRunsKind` refuses the provisional read
+    /// outright so routing never acts on it.
     var activeEngineKind: TranslationEngineKind {
         if activeTranslationEngine == .external, let provider = activeExternalProvider {
             // The attached provider is external by construction; only Apple
@@ -56,12 +34,28 @@ extension AppModel {
         return .appleFast
     }
 
-    /// True when the live Apple session runs the given Apple kind — the
-    /// marker's provisional-identity caveat applies until the probe lands
-    /// (every Apple activation holds the tuple at `(false, nil)`, so the
-    /// branch reads `.appleFast` provisionally).
+    /// True when the live Apple session runs the given Apple kind. On 26.4+
+    /// the identity is UNKNOWN until the activation probe lands (every
+    /// activation resets the tuple to `(false, nil)`), and an unlanded
+    /// identity must not route: a provisional `.appleFast` read would send a
+    /// fast retry to a live high-fidelity session (unstamped wrong-engine
+    /// text) and a high-fidelity retry to a duplicate of the live session —
+    /// the byte-identical no-op that reads as a broken button. Callers
+    /// treat `false` as "not provably the same engine": the click defers to
+    /// the dedicated session and the lane re-routes on the landing. Below
+    /// 26.4 the identity never depends on the probe.
     func liveSessionRunsKind(_ kind: TranslationEngineKind) -> Bool {
-        activeTranslationEngine == .apple && activeEngineKind == kind
+        guard activeTranslationEngine == .apple else { return false }
+        if #available(macOS 26.4, *) {
+            guard appleProbeLanded else { return false }
+        }
+        return activeEngineKind == kind
+    }
+
+    /// Whether the activation probe has landed FOR THE CURRENT TARGET — the
+    /// live Apple session's model identity is only knowable once it has.
+    private var appleProbeLanded: Bool {
+        appleHighFidelityProbe.targetCode == translationSettings.targetLanguage.code
     }
 
     /// High fidelity is *known* unavailable when the last probe landed for the
@@ -234,7 +228,11 @@ extension AppModel {
         }
         // A live Apple session running the same model de facto would return
         // byte-identical text with no marker — a no-op that reads as a
-        // broken button. The session engine serves instead.
+        // broken button. The session engine serves instead. While the probe
+        // is unlanded the identity is unknown (see `liveSessionRunsKind`),
+        // so the click routes to the dedicated session and the lane
+        // re-routes on the landing — a same-engine retry is handed to the
+        // queue path there.
         if liveSessionRunsKind(kind) {
             return .session
         }
@@ -268,6 +266,14 @@ extension AppModel {
     /// independent `Task`s awaited by value, so their in-flight engine call
     /// runs to completion and the post-await phase guards (not cancellation)
     /// drop their results.
+    ///
+    /// Apple-kind lanes first defer (bounded) to the activation probe:
+    /// while it is unlanded the live identity is unknown, so flying would
+    /// risk a duplicate of the live session (same-engine no-op) or a
+    /// high-fidelity stamp over the framework's silent fast fallback. The
+    /// landing re-resolves the kind; a same-engine retry is handed to the
+    /// queue path there. External lanes skip the wait — the live session
+    /// can never be (or turn into) a paid provider.
     private func runRetranslateLane(
         _ sentence: Sentence, kind: TranslationEngineKind, engine: (any TranslationEngine)?
     ) {
@@ -285,7 +291,15 @@ extension AppModel {
                 retireLaneMarker(sentence.index, epoch: epoch)
                 return
             }
-            let resolved = await laneEngine(engine, kind: kind)
+            // Probe deferral — high-fidelity lanes only (see doc above).
+            let laneKind: TranslationEngineKind
+            switch await probeGate(for: kind, epoch: epoch, sentence: sentence) {
+            case .done:
+                return
+            case let .proceed(resolvedKind):
+                laneKind = resolvedKind
+            }
+            let resolved = await laneEngine(engine, kind: laneKind, epoch: epoch)
             switch resolved {
             case .cancelled:
                 // The stop already cleared every toast; a "still starting"
@@ -306,7 +320,7 @@ extension AppModel {
                 // cleared stack.
                 guard retranslateLaneCanDeliver(epoch: epoch) else { return }
                 postRetranslateUnavailableToast(
-                    kind == .appleHighFidelity
+                    laneKind == .appleHighFidelity
                         ? "Apple Intelligence session is still starting — try again in a moment."
                         : "Apple (MTL) session is still starting — try again in a moment."
                 )
@@ -318,9 +332,124 @@ extension AppModel {
                     retireLaneMarker(sentence.index, epoch: epoch)
                     return
                 }
-                await fly(sentence, through: engine, kind: kind, epoch: epoch)
+                await fly(sentence, through: engine, kind: laneKind, epoch: epoch)
             }
         }
+    }
+
+    /// Outcome of the probe-deferral gate at the head of a lane task.
+    private enum ProbeGateOutcome {
+        /// Continue with the (possibly re-resolved) lane kind.
+        case proceed(TranslationEngineKind)
+        /// The lane has exited — markers and reporting were handled here.
+        case done
+    }
+
+    /// The probe-deferral gate: Apple-kind lanes wait bounded for the
+    /// activation probe to land (external lanes pass straight through),
+    /// and the landing re-routes — session hand-over when the live session
+    /// turns out to run the requested engine, degrade-to-fast when the
+    /// pair cannot serve high fidelity, or a "still checking" toast on
+    /// timeout.
+    private func probeGate(
+        for kind: TranslationEngineKind, epoch: Int, sentence: Sentence
+    ) async -> ProbeGateOutcome {
+        switch kind {
+        case .appleFast, .appleHighFidelity:
+            break // the landing decides duplicate-vs-alternate for both
+        case .google, .deepl, .openrouter:
+            return .proceed(kind)
+        }
+        guard #available(macOS 26.4, *) else { return .proceed(kind) }
+        switch await probeLanding(epoch: epoch) {
+        case .cancelled:
+            // The stop already cleared every toast; reporting here
+            // would outlive it and misreport a cancellation.
+            retireLaneMarker(sentence.index, epoch: epoch)
+            return .done
+        case .timedOut:
+            retireLaneMarker(sentence.index, epoch: epoch)
+            // The wait may have crossed a stop; a stale expiry must
+            // not repost over the cleared stack.
+            guard retranslateLaneCanDeliver(epoch: epoch) else { return .done }
+            postRetranslateUnavailableToast(
+                "Still checking Apple Intelligence availability — try again in a moment."
+            )
+            return .done
+        case .landed:
+            guard retranslateLaneCanDeliver(epoch: epoch) else {
+                retireLaneMarker(sentence.index, epoch: epoch)
+                return .done
+            }
+            // The landing can change the selection's resolution — a
+            // not-installed landing degrades a high-fidelity
+            // selection to the fast model, whose dedicated session
+            // this lane must then arm and wait on instead.
+            let laneKind = kindAfterProbeLanding(kind)
+            if liveSessionRunsKind(laneKind) {
+                handRetranslateToSession(sentence)
+                return .done
+            }
+            if laneKind != kind {
+                armRetranslateSessionIfNeeded(for: laneKind)
+            }
+            return .proceed(laneKind)
+        }
+    }
+
+    /// Outcome of waiting for the activation probe to land. `.timedOut` and
+    /// `.cancelled` are distinct on purpose, mirroring
+    /// `LaneEngineResolution`: a timeout reports a probe that never landed,
+    /// a cancellation is a stop/teardown whose toasts are already cleared.
+    private enum ProbeLanding {
+        case landed
+        case timedOut
+        case cancelled
+    }
+
+    /// Waits bounded for the activation probe to land. The probe is a fast
+    /// async availability check fired by every activation; the bound only
+    /// catches pathological cases. Monotonic deadline (`ContinuousClock`) —
+    /// wall-clock `Date` would skew on clock changes.
+    private func probeLanding(epoch: Int) async -> ProbeLanding {
+        let deadline = ContinuousClock.now + probeSettleTimeout
+        while !appleProbeLanded {
+            guard ContinuousClock.now < deadline else { return .timedOut }
+            do {
+                try await Task.sleep(for: Duration.milliseconds(50))
+            } catch {
+                return .cancelled
+            }
+            guard retranslateLaneCanDeliver(epoch: epoch) else { return .cancelled }
+        }
+        return .landed
+    }
+
+    /// The lane's Apple kind once the probe has landed: the click-time kind,
+    /// unless a not-installed landing degrades a high-fidelity selection to
+    /// the fast model — the same resolution `effectiveRetranslateSelection`
+    /// applies once the probe has landed.
+    private func kindAfterProbeLanding(_ kind: TranslationEngineKind) -> TranslationEngineKind {
+        guard kind == .appleHighFidelity, highFidelityKnownUnavailable else { return kind }
+        return .appleFast
+    }
+
+    /// Hands a deferred same-engine retry to the queue path — what the
+    /// `.session` route would have done had the probe been landed at click
+    /// time. The markers are already in place: `pendingRetranslations`
+    /// stays (the queue's landing, failure, or stop clears it) while the
+    /// lane-ownership record goes, so the queue's terminal `.unavailable`
+    /// clear can drop the cue.
+    private func handRetranslateToSession(_ sentence: Sentence) {
+        lanePendingRetranslations.remove(sentence.index)
+        guard translationQueue.hasWorker else {
+            pendingRetranslations.remove(sentence.index)
+            postRetranslateUnavailableToast(
+                "No translation engine attached — try again in a moment."
+            )
+            return
+        }
+        translationQueue.retranslate(sentence)
     }
 
     /// Runs the engine call and lands (or reports) the result. Split out of
@@ -338,8 +467,10 @@ extension AppModel {
                 retireLaneMarker(sentence.index, epoch: epoch)
                 return
             }
-            guard let text = results.first else {
-                throw TranslationEngineError.badResponse("Expected 1 translation, got 0")
+            guard let text = results.first, !text.isEmpty else {
+                // An empty result must not land: it would render the row's
+                // provenance marker with no sentence attached to it.
+                throw TranslationEngineError.badResponse("Expected 1 non-empty translation, got 0")
             }
             let pair = SentenceTranslation(
                 lang: translationSettings.targetLanguage.code,
@@ -381,7 +512,11 @@ extension AppModel {
     /// session's begin clear the sets wholesale, but neither covers a capture
     /// restart — the phase simply parks in `.starting` while the device
     /// reopens, and a lane task crossing that window has to retire its own
-    /// marker.
+    /// marker. Accepted loss: a same-session result that crosses the restart
+    /// window is dropped without a toast (the row keeps its translation) —
+    /// delivering mid-restart would race the transcript swap, and the
+    /// alternative (a toast per dropped result) reads as an error the user
+    /// did not cause.
     ///
     /// Gated on the captured epoch: retirement is the one lane operation a
     /// *stale* task still performs after its own delivery guards fail, and a
@@ -402,9 +537,11 @@ extension AppModel {
     /// bounded interval for the `.translationTask` host to hand one over —
     /// acquisition is sub-second once armed, the bound only catches
     /// pathological cases. The deadline is monotonic (`ContinuousClock`) —
-    /// wall-clock `Date` would skew on clock changes.
+    /// wall-clock `Date` would skew on clock changes. A lane that dies
+    /// mid-wait (stop, teardown) exits promptly instead of polling its
+    /// nilled storage out the whole arm window.
     private func laneEngine(
-        _ engine: (any TranslationEngine)?, kind: TranslationEngineKind
+        _ engine: (any TranslationEngine)?, kind: TranslationEngineKind, epoch: Int
     ) async -> LaneEngineResolution {
         if let engine {
             return .ready(engine)
@@ -415,6 +552,7 @@ extension AppModel {
         // timeout.
         var resolved = laneEngineStorage(for: kind)
         while resolved == nil, ContinuousClock.now < deadline {
+            guard retranslateLaneCanDeliver(epoch: epoch) else { return .cancelled }
             do {
                 try await Task.sleep(for: Duration.milliseconds(50))
             } catch {
@@ -424,106 +562,6 @@ extension AppModel {
         }
         guard let resolved else { return .timedOut }
         return .ready(resolved)
-    }
-
-    // MARK: - Dedicated Apple sessions
-
-    /// ja→target configuration for one of the dedicated re-translate
-    /// sessions. Mirrors `makeTranslationConfig` except the strategy, which
-    /// is set EXPLICITLY on 26.4+ — the property's default follows the SDK
-    /// the app was built against, which would hand both lanes the same
-    /// model as the live session and return byte-identical text, defeating
-    /// the feature. Below 26.4 the config stays plain (the session is the
-    /// fast model by definition).
-    func makeRetranslateConfig(highFidelity: Bool) -> TranslationSession.Configuration {
-        var config = TranslationSession.Configuration(
-            source: Locale.Language(identifier: "ja"),
-            target: Locale.Language(identifier: translationSettings.targetLanguage.code)
-        )
-        if #available(macOS 26.4, *) {
-            config.preferredStrategy = highFidelity ? .highFidelity : .lowLatency
-        }
-        return config
-    }
-
-    /// The stored dedicated-session engine for an Apple kind — each lane
-    /// waits on its own host's hand-over, never the other's. Named apart from
-    /// the `retranslateSessionEngine` / `retranslateHifiSessionEngine`
-    /// properties it reads so a call site is never mistaken for one.
-    private func laneEngineStorage(
-        for kind: TranslationEngineKind
-    ) -> (any TranslationEngine)? {
-        kind == .appleHighFidelity ? retranslateHifiSessionEngine : retranslateSessionEngine
-    }
-
-    /// Arms the kind's dedicated session on the first retry through it.
-    /// Never reassigns an armed config: reassignment is a path SwiftUI's
-    /// `.translationTask` may not reliably re-fire on, and a timeout keeps
-    /// the config armed so the next click is instant once the session (or
-    /// its language-pack download) lands.
-    func armRetranslateSessionIfNeeded(for kind: TranslationEngineKind) {
-        switch kind {
-        case .appleFast:
-            guard retranslateConfig == nil else { return }
-            retranslateConfig = makeRetranslateConfig(highFidelity: false)
-        case .appleHighFidelity:
-            guard retranslateHifiConfig == nil else { return }
-            retranslateHifiConfig = makeRetranslateConfig(highFidelity: true)
-        case .google, .deepl, .openrouter:
-            break // externals build their engine at click time; no session
-        }
-    }
-
-    /// Stores the fast-model session handed over by the second
-    /// `.translationTask` host. Does not run the queue — the lane is the
-    /// only consumer. Takes the engine existential (the host passes the
-    /// `AppleSessionEngine` wrapper) so tests can hand over a mock.
-    func retranslateSessionArrived(_ engine: any TranslationEngine) {
-        retranslateSessionEngine = engine
-    }
-
-    /// Stores the Apple Intelligence session handed over by the third
-    /// `.translationTask` host. Does not run the queue.
-    func retranslateHifiSessionArrived(_ engine: any TranslationEngine) {
-        retranslateHifiSessionEngine = engine
-    }
-
-    /// Drops both armed-session states (configs + stored engines) and
-    /// invalidates in-flight lane work with them. Called from every Apple
-    /// activation and from `performStop`. Within a session an armed config
-    /// is always current — target changes are restart-only — so the reset
-    /// covers the session boundary: a next session on an external provider
-    /// never takes the Apple branch, and a config armed for a prior target
-    /// must not survive to serve it.
-    ///
-    /// Cancelling the stored task and bumping the epoch makes the reset a
-    /// lane-generation change, not just a session one: a chained task
-    /// resuming after a mid-session teardown (an Apple activation while a
-    /// lane flight is airborne) would otherwise pass the phase/epoch guards
-    /// — the session is still live — and fly a session that just died, or
-    /// toast over the activation the user just made. Its captured epoch no
-    /// longer matches, so every delivery guard retires it silently.
-    /// `performStop` cancels and bumps too; both are idempotent.
-    ///
-    /// The bump makes every lane-owned marker dead — no lane task can
-    /// deliver past it — so they are retired here, synchronously, rather
-    /// than left to the cancelled task's own exit: that exit now skips
-    /// (stale epoch, see `retireLaneMarker`), and until session stop the
-    /// row would sit dimmed with its retry button dead. Only the lane-owned
-    /// subset goes; a queue-owned marker (a queued retry whose result the
-    /// queue still owes) keeps its cue.
-    func teardownRetranslateSession() {
-        retranslateLaneTask?.cancel()
-        retranslateLaneTask = nil
-        retranslateSessionEpoch += 1
-        pendingRetranslations.subtract(lanePendingRetranslations)
-        lanePendingRetranslations.removeAll()
-        retranslateConfig?.invalidate()
-        retranslateConfig = nil
-        retranslateSessionEngine = nil
-        retranslateHifiConfig?.invalidate()
-        retranslateHifiConfig = nil
-        retranslateHifiSessionEngine = nil
     }
 
     // MARK: - Settings selection

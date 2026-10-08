@@ -44,9 +44,10 @@ extension AppModel {
         // will deliver that result any more; drop the cue.
         pendingRetranslations.removeAll()
         // The lane task is cancelled (its post-await phase guard drops any
-        // late result), the armed fast-session state goes with the session —
-        // a next session on an external provider never takes the Apple
-        // branch, so a config armed for a prior target must not survive —
+        // late result), the armed lane sessions are invalidated + rebuilt in
+        // place — a nil → fresh-equal-config reassignment is the
+        // `.translationTask` path that does not reliably re-fire, so the
+        // teardown must not nil them (see `teardownRetranslateSession`) —
         // and the lane-owned markers join the queue's clear. The teardown's
         // epoch bump retires stragglers: cancelling reaches only the newest
         // chained link, earlier lane tasks keep running to completion, and

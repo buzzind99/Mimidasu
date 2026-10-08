@@ -190,6 +190,15 @@ final class AppModel {
     /// `AppModelRetranslate.swift`.
     var laneArmTimeout = Duration.seconds(5)
 
+    /// How long a high-fidelity re-translate lane waits for the activation
+    /// probe to land before routing on it: while the probe is unlanded the
+    /// live identity is unknown and the pair's hifi availability unproven,
+    /// so the lane defers (see `AppModelRetranslate.probeLanding`). The
+    /// probe is a fast async check; the bound only catches pathological
+    /// cases. Injectable for tests. Internal: driven from
+    /// `AppModelRetranslate.swift`.
+    var probeSettleTimeout = Duration.seconds(3)
+
     /// The intent held behind the cloud disclosure sheet: completing a
     /// provider switch (the live translation engine) or a re-translate
     /// engine selection. Nil when no disclosure is pending. Internal:
