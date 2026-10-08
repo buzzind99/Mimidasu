@@ -291,7 +291,7 @@ extension AppModel {
                 retireLaneMarker(sentence.index, epoch: epoch)
                 return
             }
-            // Probe deferral — high-fidelity lanes only (see doc above).
+            // Probe deferral — Apple-kind lanes only (external lanes pass straight through; see doc above).
             let laneKind: TranslationEngineKind
             switch await probeGate(for: kind, epoch: epoch, sentence: sentence) {
             case .done:
