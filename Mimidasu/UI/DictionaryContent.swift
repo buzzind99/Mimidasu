@@ -104,9 +104,18 @@ enum DictionaryContent {
     /// entries contribute nothing — their POS tags stay in the sense row.
     static func nameTypeBadges(for entry: JMDictEntry) -> [String] {
         guard isName(entry) else { return [] }
+        return nameTypeBadges(posTokens: entry.senses.map(\.pos))
+    }
+
+    /// The same mapping over raw stored `pos` columns, for a host that has the
+    /// tags rather than a whole entry — the search row, which reads them
+    /// straight off `senses`. Sharing this entry point is what keeps a
+    /// collapsed search row and an expanded entry from labelling the same
+    /// name differently.
+    static func nameTypeBadges(posTokens: [String?]) -> [String] {
         var badges: [String] = []
-        for sense in entry.senses {
-            for token in sense.pos?.components(separatedBy: ",") ?? [] {
+        for column in posTokens {
+            for token in column?.components(separatedBy: ",") ?? [] {
                 let tag = token.trimmingCharacters(in: .whitespaces)
                 guard !tag.isEmpty else { continue }
                 let badge = nameTypeLabels[tag] ?? tag

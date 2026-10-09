@@ -109,6 +109,27 @@ struct DictionaryContentTests {
         )
     }
 
+    /// The raw-`pos` entry point the search row calls. It must produce exactly
+    /// what the entry overload produces for the same stored tags — that
+    /// equality is the whole reason it exists: a collapsed search row and an
+    /// expanded entry cannot label one name two different ways.
+    @Test("raw pos columns map to the same badges the entry overload does")
+    func nameTypeBadgesFromPosTokens() {
+        let columns: [String?] = ["place,surname"]
+        #expect(
+            DictionaryContent.nameTypeBadges(posTokens: columns)
+                == DictionaryContent.nameTypeBadges(for: nameEntry())
+        )
+        // Dedupe spans columns, a null column is skipped, and untagged types
+        // pass through verbatim.
+        #expect(
+            DictionaryContent.nameTypeBadges(posTokens: ["surname", nil, "surname", "char"])
+                == ["SURNAME", "char"]
+        )
+        #expect(DictionaryContent.nameTypeBadges(posTokens: []) == [])
+        #expect(DictionaryContent.nameTypeBadges(posTokens: [nil]) == [])
+    }
+
     @Test("only the offset range counts as a name entry")
     func isName() {
         // Real data never touches this band (words stay well under the
