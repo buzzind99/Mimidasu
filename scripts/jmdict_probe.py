@@ -14,7 +14,19 @@ to stdout.
 import json
 import re
 import sys
+import unicodedata
 from collections import Counter
+
+
+def nfkc(text):
+    """The one canonical form the build stores (jmdict_build.py's nfkc): every
+    query side in the app folds its probe with NFKC, so the DB's equality
+    indexes only work over normalized spellings. The probe predicts the
+    build's *inserted* headword count from the same fold, per entry and kind,
+    which is what turns the build's dedupe into a cross-checked number
+    instead of a self-reported one.
+    """
+    return unicodedata.normalize("NFKC", text)
 
 # JMnedict name-type vocabulary (entity tokens). Unknown values are format
 # drift and fail the probe.
@@ -132,6 +144,7 @@ def main(json_path, names_json_path, log_path):
     kana_only_entries = 0
     kanji_entries = 0
     headword_count = 0
+    normalized_headword_count = 0
     max_kanji = (0, None)
     max_kana = (0, None)
     id_parse_failures = 0
@@ -202,6 +215,14 @@ def main(json_path, names_json_path, log_path):
         kanji_obj_count += len(kobjs)
         kana_obj_count += len(robjs)
         headword_count += len(kobjs) + len(robjs)
+        # The build inserts one row per (NFKC text, entry, kind): the fold can
+        # merge two of one entry's own writings (TKG and ＴＫＧ both land on
+        # TKG), and the DB's WITHOUT ROWID PK holds exactly the deduped set.
+        # Per-kind sets mirror the build's per-kind dedupe key.
+        normalized_headword_count += (
+            len({nfkc(o["text"]) for o in kobjs})
+            + len({nfkc(o["text"]) for o in robjs})
+        )
         if not kobjs and robjs:
             kana_only_entries += 1
         elif kobjs:
@@ -378,6 +399,7 @@ def main(json_path, names_json_path, log_path):
     out(f"entries: {entries}")
     out(f"headword rows (kanji[]+kana[] objects): {headword_count} "
         f"(kanji {kanji_obj_count}, kana {kana_obj_count})")
+    out(f"headword rows (normalized): {normalized_headword_count}")
     out(f"kanji-bearing entries: {kanji_entries} ({kanji_entries/total:.1%}), "
         f"kana-only: {kana_only_entries} ({kana_only_entries/total:.1%})")
     out(f"max kanji[] length: {max_kanji[0]} (entry {max_kanji[1]}), "
@@ -405,7 +427,7 @@ def main(json_path, names_json_path, log_path):
             names_text = open(path, encoding="utf-8-sig" if names_has_bom else "utf-8")
         except OSError as exc:
             fail(f"names file unreadable: {exc}")
-            return 0, 0
+            return 0, 0, 0
 
         out("=== JMnedict NAMES ===")
         out(f"names BOM: {'yes (UTF-8)' if names_has_bom else 'NO'}")
@@ -435,7 +457,7 @@ def main(json_path, names_json_path, log_path):
         out(f"version={name_header.get('version')} dictDate={name_header.get('dictDate')} "
             f"keys={sorted(name_header)}")
         if words_line is None:
-            return 0, 0
+            return 0, 0, 0
 
         def name_chunks(fobj, first, start_line):
             # Yields (line_no, chunk) so failure messages cite the real
@@ -475,6 +497,7 @@ def main(json_path, names_json_path, log_path):
         kana_objs = 0
         kept = 0
         kept_headwords = 0
+        kept_headwords_normalized = 0
         kept_id_max = 0
         id_parse_failures = 0
         id_range_failures = 0
@@ -564,6 +587,10 @@ def main(json_path, names_json_path, log_path):
             if any(v not in NAME_SCOPE_EXCLUDED for v in types):
                 kept += 1
                 kept_headwords += len(kobjs) + len(robjs)
+                kept_headwords_normalized += (
+                    len({nfkc(o["text"]) for o in kobjs})
+                    + len({nfkc(o["text"]) for o in robjs})
+                )
                 if nid is not None and nid > kept_id_max:
                     kept_id_max = nid
 
@@ -577,6 +604,7 @@ def main(json_path, names_json_path, log_path):
         out(f"type occurrences over ALL entries: {dict(type_domain.most_common())}")
         out(f"name entries: {kept}")
         out(f"name headword rows (kanji+kana objects): {kept_headwords}")
+        out(f"name headword rows (normalized): {kept_headwords_normalized}")
         out(f"name id max: {kept_id_max}")
         out(f"name types: {','.join(sorted(type_domain))}")
         out("-- spot: 木村 --")
@@ -615,9 +643,9 @@ def main(json_path, names_json_path, log_path):
                  f"{NAME_REF_HEADWORDS} (re-measure the references on a names pin bump)")
         if kept_id_max != NAME_REF_ID_MAX:
             fail(f"names: kept id max {kept_id_max} != pinned-asset reference {NAME_REF_ID_MAX}")
-        return kept, kept_headwords
+        return kept, kept_headwords, kept_headwords_normalized
 
-    names_kept, names_headwords = probe_names(names_json_path)
+    names_kept, names_headwords, names_headwords_normalized = probe_names(names_json_path)
     out()
 
     if id_parse_failures:
@@ -661,7 +689,8 @@ def main(json_path, names_json_path, log_path):
               f"pitch: {pitch_entries/total:.1%}")
         print(f"    accPatts distinct: {len(acc_patts_domain)}  jlpt values: "
               f"{sorted(jlpt_domain, key=str)}  gloss langs: {list(gloss_langs)}")
-        print(f"    names: entries {names_kept}  headwords {names_headwords}")
+        print(f"    names: entries {names_kept}  headwords {names_headwords} "
+              f"(normalized {names_headwords_normalized})")
         print("    PASS")
 
 

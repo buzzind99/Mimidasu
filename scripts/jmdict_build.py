@@ -18,11 +18,24 @@ import re
 import sqlite3
 import subprocess
 import sys
+import unicodedata
 
 # JMnedict ingest scope: keep an entry when at least one of its types is
 # outside this set; kept entries still record every type in pos.
 NAME_EXCLUDED_TYPES = {"unclass", "place"}
 NAME_SEQ_OFFSET = 10_000_000
+
+
+def nfkc(text):
+    """One canonical form at the ingestion boundary. Every query side in the
+    app NFKC-folds its probe (JMDictLookup.probeText,
+    DictionarySearchEngine.normalize), so stored text must already be in that
+    form or an equality seek can never hold (ＴＫＧ folds to TKG; stored raw
+    ＴＫＧ would miss forever). Applies to headwords, entry writings, senses,
+    and the per-sense restriction writings the lookup compares folded taps
+    against.
+    """
+    return unicodedata.normalize("NFKC", text)
 
 
 def open_word_stream(path):
@@ -72,8 +85,10 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
     # headwordRowsSQL's WHERE text = ? becomes the PK prefix seek and senseSQL's
     # WHERE entry_id = ? ORDER BY ord a prefix range scan with ordering built in,
     # so the secondary indexes are absorbed and dropped. Plain INSERT everywhere:
-    # upstream has no duplicate (text, entry_id, kind) / (entry_id, ord) rows, so
-    # a future duplicate fails the build loudly on the PK.
+    # upstream has no duplicate (text, entry_id, kind) / (entry_id, ord) rows in
+    # raw form, and the NFKC fold's merges are deduped at the row level below
+    # (first spelling in source order wins), so a future duplicate still fails
+    # the build loudly on the PK.
     conn = sqlite3.connect(db_path)
     conn.executescript("""
     PRAGMA journal_mode=OFF;
@@ -104,9 +119,12 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
     def norm_restricted(lst):
         # "*" = applies to all writings -> NULL; otherwise JSON (empty list =
         # matches none — defensive, upstream never emits it at sense level).
+        # The stored writings are what the lookup compares an NFKC-folded tap
+        # against, so they fold onto the same canonical spellings the
+        # headwords carry.
         if lst is None or lst == ["*"]:
             return None
-        return json.dumps(lst, ensure_ascii=False)
+        return json.dumps([nfkc(w) for w in lst], ensure_ascii=False)
 
     def hw_row(obj, kind):
         # Furigana is dropped (IPADIC-based alignment already exists).
@@ -115,7 +133,7 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
             pitch = (pa.get("hatsuon"), pa.get("accPatts"), pa.get("zoPatts"))
         else:
             pitch = (None, None, None)
-        return (obj["text"], kind, obj.get("jlptLevel"), *pitch)
+        return (nfkc(obj["text"]), kind, obj.get("jlptLevel"), *pitch)
 
     def reading_for_keb(keb):
         # The reading a kanji writing's furigana names: the rt chunks
@@ -123,11 +141,15 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
         # the ruby (jmdict_probe.py's furigana_no_rt contract) — okurigana
         # pieces — so those fall back to the ruby itself; kanji pieces always
         # carry rt. Missing/empty furigana yields None (nothing to join to).
+        # Normalized so the kana_rows keys it reads are the same normalized
+        # spellings hw_row stores (halfwidth-kana readings included).
         text = "".join(
             piece.get("rt") or piece.get("ruby") or ""
             for piece in keb.get("furigana") or []
         )
-        return text or None
+        if not text:
+            return None
+        return nfkc(text) or None
 
     def normalized_headword_rows(ent_seq, kobjs, robjs):
         # Bare-row backfill. JLPT rides individual kanji writings upstream but
@@ -141,8 +163,8 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
         # than wear another reading's accent.
         writings = [(o, "keb") for o in kobjs] + [(o, "reb") for o in robjs]
         rows = [hw_row(obj, kind) for obj, kind in writings]
-        kana_rows = {obj["text"]: row
-                     for (obj, kind), row in zip(writings, rows) if kind == "reb"}
+        kana_rows = {row[0]: row for (_, kind), row in zip(writings, rows)
+                     if kind == "reb"}
         jlpt_fallback = next((row[2] for row in rows if row[2] is not None), None)
         enriched = []
         for (obj, kind), row in zip(writings, rows):
@@ -154,12 +176,28 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
                 if kana_row is not None:
                     hatsuon, acc, zo = kana_row[3:]
             enriched.append((ent_seq, text, kind, jlpt, hatsuon, acc, zo))
-        return enriched
+        # The NFKC fold can merge two of one entry's own writings (TKG and
+        # ＴＫＧ both land on TKG) onto one PK key. First spelling in source
+        # order wins — the same "first row wins" convention the lookup uses
+        # for multiple headword rows of one entry — and the dropped count is
+        # reported by the build summary.
+        deduped = []
+        seen = set()
+        for row in enriched:
+            key = (row[1], row[2])
+            if key in seen:
+                counts["headwords_deduped"] += 1
+                continue
+            seen.add(key)
+            deduped.append(row)
+        return deduped
 
     BATCH = 5000
     entries_batch, senses_batch, headwords_batch = [], [], []
     counts = {"entries": 0, "senses": 0, "headwords": 0,
-              "name_entries": 0, "name_headwords": 0}
+              "headwords_raw": 0, "headwords_deduped": 0,
+              "name_entries": 0, "name_headwords": 0,
+              "name_headwords_raw": 0, "name_headwords_deduped": 0}
     name_max_seq = 0
 
     def flush():
@@ -188,24 +226,26 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
         common = 1 if any(o.get("common") for o in kobjs) or any(o.get("common") for o in robjs) else 0
         entries_batch.append((
             ent_seq,
-            kobjs[0]["text"] if kobjs else None,
-            robjs[0]["text"] if robjs else None,
+            nfkc(kobjs[0]["text"]) if kobjs else None,
+            nfkc(robjs[0]["text"]) if robjs else None,
             common,
         ))
-        headwords_batch.extend(normalized_headword_rows(ent_seq, kobjs, robjs))
+        word_headword_rows = normalized_headword_rows(ent_seq, kobjs, robjs)
+        headwords_batch.extend(word_headword_rows)
         for ord_i, s in enumerate(w.get("sense") or []):
-            glosses = [g["text"] for g in (s.get("gloss") or []) if g.get("lang") == "eng"]
+            glosses = [nfkc(g["text"]) for g in (s.get("gloss") or []) if g.get("lang") == "eng"]
             senses_batch.append((
                 ent_seq,
                 ord_i,
-                ",".join(s.get("partOfSpeech") or []) or None,
+                nfkc(",".join(s.get("partOfSpeech") or [])) or None,
                 "; ".join(glosses),
-                ", ".join(s.get("misc") or []) or None,
+                nfkc(", ".join(s.get("misc") or [])) or None,
                 norm_restricted(s.get("appliesToKanji")),
                 norm_restricted(s.get("appliesToKana")),
             ))
         counts["entries"] += 1
-        counts["headwords"] += len(kobjs) + len(robjs)
+        counts["headwords_raw"] += len(kobjs) + len(robjs)
+        counts["headwords"] += len(word_headword_rows)
         counts["senses"] += len(w.get("sense") or [])
         if len(entries_batch) >= BATCH:
             flush()
@@ -287,28 +327,43 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
         # common JMDict entries.
         entries_batch.append((
             ent_seq,
-            kobjs[0]["text"] if kobjs else None,
-            robjs[0]["text"] if robjs else None,
+            nfkc(kobjs[0]["text"]) if kobjs else None,
+            nfkc(robjs[0]["text"]) if robjs else None,
             0,
         ))
+        # Same normalized + per-entry dedupe as the words path: one name can
+        # carry two writings that fold onto one spelling, and the PK is
+        # (text, entry_id, kind).
+        name_seen = set()
         for o in kobjs:
-            headwords_batch.append((ent_seq, o["text"], "keb", None, None, None, None))
+            text = nfkc(o["text"])
+            if (text, "keb") in name_seen:
+                counts["name_headwords_deduped"] += 1
+                continue
+            name_seen.add((text, "keb"))
+            headwords_batch.append((ent_seq, text, "keb", None, None, None, None))
         for o in robjs:
-            headwords_batch.append((ent_seq, o["text"], "reb", None, None, None, None))
+            text = nfkc(o["text"])
+            if (text, "reb") in name_seen:
+                counts["name_headwords_deduped"] += 1
+                continue
+            name_seen.add((text, "reb"))
+            headwords_batch.append((ent_seq, text, "reb", None, None, None, None))
         # One sense per entry; glosses flatten across every translation[]
         # object in order. No restriction filtering applies (misc/skeb/sreb
         # NULL = applies to every writing).
         senses_batch.append((
             ent_seq,
             0,
-            ",".join(types) or None,
-            "; ".join(glosses),
+            nfkc(",".join(types)) or None,
+            "; ".join(nfkc(g) for g in glosses),
             None,
             None,
             None,
         ))
         counts["name_entries"] += 1
-        counts["name_headwords"] += len(kobjs) + len(robjs)
+        counts["name_headwords_raw"] += len(kobjs) + len(robjs)
+        counts["name_headwords"] += len(name_seen)
         if ent_seq > name_max_seq:
             name_max_seq = ent_seq
         if len(entries_batch) >= BATCH:
@@ -329,12 +384,21 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
                 return None
             return int(m.group(1))
         expected = {
+            # Raw object counts: parse fidelity — the build saw exactly the
+            # writings the probe counted.
             "entries": (probe_count(r"^entries: (\d+)$"), counts["entries"]),
-            "headwords": (probe_count(r"^headword rows \(kanji\[\]\+kana\[\] objects\): (\d+)"),
-                          counts["headwords"]),
+            "headwords (raw)": (probe_count(r"^headword rows \(kanji\[\]\+kana\[\] objects\): (\d+)"),
+                                counts["headwords_raw"]),
             "senses": (probe_count(r"^senses: (\d+)"), counts["senses"]),
             "name entries": (probe_count(r"^name entries: (\d+)$"), counts["name_entries"]),
-            "name headwords": (probe_count(r"^name headword rows \(kanji\+kana objects\): (\d+)"),
+            "name headwords (raw)": (probe_count(r"^name headword rows \(kanji\+kana objects\): (\d+)"),
+                                     counts["name_headwords_raw"]),
+            # Normalized counts: what the probe predicts the build inserts
+            # after the NFKC fold's per-entry merges — the number that must
+            # equal the DB's headword rows.
+            "headwords": (probe_count(r"^headword rows \(normalized\): (\d+)"),
+                          counts["headwords"]),
+            "name headwords": (probe_count(r"^name headword rows \(normalized\): (\d+)"),
                                counts["name_headwords"]),
         }
         for label, (want, got) in expected.items():
@@ -392,9 +456,10 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
     out("==> JMDict DB built")
     out(f"    db:      {zst_path} ({zst_mb:.1f} MB; uncompressed {raw_mb:.1f} MB)")
     out(f"    rows:    entries {counts['entries']} / headwords {counts['headwords']} / "
-        f"senses {counts['senses']} (reconciled with probe)")
+        f"senses {counts['senses']} (reconciled with probe; "
+        f"NFKC merged {counts['headwords_deduped']} writings)")
     out(f"    names:   entries {counts['name_entries']} / headwords {counts['name_headwords']} "
-        f"(ent_seq >= {NAME_SEQ_OFFSET})")
+        f"(ent_seq >= {NAME_SEQ_OFFSET}; NFKC merged {counts['name_headwords_deduped']})")
     out(f"    meta:    version={version} dictDate={dict_date} tag={artifact_tag} "
         f"names.version={name_version} names.dictDate={name_dict_date} names.tag={name_pin_tag}")
     out(f"    DMG delta: ~{zst_mb:.1f} MB")

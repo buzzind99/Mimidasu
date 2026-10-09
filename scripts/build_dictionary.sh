@@ -53,7 +53,7 @@ PIN_URL="https://github.com/Bluskyo/JMDict_Extended/releases/download/${PIN_TAG}
 # stay the upstream release identifier (it keys the download URL); this
 # revision is the artifact staleness key — bump it when the build mapping
 # changes under the same upstream pin so prepared installs re-stage.
-PIN_BUILD="4"
+PIN_BUILD="5"
 
 # --- Names pin: JMnedict proper nouns, ingested into the same DB ----------------
 # Source is scriptin/jmdict-simplified (the JMDict pin above stays on
