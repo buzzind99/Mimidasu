@@ -52,6 +52,14 @@ final class JMDictHeadwordGateTests {
         #expect(try engine.hasHeadword("ﾊﾟｲﾅｯﾌﾟﾙ"))
     }
 
+    @Test("hits for a fullwidth-Latin spelling folded onto the normalized row")
+    func fullwidthLatinHeadwordHits() throws {
+        // Ingestion normalized ＴＫＧ to TKG, so the gate's folded probe —
+        // the annotator's long-segment protection — must answer through the
+        // same fold instead of fragmenting the surface.
+        #expect(try engine.hasHeadword("ＴＫＧ"))
+    }
+
     @Test("the annotator's gate keeps a halfwidth name whole through the composed fold")
     func annotatorGateComposesHalfwidthProbe() throws {
         // ﾊﾟｲﾅｯﾌﾟﾙ carries voiced/semi-voiced marks the compatibility

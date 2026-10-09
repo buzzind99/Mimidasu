@@ -1,4 +1,5 @@
 import Foundation
+@testable import Mimidasu
 import SQLite3
 
 private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -51,7 +52,13 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// order within a tier (`9990120` < `9990140`);
 /// `9990150` パイナップル — kana-only loanword whose stored row is
 /// precomposed voiced/semi-voiced katakana, so the headword gate's
-/// halfwidth probe (ﾊﾟｲﾅｯﾌﾟﾙ) can pin the composed fold onto it.
+/// halfwidth probe (ﾊﾟｲﾅｯﾌﾟﾙ) can pin the composed fold onto it;
+/// `9990160` ＴＫＧ/ティー・ケー・ジー — the raw-upstream fullwidth-Latin
+/// initialism shape (ent_seq 2834407 in the shipped data). The fixture
+/// normalizes every stored text at insert exactly as `jmdict_build.py`
+/// does, so the writing lands as ASCII TKG and a fullwidth tap folds onto
+/// it at the SQL boundary — the lookup path a search row's expand hands
+/// the lookup engine.
 ///
 /// Two JMnedict-shaped name entries ride the offset ent_seq range the build
 /// maps `int(id) + 10_000_000` into (JMnedict ids 5668306/5668307 →
@@ -80,7 +87,7 @@ enum JMDictFixtureDatabase {
 
     private final class BundleAnchor {}
 
-    static func build() throws -> Built {
+    static func build(extraWords: [FixtureWord] = []) throws -> Built {
         let fixtureURL = try locateFixture()
         let data = try Data(contentsOf: fixtureURL)
         let fixture = try JSONDecoder().decode(FixtureEnvelope.self, from: data)
@@ -110,7 +117,7 @@ enum JMDictFixtureDatabase {
           PRIMARY KEY(text, entry_id, kind)) WITHOUT ROWID;
         CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
         """)
-        for word in fixture.words + syntheticWords {
+        for word in fixture.words + syntheticWords + extraWords {
             try insert(word, db)
         }
         return Built(url: url)
@@ -132,21 +139,21 @@ enum JMDictFixtureDatabase {
         let words: [FixtureWord]
     }
 
-    private struct FixtureWord: Decodable {
+    struct FixtureWord: Decodable {
         let id: String
         let kanji: [FixtureKanji]?
         let kana: [FixtureKana]?
         let sense: [FixtureSense]?
     }
 
-    private struct FixtureKanji: Decodable {
+    struct FixtureKanji: Decodable {
         let text: String
         let common: Bool
         let jlptLevel: Int?
         let pitchAccent: FixturePitch?
     }
 
-    private struct FixtureKana: Decodable {
+    struct FixtureKana: Decodable {
         let text: String
         let common: Bool
         let appliesToKanji: [String]?
@@ -154,7 +161,7 @@ enum JMDictFixtureDatabase {
         let pitchAccent: FixturePitch?
     }
 
-    private struct FixtureSense: Decodable {
+    struct FixtureSense: Decodable {
         let partOfSpeech: [String]?
         let appliesToKanji: [String]?
         let appliesToKana: [String]?
@@ -162,14 +169,14 @@ enum JMDictFixtureDatabase {
         let gloss: [FixtureGloss]?
     }
 
-    private struct FixtureGloss: Decodable {
+    struct FixtureGloss: Decodable {
         let lang: String?
         let text: String
     }
 
     /// Upstream writes the pitch accent as either a `{hatsuon, accPatts,
     /// zoPatts}` object or an empty list (never a non-empty one).
-    private struct FixturePitch: Decodable {
+    struct FixturePitch: Decodable {
         let hatsuon: String?
         let accPatts: String?
         let zoPatts: String?
@@ -200,273 +207,6 @@ enum JMDictFixtureDatabase {
     }
 }
 
-// MARK: - Synthetic entries
-
-/// The synthetic entries themselves, split out of the database builder's
-/// type body. See `JMDictFixtureDatabase`'s doc comment for what each pins.
-private extension JMDictFixtureDatabase {
-    private enum SyntheticWords {
-        fileprivate static let all: [FixtureWord] = [
-            FixtureWord(
-                id: "9990010",
-                kanji: [FixtureKanji(text: "仮語", common: false, jlptLevel: nil, pitchAccent: nil)],
-                kana: [FixtureKana(
-                    text: "かご", common: false, appliesToKanji: ["*"], jlptLevel: nil,
-                    pitchAccent: nil
-                )],
-                sense: [
-                    FixtureSense(
-                        partOfSpeech: ["n"], appliesToKanji: ["他語"], appliesToKana: nil,
-                        misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "restricted to another writing")]
-                    ),
-                    FixtureSense(
-                        partOfSpeech: ["n"], appliesToKanji: [], appliesToKana: nil, misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "matches no writing")]
-                    ),
-                    FixtureSense(
-                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "applies to every writing")]
-                    )
-                ]
-            ),
-            FixtureWord(
-                id: "9990020",
-                kanji: [FixtureKanji(text: "幽語", common: false, jlptLevel: nil, pitchAccent: nil)],
-                kana: [FixtureKana(
-                    text: "ゆうご", common: false, appliesToKanji: ["*"], jlptLevel: nil,
-                    pitchAccent: nil
-                )],
-                sense: [
-                    FixtureSense(
-                        partOfSpeech: ["n"], appliesToKanji: ["別語"], appliesToKana: nil,
-                        misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "foreign restriction")]
-                    )
-                ]
-            ),
-            FixtureWord(
-                id: "9990030",
-                kanji: [FixtureKanji(text: "雨", common: false, jlptLevel: 5, pitchAccent: nil)],
-                kana: [FixtureKana(
-                    text: "あめ", common: false, appliesToKanji: ["*"], jlptLevel: nil,
-                    pitchAccent: nil
-                )],
-                sense: [
-                    FixtureSense(
-                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "rain")]
-                    )
-                ]
-            ),
-            FixtureWord(
-                id: "9990040",
-                kanji: [FixtureKanji(text: "尾", common: false, jlptLevel: nil, pitchAccent: nil)],
-                kana: [FixtureKana(
-                    text: "お", common: false, appliesToKanji: ["*"], jlptLevel: nil,
-                    pitchAccent: nil
-                )],
-                sense: [
-                    FixtureSense(
-                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "tail")]
-                    )
-                ]
-            ),
-            FixtureWord(
-                id: "9990050",
-                kanji: [
-                    FixtureKanji(text: "先", common: true, jlptLevel: nil, pitchAccent: nil),
-                    FixtureKanji(text: "前", common: true, jlptLevel: nil, pitchAccent: nil)
-                ],
-                kana: [FixtureKana(
-                    text: "さき", common: true, appliesToKanji: ["*"], jlptLevel: nil,
-                    pitchAccent: nil
-                )],
-                sense: [
-                    FixtureSense(
-                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "point; tip; end")]
-                    )
-                ]
-            ),
-            FixtureWord(
-                id: "9990060",
-                kanji: [FixtureKanji(text: "前", common: false, jlptLevel: 5, pitchAccent: nil)],
-                kana: [FixtureKana(
-                    text: "まえ", common: false, appliesToKanji: ["*"], jlptLevel: nil,
-                    pitchAccent: nil
-                )],
-                sense: [
-                    FixtureSense(
-                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "front; before")]
-                    )
-                ]
-            ),
-            FixtureWord(
-                id: "9990070",
-                kanji: [FixtureKanji(text: "叉語", common: true, jlptLevel: nil, pitchAccent: nil)],
-                kana: [
-                    FixtureKana(text: "さご", common: true, appliesToKanji: ["*"], jlptLevel: nil, pitchAccent: nil),
-                    FixtureKana(text: "サゴ", common: true, appliesToKanji: nil, jlptLevel: nil, pitchAccent: nil)
-                ],
-                sense: [
-                    FixtureSense(
-                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "kanji-written homophone")]
-                    )
-                ]
-            ),
-            FixtureWord(
-                id: "9990080",
-                kanji: nil,
-                kana: [
-                    FixtureKana(text: "さご", common: true, appliesToKanji: nil, jlptLevel: nil, pitchAccent: nil),
-                    FixtureKana(text: "サゴ", common: true, appliesToKanji: nil, jlptLevel: nil, pitchAccent: nil)
-                ],
-                sense: [
-                    FixtureSense(
-                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "kana-written homophone")]
-                    )
-                ]
-            ),
-            FixtureWord(
-                id: "9990090",
-                kanji: [FixtureKanji(text: "呂敷", common: false, jlptLevel: nil, pitchAccent: nil)],
-                kana: [FixtureKana(
-                    text: "ろしき", common: false, appliesToKanji: ["*"], jlptLevel: nil,
-                    pitchAccent: nil
-                )],
-                sense: [
-                    FixtureSense(
-                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "boundary-crossing split hit")]
-                    )
-                ]
-            ),
-            FixtureWord(
-                id: "9990100",
-                kanji: [FixtureKanji(text: "雨村", common: true, jlptLevel: nil, pitchAccent: nil)],
-                kana: [FixtureKana(
-                    text: "あめむら", common: true, appliesToKanji: ["*"], jlptLevel: nil,
-                    pitchAccent: nil
-                )],
-                sense: [
-                    FixtureSense(
-                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "village rain")]
-                    )
-                ]
-            ),
-            FixtureWord(
-                id: "9990110",
-                kanji: [FixtureKanji(
-                    text: "カタ語", common: false, jlptLevel: 2,
-                    pitchAccent: FixturePitch(hatsuon: "かた'ご", accPatts: "2", zoPatts: "HH")
-                )],
-                kana: [FixtureKana(
-                    text: "カタ語", common: false, appliesToKanji: ["*"], jlptLevel: nil,
-                    pitchAccent: FixturePitch(hatsuon: nil, accPatts: nil, zoPatts: "LL")
-                )],
-                sense: [
-                    FixtureSense(
-                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "coincident spelling")]
-                    )
-                ]
-            ),
-            FixtureWord(
-                id: "9990120",
-                kanji: [FixtureKanji(text: "例子", common: false, jlptLevel: nil, pitchAccent: nil)],
-                kana: [FixtureKana(
-                    text: "れいし", common: false, appliesToKanji: ["*"], jlptLevel: nil,
-                    pitchAccent: nil
-                )],
-                sense: [
-                    FixtureSense(
-                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "uncommon homograph, lower seq")]
-                    )
-                ]
-            ),
-            FixtureWord(
-                id: "9990130",
-                kanji: [FixtureKanji(text: "例子", common: true, jlptLevel: nil, pitchAccent: nil)],
-                kana: [FixtureKana(
-                    text: "れいし", common: true, appliesToKanji: ["*"], jlptLevel: nil,
-                    pitchAccent: nil
-                )],
-                sense: [
-                    FixtureSense(
-                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "common homograph, higher seq")]
-                    )
-                ]
-            ),
-            FixtureWord(
-                id: "9990140",
-                kanji: [FixtureKanji(text: "例子", common: false, jlptLevel: nil, pitchAccent: nil)],
-                kana: [FixtureKana(
-                    text: "れいし", common: false, appliesToKanji: ["*"], jlptLevel: nil,
-                    pitchAccent: nil
-                )],
-                sense: [
-                    FixtureSense(
-                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "uncommon homograph, higher seq")]
-                    )
-                ]
-            ),
-            FixtureWord(
-                id: "9990150",
-                kanji: nil,
-                kana: [FixtureKana(
-                    text: "パイナップル", common: true, appliesToKanji: nil, jlptLevel: nil,
-                    pitchAccent: nil
-                )],
-                sense: [
-                    FixtureSense(
-                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "pineapple")]
-                    )
-                ]
-            ),
-            FixtureWord(
-                id: "15668306",
-                kanji: [FixtureKanji(text: "木村", common: false, jlptLevel: nil, pitchAccent: nil)],
-                kana: [FixtureKana(
-                    text: "きむら", common: false, appliesToKanji: ["*"], jlptLevel: nil,
-                    pitchAccent: nil
-                )],
-                sense: [
-                    FixtureSense(
-                        partOfSpeech: ["place", "surname"], appliesToKanji: nil, appliesToKana: nil,
-                        misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "Kimura")]
-                    )
-                ]
-            ),
-            FixtureWord(
-                id: "15668307",
-                kanji: [FixtureKanji(text: "雨村", common: false, jlptLevel: nil, pitchAccent: nil)],
-                kana: [FixtureKana(
-                    text: "あめむら", common: false, appliesToKanji: ["*"], jlptLevel: nil,
-                    pitchAccent: nil
-                )],
-                sense: [
-                    FixtureSense(
-                        partOfSpeech: ["surname"], appliesToKanji: nil, appliesToKana: nil,
-                        misc: nil,
-                        gloss: [FixtureGloss(lang: "eng", text: "Amemura (surname)")]
-                    )
-                ]
-            )
-        ]
-    }
-}
-
 // MARK: - Insertion (build-script mapping)
 
 private extension JMDictFixtureDatabase {
@@ -479,27 +219,27 @@ private extension JMDictFixtureDatabase {
         let common = kanji.contains(where: \.common) || kana.contains(where: \.common)
         try insertRow(db, "INSERT INTO entries VALUES (?,?,?,?)", [
             .int(entSeq),
-            .text(kanji.first?.text),
-            .text(kana.first?.text),
+            .text(nfkc(kanji.first?.text)),
+            .text(nfkc(kana.first?.text)),
             .int(common ? 1 : 0)
         ])
         for object in kanji {
-            try insertHeadword(db, entSeq: entSeq, kind: "keb", object: object)
+            try insertHeadword(db, entSeq: entSeq, kind: "keb", text: nfkc(object.text), object: object)
         }
         for object in kana {
-            try insertHeadword(db, entSeq: entSeq, kind: "reb", object: object)
+            try insertHeadword(db, entSeq: entSeq, kind: "reb", text: nfkc(object.text), object: object)
         }
         for (ord, sense) in (word.sense ?? []).enumerated() {
             let glosses = (sense.gloss ?? [])
                 .filter { gloss in gloss.lang == "eng" }
-                .map(\.text)
+                .map { gloss in nfkc(gloss.text) ?? "" }
                 .joined(separator: "; ")
             try insertRow(db, "INSERT INTO senses VALUES (?,?,?,?,?,?,?)", [
                 .int(entSeq),
                 .int(ord),
-                .text(joined(sense.partOfSpeech, separator: ",")),
+                .text(joined(sense.partOfSpeech, separator: ",").map(ReadingAlignment.compatibilityComposed)),
                 .text(glosses),
-                .text(joined(sense.misc, separator: ", ")),
+                .text(joined(sense.misc, separator: ", ").map(ReadingAlignment.compatibilityComposed)),
                 .text(normalizedRestriction(sense.appliesToKanji)),
                 .text(normalizedRestriction(sense.appliesToKana))
             ])
@@ -507,11 +247,11 @@ private extension JMDictFixtureDatabase {
     }
 
     private static func insertHeadword(
-        _ db: OpaquePointer, entSeq: Int, kind: String, object: FixtureKanji
+        _ db: OpaquePointer, entSeq: Int, kind: String, text: String?, object: FixtureKanji
     ) throws {
         try insertRow(db, "INSERT INTO headwords VALUES (?,?,?,?,?,?,?)", [
             .int(entSeq),
-            .text(object.text),
+            .text(text),
             .text(kind),
             .int(object.jlptLevel),
             .text(object.pitchAccent?.hatsuon),
@@ -521,11 +261,11 @@ private extension JMDictFixtureDatabase {
     }
 
     private static func insertHeadword(
-        _ db: OpaquePointer, entSeq: Int, kind: String, object: FixtureKana
+        _ db: OpaquePointer, entSeq: Int, kind: String, text: String?, object: FixtureKana
     ) throws {
         try insertRow(db, "INSERT INTO headwords VALUES (?,?,?,?,?,?,?)", [
             .int(entSeq),
-            .text(object.text),
+            .text(text),
             .text(kind),
             .int(object.jlptLevel),
             .text(object.pitchAccent?.hatsuon),
@@ -535,13 +275,25 @@ private extension JMDictFixtureDatabase {
     }
 
     /// `*` (and absence) = applies to every writing → NULL; otherwise the
-    /// JSON array as stored, an empty list included (matches none).
+    /// JSON array as stored, an empty list included (matches none). The
+    /// stored writings fold onto the same canonical spellings the headwords
+    /// carry — the lookup compares an NFKC-folded tap against them.
     private static func normalizedRestriction(_ list: [String]?) -> String? {
         guard let list, list != ["*"] else { return nil }
-        guard let data = try? JSONSerialization.data(withJSONObject: list),
+        let folded = list.map { writing in nfkc(writing) ?? writing }
+        guard let data = try? JSONSerialization.data(withJSONObject: folded),
               let json = String(data: data, encoding: .utf8)
         else { return nil }
         return json
+    }
+
+    /// The build's one canonical form (`jmdict_build.py`'s `nfkc`): the
+    /// app's query sides fold their probes with the same mapping, so the
+    /// fixture's stored spellings must already carry it — a fullwidth-Latin
+    /// writing lands as its ASCII form, exactly what the shipped database
+    /// holds.
+    private static func nfkc(_ text: String?) -> String? {
+        text.map(ReadingAlignment.compatibilityComposed)
     }
 
     private static func joined(_ list: [String]?, separator: String) -> String? {

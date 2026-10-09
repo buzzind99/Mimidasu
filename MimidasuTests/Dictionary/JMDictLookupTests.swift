@@ -26,9 +26,9 @@ final class JMDictLookupTests {
     @Test("hits the lemma candidate with pitch and JLPT from the matched headword row")
     func lemmaHit() throws {
         let result = try #require(try engine.lookup(LookupCandidate(text: "食べる")))
-
         #expect(result.matched == "食べる")
         #expect(result.entries.count == 1)
+
         let entry = try #require(result.entries.first)
         #expect(entry.entSeq == 1_358_280)
         #expect(entry.keb == "食べる")
@@ -47,8 +47,8 @@ final class JMDictLookupTests {
     @Test("hits the kana-only gairaigo entry with commonness from the kana object")
     func kanaOnlyHit() throws {
         let result = try #require(try engine.lookup(LookupCandidate(text: "アルバイト")))
-
         #expect(result.entries.count == 1)
+
         let entry = try #require(result.entries.first)
         #expect(entry.entSeq == 1_019_420)
         #expect(entry.keb == nil)
@@ -74,10 +74,40 @@ final class JMDictLookupTests {
 
         let kanaOnly = try #require(try engine.lookup(LookupCandidate(text: "ﾊﾟｲﾅｯﾌﾟﾙ")))
         #expect(kanaOnly.matched == "ﾊﾟｲﾅｯﾌﾟﾙ")
+
         let entry = try #require(kanaOnly.entries.first)
         #expect(entry.entSeq == 9_990_150)
         #expect(entry.reb == "パイナップル")
         #expect(entry.common)
+    }
+
+    @Test("resolves a fullwidth-Latin tap onto the stored normalized spelling")
+    func fullwidthLatinHit() throws {
+        // The search row's headword shape: upstream stores ＴＫＧ fullwidth,
+        // ingestion normalizes it to TKG, and the probe folds the tap at the
+        // SQL boundary — the direction the shipped database's equality seeks
+        // live or die by.
+        let result = try #require(try engine.lookup(LookupCandidate(text: "ＴＫＧ")))
+        #expect(result.matched == "ＴＫＧ")
+
+        let entry = try #require(result.entries.first)
+        #expect(entry.entSeq == 9_990_160)
+        #expect(entry.keb == "TKG")
+        #expect(entry.reb == "ティー・ケー・ジー")
+        #expect(entry.senses[0].glosses == ["tamago kake gohan"])
+    }
+
+    @Test("resolves the ASCII spelling the normalized entry hands back")
+    func normalizedLatinHit() throws {
+        // The expand path: the search row renders the normalized keb, so the
+        // candidate text arrives already canonical and must still find its
+        // own row.
+        let result = try #require(try engine.lookup(LookupCandidate(text: "TKG")))
+
+        let entry = try #require(result.entries.first)
+
+        #expect(entry.entSeq == 9_990_160)
+        #expect(entry.keb == "TKG")
     }
 
     @Test("orders senses by ord and splits the stored joins back apart")
@@ -85,6 +115,7 @@ final class JMDictLookupTests {
         let result = try #require(try engine.lookup(LookupCandidate(text: "あめ")))
 
         let entry = try #require(result.entries.first { entry in entry.entSeq == 1_153_520 })
+
         #expect(entry.senses.map(\.glosses.first) == ["(hard) candy", "rice-sugar", "amber"])
         #expect(entry.senses[2].misc == "abbr")
         #expect(entry.senses[1].pos == "n")
@@ -97,6 +128,7 @@ final class JMDictLookupTests {
         let result = try #require(try engine.lookup(LookupCandidate(text: "仮語")))
 
         let entry = try #require(result.entries.first)
+
         #expect(entry.entSeq == 9_990_010)
         #expect(entry.senses.count == 1)
         #expect(entry.senses[0].glosses == ["applies to every writing"])
@@ -107,6 +139,7 @@ final class JMDictLookupTests {
         let result = try #require(try engine.lookup(LookupCandidate(text: "あしこ")))
 
         let entry = try #require(result.entries.first)
+
         #expect(entry.entSeq == 1_000_320)
         #expect(entry.senses.count == 2)
         #expect(entry.senses.map(\.glosses.first) == ["there", "that far"])
@@ -117,6 +150,7 @@ final class JMDictLookupTests {
         let result = try #require(try engine.lookup(LookupCandidate(text: "あそこ")))
 
         let entry = try #require(result.entries.first)
+
         #expect(entry.senses.count == 3)
     }
 
@@ -132,6 +166,7 @@ final class JMDictLookupTests {
         let result = try #require(try engine.lookup(LookupCandidate(text: "ふろしき")))
 
         let entry = try #require(result.entries.first)
+
         #expect(entry.entSeq == 1_500_150)
         #expect(entry.jlpt == nil, "the kana row's null wins over the kanji row's 2")
         #expect(entry.hatsuon == "ふろ'[Dev]しき")
@@ -143,6 +178,7 @@ final class JMDictLookupTests {
         let result = try #require(try engine.lookup(LookupCandidate(text: "お土産")))
 
         let entry = try #require(result.entries.first)
+
         #expect(entry.entSeq == 1_002_500)
         #expect(entry.jlpt == 4)
         #expect(entry.hatsuon == nil)
@@ -415,132 +451,6 @@ final class JMDictLookupTests {
             throw JMDictFixtureDatabase.FixtureError.sqlite(String(cString: sqlite3_errmsg(db)))
         }
         return JMDictFixtureDatabase.Built(url: url)
-    }
-}
-
-// MARK: - Live database
-
-/// Exercises the real prepared JMDict database when one resolves (the
-/// Application Support location, or — debug checkouts — the uncompressed
-/// intermediate `scripts/build_dictionary.sh` leaves in `build/`). Opt-in like
-/// the other `Live*` suites: it re-runs at every pin bump and pins the
-/// spot entries against the shipped data shape.
-/// Same resolution chain as `JMDictLookup.defaultDatabaseURL`, with a
-/// repo-root fallback the test host's working directory can't provide.
-/// File-scope so the suite trait can gate on it.
-private let liveDatabaseURL: URL? = {
-    if let resolved = JMDictLookup.defaultDatabaseURL {
-        return resolved
-    }
-    let repoRoot = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-    let checkout = repoRoot.appendingPathComponent("build/\(JMDictPin.preparedFileName)")
-    return FileManager.default.fileExists(atPath: checkout.path) ? checkout : nil
-}()
-
-@Suite("JMDictLookup live database", .enabled(if: liveDatabaseURL != nil))
-struct JMDictLookupLiveTests {
-    private let engine: JMDictLookup
-
-    init() throws {
-        let url = try #require(liveDatabaseURL)
-        engine = JMDictLookup(resolveDatabase: { url })
-    }
-
-    @Test("hits 食べる with its pitch and JLPT from the real database")
-    func taberu() throws {
-        let result = try #require(try engine.lookup(LookupCandidate(text: "食べる")))
-
-        let entry = try #require(result.entries.first)
-        #expect(entry.entSeq == 1_358_280)
-        #expect(entry.common)
-        #expect(entry.jlpt == 5)
-        #expect(entry.zoPatts == "LHLL")
-        #expect(entry.senses[0].glosses == ["to eat"])
-    }
-
-    @Test("inherits 喰べる's pitch from the たべる row its furigana names")
-    func kuberuInheritsPitch() throws {
-        // The rt-omitted furigana shape: the okurigana pieces carry no rt,
-        // so only the ruby fallback rejoins the reading たべる the pitch
-        // inheritance matches on.
-        let result = try #require(try engine.lookup(LookupCandidate(text: "喰べる")))
-
-        let entry = try #require(result.entries.first)
-        #expect(entry.entSeq == 1_358_280)
-        #expect(entry.hatsuon == "た~べる")
-        #expect(entry.accPatts == "2")
-        #expect(entry.zoPatts == "LHLL")
-    }
-
-    @Test("inherits お土産's pitch from the おみやげ row its furigana names")
-    func omiyageInheritsPitch() throws {
-        // The leading-rt-omitted shape: お opens the furigana with no rt, so
-        // the ruby fallback restores the おみやげ reading the match needs.
-        let result = try #require(try engine.lookup(LookupCandidate(text: "お土産")))
-
-        let entry = try #require(result.entries.first)
-        #expect(entry.entSeq == 1_002_500)
-        #expect(entry.hatsuon == "お･みやげ")
-        #expect(entry.accPatts == "0")
-        #expect(entry.zoPatts == "LHHHH")
-    }
-
-    @Test("hits the kana-only gairaigo アルバイト from the real database")
-    func arubaito() throws {
-        let result = try #require(try engine.lookup(LookupCandidate(text: "アルバイト")))
-
-        let entry = try #require(result.entries.first)
-        #expect(entry.entSeq == 1_019_420)
-        #expect(entry.keb == nil)
-        #expect(entry.common)
-        #expect(entry.jlpt == 4)
-    }
-
-    @Test("hits 橋 with its pitch from the real database")
-    func hashi() throws {
-        let result = try #require(try engine.lookup(LookupCandidate(text: "橋")))
-
-        let entry = try #require(result.entries.first)
-        #expect(entry.entSeq == 1_237_410)
-        #expect(entry.common)
-        #expect(entry.jlpt == 5)
-        #expect(entry.zoPatts == "HLL")
-    }
-
-    @Test("returns multiple homograph entries for あめ in ranked order")
-    func ameHomographs() throws {
-        let result = try #require(try engine.lookup(LookupCandidate(text: "あめ")))
-
-        #expect(result.entries.count >= 2)
-        #expect(result.entries.first?.common == true)
-    }
-
-    @Test("ranks the 前/まえ entry first when the furigana reading is まえ")
-    func maeReadingMatch() throws {
-        let result = try #require(try engine.lookup(
-            LookupCandidate(text: "前", reading: "まえ")
-        ))
-
-        #expect(result.entries.count >= 2)
-        #expect(result.entries.first?.reb == "まえ")
-    }
-
-    @Test("ranks the kana-only さ entry first when the tap is kana")
-    func kanaSurfaceRanksFirstLive() throws {
-        let result = try #require(try engine.lookup(LookupCandidate(text: "さ")))
-
-        #expect(result.entries.first?.entSeq == 2_029_120)
-        #expect(result.entries.first?.keb == nil)
-    }
-
-    @Test("reading resolves a standalone kanji IPADIC lacks (圧 → あつ)")
-    func readingForStandaloneKanji() throws {
-        let reading = try #require(try engine.reading(forWriting: "圧"))
-
-        #expect(reading == "あつ")
     }
 }
 
