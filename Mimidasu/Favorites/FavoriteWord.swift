@@ -20,6 +20,23 @@ struct FavoriteWord: Identifiable, Equatable, Sendable {
         headword
     }
 
+    /// A favorite being starred right now, built the one way every star site
+    /// builds it: the headword the star keys on, the entry's kana reading, its
+    /// romaji, and the epoch-millisecond stamp the newest-first ordering needs.
+    ///
+    /// Shared rather than written per site because the stamp is the part that
+    /// goes quietly wrong — a favorite written with a second-resolution `addedAt`
+    /// reorders against every other favorite added in the same second, and the
+    /// list reshuffles under the cursor with nothing to show for it.
+    static func starred(headword: String, reading: String?) -> FavoriteWord {
+        FavoriteWord(
+            headword: headword,
+            reading: reading,
+            romaji: reading.flatMap(KanaRomaji.romaji(fromKana:)),
+            addedAt: Int(Date.now.timeIntervalSince1970 * 1000)
+        )
+    }
+
     /// The NFKC-decompose-then-compose fold the dictionary probe uses at its
     /// SQL boundary. Stored headwords arrive from JMDict already folded, but
     /// the probe side comes from ASR output, which can emit halfwidth

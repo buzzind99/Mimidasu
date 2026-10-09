@@ -46,11 +46,8 @@ extension AppModel {
         if favorites.isFavorite(headword: headword) {
             return .pendingRemoval(headword: headword)
         }
-        let outcome = favorites.toggle(FavoriteWord(
-            headword: headword,
-            reading: entry.reb,
-            romaji: entry.reb.flatMap(KanaRomaji.romaji(fromKana:)),
-            addedAt: Int(Date.now.timeIntervalSince1970 * 1000)
+        let outcome = favorites.toggle(FavoriteWord.starred(
+            headword: headword, reading: entry.reb
         ))
         switch outcome {
         case .added:

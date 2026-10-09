@@ -91,6 +91,12 @@ final class AppModel {
     /// The JMDict lookup engine behind dictionary taps; injectable so tests
     /// drive a fixture database (the default resolves the prepared store).
     let jmDictLookup: JMDictLookup
+    /// The full-dictionary search engine behind the reference window's
+    /// Dictionary mode; injectable on the same terms as `jmDictLookup`. It
+    /// owns its own read-only handle rather than sharing `jmDictLookup`'s, so
+    /// a long prefix scan cannot stall a tap lookup: the two only ever meet at
+    /// SQLite's own file locking.
+    let dictionarySearch: DictionarySearchEngine
 
     /// Drives SwiftUI's `.translationTask` (session acquisition + pack prompt).
     var translationConfig: TranslationSession.Configuration?
@@ -340,6 +346,7 @@ final class AppModel {
             await AppModel.checkHighFidelityAvailability(targetCode: code)
         },
         jmDictLookup: JMDictLookup? = nil,
+        dictionarySearch: DictionarySearchEngine? = nil,
         initialModelResolve: @escaping @Sendable (ASRModelChoice) -> URL? = { choice in
             ModelLocator.resolve(for: choice)
         },
@@ -352,6 +359,7 @@ final class AppModel {
         self.asrModelSettings = asrModelSettings ?? ASRModelSettings()
         self.favorites = favorites ?? FavoritesStore()
         self.jmDictLookup = jmDictLookup ?? JMDictLookup()
+        self.dictionarySearch = dictionarySearch ?? DictionarySearchEngine()
         modelResolve = initialModelResolve
         self.translationTransport = translationTransport
         self.highFidelityProbe = highFidelityProbe
