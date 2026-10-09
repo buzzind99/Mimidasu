@@ -197,9 +197,17 @@ struct DictionaryEntryContentView: View {
     /// False hides the headword block — headword, inline reading, romaji, and
     /// the header row's controls. For a host that already renders that
     /// identity directly above (a favorites row expanding its own definition):
-    /// repeating it costs a line of the row and reads as a mistake. Everything
-    /// below it — badges, pitch pill, senses, "also:" — is unaffected.
+    /// repeating it costs a line of the row and reads as a mistake. The badge
+    /// row is a separate flag — `showsBadges` — because a host can suppress one
+    /// without the other.
     var showsHeadword = true
+    /// False hides the badge row, for a host whose own header already carries
+    /// the badges directly above this view (a search row: its collapsed header
+    /// shows the match badge, commonness, level, and name types). Without this
+    /// the expanded block repeats them verbatim a line below the divider.
+    /// Independent of `showsHeadword`: the Favorites window shows no badges in
+    /// its collapsed header, so it sets only that one.
+    var showsBadges = true
     /// Membership of the displayed entry's headword. Recomputed by each host
     /// on every render rather than carried across lookups — a related-pill
     /// promotion repins both hosts to a *different* entry, and a cached value
@@ -380,7 +388,9 @@ struct DictionaryEntryContentView: View {
                     }
                 }
             }
-            badgeRow
+            if showsBadges {
+                badgeRow
+            }
             if let pitch = DictionaryContent.pitchPill(for: entry) {
                 pitchPill(pitch)
             }
@@ -537,23 +547,35 @@ struct DictionaryEntryPager: View {
     }
 }
 
-/// One badge chip (COMMON, ≈N5, POS): outlined capsule with a tinted fill.
+/// One badge chip (COMMON, ≈N5, POS): outlined capsule with a tinted fill,
+/// optionally led by a glyph. The icon marks the chips that say *why this row
+/// is here* rather than *what this word is* — the dictionary search's
+/// EXACT/PREFIX/GLOSS/LEMMA match badges — so the two kinds never read as the
+/// same claim.
 struct DictionaryBadgeView: View {
     let text: String
     let color: Color
     var compact = false
+    var icon: String?
 
     var body: some View {
-        Text(text)
-            .font(.system(size: compact ? 9 : 10, weight: .semibold))
-            .fixedSize()
-            .padding(.horizontal, compact ? 5 : 7)
-            .padding(.vertical, compact ? 2 : 3)
-            .background(
-                Capsule().fill(color.opacity(0.14))
-                    .overlay(Capsule().stroke(color.opacity(0.55)))
-            )
-            .foregroundStyle(color)
+        HStack(spacing: 3) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: compact ? 8 : 9, weight: .semibold))
+                    .accessibilityHidden(true)
+            }
+            Text(text)
+                .font(.system(size: compact ? 9 : 10, weight: .semibold))
+        }
+        .fixedSize()
+        .padding(.horizontal, compact ? 5 : 7)
+        .padding(.vertical, compact ? 2 : 3)
+        .background(
+            Capsule().fill(color.opacity(0.14))
+                .overlay(Capsule().stroke(color.opacity(0.55)))
+        )
+        .foregroundStyle(color)
     }
 }
 
