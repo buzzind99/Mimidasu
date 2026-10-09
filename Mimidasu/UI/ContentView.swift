@@ -26,8 +26,8 @@ private struct StaticButtonStyle: ButtonStyle {
     }
 }
 
-/// The floating favorite-list opener, as its own leaf so its hover read stays
-/// local: `FavoritesButtonHover` is observed by the glyph's opacity and by the
+/// The floating reference-window opener — Dictionary and Favorites in one
+/// window — as its own leaf so its hover read stays local: `FavoritesButtonHover` is observed by the glyph's opacity and by the
 /// stand-down the word surfaces perform, and a hover transition should
 /// re-evaluate this button — not `ContentView.body`, which would re-diff the
 /// sidebar, the transcript, and the live strip twice per hover. The hover
@@ -49,7 +49,7 @@ private struct FavoritesOpenerButton: View {
             {
                 return
             }
-            openWindow(id: "favorites")
+            openWindow(id: ReferenceWindow.sceneID)
         } label: {
             Image(systemName: "star.fill")
                 .font(.system(size: 13, weight: .semibold))
@@ -65,8 +65,8 @@ private struct FavoritesOpenerButton: View {
         .buttonStyle(StaticButtonStyle())
         .opacity(hover.isHovering ? 1 : 0.4)
         .pointerStyle(.link)
-        .help("Favorite list")
-        .accessibilityLabel("Favorite list")
+        .help("Dictionary & favorites")
+        .accessibilityLabel("Dictionary & favorites")
         .onHover { hovering in hover.isHovering = hovering }
     }
 }
@@ -105,7 +105,7 @@ struct ContentView: View {
     /// Backing state for the floating favorite-list button (ghosted until
     /// hovered) and the word-hover stand-down flag the surfaces read.
     @State private var favoritesButtonHover = FavoritesButtonHover()
-    /// When the favorites window last closed — same shape as the Settings
+    /// When the reference window last closed — same shape as the Settings
     /// gear (`SidebarView.settingsClosedAt`): a star click is itself a click
     /// outside the window, so resign-key closes it before this button's
     /// mouse-up action runs, and a fresh close means the click already did
@@ -217,7 +217,7 @@ struct ContentView: View {
         .background(Theme.window)
         .environment(\.favoritesButtonHover, favoritesButtonHover)
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
-            guard (note.object as? NSWindow)?.title == "Favorites" else { return }
+            guard (note.object as? NSWindow)?.title == ReferenceWindow.title else { return }
             favoritesClosedAt = .now
         }
     }

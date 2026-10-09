@@ -42,3 +42,40 @@ final class DictionarySearchFixture {
         built.remove()
     }
 }
+
+/// The same fixture wired into a `DictionarySearchState`, for the window-side
+/// tests that observe what the engine published rather than what it returned.
+@MainActor
+final class DictionarySearchStateFixture {
+    let state: DictionarySearchState
+    private let built: JMDictFixtureDatabase.Built
+    private let searchEngine: DictionarySearchEngine
+    private let lookup: JMDictLookup
+
+    init(
+        tokenize: @escaping @Sendable (String) -> [DictionaryToken]? = { _ in nil },
+        extraWords: [JMDictFixtureDatabase.FixtureWord] = []
+    ) throws {
+        built = try JMDictFixtureDatabase.build(extraWords: extraWords)
+        let url = built.url
+        lookup = JMDictLookup(resolveDatabase: { url })
+        searchEngine = DictionarySearchEngine(
+            resolveDatabase: { url }, tokenize: tokenize
+        )
+        let model = AppModel(
+            favorites: isolatedFavorites(),
+            jmDictLookup: lookup,
+            dictionarySearch: searchEngine
+        )
+        state = DictionarySearchState(model: model)
+    }
+
+    deinit {
+        // Close before unlinking — SQLite complains loudly about a vnode
+        // removed underneath an open handle, and an in-flight lookup or
+        // search may still be reading when the suite tears down.
+        searchEngine.close()
+        lookup.close()
+        built.remove()
+    }
+}

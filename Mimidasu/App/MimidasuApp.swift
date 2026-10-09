@@ -35,14 +35,15 @@ struct MimidasuApp: App {
         }
         .windowStyle(.hiddenTitleBar)
 
-        // The favorites list: a reference panel, not a preferences modal, so it
-        // shares the Settings window's dismiss-on-outside-click path (see the
-        // resign-key observer in `AppDelegate`). `.windowStyle(.hiddenTitleBar)`
-        // is honored by this scene, and the view supplies its own header band
-        // in place of a title bar. No `defaultSize`: the view fixes its own
+        // The reference panel: a two-mode window over the same dictionary the
+        // rest of the app reads, not a preferences modal, so it shares the
+        // Settings window's dismiss-on-outside-click path (see the resign-key
+        // observer in `AppDelegate`). `.windowStyle(.hiddenTitleBar)` is
+        // honored by this scene, and the view supplies its own header band in
+        // place of a title bar. No `defaultSize`: the view fixes its own
         // frame, so `.contentSize` makes the window exactly that.
-        Window("Favorites", id: "favorites") {
-            FavoritesView(model: appDelegate.model)
+        Window(ReferenceWindow.title, id: ReferenceWindow.sceneID) {
+            ReferenceWindowView(model: appDelegate.model)
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
@@ -177,7 +178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let window = note.object as? NSWindow
             MainActor.assumeIsolated {
                 guard let window, window.isVisible, window.attachedSheet == nil,
-                      window.title == "Favorites"
+                      window.title == ReferenceWindow.title
                       || SettingsWindowController.isSettingsWindow(window)
                 else { return }
                 window.performClose(nil)
@@ -200,7 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] note in
             let window = note.object as? NSWindow
             MainActor.assumeIsolated {
-                guard let self, let window, window.title == "Favorites" else { return }
+                guard let self, let window, window.title == ReferenceWindow.title else { return }
                 window.collectionBehavior = [.stationary, .fullScreenAuxiliary, .moveToActiveSpace]
                 if self.favoritesWindow !== window {
                     self.favoritesWindow = window
@@ -216,7 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { note in
             let window = note.object as? NSWindow
             MainActor.assumeIsolated {
-                guard let window, window.title == "Favorites"
+                guard let window, window.title == ReferenceWindow.title
                     || SettingsWindowController.isSettingsWindow(window)
                 else { return }
                 window.center()
