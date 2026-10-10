@@ -81,15 +81,29 @@ struct DictionaryContentTests {
         #expect(DictionaryContent.posLabel("product") == "PRODUCT")
         #expect(DictionaryContent.posLabel("work") == "WORK")
         #expect(DictionaryContent.posLabel("unclass") == "NAME")
+        // The rare types the pinned corpus carries (三田線 is a `serv`).
+        #expect(DictionaryContent.posLabel("serv") == "SERVICE")
+        #expect(DictionaryContent.posLabel("char") == "CHARACTER")
+        #expect(DictionaryContent.posLabel("fict") == "FICTION")
+        #expect(DictionaryContent.posLabel("ev") == "EVENT")
+        #expect(DictionaryContent.posLabel("group") == "GROUP")
+        #expect(DictionaryContent.posLabel("dei") == "DEITY")
+        #expect(DictionaryContent.posLabel("obj") == "OBJECT")
+        #expect(DictionaryContent.posLabel("myth") == "MYTHOLOGY")
+        #expect(DictionaryContent.posLabel("doc") == "DOCUMENT")
+        #expect(DictionaryContent.posLabel("creat") == "CREATURE")
+        #expect(DictionaryContent.posLabel("ship") == "SHIP")
+        #expect(DictionaryContent.posLabel("leg") == "LEGEND")
+        #expect(DictionaryContent.posLabel("relig") == "RELIGION")
     }
 
     @Test("multi-type name senses take the first token; unknown types pass through verbatim")
     func nameBadgeFirstTokenAndPassthrough() {
         #expect(DictionaryContent.posLabel("place,surname") == "PLACE NAME")
-        #expect(DictionaryContent.posLabel("char,surname") == "char")
-        // The rare upstream types and JMDict POS tags never map.
-        #expect(DictionaryContent.posLabel("char") == "char")
-        #expect(DictionaryContent.posLabel("relig") == "relig")
+        #expect(DictionaryContent.posLabel("serv,station") == "SERVICE")
+        // A tag the map lacks (a retired upstream type here) and JMDict POS
+        // tags never map.
+        #expect(DictionaryContent.posLabel("plant") == "plant")
         #expect(DictionaryContent.posLabel("v1,vt") == "v1")
     }
 
@@ -120,11 +134,10 @@ struct DictionaryContentTests {
             DictionaryContent.nameTypeBadges(posTokens: columns)
                 == DictionaryContent.nameTypeBadges(for: nameEntry())
         )
-        // Dedupe spans columns, a null column is skipped, and untagged types
-        // pass through verbatim.
+        // Dedupe spans columns and a null column is skipped.
         #expect(
-            DictionaryContent.nameTypeBadges(posTokens: ["surname", nil, "surname", "char"])
-                == ["SURNAME", "char"]
+            DictionaryContent.nameTypeBadges(posTokens: ["surname", nil, "surname", "serv"])
+                == ["SURNAME", "SERVICE"]
         )
         #expect(DictionaryContent.nameTypeBadges(posTokens: []) == [])
         #expect(DictionaryContent.nameTypeBadges(posTokens: [nil]) == [])
@@ -148,7 +161,7 @@ struct DictionaryContentTests {
                 == ["SURNAME", "PLACE NAME"]
         )
         #expect(DictionaryContent.nameTypeBadges(for: nameEntry(pos: "fem,given")) == ["GIVEN NAME"])
-        #expect(DictionaryContent.nameTypeBadges(for: nameEntry(pos: "char,surname")) == ["char", "SURNAME"])
+        #expect(DictionaryContent.nameTypeBadges(for: nameEntry(pos: "char,surname")) == ["CHARACTER", "SURNAME"])
         #expect(DictionaryContent.nameTypeBadges(for: nameEntry(pos: nil)) == [])
         // Word entries contribute nothing — their POS tags stay in the sense row.
         #expect(DictionaryContent.nameTypeBadges(for: entry()) == [])

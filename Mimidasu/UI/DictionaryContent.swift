@@ -71,9 +71,10 @@ enum DictionaryContent {
         return nameTypeLabels[tag] ?? tag
     }
 
-    /// JMnedict name type → badge label. The mapped rows cover the common
-    /// upstream vocabulary; the rare types (`char`, `serv`, `fict`, …) fall
-    /// through verbatim. JMDict POS tags never collide with these tokens.
+    /// JMnedict name type → badge label. The rows cover the pinned corpus's
+    /// full upstream vocabulary (its `tags` table, uppercased minus a
+    /// redundant "name" suffix); a tag the map lacks — a future or retired
+    /// upstream type, or a JMDict POS tag — falls through verbatim.
     private static let nameTypeLabels = [
         "surname": "SURNAME",
         "given": "GIVEN NAME",
@@ -86,7 +87,20 @@ enum DictionaryContent {
         "station": "STATION",
         "product": "PRODUCT",
         "work": "WORK",
-        "unclass": "NAME"
+        "unclass": "NAME",
+        "serv": "SERVICE",
+        "char": "CHARACTER",
+        "fict": "FICTION",
+        "ev": "EVENT",
+        "group": "GROUP",
+        "dei": "DEITY",
+        "obj": "OBJECT",
+        "myth": "MYTHOLOGY",
+        "doc": "DOCUMENT",
+        "creat": "CREATURE",
+        "ship": "SHIP",
+        "leg": "LEGEND",
+        "relig": "RELIGION"
     ]
 
     /// JMnedict ingest offset: name entries ride `ent_seq + 10M`, above
