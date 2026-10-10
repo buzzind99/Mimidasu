@@ -120,12 +120,18 @@ extension DictionarySearchEngine {
     /// 74 rows tripped the cap — and the entry whose gloss reads "best regards"
     /// never ran at all.
     ///
-    /// `commonOnly` is still absent, and must be: `common` does not exist
-    /// before the `entries` join, so a common-only window can saturate on rows
-    /// `assemble` will drop. That is a wasted stage, never a hidden one.
+    /// `commonOnly` refuses the measurement outright. `common` does not exist
+    /// before the `entries` join, so the window counted here is not the window
+    /// `assemble` will render: a common-only search can saturate on hundreds
+    /// of rows and then drop every one the window was full of. Skipping a
+    /// stage on that basis hides rows — and since the headword stages ignore
+    /// `limit`, a wider window re-measures the same rows and saturates
+    /// identically, so paging could not un-skip it. A common-only search runs
+    /// the remaining stage instead, and publishes no floor it cannot honour.
     static func capSaturated(
         _ rows: [CandidateRow], filters: DictionarySearchFilters, limit: Int, remaining: [Int]
     ) -> Bool {
+        guard !filters.commonOnly else { return false }
         guard let best = remaining.min() else { return false }
         // The window is the *ranked* top `limit`, so its worst row is the
         // worst tier among the best `limit` tiers — not the worst tier in

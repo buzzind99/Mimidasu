@@ -140,6 +140,10 @@ struct DictionarySearchOutcome: Equatable, Sendable {
     /// that jumps. That is why a saturated search offers a load-more even when
     /// it filled the window exactly and `matchedCount` does not exceed it, and
     /// why the header marks such a total with `+`.
+    ///
+    /// Never true for a `commonOnly` search: the window cannot be measured
+    /// before the `entries` join that resolves `common`, so such a search runs
+    /// every stage and this is `false` — its total is exact, not a floor.
     let saturated: Bool
 
     static let empty = DictionarySearchOutcome(hits: [], matchedCount: 0, saturated: false)

@@ -30,6 +30,16 @@ struct DictionarySearchPagingTests {
         ))
     }
 
+    /// 120 rows under `かん`, a third of them common: the shape a `mak` search
+    /// has. A window of 50 saturates on the prefix tier while the common filter
+    /// holds the answer to a third of it, so `commonOnly` and the gloss tier
+    /// pending behind it are the two things the window cannot measure.
+    private func makeCommonFilteredFixture() throws -> DictionarySearchFixture {
+        try DictionarySearchFixture(extraWords: JMDictFixtureDatabase.bulkWords(
+            count: 120, readingPrefix: "かん", startingAt: 9_993_000
+        ))
+    }
+
     @Test("returns every row it found, not just the window")
     func returnsEveryFoundRow() throws {
         // 120 rows, so no stage is ever skipped for want of window space: the
@@ -107,5 +117,46 @@ struct DictionarySearchPagingTests {
         #expect(outcome.hits.count == ceiling)
         // The rows past the ceiling still exist, and are still counted.
         #expect(outcome.matchedCount == ceiling + 100)
+    }
+
+    @Test("a common-only search reports a total it can honour, with no floor")
+    func commonOnlyIsNeverSaturated() throws {
+        let fixture = try makeCommonFilteredFixture()
+
+        // The window the ladder could measure here is 120 prefix rows and the
+        // window the user sees is 40. Publishing a floor over the wrong one is
+        // what made `mak` read `36 / 36+` and re-run the same search on every
+        // click — the prefix stages ignore the window, so the measurement
+        // could never come back any other way.
+        let outcome = try fixture.outcome("kan", commonOnly: true)
+
+        #expect(outcome.saturated == false)
+    }
+
+    @Test("a common-only search returns every row it found")
+    func commonOnlyHoldsTheWholeAnswer() throws {
+        let fixture = try makeCommonFilteredFixture()
+
+        let outcome = try fixture.outcome("kan", commonOnly: true)
+
+        // Nothing was skipped, so the payload is the whole answer — which is
+        // what lets the window say `40 / 40` and offer nothing to load.
+        #expect(outcome.hits.count == outcome.matchedCount)
+    }
+
+    @Test("a common-only search still runs the gloss tier")
+    func commonOnlyKeepsTheGlossTier() throws {
+        let fixture = try makeCommonFilteredFixture()
+
+        // `kanji-written homophone` is common and no writing of it starts with
+        // the query, so only the gloss scan reaches it. A window measured
+        // without the common filter would have skipped that scan and stranded
+        // the entry behind a `+` no click could resolve.
+        let outcome = try fixture.outcome("kan", commonOnly: true)
+
+        let hit = try #require(outcome.hits.first { candidate in
+            candidate.glossPreview.first == "kanji-written homophone"
+        })
+        #expect(hit.common)
     }
 }
