@@ -25,6 +25,16 @@ import unicodedata
 NAME_EXCLUDED_TYPES = {"unclass", "place"}
 NAME_SEQ_OFFSET = 10_000_000
 
+# Sense glosses join with a control character that cannot occur inside an
+# English gloss, so the app can split the column back into individual glosses
+# without ambiguity. The historical joiner "; " occurs inside real glosses
+# ("to scoop up (and remove; sand, earth, etc.)" is one gloss, not three),
+# and splitting on it shredded them at every display site. The tripwires in
+# both ingest loops fail the build rather than let a gloss carry the joiner
+# silently. Mirrored by JMDictPin.glossJoiner; build_dictionary.sh pins both
+# declarations against drift.
+GLOSS_JOINER = "\x1f"
+
 
 def nfkc(text):
     """One canonical form at the ingestion boundary. Every query side in the
@@ -234,11 +244,13 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
         headwords_batch.extend(word_headword_rows)
         for ord_i, s in enumerate(w.get("sense") or []):
             glosses = [nfkc(g["text"]) for g in (s.get("gloss") or []) if g.get("lang") == "eng"]
+            if any(GLOSS_JOINER in gloss for gloss in glosses):
+                fail(f"word {ent_seq}: a gloss contains the reserved gloss joiner")
             senses_batch.append((
                 ent_seq,
                 ord_i,
                 nfkc(",".join(s.get("partOfSpeech") or [])) or None,
-                "; ".join(glosses),
+                GLOSS_JOINER.join(glosses),
                 nfkc(", ".join(s.get("misc") or [])) or None,
                 norm_restricted(s.get("appliesToKanji")),
                 norm_restricted(s.get("appliesToKana")),
@@ -318,6 +330,8 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
                 continue
 
             ent_seq = int(w["id"]) + NAME_SEQ_OFFSET
+            if any(GLOSS_JOINER in gloss for gloss in glosses):
+                fail(f"name {w.get('id')}: a gloss contains the reserved gloss joiner")
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
             fail(f"names entry has an unexpected shape: {exc}: {stripped[:120]!r}")
             break
@@ -356,7 +370,7 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
             ent_seq,
             0,
             nfkc(",".join(types)) or None,
-            "; ".join(nfkc(g) for g in glosses),
+            GLOSS_JOINER.join(nfkc(g) for g in glosses),
             None,
             None,
             None,

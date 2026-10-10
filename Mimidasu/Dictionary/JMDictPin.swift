@@ -20,7 +20,19 @@ enum JMDictPin {
     /// download URL in `build_dictionary.sh`); this revision is the artifact
     /// staleness key — bumped when the build mapping changes under the same
     /// upstream pin so prepared installs re-stage.
-    static let buildRevision = "5"
+    static let buildRevision = "6"
+
+    /// The character the build joins a sense's glosses with in the stored
+    /// `senses.gloss` column, and the character every consumer splits that
+    /// column back on. It is a control character that cannot occur inside an
+    /// English gloss, which is the point: the historical joiner `"; "` occurs
+    /// inside real glosses ("to scoop up (and remove; sand, earth, etc.)" is
+    /// one gloss), and splitting on it shredded those glosses at every display
+    /// site. The build tripwires a gloss that carries this character instead
+    /// of storing it, and `scripts/build_dictionary.sh` pins both the Python
+    /// and the Swift declaration against drift. Revision 6 is the first
+    /// revision that stores it; earlier revisions joined with `"; "`.
+    static let glossJoiner: Unicode.Scalar = "\u{001F}"
 
     /// Full upstream release tag of the pinned JMnedict names asset — never
     /// the date alone. The names source is scriptin/jmdict-simplified while

@@ -422,10 +422,11 @@ extension DictionarySearchEngine {
         var fragmentStart = 0
         while fragmentStart < scalars.count, bestKind != .glossWordBoundary {
             let fragmentEnd = separatorStart(in: scalars, from: fragmentStart) ?? scalars.count
-            // The build writes `"; "` between glosses and nothing else, so a
-            // fragment's bounds are a scan for that pair — and trimming its
-            // edges is a pair of walks, where `glossList` allocated a substring
-            // for every one of the ~85,000 glosses a one-mora query reaches.
+            // The build writes the gloss joiner between glosses and nothing
+            // else, so a fragment's bounds end at that scalar — and trimming
+            // its edges is a pair of walks, where `glossList` allocated a
+            // substring for every one of the ~85,000 glosses a one-mora query
+            // reaches.
             var lower = fragmentStart
             var upper = fragmentEnd
             while lower < upper, CharacterSet.whitespaces.contains(scalars[lower]) {
@@ -434,7 +435,7 @@ extension DictionarySearchEngine {
             while upper > lower, CharacterSet.whitespaces.contains(scalars[upper - 1]) {
                 upper -= 1
             }
-            fragmentStart = min(fragmentEnd + 2, scalars.count)
+            fragmentStart = min(fragmentEnd + 1, scalars.count)
 
             // Every occurrence inside the fragment is graded, not just the
             // leftmost: in `iced (e.g. iced tea` the first `iced` opens the
@@ -529,18 +530,12 @@ extension DictionarySearchEngine {
         )
     }
 
-    /// The first `"; "` at or after `start`, or nil when the column ends first.
+    /// The first gloss joiner at or after `start`, or nil when the column ends
+    /// first.
     private static func separatorStart(
         in scalars: [Unicode.Scalar], from start: Int
     ) -> Int? {
-        var index = start
-        while index + 1 < scalars.count {
-            if scalars[index] == ";", scalars[index + 1] == " " {
-                return index
-            }
-            index += 1
-        }
-        return nil
+        scalars[start...].firstIndex(of: JMDictPin.glossJoiner)
     }
 
     /// The first position at or after `start` where `needle` sits within

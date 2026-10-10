@@ -7,8 +7,9 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// Builds a throwaway JMDict database from the committed fixture
 /// (`Fixtures/jmdict-extended-sample.json`) for offline lookup tests. The
 /// column mapping mirrors `scripts/build_dictionary.sh` exactly — JSON-encoded
-/// `skeb`/`sreb` restriction lists (`*` → NULL), `"; "`-joined glosses,
-/// `,`-joined POS, `", "`-joined misc — and the schema mirrors the build's
+/// `skeb`/`sreb` restriction lists (`*` → NULL), glosses joined with
+/// `JMDictPin.glossJoiner`, `,`-joined POS, `", "`-joined misc — and the
+/// schema mirrors the build's
 /// WITHOUT ROWID tables (headwords keyed `(text, entry_id, kind)`, senses
 /// keyed `(entry_id, ord)`), so the tests exercise the same data shapes and
 /// row ordering the shipped database carries.
@@ -242,7 +243,7 @@ private extension JMDictFixtureDatabase {
             let glosses = (sense.gloss ?? [])
                 .filter { gloss in gloss.lang == "eng" }
                 .map { gloss in nfkc(gloss.text) ?? "" }
-                .joined(separator: "; ")
+                .joined(separator: String(JMDictPin.glossJoiner))
             try insertRow(db, "INSERT INTO senses VALUES (?,?,?,?,?,?,?)", [
                 .int(entSeq),
                 .int(ord),

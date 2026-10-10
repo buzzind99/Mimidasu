@@ -344,9 +344,11 @@ final class JMDictLookup: Sendable {
             if let restricted, !restricted.contains(Self.probeText(candidate.text)) {
                 continue
             }
+            let split: [String] = glossText.isEmpty
+                ? [] : glossText.components(separatedBy: String(JMDictPin.glossJoiner))
             senses.append(JMDictSense(
                 pos: pos,
-                glosses: glossText.isEmpty ? [] : glossText.components(separatedBy: "; "),
+                glosses: split,
                 misc: misc,
                 restrictedKanji: restrictedKanji,
                 restrictedKana: restrictedKana

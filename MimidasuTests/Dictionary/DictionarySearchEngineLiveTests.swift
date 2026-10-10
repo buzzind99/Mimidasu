@@ -213,6 +213,23 @@ struct DictionarySearchEngineLiveTests {
         #expect(outcome.matchedCount == 7)
     }
 
+    @Test("a gloss whose own text contains the old \"; \" joiner stays whole")
+    func embeddedJoinerGlossStaysWhole() throws {
+        let engine = try makeEngine()
+        defer { engine.close() }
+
+        // 1002890's sense reads "to scoop up (and remove; sand, earth, etc.)"
+        // — one gloss whose own text contains the separator revisions before
+        // 6 joined senses with. The column splits on the stored joiner, so a
+        // gloss carrying the old spelling must reach the preview intact
+        // rather than shredded into three bullets.
+        let outcome = try engine.search("scoop up", filters: DictionarySearchFilters())
+
+        let hit = try #require(outcome.hits.first { candidate in candidate.entSeq == 1_002_890 })
+        #expect(hit.matchedField == .gloss)
+        #expect(hit.glossPreview.first == "to scoop up (and remove; sand, earth, etc.)")
+    }
+
     @Test("the scope filter holds against the live names")
     func scopeFilterHolds() throws {
         let engine = try makeEngine()

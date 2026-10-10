@@ -428,20 +428,13 @@ final class DictionarySearchEngineInternalsTests {
 
     @Test("an ordinary column grades per gloss and locates the span")
     func ordinaryColumnLocated() {
-        let located = DictionarySearchEngine.glossMatch(pattern: "ice", column: "rice-sugar; toffee")
+        let located = DictionarySearchEngine.glossMatch(
+            pattern: "ice", column: "rice-sugar" + String(JMDictPin.glossJoiner) + "toffee"
+        )
 
         #expect(located.gloss == "rice-sugar")
         #expect(located.kind == .glossSubstring)
         #expect(located.range == 1 ..< 4)
-    }
-
-    @Test("splits a sense's stored gloss column back into glosses",
-          arguments: zip(
-              ["to eat; to live on", "a; a; ", ""],
-              [["to eat", "to live on"], ["a"], [String]()]
-          ))
-    func glossList(input: String, expected: [String]) {
-        #expect(DictionarySearchEngine.glossList(input) == expected)
     }
 
     @Test("grades a gloss match against its neighbours",

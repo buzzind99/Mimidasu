@@ -186,7 +186,7 @@ extension DictionarySearchEngine {
 
     /// The first sense's glosses per entry — the preview line's text for every
     /// hit that was not found by its own gloss. Ordered by `ord` so the lowest
-    /// `ord` per entry is simply the first row seen; the build's `"; "` join
+    /// `ord` per entry is simply the first row seen; the build's gloss joiner
     /// is split back into individual glosses here.
     static func firstSenseGlosses(
         for entSeqs: [Int], db: SQLiteDatabase
@@ -241,11 +241,11 @@ extension DictionarySearchEngine {
         return Array(glosses.prefix(3))
     }
 
-    /// The build joins a sense's glosses with `"; "`; split them back, trimmed,
-    /// deduped in order, empties dropped.
+    /// The build joins a sense's glosses with `JMDictPin.glossJoiner`; split
+    /// them back, trimmed, deduped in order, empties dropped.
     static func glossList(_ column: String) -> [String] {
         var out: [String] = []
-        for gloss in column.components(separatedBy: "; ") {
+        for gloss in column.components(separatedBy: String(JMDictPin.glossJoiner)) {
             let trimmed = gloss.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty, !out.contains(trimmed) else { continue }
             out.append(trimmed)

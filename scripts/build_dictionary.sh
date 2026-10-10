@@ -53,7 +53,7 @@ PIN_URL="https://github.com/Bluskyo/JMDict_Extended/releases/download/${PIN_TAG}
 # stay the upstream release identifier (it keys the download URL); this
 # revision is the artifact staleness key — bump it when the build mapping
 # changes under the same upstream pin so prepared installs re-stage.
-PIN_BUILD="5"
+PIN_BUILD="6"
 
 # --- Names pin: JMnedict proper nouns, ingested into the same DB ----------------
 # Source is scriptin/jmdict-simplified (the JMDict pin above stays on
@@ -140,6 +140,24 @@ check_pin_constant buildRevision "${PIN_BUILD}"
 check_pin_constant nameReleaseTag "${NAME_PIN_TAG}"
 check_pin_constant nameSourceAssetFileName "${NAME_PIN_ASSET}"
 check_pin_constant nameSourceSHA256 "${NAME_PIN_SHA256}"
+
+# The gloss joiner is a cross-language ingestion constant: jmdict_build.py
+# joins a sense's glosses with it and JMDictPin.glossJoiner is the character
+# every Swift consumer splits the column back on. A drift between the two
+# would fuse every multi-gloss sense into one unsplit string on the Swift
+# side, so both declarations are pinned literally here, and the live corpus
+# tests (which read the Python-built database while the fixture exercises the
+# Swift constant) are the runtime backstop.
+if ! grep -Fq 'GLOSS_JOINER = "\x1f"' "${REPO_ROOT}/scripts/jmdict_build.py"; then
+  echo "ERROR: jmdict_build.py no longer declares GLOSS_JOINER = \"\x1f\"; update this drift guard." >&2
+  exit 1
+fi
+echo "    gloss.GLOSS_JOINER: ok"
+if ! grep -Fq 'static let glossJoiner: Unicode.Scalar = "\u{001F}"' "${PIN_SWIFT}"; then
+  echo "ERROR: JMDictPin.glossJoiner no longer matches; update this drift guard." >&2
+  exit 1
+fi
+echo "    gloss.glossJoiner: ok"
 
 # The gloss FTS index's DDL lives in Swift (JMDictFTSIndex) and is re-stated
 # below to build the dev artifact. Two copies of a schema is exactly the kind
