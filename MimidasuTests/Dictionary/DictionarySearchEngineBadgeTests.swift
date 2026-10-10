@@ -116,12 +116,12 @@ final class DictionarySearchEngineBadgeTests {
     // MARK: Assembly seams
 
     @Test("the row's own level wins, and the entry's is the fallback")
-    func hitLevelPrefersTheMatchedRow() throws {
+    func hitLevelPrefersTheMatchedRow() {
         let metadata = DictionarySearchEngine.EntryMetadata(
             entSeq: 5, keb: "検", reb: "けん", common: true, jlpt: 3
         )
-        func level(_ rowLevel: Int?) throws -> Int? {
-            try DictionarySearchEngine.hit(
+        func level(_ rowLevel: Int?) -> Int? {
+            DictionarySearchEngine.hit(
                 for: .init(
                     row: .init(
                         entryID: 5, matchedField: .gloss, matchKind: .glossWordBoundary,
@@ -135,9 +135,9 @@ final class DictionarySearchEngineBadgeTests {
         }
         // A headword-stage row keeps the level of the exact writing it matched,
         // even where the entry's kanji writing disagrees.
-        #expect(try level(5) == 5)
+        #expect(level(5) == 5)
         // The gloss stage carries none, so it reads the entry's.
-        #expect(try level(nil) == 3)
+        #expect(level(nil) == 3)
     }
 
     /// The entries join must read the level off a writing through

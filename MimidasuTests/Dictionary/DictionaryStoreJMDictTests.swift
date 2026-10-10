@@ -166,7 +166,7 @@ extension DictionaryStoreTests {
     func jmDictReStagesStaleIndex() async throws {
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
         let existing = destination.appendingPathComponent(JMDictPin.preparedFileName)
-        try copyOf(smokeDatabase, to: existing)
+        _ = copyOf(smokeDatabase, to: existing)
         // A database whose `gloss_fts` exists under the current name but was
         // built from different constants is the dangerous case: the search
         // stage's `rowid >> 7` / `rowid & 127` decode would read the wrong

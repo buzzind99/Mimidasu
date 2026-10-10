@@ -54,7 +54,7 @@ struct FavoritesDatabaseTests {
     }
 
     @Test("a database that cannot be opened degrades every operation")
-    func unopenableLocationDegrades() async throws {
+    func unopenableLocationDegrades() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("mimidasu-favorites-blocked-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -64,32 +64,32 @@ struct FavoritesDatabaseTests {
 
         let database = FavoritesDatabase(location: blocked.appendingPathComponent("nested.sqlite"))
 
-        let error = await #expect(throws: FavoritesDatabase.Error.degraded) {
+        let error = #expect(throws: FavoritesDatabase.Error.degraded) {
             try database.all()
         }
         #expect(error == .degraded)
     }
 
     @Test("an explicitly degraded database fails every operation")
-    func explicitDegradeIsTerminal() async throws {
+    func explicitDegradeIsTerminal() throws {
         let fixture = makeDatabase()
         defer { fixture.cleanup() }
         try fixture.database.insert(Self.ko)
 
         fixture.database.degrade()
 
-        let read = await #expect(throws: FavoritesDatabase.Error.degraded) {
+        let read = #expect(throws: FavoritesDatabase.Error.degraded) {
             try fixture.database.all()
         }
         #expect(read == .degraded)
-        let write = await #expect(throws: FavoritesDatabase.Error.degraded) {
+        let write = #expect(throws: FavoritesDatabase.Error.degraded) {
             try fixture.database.insert(Self.ko)
         }
         #expect(write == .degraded)
     }
 
     @Test("an operation the file refuses degrades once, and the next one works")
-    func refusedOperationDegradesOnce() async throws {
+    func refusedOperationDegradesOnce() throws {
         let fixture = makeDatabase()
         defer { fixture.cleanup() }
         try fixture.database.insert(Self.ko)
@@ -99,7 +99,7 @@ struct FavoritesDatabaseTests {
         let blocker = try SQLiteDatabase.writable(path: fixture.location.path)
         try blocker.execute("BEGIN EXCLUSIVE")
 
-        let refused = await #expect(throws: FavoritesDatabase.Error.degraded) {
+        let refused = #expect(throws: FavoritesDatabase.Error.degraded) {
             try fixture.database.all()
         }
         #expect(refused == .degraded)

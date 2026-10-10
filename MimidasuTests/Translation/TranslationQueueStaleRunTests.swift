@@ -55,7 +55,7 @@ struct TranslationQueueStaleRunTests {
             status: { status in sink.receive(status: status) }
         )
 
-        let stale = Task { await queue.run(with: engine) }
+        _ = Task { await queue.run(with: engine) }
         queue.enqueue(makeSentence(index: 0, text: sentenceText))
         #expect(
             await pollUntil(timeout: resultTimeout) { engine.isEntered },
@@ -134,7 +134,7 @@ struct TranslationQueueStaleRunTests {
             status: { status in sink.receive(status: status) }
         )
 
-        let stale = Task { await queue.run(with: engine) }
+        _ = Task { await queue.run(with: engine) }
         queue.enqueue(makeSentence(index: 0, text: sentenceText))
         #expect(
             await pollUntil(timeout: resultTimeout) { engine.isEntered },
@@ -182,7 +182,7 @@ struct TranslationQueueStaleRunTests {
             status: { status in sink.receive(status: status) }
         )
 
-        let stale = Task { await queue.run(with: engine) }
+        _ = Task { await queue.run(with: engine) }
         queue.enqueue(makeSentence(index: 0, text: sentenceText))
         #expect(
             await pollUntil(timeout: resultTimeout) { engine.isEntered },

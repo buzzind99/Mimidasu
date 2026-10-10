@@ -44,11 +44,11 @@ struct ReadingAnnotatorCollapseSweepLiveTests {
     /// paths were caught there without this corpus adding anything — so this is
     /// breadth over *inputs*, not a second copy of the ladder's assertions.
     @Test("no shape in the corpus leaves a stranded opening")
-    func corpusLeavesNoStrandedOpening() throws {
+    func corpusLeavesNoStrandedOpening() {
         var stranded: [String] = []
 
         for text in Self.corpus() {
-            guard let raw = try #require(DictionaryEngine.shared.tokenize(text)) else { continue }
+            guard let raw = DictionaryEngine.shared.tokenize(text) else { continue }
             let fixed = ReadingAnnotator.repairedTokens(raw, of: text) { window in
                 DictionaryEngine.shared.tokenize(window)
             }
