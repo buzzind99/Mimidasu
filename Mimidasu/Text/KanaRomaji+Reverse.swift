@@ -288,7 +288,12 @@ private extension KanaRomaji {
             Row(consonant: "p", vowels: "aiueo", morae: "ぱぴぷぺぽ"),
             Row(consonant: "m", vowels: "aiueo", morae: "まみむめも"),
             Row(consonant: "r", vowels: "aiueo", morae: "らりるれろ"),
-            Row(consonant: "y", vowels: "auo", morae: "やゆよ")
+            Row(consonant: "y", vowels: "auo", morae: "やゆよ"),
+            // The w-row is は行 history: modern Japanese carries わ alone,
+            // and the forward table spells it "wa" — without this row the
+            // romaji the transcript prints (wakaru under 分かる) could never
+            // be read back.
+            Row(consonant: "w", vowels: "a", morae: "わ")
         ]
         for row in rows {
             for (vowel, kana) in zip(row.vowels, row.morae) {

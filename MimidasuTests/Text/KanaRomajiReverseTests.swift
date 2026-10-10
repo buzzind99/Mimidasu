@@ -43,6 +43,19 @@ struct KanaRomajiReverseTests {
         #expect(KanaRomaji.convert("yoroshiku")?.fullyConsumed == true)
     }
 
+    @Test("reads the w-row's wa back, completing the line the extras only borrow")
+    func waRow() throws {
+        // The forward table emits わ "wa" — the romaji printed under a
+        // transcript token (wakaru) must convert back or the search box goes
+        // deaf to it. wi/we/wo stay in the extras; わ is the row itself.
+        #expect(KanaRomaji.convert("wa")?.kana == "わ")
+        let wakaru = try #require(KanaRomaji.convert("wakaru"))
+        #expect(wakaru.kana == "わかる")
+        #expect(wakaru.fullyConsumed)
+        #expect(wakaru.trailingOnset == nil)
+        #expect(KanaRomaji.convert("kawa")?.kana == "かわ")
+    }
+
     @Test("folds the case at the boundary, so MAKERU reaches the same rows")
     func foldsCase() throws {
         let conversion = try #require(KanaRomaji.convert("MAKERU"))
