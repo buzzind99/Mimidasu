@@ -328,16 +328,22 @@ final class DictionarySearchEngineTests {
         #expect(DictionarySearchEngine.acceptsGlossQuery("abc123") == true)
         #expect(DictionarySearchEngine.acceptsGlossQuery("負ける") == false)
         #expect(DictionarySearchEngine.acceptsGlossQuery("ま") == false)
+
+        // Three is the trigram tokenizer's floor, not a taste call: FTS5
+        // answers a shorter phrase with no rows and no error, so anything below
+        // this would return a silent, total loss of recall rather than a
+        // degraded answer. Measured on the real prepared database, `Ma` matches
+        // 78,143 senses through the old `LIKE` scan and zero through the index.
+        #expect(DictionarySearchEngine.glossMinLatinLength == 3)
     }
 
     @Test("keeps the scan budgets on the side of the payload they feed")
     func scanBudgetsFeedThePayload() {
-        // A gloss cap under the payload ceiling can only hide — rows collapse
-        // to entries through `bestPerEntry`, so it has to clear `maxRows`
-        // before a screen can fill at all. A headroom above the scan ceiling
-        // truncates to the ceiling instead, which reads as a smaller headroom
-        // rather than as a broken one.
-        #expect(DictionarySearchEngine.glossFetchCap >= DictionarySearchEngine.maxRows)
+        // The gloss stage no longer has a fetch cap at all — it runs uncapped
+        // and `assemble` cuts the window after ranking, because every ranking
+        // key is available from the pre-join pre-fetch. What remains is the
+        // headword scan's headroom, which must not exceed the scan ceiling it
+        // is drawn from or it truncates to the ceiling instead.
         #expect(
             DictionarySearchEngine.prefixFetchHeadroom
                 <= DictionarySearchEngine.prefixScanCeiling

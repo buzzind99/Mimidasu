@@ -45,6 +45,20 @@ extension DictionarySearchEngine {
         let matchedGloss: String?
     }
 
+    /// One headword stage's rows, and whether one of that stage's own bounds
+    /// cut them.
+    ///
+    /// Reported apart from saturation because the two are not the same fact. A
+    /// stage the *window* skipped is undone by a wider window; a bound the
+    /// *scan* hit is not undone by anything — `prefixScanCeiling` and
+    /// `prefixFetchHeadroom` are constants, so a deeper search re-runs the same
+    /// scan and reaches the same bound. Only the first is worth a re-search;
+    /// both are worth a floor on the total.
+    struct HeadwordRows {
+        let rows: [CandidateRow]
+        let truncated: Bool
+    }
+
     // MARK: - The ladder
 
     /// Runs every applicable stage and returns the ranked outcome for the window.
@@ -77,15 +91,25 @@ extension DictionarySearchEngine {
         let glossEligible = acceptsGlossQuery(normalized)
         var rows: [CandidateRow] = []
         var saturated = false
+        var truncated = false
+        // The three headword stages share one accumulator because they share one
+        // question: not only which rows did this stage find, but did a bound of
+        // its own hide any. Collecting the answer at the call site would let the
+        // exact stage's `continue` silently drop it.
+        func collect(_ label: String, _ candidates: [HeadwordCandidate]) throws {
+            let scanned = try stage(label) { try headwordRows(candidates, db: db) }
+            rows += scanned.rows
+            truncated = truncated || scanned.truncated
+        }
         if !exact.isEmpty {
-            rows += try stage("exact") { try headwordRows(exact, db: db) }
+            try collect("exact", exact)
             saturated = capSaturated(rows, filters: filters, limit: limit, remaining: [
                 prefixes.isEmpty ? nil : DictionarySearchHit.MatchKind.prefix.rawValue,
                 glossEligible ? DictionarySearchHit.MatchKind.glossWordBoundary.rawValue : nil
             ].compactMap(\.self))
         }
         if !saturated, !prefixes.isEmpty {
-            rows += try stage("prefix") { try headwordRows(prefixes, db: db) }
+            try collect("prefix", prefixes)
             saturated = capSaturated(rows, filters: filters, limit: limit, remaining: glossEligible
                 ? [DictionarySearchHit.MatchKind.glossWordBoundary.rawValue] : [])
         }
@@ -94,14 +118,14 @@ extension DictionarySearchEngine {
         if !saturated, rows.isEmpty, KanaClassification.containsJapanese(normalized) {
             let lemmas = lemmaCandidates(for: normalized, tokenize: tokenize)
             if !lemmas.isEmpty {
-                rows += try stage("lemma") { try headwordRows(lemmas, db: db) }
+                try collect("lemma", lemmas)
             }
         }
         if !saturated, glossEligible {
             rows += try stage("gloss") { try glossRows(pattern: normalized, scope: filters.scope, db: db) }
         }
         return try stage("assemble") {
-            try assemble(rows, filters: filters, db: db, saturated: saturated)
+            try assemble(rows, filters: filters, db: db, saturated: saturated, truncated: truncated)
         }
     }
 
@@ -160,18 +184,39 @@ extension DictionarySearchEngine {
 
     // MARK: - Stages
 
-    /// Stage 4: a bounded `senses` scan with the scope predicate *in the SQL*.
+    /// Stage 4: the FTS5 trigram index over `senses.gloss`, with the scope
+    /// predicate *in the SQL*.
     ///
-    /// `senses` is WITHOUT ROWID keyed `(entry_id, ord)`, so a bare limit
-    /// returns the lowest-`ent_seq` matches first — and name entries live at
-    /// `ent_seq >= 10M`, above every JMDict row. Filtering afterwards would
-    /// hand Words scope everything and Names scope nothing.
+    /// The gloss text comes back through a **join**, not a per-row lookup. A
+    /// contentless FTS table exposes only `rowid`, so the `(entry_id, ord)` pair
+    /// has to be decoded and the gloss re-read from `senses` — and the shape of
+    /// that re-read is the whole cost of the stage. Done one primary-key seek at
+    /// a time it measured 434 ms for `ing` against the real prepared database,
+    /// each seek an independent B-tree descent. Expressed as a single join, FTS5
+    /// emits matching rowids ascending, `senses` is therefore read in primary
+    /// key order, and the same rows cost 33 ms. Same rows, same order, 13×
+    /// cheaper.
+    ///
+    /// Scope rides the rowid range rather than the `entry_id` predicate: with
+    /// `rowid = entry_id * 128 + ord` the JMnedict boundary is exactly
+    /// `DictionaryContent.nameSeqOffset * 128`, so one statement covers all
+    /// three scopes and the predicate still rides the scan. Filtering
+    /// afterwards instead would pay the read-back for every out-of-scope row —
+    /// a `.names` query streaming the entire word block — and `assemble` would
+    /// discard all of it. `assemble`'s `admits(entSeq:)` stays as the second,
+    /// independent check; neither alone is enough.
     static func glossRows(
         pattern: String, scope: DictionarySearchFilters.Scope, db: SQLiteDatabase
     ) throws -> [CandidateRow] {
-        let statement = try db.statement(glossSQL(for: scope))
-        statement.bind("%\(likeEscaped(pattern))%", at: 1)
-        statement.bind(glossFetchCap, at: 2)
+        assert(
+            pattern.unicodeScalars.count >= glossMinLatinLength,
+            "the trigram index silently answers nothing below three characters"
+        )
+        let bounds = glossRowIDBounds(for: scope)
+        let statement = try db.statement(glossSQL)
+        statement.bind(JMDictFTSIndex.phrase(pattern), at: 1)
+        statement.bind(bounds.lower, at: 2)
+        statement.bind(bounds.upper, at: 3)
         var rows: [CandidateRow] = []
         var scanned = 0
         while try statement.step() {
@@ -199,6 +244,23 @@ extension DictionarySearchEngine {
         return rows
     }
 
+    /// The inclusive `rowid` range a scope's sense rows occupy.
+    ///
+    /// The pack is `entry_id * JMDictFTSIndex.ordStride + ord`, so the
+    /// `ent_seq` boundary becomes a constant comparison on the rowid itself and
+    /// needs no second statement. `.all` is unbounded on both ends, which FTS5
+    /// reads as "no constraint" — not as a scan of everything.
+    static func glossRowIDBounds(
+        for scope: DictionarySearchFilters.Scope
+    ) -> (lower: Int, upper: Int) {
+        let boundary = DictionaryContent.nameSeqOffset * JMDictFTSIndex.ordStride
+        return switch scope {
+        case .all: (0, Int.max)
+        case .words: (0, boundary)
+        case .names: (boundary, Int.max)
+        }
+    }
+
     /// The headword scans — stages 1, 2, and 3's retries — one candidate at a
     /// time: a primary-key seek for an exact candidate, a B-tree range scan for
     /// a prefix one.
@@ -214,14 +276,23 @@ extension DictionarySearchEngine {
     /// highlight's field: a kana spelling never lights up the kanji writing,
     /// and a kana-only entry (no `keb` row at all) still highlights its
     /// reading.
+    ///
+    /// `truncated` is what keeps those two bounds honest. A 1-mora prefix scan
+    /// matches tens of thousands of headwords and the headroom keeps 8000 of
+    /// them, so a search that reports the survivors it kept as though they were
+    /// the answer is publishing a floor with nothing marking it as one — `ma`
+    /// read `10402` where the true count is 21532. Both bounds are reported,
+    /// and both are constants, so the flag is not something a wider window can
+    /// clear.
     static func headwordRows(
         _ candidates: [HeadwordCandidate], db: SQLiteDatabase
-    ) throws -> [CandidateRow] {
+    ) throws -> HeadwordRows {
         assert(
             prefixFetchHeadroom <= prefixScanCeiling,
             "headroom above the scan ceiling truncates to the ceiling instead"
         )
         var rows: [CandidateRow] = []
+        var truncated = false
         for candidate in candidates {
             try checkCancellation()
             let statement = try db.statement(
@@ -252,11 +323,26 @@ extension DictionarySearchEngine {
                     candidate: candidate
                 ))
             }
-            rows += candidate.probe == .exact
-                ? scanned
-                : Array(shortestFirst(scanned).prefix(prefixFetchHeadroom))
+            guard candidate.probe == .prefix else {
+                // An exact seek has no limit of its own, so it cannot truncate.
+                rows += scanned
+                continue
+            }
+            // The scan's own ceiling reports as "reached", never as "not
+            // reached": a range that happens to hold exactly `prefixScanCeiling`
+            // rows is indistinguishable from one the `LIMIT` cut, and the false
+            // positive runs the safe way — a `+` on a total that happened to be
+            // exact — while the false negative would publish a truncated total
+            // as the whole answer.
+            truncated = truncated || count >= prefixScanCeiling
+            guard scanned.count > prefixFetchHeadroom else {
+                rows += scanned
+                continue
+            }
+            truncated = true
+            rows += Array(shortestFirst(scanned).prefix(prefixFetchHeadroom))
         }
-        return rows
+        return HeadwordRows(rows: rows, truncated: truncated)
     }
 
     private static func headwordRow(
@@ -298,33 +384,181 @@ extension DictionarySearchEngine {
     }
 
     /// The best match inside a stored sense column: the tightest tier across
-    /// its glosses, and the gloss that carried it — which is what the row will
-    /// render, so the highlight always points into a string the user can see.
+    /// every occurrence in every gloss, and the occurrence that carried it —
+    /// what the row will render, so the highlight points at what it ranks.
     ///
-    /// `range(of:)` is the same case-insensitive fold the `LIKE` matched under,
-    /// so a gloss it cannot locate is not a gloss the query reached. The
-    /// fallback covers the pathological case where the fold disagrees with the
-    /// collation: the row still matched, so it keeps its place without a
-    /// highlight rather than dropping out of the results.
+    /// The fold here is the same case fold the gloss index's tokenizer
+    /// applies, so a gloss it cannot locate is not a gloss the query
+    /// reached. That agreement is no longer incidental — the index folds case
+    /// across the whole Unicode range, so a row can match the index on a case
+    /// difference the fold must then reproduce — and it is asserted against
+    /// the real prepared database rather than assumed. The fallback covers the
+    /// pathological case where the two folds still disagree: the row keeps its
+    /// place without a highlight rather than dropping out of the results.
     static func glossMatch(pattern: String, column: String) -> GlossMatch {
-        var best: GlossMatch?
-        for gloss in glossList(column) {
-            guard let range = MatchHighlight.range(of: pattern, in: gloss) else { continue }
-            let kind = glossMatchKind(gloss: gloss, range: range)
-            let match = GlossMatch(gloss: gloss, range: range, kind: kind)
-            if best == nil || kind.rawValue < best?.kind.rawValue ?? .max {
-                best = match
+        let byteCount = column.utf8.count
+        // The fast path offsets into the *folded* text and then slices the
+        // *original*, which only lines up when one scalar is one byte: then the
+        // fold cannot change the count either, so a scalar offset is a byte
+        // offset and a byte offset is a character offset. `K` (U+212A) is the
+        // trap — it is not ASCII but folds to one, so testing the folded text
+        // for ASCII would wrongly admit it; the column's own byte width is what
+        // settles it. Everything else — an accented character, `İ` — takes the
+        // fragment-wise path, which derives its text from the column itself and
+        // so cannot get this wrong. 36,413 of 656,706 senses (5.5%); among the
+        // rows a dense query reaches, `ing`, it is 389 of 52,172 (0.7%).
+        guard byteCount == column.unicodeScalars.count else {
+            return glossMatchByFragment(pattern: pattern, column: column)
+        }
+        let scalars = Array(column.lowercased().unicodeScalars)
+        let needle = Array(pattern.lowercased().unicodeScalars)
+        guard !scalars.isEmpty, !needle.isEmpty, scalars.count >= needle.count else {
+            return glossMatchFallback(pattern: pattern, column: column)
+        }
+
+        var bestKind: DictionarySearchHit.MatchKind?
+        var bestRange: Range<Int>?
+        var bestBounds: Range<Int>?
+        var fragmentStart = 0
+        while fragmentStart < scalars.count, bestKind != .glossWordBoundary {
+            let fragmentEnd = separatorStart(in: scalars, from: fragmentStart) ?? scalars.count
+            // The build writes `"; "` between glosses and nothing else, so a
+            // fragment's bounds are a scan for that pair — and trimming its
+            // edges is a pair of walks, where `glossList` allocated a substring
+            // for every one of the ~85,000 glosses a one-mora query reaches.
+            var lower = fragmentStart
+            var upper = fragmentEnd
+            while lower < upper, CharacterSet.whitespaces.contains(scalars[lower]) {
+                lower += 1
+            }
+            while upper > lower, CharacterSet.whitespaces.contains(scalars[upper - 1]) {
+                upper -= 1
+            }
+            fragmentStart = min(fragmentEnd + 2, scalars.count)
+
+            // Every occurrence inside the fragment is graded, not just the
+            // leftmost: in `iced (e.g. iced tea` the first `iced` opens the
+            // gloss while the second stands alone — the occurrence that earns
+            // the tier lends its span, so the highlight points at what ranks.
+            var position = lower
+            while let start = nextOccurrence(
+                of: needle, in: scalars, within: lower ..< upper, from: position
+            ) {
+                let lowerBound = start - lower
+                let upperBound = lowerBound + needle.count
+                let kind = glossMatchKind(
+                    scalars: scalars,
+                    range: lowerBound ..< upperBound,
+                    length: upper - lower,
+                    offset: lower
+                )
+                // Only the winner's text is materialised. Every row the index
+                // matches used to build a `String` here, to serve the thousand rows
+                // `assemble` actually shows.
+                if kind.rawValue < bestKind?.rawValue ?? .max {
+                    bestKind = kind
+                    bestRange = lowerBound ..< upperBound
+                    bestBounds = lower ..< upper
+                }
+                // The best tier there is, and ties keep the first: nothing
+                // later in the column can change the answer.
+                if kind == .glossWordBoundary {
+                    break
+                }
+                position = start + 1
             }
         }
-        if let best {
-            return best
+        guard let bestKind, let bestRange, let bestBounds else {
+            return glossMatchFallback(pattern: pattern, column: column)
         }
+        return GlossMatch(
+            // One scalar is one byte and one character here, so the scalar
+            // bounds the scan produced are character bounds — a native
+            // substring, not a re-encode. The two ends are the whole column
+            // for most rows, and are taken without a walk.
+            gloss: String(column[
+                (bestBounds.lowerBound == 0 ? column.startIndex
+                    : column.index(column.startIndex, offsetBy: bestBounds.lowerBound))
+                    ..< (bestBounds.upperBound == scalars.count ? column.endIndex
+                        : column.index(column.startIndex, offsetBy: bestBounds.upperBound))
+            ]),
+            range: bestRange,
+            kind: bestKind
+        )
+    }
+
+    /// The original fragment-wise grading, occurrence-wise like the fast path,
+    /// kept for the columns whose fold changes their scalar offsets.
+    private static func glossMatchByFragment(pattern: String, column: String) -> GlossMatch {
+        let needle = Array(pattern.lowercased().unicodeScalars)
+        guard !needle.isEmpty else {
+            return glossMatchFallback(pattern: pattern, column: column)
+        }
+        var best: GlossMatch?
+        fragment: for gloss in glossList(column) {
+            let scalars = Array(gloss.lowercased().unicodeScalars)
+            var position = 0
+            while let start = nextOccurrence(
+                of: needle, in: scalars, within: 0 ..< scalars.count, from: position
+            ) {
+                let range = start ..< (start + needle.count)
+                let kind = glossMatchKind(
+                    scalars: scalars, range: range, length: scalars.count, offset: 0
+                )
+                let match = GlossMatch(gloss: gloss, range: range, kind: kind)
+                if best == nil || kind.rawValue < best?.kind.rawValue ?? .max {
+                    best = match
+                }
+                if kind == .glossWordBoundary {
+                    break fragment
+                }
+                position = start + 1
+            }
+        }
+        return best ?? glossMatchFallback(pattern: pattern, column: column)
+    }
+
+    /// A column whose fold reproduced none of its glosses. The hit keeps its
+    /// place, spanned by the pattern's own length.
+    private static func glossMatchFallback(pattern: String, column: String) -> GlossMatch {
         let scalars = column.unicodeScalars.count
         return GlossMatch(
             gloss: column,
             range: scalars == 0 ? nil : 0 ..< min(pattern.unicodeScalars.count, scalars),
             kind: .glossSubstring
         )
+    }
+
+    /// The first `"; "` at or after `start`, or nil when the column ends first.
+    private static func separatorStart(
+        in scalars: [Unicode.Scalar], from start: Int
+    ) -> Int? {
+        var index = start
+        while index + 1 < scalars.count {
+            if scalars[index] == ";", scalars[index + 1] == " " {
+                return index
+            }
+            index += 1
+        }
+        return nil
+    }
+
+    /// The first position at or after `start` where `needle` sits within
+    /// `bounds`, or nil.
+    private static func nextOccurrence(
+        of needle: [Unicode.Scalar],
+        in scalars: [Unicode.Scalar],
+        within bounds: Range<Int>,
+        from start: Int
+    ) -> Int? {
+        var index = start
+        while index + needle.count <= bounds.upperBound {
+            if scalars[index ..< (index + needle.count)].elementsEqual(needle) {
+                return index
+            }
+            index += 1
+        }
+        return nil
     }
 
     /// The gloss sub-tiers: a whole-word match first, then one starting the
@@ -334,15 +568,28 @@ extension DictionarySearchEngine {
         gloss: String, range: Range<Int>
     ) -> DictionarySearchHit.MatchKind {
         let scalars = Array(gloss.lowercased().unicodeScalars)
+        return glossMatchKind(scalars: scalars, range: range, length: scalars.count, offset: 0)
+    }
+
+    /// The same grading against an already-folded scalar array, for a caller
+    /// grading several fragments of one column out of a single array.
+    ///
+    /// `range` is relative to the matched gloss, but `scalars` is the whole
+    /// column, so `offset` is where that gloss starts — the two are what keep
+    /// the neighbour lookups pointing at the characters around the match
+    /// instead of at the start of the column.
+    private static func glossMatchKind(
+        scalars: [Unicode.Scalar], range: Range<Int>, length: Int, offset: Int
+    ) -> DictionarySearchHit.MatchKind {
         guard range.lowerBound > 0 else {
-            return range.upperBound == scalars.count
+            return range.upperBound == length
                 ? .glossWordBoundary
                 : .glossPrefix
         }
-        let opensCleanly = !isWordScalar(scalars[range.lowerBound - 1])
+        let opensCleanly = !isWordScalar(scalars[offset + range.lowerBound - 1])
         // A match at the very end of the gloss closes cleanly too.
-        let closesCleanly = range.upperBound == scalars.count
-            || !isWordScalar(scalars[range.upperBound])
+        let closesCleanly = range.upperBound == length
+            || !isWordScalar(scalars[offset + range.upperBound])
         guard opensCleanly, closesCleanly else { return .glossSubstring }
         return .glossWordBoundary
     }

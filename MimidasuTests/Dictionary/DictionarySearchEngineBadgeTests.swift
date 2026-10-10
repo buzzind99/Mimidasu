@@ -19,8 +19,28 @@ final class DictionarySearchEngineBadgeTests {
     private let fixture: DictionarySearchFixture
 
     init() throws {
-        fixture = try DictionarySearchFixture()
+        // The kana-only entry has to come in per-suite: no shared synthetic
+        // carries a level, and adding one would move every count another
+        // suite asserts on.
+        fixture = try DictionarySearchFixture(extraWords: [Self.kanaOnlyLevelWord])
     }
+
+    /// A kana-only entry whose level lives only on its reading's headword row:
+    /// `entries.keb` is NULL here, so a join keyed on the kanji writing alone
+    /// finds no `headwords` row and the badge disappears exactly where a gloss
+    /// hit is the only thing describing the entry.
+    private static let kanaOnlyLevelWord = JMDictFixtureDatabase.FixtureWord(
+        id: "9990180",
+        kanji: nil,
+        kana: [JMDictFixtureDatabase.FixtureKana(
+            text: "りふるじぇんす", common: false, appliesToKanji: nil, jlptLevel: 5,
+            pitchAccent: nil
+        )],
+        sense: [JMDictFixtureDatabase.FixtureSense(
+            partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
+            gloss: [JMDictFixtureDatabase.FixtureGloss(lang: "eng", text: "refulgence")]
+        )]
+    )
 
     private func search(_ query: String) throws -> DictionarySearchOutcome {
         try fixture.outcome(query)
@@ -50,6 +70,19 @@ final class DictionarySearchEngineBadgeTests {
 
         #expect(hit.matchKind == .exact)
         #expect(hit.jlpt == 5)
+    }
+
+    /// A kana-only entry reaches the gloss stage through its reading alone —
+    /// with no kanji writing the metadata join must seek the reading, or the
+    /// level has nowhere to come from and the badge silently disappears.
+    @Test("a kana-only entry's gloss hit still reports the entry's JLPT level")
+    func kanaOnlyGlossHitCarriesJLPT() throws {
+        let hit = try #require(search("refulgence").hits.first)
+
+        #expect(hit.matchedField == .gloss)
+        #expect(hit.keb == nil)
+        #expect(hit.jlpt == 5)
+        #expect(DictionaryContent.jlptBadge(hit.jlpt) == "≈N5")
     }
 
     // MARK: Name types
@@ -107,15 +140,17 @@ final class DictionarySearchEngineBadgeTests {
         #expect(try level(nil) == 3)
     }
 
-    /// The entries join must read the level off the kanji writing through
-    /// `headwords.text` — the leading column of that table's primary key.
-    /// Anything else (a scan on `entry_id`, a join the planner cannot seek)
-    /// would turn every keystroke's metadata fetch into a table walk.
+    /// The entries join must read the level off a writing through
+    /// `headwords.text` — the leading column of that table's primary key —
+    /// preferring the kanji writing and falling back to the reading for the
+    /// kana-only entries that have none. Anything else (a scan on `entry_id`,
+    /// a join the planner cannot seek) would turn every keystroke's metadata
+    /// fetch into a table walk.
     @Test("the entries join seeks headwords by its leading primary-key column")
     func entriesJoinIsASeek() {
         let sql = DictionarySearchEngine.entriesSQL(count: 2)
 
-        #expect(sql.contains("LEFT JOIN headwords h ON h.text = e.keb"))
+        #expect(sql.contains("LEFT JOIN headwords h ON h.text = COALESCE(e.keb, e.reb)"))
         #expect(sql.contains("h.entry_id = e.ent_seq"))
     }
 

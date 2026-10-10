@@ -1,9 +1,14 @@
 import Foundation
 
-/// Merging, the deferred `entries` join, ranking, and hit construction. The
-/// order matters: ranking key #2 (`common`) lives in `entries`, so the join
-/// cannot be folded into the scans and `commonOnly` cannot apply before it —
-/// which is exactly why the stage queries stay primary-key-only.
+/// Merging, the deferred `entries` join, ranking, and hit construction.
+///
+/// The order is load-bearing and it is why the join is split in two. Ranking
+/// key #2 is `common`, which lives in `entries` — so a row cannot be ranked
+/// until its entry has been read, and yet the expensive part of that read (the
+/// `headwords` LEFT JOIN for the JLPT level) buys nothing the ranking uses.
+/// So `commonFlags` fetches the one ranking column for every survivor as a
+/// bare primary-key lookup, the window is cut from the ranking, and only the
+/// rows on screen pay for the full join.
 extension DictionarySearchEngine {
     /// The `entries` metadata a hit needs, fetched in bulk once the stages have
     /// said which entries they actually hit.
@@ -19,39 +24,60 @@ extension DictionarySearchEngine {
         let jlpt: Int?
     }
 
-    /// A candidate row joined to its entry, ready to rank.
+    /// A candidate row joined to its entry, ready to decorate.
     struct RankedRow {
         let row: CandidateRow
         let metadata: EntryMetadata
     }
 
-    /// Merge, join, filter, rank, bound, and decorate.
+    /// A candidate row paired with the single `entries` column the ranking
+    /// reads. Everything `rank` needs, and nothing else — so it can be built
+    /// for all survivors before the window is cut.
+    struct ScoredRow {
+        let entryID: Int
+        let row: CandidateRow
+        let common: Bool
+    }
+
+    /// Merge, filter, rank, bound, join, and decorate.
     ///
-    /// The sequence is load-bearing: scope filters pre-join (it is a predicate
-    /// on `ent_seq` alone), and `commonOnly` filters post-join (`common` does
-    /// not exist before it).
+    /// The sequence is load-bearing: scope filters pre-join (a predicate on
+    /// `ent_seq` alone), `commonOnly` filters on the pre-fetched flag, and the
+    /// window is cut *before* the `headwords` join — every input to the ranking
+    /// decision is available pre-join, so cutting there is lossless and skips
+    /// the join for every row that will not be shown.
     ///
     /// Note what is *not* here: the caller's window. Every row the stages
-    /// found is built, up to `maxRows` — the window is the UI's slice
-    /// (`DictionarySearchState.visibleHits`), and building a row costs a
-    /// couple of dictionary lookups against rows this search already holds.
-    /// What costs a search is the scans, which happen upstream of this file.
+    /// found is ranked and counted, up to `maxRows` built — the window is the
+    /// UI's slice (`DictionarySearchState.visibleHits`), and building a row
+    /// costs a couple of dictionary lookups against rows this search already
+    /// holds. What costs a search is the scans, which happen upstream of this
+    /// file.
     static func assemble(
         _ rows: [CandidateRow],
         filters: DictionarySearchFilters,
         db: SQLiteDatabase,
-        saturated: Bool
+        saturated: Bool,
+        truncated: Bool
     ) throws -> DictionarySearchOutcome {
         let survivors = bestPerEntry(rows)
             .filter { entryID, _ in filters.admits(entSeq: entryID) }
-        let metadata = try entryMetadata(for: survivors.keys.sorted(), db: db)
-        let joined = survivors.compactMap { entryID, row in
-            metadata[entryID].map { meta in RankedRow(row: row, metadata: meta) }
+        let flags = try commonFlags(for: survivors.keys.sorted(), db: db)
+        let scored = survivors.compactMap { entryID, row in
+            flags[entryID].map { common in
+                ScoredRow(entryID: entryID, row: row, common: common)
+            }
         }
         let kept = filters.commonOnly
-            ? rank(joined.filter { ranked in ranked.metadata.common })
-            : rank(joined)
-        let built = Array(kept.prefix(Self.maxRows))
+            ? rank(scored.filter { scored in scored.common })
+            : rank(scored)
+        // Every ranking key is decided above, so the window is cut here and the
+        // `headwords` join runs for these rows alone.
+        let window = Array(kept.prefix(Self.maxRows))
+        let metadata = try entryMetadata(for: window.map(\.entryID), db: db)
+        let built = window.compactMap { scored in
+            metadata[scored.entryID].map { meta in RankedRow(row: scored.row, metadata: meta) }
+        }
         let previews = try firstSenseGlosses(for: built.map(\.metadata.entSeq), db: db)
         let nameTypes = try namePosTokens(for: built, db: db)
         let hits = built.map { ranked in
@@ -62,7 +88,8 @@ extension DictionarySearchEngine {
             )
         }
         return DictionarySearchOutcome(
-            hits: hits, matchedCount: kept.count, saturated: saturated
+            hits: hits, matchedCount: kept.count,
+            saturated: saturated, truncated: truncated
         )
     }
 
@@ -88,34 +115,59 @@ extension DictionarySearchEngine {
     ///
     /// The last key is not cosmetic — without a total order the same query
     /// could reshuffle its rows between two keystrokes, and a list that moves
-    /// under the cursor is worse than one that is merely alphabetical.
+    /// under the cursor is worse than one that is merely alphabetical. It is
+    /// also what makes the uncapped path safe to truncate: `bestPerEntry` has
+    /// already collapsed to one row per entry, so the key is unique and the
+    /// window is a deterministic prefix.
     /// Commonness descending sinks names in All scope on its own, since
     /// JMnedict entries are never common.
-    static func rank(_ rows: [RankedRow]) -> [RankedRow] {
+    static func rank(_ rows: [ScoredRow]) -> [ScoredRow] {
         rows.sorted { lhs, rhs in
             if lhs.row.matchKind != rhs.row.matchKind {
                 return lhs.row.matchKind.rawValue < rhs.row.matchKind.rawValue
             }
-            if lhs.metadata.common != rhs.metadata.common {
-                return lhs.metadata.common
+            if lhs.common != rhs.common {
+                return lhs.common
             }
             if lhs.row.matchedLength != rhs.row.matchedLength {
                 return lhs.row.matchedLength < rhs.row.matchedLength
             }
-            return lhs.metadata.entSeq < rhs.metadata.entSeq
+            return lhs.entryID < rhs.entryID
         }
     }
 
     // MARK: - Deferred joins
 
+    /// `entries.common` alone, in `IN`-clause chunks — the pre-join pre-fetch
+    /// that lets the window be cut before the expensive join.
+    ///
+    /// No `headwords` LEFT JOIN and no text columns: this is a bare
+    /// primary-key lookup per survivor, measured at ~0.55 µs/row against the
+    /// real prepared database, where the full `entryMetadata` join over the same
+    /// survivors costs several times more and returns metadata for rows the
+    /// window will never show.
+    static func commonFlags(
+        for entSeqs: [Int], db: SQLiteDatabase
+    ) throws -> [Int: Bool] {
+        var out: [Int: Bool] = [:]
+        for chunk in chunks(entSeqs, size: entryChunkSize) {
+            let statement = try db.statement(commonFlagsSQL(count: chunk.count))
+            bind(chunk, to: statement)
+            while try statement.step() {
+                out[statement.requiredInt(0)] = statement.bool(1)
+            }
+        }
+        return out
+    }
+
     /// `entries` metadata in `IN`-clause chunks. A search can reach a few
     /// thousand survivors; chunking keeps every statement inside SQLite's bound
     /// parameter limit, and each chunk is a run of primary-key seeks.
     static func entryMetadata(
-        for entSeqs: [Int], db: SQLiteDatabase
+        for entSeqs: some Sequence<Int>, db: SQLiteDatabase
     ) throws -> [Int: EntryMetadata] {
         var out: [Int: EntryMetadata] = [:]
-        for chunk in chunks(entSeqs, size: entryChunkSize) {
+        for chunk in chunks(Array(entSeqs), size: entryChunkSize) {
             let statement = try db.statement(entriesSQL(count: chunk.count))
             bind(chunk, to: statement)
             while try statement.step() {
@@ -287,28 +339,50 @@ extension DictionarySearchEngine {
     LIMIT ?3
     """
 
-    /// The gloss stage, one statement per scope so the predicate rides the
-    /// scan. `senses` cannot use an index for `LIKE`, so this is the only
-    /// bounded thing about it.
-    static func glossSQL(for scope: DictionarySearchFilters.Scope) -> String {
-        let head = "SELECT s.entry_id, s.gloss FROM senses s WHERE s.gloss LIKE ?1 ESCAPE '\\'"
-        let boundary = DictionaryContent.nameSeqOffset
-        return switch scope {
-        case .all: head + " LIMIT ?2"
-        case .words: head + " AND s.entry_id < \(boundary) LIMIT ?2"
-        case .names: head + " AND s.entry_id >= \(boundary) LIMIT ?2"
-        }
+    /// The gloss stage: the trigram index joined back to `senses` for the matched
+    /// text, scoped by `rowid`.
+    ///
+    /// `MATCH`, not `LIKE`. SQLite's FTS5 documentation is explicit that its
+    /// index cannot optimize a `LIKE` carrying an `ESCAPE` clause, and the old
+    /// query had one — which is why the stage was a 656,706-row full scan.
+    ///
+    /// The join is not decoration: `content=''` means the index stores no gloss
+    /// text, so the matched column has to come from `senses`, and `rowid` decodes
+    /// back to the `(entry_id, ord)` that addresses it. Because FTS5 returns
+    /// matching rowids in ascending order, this join reads `senses` in primary
+    /// key order.
+    ///
+    /// One statement for all three scopes — the scope rides `?2`/`?3` (see
+    /// `glossRowIDBounds`) — so the predicate rides the scan and the prepared
+    /// statement is cached once.
+    static let glossSQL = """
+    SELECT s.entry_id, s.gloss FROM \(JMDictFTSIndex.tableName) f
+    JOIN senses s ON s.entry_id = f.rowid >> \(JMDictFTSIndex.ordShift)
+                   AND s.ord = f.rowid & \(JMDictFTSIndex.maxEncodableOrd)
+    WHERE \(JMDictFTSIndex.tableName) MATCH ?1 AND f.rowid >= ?2 AND f.rowid < ?3
+    """
+
+    /// The pre-join pre-fetch: the one `entries` column the ranking reads. No
+    /// join, no text — a run of primary-key seeks over the `entries` B-tree, so
+    /// it stays cheap enough to run for every survivor.
+    static func commonFlagsSQL(count: Int) -> String {
+        "SELECT ent_seq, common FROM entries WHERE ent_seq IN ("
+            + placeholders(count) + ")"
     }
 
-    /// The `entries` metadata join, LEFT JOINing the entry's kanji writing for its
-    /// JLPT level. `headwords` is WITHOUT ROWID keyed `(text, entry_id, kind)`
-    /// and `text` is that key's leading column, so `h.text = e.keb` is a primary-key
+    /// The `entries` metadata join, LEFT JOINing one of the entry's writings for
+    /// its JLPT level. `headwords` is WITHOUT ROWID keyed `(text, entry_id, kind)`
+    /// and `text` is that key's leading column, so the join is a primary-key
     /// prefix seek per row — the same shape as every other probe in the ladder.
     /// The build backfills a word's level onto its writings that carry none, so
-    /// the kanji row is where the entry's level lives.
+    /// the kanji row is where the entry's level lives — and an entry with no
+    /// kanji writing at all (keb NULL) reads it off its reading instead, which
+    /// is what `COALESCE` buys: without the fallback the level of every
+    /// kana-only entry vanished on gloss-tier hits. The join stays entry-scoped
+    /// and `(text, entry_id)` is unique, so the fallback cannot fan a row out.
     static func entriesSQL(count: Int) -> String {
         "SELECT e.ent_seq, e.keb, e.reb, e.common, h.jlpt FROM entries e "
-            + "LEFT JOIN headwords h ON h.text = e.keb AND h.entry_id = e.ent_seq "
+            + "LEFT JOIN headwords h ON h.text = COALESCE(e.keb, e.reb) AND h.entry_id = e.ent_seq "
             + "WHERE e.ent_seq IN (" + placeholders(count) + ")"
     }
 
@@ -324,15 +398,5 @@ extension DictionarySearchEngine {
 
     static func placeholders(_ count: Int) -> String {
         Array(repeating: "?", count: count).joined(separator: ",")
-    }
-
-    /// `LIKE` wildcards in a user query are literal text, not patterns — same
-    /// escaping (and the same `ESCAPE '\'`) `FavoritesDatabase` uses for its
-    /// own search.
-    static func likeEscaped(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "%", with: "\\%")
-            .replacingOccurrences(of: "_", with: "\\_")
     }
 }

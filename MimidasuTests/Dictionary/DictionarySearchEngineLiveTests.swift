@@ -78,6 +78,30 @@ struct DictionarySearchEngineLiveTests {
         #expect(outcome.hits.allSatisfy { hit in hit.matchedField == .gloss })
     }
 
+    @Test("the reported query's truncated total is marked as a floor")
+    func headroomBoundIsPublishedLive() throws {
+        let engine = try makeEngine()
+        defer { engine.close() }
+        let filters = DictionarySearchFilters()
+
+        // The reported case: `ま` matches ~19,600 headword rows, the headroom
+        // keeps 8000, and the header read `10402` with no `+` — a total that was
+        // short of the answer by 11,000 rows and looked like none of it was.
+        let outcome = try engine.search("ま", filters: filters)
+
+        #expect(outcome.truncated)
+        #expect(outcome.isFloor)
+        // Two Latin characters cannot reach the gloss stage, so no stage was
+        // ever skipped and this floor is the bound and only the bound.
+        #expect(outcome.saturated == false)
+        // The window is not what cleared it, because nothing can.
+        let deep = try engine.search("ま", filters: filters, limit: DictionarySearchEngine.maxRows)
+
+        #expect(deep.truncated)
+        #expect(deep.saturated == false)
+        #expect(deep.matchedCount == outcome.matchedCount)
+    }
+
     @Test("a window past the ceiling returns no more than the ceiling")
     func windowClampsToCeiling() throws {
         let engine = try makeEngine()
@@ -282,6 +306,30 @@ struct DictionarySearchEngineLiveTests {
 
         #expect(hit.matchKind == .exact)
         #expect(hit.reb == "よろしく")
+    }
+
+    @Test("the densest three-character query still answers through the whole ladder")
+    func densestGlossQueryAnswers() throws {
+        let engine = try makeEngine()
+        defer { engine.close() }
+
+        // The end-to-end shape of the "no hit" regression. `ion` is the densest
+        // three-character crossing of the word/name offset in the corpus — 47,909
+        // sense rows over 46,394 entries — and the gloss stage is the only
+        // source of all but a couple of dozen of them. A database adopted
+        // without `gloss_fts` throws out of `glossRows` rather than returning
+        // empty, and the search state turns that into "no results"; this asserts
+        // the ladder itself still fills.
+        //
+        // It is also `i` + `on` as romaji (いおん / イオン), so the headword
+        // stages contribute too — the gloss tier has to dominate the window
+        // rather than fill it outright.
+        let outcome = try engine.search("ion", filters: DictionarySearchFilters())
+
+        #expect(outcome.hits.isEmpty == false)
+        #expect(outcome.hits.count == min(outcome.matchedCount, DictionarySearchEngine.maxRows))
+        #expect(outcome.matchedCount > 40000)
+        #expect(outcome.hits.filter { hit in hit.matchedField == .gloss }.count > 900)
     }
 
     @Test("a lowercase initialism reaches its uppercase headword")

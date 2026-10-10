@@ -266,39 +266,65 @@ final class DictionarySearchEngineInternalsTests {
             matchedLength: 2, highlightRange: 0 ..< 2, matchedGloss: nil
         )
         let rows = [
-            DictionarySearchEngine.RankedRow(
-                row: weak,
-                metadata: .init(entSeq: 7, keb: "愛", reb: "あい", common: false, jlpt: nil)
-            ),
-            DictionarySearchEngine.RankedRow(
-                row: strong,
-                metadata: .init(entSeq: 8, keb: "藍", reb: "あい", common: true, jlpt: nil)
-            )
+            DictionarySearchEngine.ScoredRow(entryID: 7, row: weak, common: false),
+            DictionarySearchEngine.ScoredRow(entryID: 8, row: strong, common: true)
         ]
 
         let ranked = DictionarySearchEngine.rank(rows)
 
-        #expect(ranked.map(\.metadata.entSeq) == [8, 7])
+        #expect(ranked.map(\.entryID) == [8, 7])
     }
 
     @Test("puts the scope predicate in the gloss SQL and nowhere else")
     func glossSQLShape() {
-        let all = DictionarySearchEngine.glossSQL(for: .all)
+        let sql = DictionarySearchEngine.glossSQL
 
-        #expect(all.contains("LIKE ?1 ESCAPE '\\'"))
-        #expect(all.contains("LIMIT ?2"))
-        #expect(!all.contains("entry_id <"))
-        #expect(!all.contains("entry_id >="))
-        #expect(DictionarySearchEngine.glossSQL(for: .words)
-            .contains("AND s.entry_id < \(DictionaryContent.nameSeqOffset)"))
-        #expect(DictionarySearchEngine.glossSQL(for: .names)
-            .contains("AND s.entry_id >= \(DictionaryContent.nameSeqOffset)"))
+        #expect(sql.contains("MATCH ?1"))
+        #expect(sql.contains("f.rowid >= ?2 AND f.rowid < ?3"))
+        // The matched text comes from `senses` — a contentless FTS table stores
+        // no gloss — decoded back to `(entry_id, ord)` by the pack.
+        #expect(sql.contains("s.entry_id = f.rowid >> \(JMDictFTSIndex.ordShift)"))
+        #expect(sql.contains("s.ord = f.rowid & \(JMDictFTSIndex.maxEncodableOrd)"))
+        // The `ESCAPE` clause is what made the index unusable in the first
+        // place, and the fetch cap is gone: every survivor is ranked now.
+        #expect(!sql.contains("LIKE"))
+        #expect(!sql.contains("LIMIT"))
     }
 
-    @Test("escapes LIKE metacharacters, backslash first",
-          arguments: zip(["100%", "a_b", "a\\b", "%_\\"], ["100\\%", "a\\_b", "a\\\\b", "\\%\\_\\\\"]))
-    func likeEscaping(input: String, expected: String) {
-        #expect(DictionarySearchEngine.likeEscaped(input) == expected)
+    @Test("scopes the gloss stage by rowid range, one statement for all three")
+    func glossRowIDRange() {
+        // The boundary is the same predicate `admits(entSeq:)` applies, packed.
+        // Words admits `ent_seq < 10_000_000`, which is exactly
+        // `rowid < 10_000_000 * 128`.
+        let boundary = DictionaryContent.nameSeqOffset * JMDictFTSIndex.ordStride
+        #expect(boundary == 1_280_000_000)
+
+        let words = DictionarySearchEngine.glossRowIDBounds(for: .words)
+        #expect(words.lower == 0)
+        #expect(words.upper == boundary)
+
+        let names = DictionarySearchEngine.glossRowIDBounds(for: .names)
+        #expect(names.lower == boundary)
+
+        // `.all` is unbounded, and FTS5 reads an absent bound as "no
+        // constraint" — not as a scan of everything.
+        let all = DictionarySearchEngine.glossRowIDBounds(for: .all)
+        #expect(all.lower == 0)
+        #expect(all.upper == Int.max)
+    }
+
+    @Test("quotes a user's gloss query as one literal phrase",
+          arguments: [
+              ("bridge", "\"bridge\""),
+              // Every LIKE metacharacter is already literal inside a quoted
+              // phrase, so only the quote itself needs escaping.
+              ("100%", "\"100%\""),
+              ("a_b", "\"a_b\""),
+              ("a*b", "\"a*b\""),
+              ("say \"hi\"", "\"say \"\"hi\"\"\""),
+          ])
+    func glossPhrase(input: String, expected: String) {
+        #expect(JMDictFTSIndex.phrase(input) == expected)
     }
 
     @Test("chunks a list inside the size, keeping the tail",

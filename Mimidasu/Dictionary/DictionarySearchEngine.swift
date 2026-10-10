@@ -36,16 +36,20 @@ final class DictionarySearchEngine: Sendable {
     /// Raw rows a prefix scan may touch before the fetch is cut. Without it a
     /// single-mora query walks the whole kana block on every keystroke.
     static let prefixScanCeiling = 20000
-    /// Gloss rows fetched for ranking. The `senses` scan cannot use an index,
-    /// so this is the only thing bounding a rare term's full-table walk.
+    /// Shortest Latin query the gloss stage will answer.
     ///
-    /// It must not sit below `maxRows`: a cap under the payload ceiling can
-    /// only ever hide, and one row can be several senses of one entry, so
-    /// `bestPerEntry` collapses well under the cap. Below this a query whose
-    /// true answer fits on screen answers short.
-    static let glossFetchCap = 1200
-    /// Shortest Latin query the gloss stage will answer. Below this, a
-    /// substring match is noise rather than a search.
+    /// This is the trigram tokenizer's expressibility floor, not a quality
+    /// preference — and that is why it cannot be relaxed. A trigram index
+    /// cannot answer a one- or two-character phrase: FTS5 returns **no rows**
+    /// for it, with no error and no warning. Measured against the real prepared
+    /// database, query `Ma` matches 78,143 senses under the old `LIKE` scan and
+    /// zero of them through the index — a silent, total loss of recall.
+    ///
+    /// The only way to answer a 1–2 character query would be to keep a full
+    /// table `LIKE` scan alongside the index, which is the 25–69 ms walk this
+    /// index exists to delete. The secondary argument still stands on its own —
+    /// below three letters a substring match is mostly noise — but the tokenizer
+    /// is the load-bearing reason, and `glossRows` asserts it.
     static let glossMinLatinLength = 3
     /// `IN`-clause chunk for the deferred `entries`/first-sense joins —
     /// SQLite's default bound-parameter limit is 999, so this stays well under.

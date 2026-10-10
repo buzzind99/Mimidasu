@@ -40,6 +40,17 @@ struct DictionarySearchPagingTests {
         ))
     }
 
+    /// `headroom + 1` rows under one reading prefix: exactly one row past what
+    /// the prefix stage's own `prefixFetchHeadroom` keeps, so the survivors
+    /// behind that bound are the whole of what this fixture can prove. `かん`
+    /// prefixes nothing in the base fixture, so the count is exact.
+    private func makeHeadroomBoundFixture() throws -> DictionarySearchFixture {
+        try DictionarySearchFixture(extraWords: JMDictFixtureDatabase.bulkWords(
+            count: DictionarySearchEngine.prefixFetchHeadroom + 1,
+            readingPrefix: "かん", startingAt: 9_994_000
+        ))
+    }
+
     @Test("returns every row it found, not just the window")
     func returnsEveryFoundRow() throws {
         // 120 rows, so no stage is ever skipped for want of window space: the
@@ -117,6 +128,44 @@ struct DictionarySearchPagingTests {
         #expect(outcome.hits.count == ceiling)
         // The rows past the ceiling still exist, and are still counted.
         #expect(outcome.matchedCount == ceiling + 100)
+    }
+
+    @Test("a headroom-bound scan publishes its total as a floor")
+    func headroomBoundPublishesAFloor() throws {
+        let headroom = DictionarySearchEngine.prefixFetchHeadroom
+        let fixture = try makeHeadroomBoundFixture()
+
+        let outcome = try fixture.outcome("かん")
+
+        // The scan found one row more than the headroom keeps, so the row
+        // behind it is in neither `hits` nor `matchedCount` — and the total says
+        // so, rather than reading `8000` as the whole of `かん`. This is the
+        // `ma` case: a 1-mora scan truncated at a constant, with nothing marking
+        // the count as short of the answer.
+        #expect(outcome.matchedCount == headroom)
+        #expect(outcome.truncated)
+        #expect(outcome.isFloor)
+        // Nothing was skipped. `かん` is Japanese, so the gloss stage was never
+        // a candidate and there was no tier for the window to saturate against.
+        // The two facts are independent, and only one of them is a stage.
+        #expect(outcome.saturated == false)
+    }
+
+    @Test("no window lifts a bound, so paging cannot un-truncate it")
+    func pagingCannotUnTruncate() throws {
+        let fixture = try makeHeadroomBoundFixture()
+
+        let narrow = try fixture.outcome("かん", limit: DictionarySearchEngine.pageSize)
+        let deep = try fixture.outcome("かん", limit: DictionarySearchEngine.maxRows)
+
+        // Both bounds are constants rather than functions of the caller's
+        // limit, so the deeper search runs the same scan, stops in the same
+        // place, and reports the same floor. That is the whole difference from
+        // saturation, and it is what keeps `loadMore` from re-paying full price
+        // for an answer it already holds.
+        #expect(deep.truncated)
+        #expect(deep.saturated == false)
+        #expect(deep.matchedCount == narrow.matchedCount)
     }
 
     @Test("a common-only search reports a total it can honour, with no floor")

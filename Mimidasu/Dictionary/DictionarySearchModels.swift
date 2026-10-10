@@ -130,8 +130,11 @@ struct DictionarySearchOutcome: Equatable, Sendable {
     /// rather than searching again, so rows below the window cost nothing to
     /// show.
     let hits: [DictionarySearchHit]
-    /// Total hits after filters, before the window — a lower bound when a stage's
-    /// fetch ceiling truncated its own scan, or when a stage was skipped.
+    /// Total hits after filters, before the window. Every row the stages that
+    /// ran found is ranked and counted, so this is never short of *its own*
+    /// payload — but it is a floor on the answer whenever `isFloor` is true,
+    /// because a skipped stage's rows and a headword scan's own bound are in
+    /// neither this count nor `hits`.
     let matchedCount: Int
     /// A stage was skipped because the window was already full of strictly
     /// better tiers, so the rows it would have found are not in `matchedCount`
@@ -141,12 +144,38 @@ struct DictionarySearchOutcome: Equatable, Sendable {
     /// it filled the window exactly and `matchedCount` does not exceed it, and
     /// why the header marks such a total with `+`.
     ///
-    /// Never true for a `commonOnly` search: the window cannot be measured
-    /// before the `entries` join that resolves `common`, so such a search runs
+    /// Never true for a `commonOnly` search: `commonOnly` resolves against the
+    /// pre-join pre-fetch, so a common-only search's window *can* be measured
+    /// pre-join — but it is still refused, because `capSaturated` measures tiers
+    /// only and cannot see `common` at all, so a window full of uncommon rows
+    /// would read as full and hide the common ones behind it. Such a search runs
     /// every stage and this is `false` — its total is exact, not a floor.
     let saturated: Bool
 
-    static let empty = DictionarySearchOutcome(hits: [], matchedCount: 0, saturated: false)
+    /// A headword scan hit one of its own bounds — `prefixScanCeiling`, which
+    /// caps the scan, or `prefixFetchHeadroom`, which caps the survivors kept
+    /// for ranking — so rows behind that bound are in neither `hits` nor
+    /// `matchedCount`, and the header marks the total with `+` for the same
+    /// reason `saturated` does.
+    ///
+    /// Never folded into `saturated`, because the two say different things and
+    /// only one of them is actionable. Both bounds are constants, not
+    /// functions of the caller's `limit`, so **no window lifts them**: a deeper
+    /// search returns the identical truncated answer. Reading this as
+    /// saturation would put `canLoadMore`'s probe arm and `loadMore`'s
+    /// re-search on a path that can only re-pay full price for the same rows.
+    let truncated: Bool
+
+    /// Whether `matchedCount` is a floor over a larger answer rather than the
+    /// whole of it — what the header's `+` marks. `saturated` says paging can
+    /// grow it; `truncated` says paging cannot.
+    var isFloor: Bool {
+        saturated || truncated
+    }
+
+    static let empty = DictionarySearchOutcome(
+        hits: [], matchedCount: 0, saturated: false, truncated: false
+    )
 
     var isEmpty: Bool {
         hits.isEmpty
