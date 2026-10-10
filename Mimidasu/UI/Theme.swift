@@ -132,6 +132,15 @@ enum Theme {
     /// Accent (reading-aid selected pill, jump-button glyphs, brand): settings
     /// coral `#FF6B5E` on light, sakura pink on dark.
     static let accentPink = SharedTokens.accent
+    /// The floating dictionary opener's glyph: accent coral on light (the same
+    /// value `accentPink` carries there), and on dark a white that sits between
+    /// the sidebar card's kicker (`secondaryText`, 45%) and the card's headword
+    /// (`primaryText`) — legible against the jump-button chrome without the
+    /// glare of a solid white glyph.
+    static let dictionaryOpenerGlyph = Color(
+        light: NSColor(hex: 0xFF6B5E),
+        dark: NSColor.white.withAlphaComponent(0.8)
+    )
     /// Brand gradient's second stop — flat coral on light (mirrors the
     /// settings header mark), violet on dark.
     static let brandViolet = SharedTokens.brandViolet

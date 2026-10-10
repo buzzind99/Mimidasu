@@ -68,11 +68,12 @@ enum ReferenceMode: String {
     }
 
     /// The floating opener's glyph tint. Keeps the two openers distinct at a
-    /// glance by color as well as by shape, and reuses the tokens the mode's
-    /// glyphs already wear elsewhere so neither icon reads as a new color.
+    /// glance by color as well as by shape. Favorites reuses the token its
+    /// star already wears elsewhere; the dictionary gets its own because its
+    /// dark appearance matches the sidebar card's kicker instead.
     var openerTint: Color {
         switch self {
-        case .dictionary: Theme.accentPink
+        case .dictionary: Theme.dictionaryOpenerGlyph
         case .favorites: Theme.favoriteStarYellow
         }
     }
