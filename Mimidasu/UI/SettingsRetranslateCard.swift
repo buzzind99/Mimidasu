@@ -46,7 +46,7 @@ struct SettingsRetranslateCard: View {
     /// The provenance marker switch, drawn with the accent checkbox style.
     private var markerToggle: some View {
         Toggle(isOn: $settings.showsRetranslateMarker) {
-            Text("Show engine on re-translated lines")
+            Text("Show provider on re-translated lines")
                 .font(.system(size: 12.5))
                 .foregroundStyle(Palette.secondaryText)
         }
