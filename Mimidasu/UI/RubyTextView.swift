@@ -167,21 +167,21 @@ struct RubyTextView: View, Equatable {
         var action: (() -> Void)?
 
         @State private var hovering = false
-        /// Stand-down flag from the floating favorite-list button: hover is
+        /// Stand-down flag from the floating reference openers: hover is
         /// not exclusive, so without this the surface would light up while
-        /// the cursor is on the button above it. Nil where no button exists.
-        @Environment(\.favoritesButtonHover) private var favoritesButtonHover
+        /// the cursor is on a button above it. Nil where no button exists.
+        @Environment(\.referenceButtonHover) private var referenceButtonHover
 
         var body: some View {
-            let suppressed = favoritesButtonHover?.isHovering == true
+            let suppressed = referenceButtonHover?.isHovering == true
             let base: AnyShapeStyle = baseColor.map(AnyShapeStyle.init)
                 ?? AnyShapeStyle(.primary)
             Text(verbatim: text)
                 .font(font)
                 .italic(italic)
                 // Hover stays authoritative over the favorite color: it is the
-                // tap affordance, and the star stand-down only suppresses it
-                // for the surfaces under the floating button.
+                // tap affordance, and the opener stand-down only suppresses it
+                // for the surfaces under the floating buttons.
                 .foregroundStyle(hovering && !suppressed ? AnyShapeStyle(hoverColor) : base)
                 .textSelection(.disabled)
                 .onHover { isHovering in hovering = isHovering }

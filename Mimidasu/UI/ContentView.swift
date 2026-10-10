@@ -1,59 +1,62 @@
 import AppKit
 import SwiftUI
 
-/// Shared hover flag for the floating favorite-list button. Hover delivery
-/// is not exclusive, so without this the word surfaces below the button
-/// would light up while the cursor is on it. A reference, not a value: every
+/// Shared hover flag for the floating reference-window openers. Hover delivery
+/// is not exclusive, so without this the word surfaces below the buttons
+/// would light up while the cursor is on one. A reference, not a value: every
 /// reader must see the same instance for the flag to work across the
-/// transcript tree. The HUD and the Favorites window are separate windows and
-/// read the nil default, so neither is affected.
+/// transcript tree. The HUD and the reference window are separate windows and
+/// read the nil default, so neither is affected. One flag for both openers
+/// rather than one each: it answers "is a floating opener under the pointer",
+/// and two flags would let the gap between the two buttons light the
+/// transcript. Each opener's own ghosting is local to that button.
 @Observable
 @MainActor
-final class FavoritesButtonHover {
+final class ReferenceButtonHover {
     var isHovering = false
 }
 
 extension EnvironmentValues {
-    @Entry var favoritesButtonHover: FavoritesButtonHover?
+    @Entry var referenceButtonHover: ReferenceButtonHover?
 }
 
 /// Button style with zero pressed-state feedback: the label renders
-/// identically idle, hovered, and pressed. The floating star manages its own
-/// ghost opacity, so `.plain`'s mouse-down dimming would fight it.
+/// identically idle, hovered, and pressed. The floating openers manage their
+/// own ghost opacity, so `.plain`'s mouse-down dimming would fight it.
 private struct StaticButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
     }
 }
 
-/// The floating reference-window opener — Dictionary and Favorites in one
-/// window — as its own leaf so its hover read stays local: `FavoritesButtonHover` is observed by the glyph's opacity and by the
-/// stand-down the word surfaces perform, and a hover transition should
+/// One floating opener for the shared reference window. The two modes are
+/// separate buttons rather than one that toggles, because the point of each is
+/// to land on a named place: the book opens Dictionary, the star opens
+/// Favorites, whichever mode the window was left in.
+///
+/// Each is its own leaf so its hover read stays local: `ReferenceButtonHover`
+/// is observed by the word surfaces' stand-down, and a hover transition should
 /// re-evaluate this button — not `ContentView.body`, which would re-diff the
-/// sidebar, the transcript, and the live strip twice per hover. The hover
-/// reference is shared by design (every reader must see the same instance);
-/// `closedAt` is the close stamp the reopen debounce reads. Same 34pt circle
-/// chrome as the transcript jump buttons; the hit area is deliberately the
-/// full square, not the circle — corner hovers must not fall through to the
-/// word surfaces below.
-private struct FavoritesOpenerButton: View {
-    let hover: FavoritesButtonHover
-    let closedAt: ContinuousClock.Instant?
+/// sidebar, the transcript, and the live strip twice per hover. Same 34pt
+/// circle chrome as the transcript jump buttons; the hit area is deliberately
+/// the full square, not the circle — corner hovers must not fall through to
+/// the word surfaces below.
+private struct ReferenceOpenerButton: View {
+    let mode: ReferenceMode
+    let hover: ReferenceButtonHover
 
     @Environment(\.openWindow) private var openWindow
+    /// Ghosting is per-button, unlike the stand-down: brightening the pair
+    /// together would make the pointer crossing the gap between them flicker.
+    @State private var isHovering = false
 
     var body: some View {
         Button {
-            if let closedAt,
-               closedAt.duration(to: .now) < .milliseconds(500)
-            {
-                return
-            }
-            openWindow(id: ReferenceWindow.sceneID)
+            ReferenceWindow.open(mode, with: openWindow)
         } label: {
-            Image(systemName: "star.fill")
+            Image(systemName: mode.icon)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.favoriteStarYellow)
+                .foregroundStyle(mode.openerTint)
                 .frame(width: 34, height: 34)
                 .background(
                     Circle()
@@ -63,30 +66,35 @@ private struct FavoritesOpenerButton: View {
                 )
         }
         .buttonStyle(StaticButtonStyle())
-        .opacity(hover.isHovering ? 1 : 0.4)
+        .opacity(isHovering ? 1 : 0.4)
         .pointerStyle(.link)
-        .help("Dictionary & favorites")
-        .accessibilityLabel("Dictionary & favorites")
-        .onHover { hovering in hover.isHovering = hovering }
+        .help(mode.openerHelp)
+        .accessibilityLabel(mode.openerHelp)
+        .onHover { hovering in
+            isHovering = hovering
+            hover.isHovering = hovering
+        }
     }
 }
 
-/// Toast stack and the favorites opener, one top-trailing column: toasts push
-/// the star down by layout, and it glides back when they clear. Its own leaf
-/// so the toast-array read the conditional mount performs registers against
-/// this column alone — in `ContentView.body` it would re-diff the sidebar,
-/// the transcript, and the live strip on every post, dismissal, and expiry.
+/// Toast stack and the two openers, one top-trailing column: toasts push the
+/// openers down by layout, and they glide back when they clear. Dictionary
+/// sits above Favorites — the more general tool first, the user's saved list
+/// under it. Its own leaf so the toast-array read the conditional mount
+/// performs registers against this column alone — in `ContentView.body` it
+/// would re-diff the sidebar, the transcript, and the live strip on every
+/// post, dismissal, and expiry.
 private struct TranscriptOverlayColumn: View {
     let toasts: ToastCenter
-    let hover: FavoritesButtonHover
-    let closedAt: ContinuousClock.Instant?
+    let hover: ReferenceButtonHover
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 12) {
             if !toasts.toasts.isEmpty {
                 ToastStackView(center: toasts)
             }
-            FavoritesOpenerButton(hover: hover, closedAt: closedAt)
+            ReferenceOpenerButton(mode: .dictionary, hover: hover)
+            ReferenceOpenerButton(mode: .favorites, hover: hover)
         }
         .padding(.trailing, 20)
         .padding(.top, 16)
@@ -102,16 +110,9 @@ struct ContentView: View {
     var latency: LatencyState
 
     @AppearanceSetting private var appearance
-    /// Backing state for the floating favorite-list button (ghosted until
+    /// Backing state for the floating reference openers (ghosted until
     /// hovered) and the word-hover stand-down flag the surfaces read.
-    @State private var favoritesButtonHover = FavoritesButtonHover()
-    /// When the reference window last closed — same shape as the Settings
-    /// gear (`SidebarView.settingsClosedAt`): a star click is itself a click
-    /// outside the window, so resign-key closes it before this button's
-    /// mouse-up action runs, and a fresh close means the click already did
-    /// the toggle-off and must not re-open. Continuous clock: monotonic, so
-    /// a system-time step can't stretch or skip the guard.
-    @State private var favoritesClosedAt: ContinuousClock.Instant?
+    @State private var referenceButtonHover = ReferenceButtonHover()
     /// The un-star awaiting confirmation, in the main window — one slot for
     /// both dictionary hosts. They are mounted together for a pinned lookup, so
     /// a slot per control could raise two dialogs; a slot per *window* cannot.
@@ -200,14 +201,13 @@ struct ContentView: View {
                     }
                 }
             }
-            // Toast stack and favorites opener share one top-trailing
+            // Toast stack and the reference openers share one top-trailing
             // column (see `TranscriptOverlayColumn`); it is a leaf so its
             // toast observation stays local.
             .overlay(alignment: .topTrailing) {
                 TranscriptOverlayColumn(
                     toasts: model.toasts,
-                    hover: favoritesButtonHover,
-                    closedAt: favoritesClosedAt
+                    hover: referenceButtonHover
                 )
             }
             .overlay(alignment: .top) {
@@ -215,10 +215,6 @@ struct ContentView: View {
             }
         }
         .background(Theme.window)
-        .environment(\.favoritesButtonHover, favoritesButtonHover)
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
-            guard (note.object as? NSWindow)?.title == ReferenceWindow.title else { return }
-            favoritesClosedAt = .now
-        }
+        .environment(\.referenceButtonHover, referenceButtonHover)
     }
 }

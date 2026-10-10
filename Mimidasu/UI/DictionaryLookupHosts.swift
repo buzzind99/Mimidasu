@@ -119,6 +119,11 @@ struct DictionaryCardView: View {
     @State private var alsoHeight: CGFloat = 0
     /// Natural height of all sense rows — what the viewport clamps against.
     @State private var sensesContentHeight: CGFloat = 0
+    /// Whether the pointer is on the DICTIONARY kicker, which tints the opener
+    /// (`dictionaryOpener`).
+    @State private var isHovering = false
+
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         GeometryReader { geo in
@@ -129,7 +134,7 @@ struct DictionaryCardView: View {
     private func card(freeHeight: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                KickerLabel("DICTIONARY")
+                dictionaryOpener
                 Spacer(minLength: 8)
                 if let pinned = model.pinnedLookup,
                    case let .found(result, _, _) = pinned.content,
@@ -161,6 +166,37 @@ struct DictionaryCardView: View {
     /// only a removal raises the question.
     private func requestRemovalIfPending(_ entry: JMDictEntry) {
         forwardRemovalRequest(for: entry, model: model, to: onFavoriteRemovalRequest)
+    }
+
+    /// The card's kicker doubles as the card's opener: the card holds one
+    /// pinned lookup, and the window holds the whole searchable dictionary, so
+    /// the label is the one control on the card that reaches it. It reads as a
+    /// link rather than as chrome — pointer, hover tint, and the window's own
+    /// book glyph — because a static kicker next to a live entry would promise
+    /// nothing. The tint is the shared accent, the one the reference window's
+    /// switcher already uses to mark the selected mode.
+    private var dictionaryOpener: some View {
+        Button {
+            ReferenceWindow.open(.dictionary, with: openWindow)
+        } label: {
+            HStack(spacing: 4) {
+                KickerLabel("DICTIONARY", color: kickerColor)
+                Image(systemName: ReferenceMode.dictionary.icon)
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(kickerColor)
+            }
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
+        .onHover { hovering in isHovering = hovering }
+        .help("Search the dictionary")
+        .accessibilityLabel("Search the dictionary")
+    }
+
+    private var kickerColor: Color {
+        isHovering ? Theme.accentPink : Theme.secondaryText
     }
 
     /// The pinned content per state: the shared entry view for a found

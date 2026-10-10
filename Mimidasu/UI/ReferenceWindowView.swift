@@ -1,17 +1,37 @@
 import AppKit
 import SwiftUI
 
-/// The reference window's identity: the scene's title, its scene id, and the
-/// one constant every AppKit title-match site compares against.
+/// The reference window's identity: the scene's title, its scene id, its fixed
+/// size, and the one constant every AppKit title-match site compares against.
 ///
-/// The window started life as the Favorites list, and five observers in three
+/// The window started life as the Favorites list, and two observers in two
 /// files recognize it by `window.title`. Renaming the scene without routing
-/// them through a constant is how one of them silently stops firing — the
-/// `favoritesClosedAt` stamp in particular, which quietly disables the
-/// opener's reopen debounce with no error anywhere.
+/// them through a constant is how one of them silently stops firing, with no
+/// error anywhere.
 enum ReferenceWindow {
     static let title = "Dictionary"
     static let sceneID = "dictionary"
+    /// The fixed content size. Width is dictated by the row content; height is
+    /// sized to six collapsed Favorites rows — a 73.6 pt row plus the 10 pt
+    /// `LazyVStack` gap, in a slot that also holds the notice card, the search
+    /// field, their gaps, and the content padding. Dictionary mode shares the
+    /// frame deliberately: a mode switch must not resize the window under the
+    /// pointer.
+    static let width: CGFloat = 460
+    static let height: CGFloat = 692
+}
+
+extension ReferenceWindow {
+    /// Brings the window up showing `mode`. The mode is persisted
+    /// (`ReferenceMode.storageKey`), so writing the key here retargets a window
+    /// that is already open — `AppStorage` observes the defaults store — and
+    /// seeds the default for one that is not. Skipping the write is how an
+    /// opener lands on whichever mode the last visit left behind.
+    @MainActor
+    static func open(_ mode: ReferenceMode, with openWindow: OpenWindowAction) {
+        UserDefaults.standard.set(mode.rawValue, forKey: ReferenceMode.storageKey)
+        openWindow(id: sceneID)
+    }
 }
 
 /// The two surfaces the reference window shows. One window rather than two
@@ -42,16 +62,38 @@ enum ReferenceMode: String, CaseIterable, Identifiable {
         case .favorites: "star.fill"
         }
     }
+
+    /// The floating opener's glyph tint. Keeps the two openers distinct at a
+    /// glance by color as well as by shape, and reuses the tokens the mode's
+    /// glyphs already wear elsewhere so neither icon reads as a new color.
+    var openerTint: Color {
+        switch self {
+        case .dictionary: Theme.accentPink
+        case .favorites: Theme.favoriteStarYellow
+        }
+    }
+
+    /// What each floating opener promises. The title alone is ambiguous from a
+    /// 34pt circle in the corner of the transcript pane, so each names the
+    /// mode it opens and what that mode is for.
+    var openerHelp: String {
+        switch self {
+        case .dictionary: "Open the dictionary"
+        case .favorites: "Open favorites"
+        }
+    }
 }
 
 /// The reference window's content: the header band, the mode switcher, and
 /// whichever mode is active.
 ///
-/// The window owns the fixed 460 × 608 frame and the surface color, so both
-/// modes size identically — a mode switch must not resize the window under the
-/// pointer. The mode itself is persisted (`@AppStorage`), defaulting to
-/// Dictionary: it is the more general of the two, and the window now opens on
-/// the tool rather than on one user's saved list.
+/// The window owns the fixed frame (`ReferenceWindow.width` × `.height`) and
+/// the surface color, so both modes size identically — a mode switch must not
+/// resize the window under the pointer. The mode itself is persisted
+/// (`@AppStorage`), defaulting to Dictionary: it is the more general of the
+/// two, and the window now opens on the tool rather than on one user's saved
+/// list. `ReferenceWindow.open` is what an opener writes before presenting, so
+/// a button can land on the mode it names.
 struct ReferenceWindowView: View {
     var model: AppModel
 
@@ -106,7 +148,7 @@ struct ReferenceWindowView: View {
         }
         // The whole window's size; `.top` keeps a short list and the empty
         // states pinned to the top instead of floating in the middle.
-        .frame(width: 460, height: 608, alignment: .top)
+        .frame(width: ReferenceWindow.width, height: ReferenceWindow.height, alignment: .top)
         .background(Theme.window)
         .preferredColorScheme($appearance.resolvedColorScheme)
         .favoriteRemovalConfirmation(model, pendingRemoval: $pendingRemoval)
