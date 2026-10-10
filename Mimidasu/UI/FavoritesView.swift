@@ -12,9 +12,10 @@ import SwiftUI
 /// This is one mode of the reference window, so the frame, the surface, the
 /// header band, and the window-close reset live in `ReferenceWindowView` /
 /// `FavoritesWindowState`; what is left here is the mode's own content.
-/// Fixed 460 × 608 with a `ScrollView` rather than a `List`: a fixed panel
-/// plus a scrolling list means expanding a card *scrolls* instead of growing
-/// the window, which a `List` cannot do without swallowing the expansion.
+/// Fixed-size panel (`ReferenceWindow.width` × `.height`) with a `ScrollView`
+/// rather than a `List`: a fixed panel plus a scrolling list means expanding a
+/// card *scrolls* instead of growing the window, which a `List` cannot do
+/// without swallowing the expansion.
 struct FavoritesView: View {
     var model: AppModel
     /// Hoisted to the host so a mode switch cannot take the query, the rows,
@@ -23,6 +24,9 @@ struct FavoritesView: View {
     /// Files the un-star question on the window's single alert slot — shared
     /// with the Dictionary mode, so the two can never stack two dialogs.
     var onFavoriteRemoval: (String) -> Void
+    /// The host's focus, shared with the Dictionary field so only one of the
+    /// two can hold the caret — see `ReferenceWindowView`.
+    let searchFocus: FocusState<Bool>.Binding
 
     /// How far a row's trailing controls drop onto the headword's line: they
     /// are top-aligned to the row, and the 26pt headword is what sets the
@@ -110,6 +114,7 @@ struct FavoritesView: View {
             TextField("Search favorites", text: query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
+                .focused(searchFocus, equals: true)
         }
         .padding(9)
         .cardSurface(radius: 9)

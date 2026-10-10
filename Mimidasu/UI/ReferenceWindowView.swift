@@ -4,7 +4,7 @@ import SwiftUI
 /// The reference window's identity: the scene's title, its scene id, its fixed
 /// size, and the one constant every AppKit title-match site compares against.
 ///
-/// The window started life as the Favorites list, and two observers in two
+/// The window started life as the Favorites list, and three observers in two
 /// files recognize it by `window.title`. Renaming the scene without routing
 /// them through a constant is how one of them silently stops firing, with no
 /// error anywhere.
@@ -94,6 +94,11 @@ enum ReferenceMode: String, CaseIterable, Identifiable {
 /// two, and the window now opens on the tool rather than on one user's saved
 /// list. `ReferenceWindow.open` is what an opener writes before presenting, so
 /// a button can land on the mode it names.
+///
+/// The host also owns the search field's focus: it claims the caret for the
+/// active mode on open and on every mode switch, so arriving at the window — or
+/// switching between its two surfaces — starts from the field the user is
+/// about to type into rather than from nothing.
 struct ReferenceWindowView: View {
     var model: AppModel
 
@@ -104,6 +109,18 @@ struct ReferenceWindowView: View {
     /// sheet here, and a sheet whose window closes takes its own question with
     /// it while the slot would not.
     @State private var pendingRemoval: String?
+    /// Which of the two mutually-exclusive search fields holds the caret. Held
+    /// here rather than by each mode's view so a switch has somewhere to hand
+    /// the caret *to* — a field that owns its own focus would leave the window
+    /// with none when its view is torn down. Two values rather than one keyed
+    /// by `ReferenceMode`: `@FocusState` ships initializers for `Bool` and for
+    /// an `Optional<Hashable>` only — no `init(wrappedValue:)` — so a mode-keyed
+    /// property is unspellable and every `.focused(_:equals:)` call would have
+    /// to carry `.some(...)`. Splitting the pair also makes the hand-off
+    /// explicit instead of depending on the outgoing field writing `false` back
+    /// as it is torn down.
+    @FocusState private var dictionarySearchFocused: Bool
+    @FocusState private var favoritesSearchFocused: Bool
     /// Files the un-star question on this window's single slot. One closure for
     /// both modes so neither can pass a different handler and quietly grow a
     /// second slot.
@@ -136,13 +153,15 @@ struct ReferenceWindowView: View {
                 DictionarySearchView(
                     model: model,
                     state: dictionaryState,
-                    onFavoriteRemoval: fileFavoriteRemoval
+                    onFavoriteRemoval: fileFavoriteRemoval,
+                    searchFocus: $dictionarySearchFocused
                 )
             case .favorites:
                 FavoritesView(
                     model: model,
                     state: favoritesState,
-                    onFavoriteRemoval: fileFavoriteRemoval
+                    onFavoriteRemoval: fileFavoriteRemoval,
+                    searchFocus: $favoritesSearchFocused
                 )
             }
         }
@@ -152,6 +171,18 @@ struct ReferenceWindowView: View {
         .background(Theme.window)
         .preferredColorScheme($appearance.resolvedColorScheme)
         .favoriteRemovalConfirmation(model, pendingRemoval: $pendingRemoval)
+        .onChange(of: mode) { _, _ in
+            focusActiveSearch()
+        }
+        // Focus is set from `didBecomeKey` rather than `onAppear`: a focus
+        // request only lands once the window has a first responder to hand it
+        // to, and this scene caches its window, so `onAppear` is not a
+        // reliable stand-in for "on screen and taking input". It also fires on
+        // every reopen, which is exactly the set of moments to claim focus.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            guard (note.object as? NSWindow)?.title == ReferenceWindow.title else { return }
+            focusActiveSearch()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
             guard (note.object as? NSWindow)?.title == ReferenceWindow.title else { return }
             resetForClose()
@@ -253,5 +284,23 @@ struct ReferenceWindowView: View {
     private func resetForClose() {
         favoritesState.resetForClose()
         dictionaryState.resetForClose()
+    }
+
+    // MARK: - Focus
+
+    /// Puts the caret in the active mode's search field and takes it from the
+    /// other. Both triggers route through here so a switch and a reopen cannot
+    /// drift apart, and the incoming field is claimed only after the outgoing
+    /// one is released — the order a hand-off needs, since a torn-down view
+    /// cannot hold focus.
+    private func focusActiveSearch() {
+        switch mode {
+        case .dictionary:
+            favoritesSearchFocused = false
+            dictionarySearchFocused = true
+        case .favorites:
+            dictionarySearchFocused = false
+            favoritesSearchFocused = true
+        }
     }
 }

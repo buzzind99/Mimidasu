@@ -15,6 +15,9 @@ struct DictionarySearchView: View {
     var model: AppModel
     let state: DictionarySearchState
     var onFavoriteRemoval: (String) -> Void
+    /// The host's focus, shared with the Favorites field so only one of the
+    /// two can hold the caret — see `ReferenceWindowView`.
+    let searchFocus: FocusState<Bool>.Binding
 
     /// How far a row's trailing controls drop onto the headword's line — the
     /// same 26pt headword the Favorites rows use, so the same offset. The
@@ -49,6 +52,7 @@ struct DictionarySearchView: View {
             TextField("Search the dictionary", text: query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
+                .focused(searchFocus, equals: true)
             // In the field rather than over the list: the list is not blocked
             // (it keeps showing the previous results) and the window never
             // flashes a spinner-sized hole in the middle of itself.
@@ -117,7 +121,7 @@ struct DictionarySearchView: View {
         .hoverHighlight(Capsule(), isEnabled: !selected && !disabled)
         .help(disabled
             ? "Name entries are never marked common"
-            : "Only entries JMDict marks common")
+            : "Only entries the dictionary marks common")
         .accessibilityLabel("Common entries only")
     }
 
