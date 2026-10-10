@@ -49,6 +49,19 @@ struct DictionarySearchStateTests {
         )
     }
 
+    /// A state over `headroom + 1` rows under `かん` — one row past what the
+    /// prefix stage's own `prefixFetchHeadroom` keeps. It is the only shape in
+    /// which `matchedCount` is a floor with no stage having been skipped, which
+    /// is the reported `ま` case: a truncated total read as the whole answer.
+    private func makeHeadroomBoundState() throws -> DictionarySearchStateFixture {
+        try DictionarySearchStateFixture(
+            extraWords: JMDictFixtureDatabase.bulkWords(
+                count: DictionarySearchEngine.prefixFetchHeadroom + 1,
+                readingPrefix: "かん", startingAt: 9_994_000
+            )
+        )
+    }
+
     /// A state whose engine points at a path that is not there, so every search
     /// lands as the missing-database fault.
     private func makeUnavailableState() -> DictionarySearchState {
@@ -336,6 +349,29 @@ struct DictionarySearchStateTests {
 
         state.loadMore()
         #expect(state.countText == "100 / 120")
+    }
+
+    @Test("a truncated total is marked, and paging it never re-runs the search")
+    func truncatedTotalIsMarkedAndPagingReveals() async throws {
+        let headroom = DictionarySearchEngine.prefixFetchHeadroom
+        let fixture = try makeHeadroomBoundState()
+        let state = fixture.state
+
+        state.query = "かん"
+        #expect(await pollUntil { state.outcome.hits.isEmpty == false })
+        #expect(await pollUntil { state.isSearching == false })
+
+        // The header says the total is short of the answer. Without the `+` this
+        // reads as `50 / 8000` and `8000` is the entire truth about `ま`, which
+        // is 21,532 entries.
+        #expect(state.countText == "50 / \(headroom)+")
+        // No stage was skipped, so the button is a reveal rather than a probe:
+        // a re-search would run the same scan, stop at the same constant, and
+        // land on the same rows for full price.
+        #expect(state.outcome.saturated == false)
+        state.loadMore()
+        #expect(state.isSearching == false)
+        #expect(state.countText == "100 / \(headroom)+")
     }
 
     @Test("a new query starts one page deep again")

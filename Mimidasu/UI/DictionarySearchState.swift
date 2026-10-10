@@ -76,7 +76,7 @@ final class DictionarySearchState {
     init(model: AppModel) {
         engine = model.dictionarySearch
         lookupState = FavoritesLookupState(lookup: model.jmDictLookup)
-        prepareDictionary = { model.prepareDictionaryIfNeeded() }
+        prepareDictionary = { model.prepareDictionaries() }
     }
 
     private var trimmedQuery: String {
@@ -111,12 +111,13 @@ final class DictionarySearchState {
         outcome.hits.prefix(visibleLimit)
     }
 
-    /// The header's `displayed / matched` count. The total carries a `+` when
-    /// the search skipped a stage: it is then a floor, and paging is what grows
-    /// it — a total that says `51+` is the honest reading of a search that
-    /// found 51 and declined to look for the rest.
+    /// The header's `displayed / matched` count. The total carries a `+`
+    /// whenever it is a floor — a stage the search skipped, or a headword scan
+    /// that stopped at one of its own bounds. A total that says `51+` is the
+    /// honest reading of a search that found 51 and declined to look for the
+    /// rest; only the first of those two grows when the user pages.
     var countText: String {
-        "\(visibleHits.count) / \(outcome.matchedCount)\(outcome.saturated ? "+" : "")"
+        "\(visibleHits.count) / \(outcome.matchedCount)\(outcome.isFloor ? "+" : "")"
     }
 
     /// Whether one more page can be reached — either the search already holds
