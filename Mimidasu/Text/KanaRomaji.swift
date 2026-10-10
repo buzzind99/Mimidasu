@@ -107,7 +107,13 @@ enum KanaRomaji {
         "シェ": "she", "チェ": "che", "ジェ": "je",
         "ツァ": "tsa", "ツィ": "tsi", "ツェ": "tse", "ツォ": "tso",
         "クァ": "kwa", "クィ": "kwi", "クェ": "kwe", "クォ": "kwo",
-        "クヮ": "kwa"
+        "クヮ": "kwa",
+        // Hiragana twins: compatibility normalization does not fold the
+        // small-kana scripts together, so without these rows くぁ falls
+        // through to singles as "kua" — a spelling the reverse table cannot
+        // read back (it spells the family "kwa/kwi/kwe/kwo").
+        "くぁ": "kwa", "くぃ": "kwi", "くぇ": "kwe", "くぉ": "kwo",
+        "くゎ": "kwa"
     ]
 
     /// Single kana. し/ち/つ use their Hepburn spellings; ぢ/づ voice to

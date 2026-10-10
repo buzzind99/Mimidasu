@@ -38,6 +38,12 @@ struct KanaRomajiTests {
         ("ティ", "ti"),
         ("とぅ", "tu"),
         ("ウォ", "wo"),
+        ("クァ", "kwa"),
+        ("くぁ", "kwa"),
+        ("くぃ", "kwi"),
+        ("くぇ", "kwe"),
+        ("くぉ", "kwo"),
+        ("くゎ", "kwa"),
     ])
     func digraphs(kana: String, expected: String) {
         #expect(KanaRomaji.romaji(fromKana: kana) == expected)
