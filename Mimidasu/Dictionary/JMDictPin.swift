@@ -48,7 +48,20 @@ enum JMDictPin {
     static let preparedFileName = "\(artifactPrefix)\(releaseTag).\(buildRevision).\(artifactExtension)"
     static let bundledFileName = preparedFileName + ".zst"
 
-    /// The uncompressed intermediate `scripts/build_dictionary.sh` leaves in the
-    /// checkout's `build/` before compressing; debug-only discovery path.
-    static let debugCheckoutPath = "build/\(preparedFileName)"
+    /// The debug-checkout database, carrying the gloss index.
+    ///
+    /// The bundled `.zst` is the raw ingestion output and must stay that way —
+    /// the index is derived at first launch into Application Support, so it
+    /// costs the shipped bundle nothing. A debug checkout that resolved the
+    /// *raw* database instead would run every Latin gloss search against a
+    /// database with no index and no `LIKE` fallback, and fail silently.
+    /// `scripts/build_dictionary.sh` emits this file alongside the raw one by
+    /// applying the same DDL `JMDictFTSIndex` applies, and guards the two
+    /// against drift.
+    static let devArtifactFileName =
+        "\(artifactPrefix)\(releaseTag).\(buildRevision).dev.\(artifactExtension)"
+
+    /// The uncompressed, index-carrying intermediate `scripts/build_dictionary.sh`
+    /// leaves in the checkout's `build/`; debug-only discovery path.
+    static let debugCheckoutPath = "build/\(devArtifactFileName)"
 }

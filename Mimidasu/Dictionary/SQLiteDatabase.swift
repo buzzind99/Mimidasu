@@ -109,8 +109,16 @@ final class SQLiteDatabase: @unchecked Sendable {
         }
     }
 
-    /// The only route to a writable handle. Favorites own their database;
-    /// the prepared dictionary must never be opened this way.
+    /// The only route to a writable handle.
+    ///
+    /// Favorites own their database and write to it freely. The prepared
+    /// dictionary is different: **never** open the promoted copy this way. The
+    /// one sanctioned writer is `JMDictFTSIndex.build`, and only against the
+    /// staged file inside `DictionaryStore.prepareArtifact`'s temp directory —
+    /// a throwaway copy that is discarded on any failure and promoted only
+    /// after it passes its smoke check. Writing to the promoted path instead
+    /// would mutate the artifact the app reads concurrently, and would do it
+    /// with no staging window to fail safely in.
     static func writable(path: String) throws(Error) -> SQLiteDatabase {
         try SQLiteDatabase(opening: path, flags: SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE)
     }
@@ -173,5 +181,33 @@ final class SQLiteDatabase: @unchecked Sendable {
             code: sqlite3_errcode(db),
             message: String(cString: sqlite3_errmsg(db))
         )
+    }
+}
+
+extension SQLiteDatabase {
+    /// Whether the linked `libsqlite3` can create an FTS5 table at all.
+    ///
+    /// Probed by creating one, not by reading `SQLITE_ENABLE_COMPILEOPTIONS`
+    /// out of `PRAGMA compile_options`: that pragma is itself compiled in
+    /// conditionally, so it can answer "no" on a library that does have the
+    /// module, and it can never answer "yes" for a virtual table the build
+    /// cannot actually instantiate.
+    ///
+    /// Once per process, on a throwaway in-memory connection. macOS's system
+    /// `libsqlite3` has FTS5 compiled in, so this is a constant in practice —
+    /// but the index build is deliberately fail-soft without it, and the
+    /// adoption check has to be able to tell that case apart.
+    static let supportsFTS5: Bool = {
+        guard let probe = try? SQLiteDatabase(inMemory: true) else { return false }
+        defer { probe.close() }
+        return (try? probe.execute(SQLiteDatabase.fts5ProbeSQL)) != nil
+    }()
+
+    static let fts5ProbeSQL = "CREATE VIRTUAL TABLE fts5_probe USING fts5(probe)"
+
+    /// A private, empty database that lives only as long as the handle. Used
+    /// for the FTS5 capability probe, so it never touches the filesystem.
+    private convenience init(inMemory: Bool) throws(Error) {
+        try self.init(opening: ":memory:", flags: SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE)
     }
 }

@@ -120,6 +120,15 @@ enum JMDictFixtureDatabase {
         for word in fixture.words + syntheticWords + extraWords {
             try insert(word, db)
         }
+        // The gloss stage reads through the FTS5 index and has no `LIKE` fallback,
+        // so a fixture without one silently loses every gloss hit — which no
+        // assertion would catch, because the search would just return fewer
+        // rows. Built from the production DDL rather than a paraphrase, so a
+        // change to the index's shape or tokenizer options is exercised here
+        // rather than only against the real database.
+        try exec(db, JMDictFTSIndex.createSQL)
+        try exec(db, JMDictFTSIndex.insertSQL)
+        try exec(db, JMDictFTSIndex.optimizeSQL)
         return Built(url: url)
     }
 

@@ -386,7 +386,7 @@ final class AppModel {
             }
         )
         initialModelCheck = Task { await refreshModelAvailability() }
-        prepareDictionaryIfNeeded()
+        prepareDictionaries()
 
         willTerminateNotifications.addObserver(
             forName: .mimidasuAppWillTerminate, object: nil, queue: .main

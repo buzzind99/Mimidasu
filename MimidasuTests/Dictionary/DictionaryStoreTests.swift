@@ -111,7 +111,17 @@ private enum SmokeDatabaseError: Error {
 /// tables). With `includeSmokeWord` the `学生` headword hits one entry, which
 /// is exactly what the store's JMDict smoke query requires; without it the
 /// database is well-formed but the smoke word misses.
-func makeJMDictSmokeDatabase(includeSmokeWord: Bool = true) throws -> URL {
+///
+/// `sensesPerEntry` sets how many sense rows one entry carries. 128 or more is
+/// the shape the index builder must refuse: the `rowid` pack spends seven bits
+/// on `ord`, and an entry that overruns them would alias onto other entries'
+/// rows and return another entry's gloss with no error raised anywhere.
+/// `emptyGloss` builds an otherwise valid database whose senses carry no gloss
+/// text, which the lookup accepts but the gloss index cannot answer — the
+/// silent-empty failure the promote-time smoke check exists to catch.
+func makeJMDictSmokeDatabase(
+    includeSmokeWord: Bool = true, sensesPerEntry: Int = 1, emptyGloss: Bool = false
+) throws -> URL {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("mimidasu-jmdict-smoke-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -144,11 +154,13 @@ func makeJMDictSmokeDatabase(includeSmokeWord: Bool = true) throws -> URL {
       jlpt INTEGER, hatsuon TEXT, acc TEXT, zo TEXT);
     """)
     if includeSmokeWord {
-        try exec("""
-        INSERT INTO entries VALUES (1000000, '学生', 'がくせい', 1);
-        INSERT INTO senses VALUES (1000000, 0, 'n', 'student', NULL, NULL, NULL);
-        INSERT INTO headwords VALUES (1000000, '学生', 'keb', NULL, NULL, NULL, NULL);
-        """)
+        let gloss = emptyGloss ? "''" : "'student'"
+        var statements = "INSERT INTO entries VALUES (1000000, '学生', 'がくせい', 1);"
+        for ord in 0 ..< sensesPerEntry {
+            statements += "INSERT INTO senses VALUES (1000000, \(ord), 'n', \(gloss), NULL, NULL, NULL);"
+        }
+        statements += "INSERT INTO headwords VALUES (1000000, '学生', 'keb', NULL, NULL, NULL, NULL);"
+        try exec(statements)
     }
     return url
 }

@@ -301,7 +301,7 @@ final class DictionaryStore: Sendable {
                 }
                 let destination = self.destinationDirectory
                     .appendingPathComponent(artifact.destinationFileName)
-                if FileManager.default.fileExists(atPath: destination.path) {
+                if FileManager.default.fileExists(atPath: destination.path), self.isAdoptable(artifact, at: destination) {
                     // Prepared by an earlier launch: adopt it, don't re-decompress.
                     self.setPhase(artifact, to: .done(destination))
                     self.afterPrepare(artifact, promoted: destination)
@@ -327,6 +327,40 @@ final class DictionaryStore: Sendable {
     private func setPhase(_ artifact: Artifact, to phase: Phase) {
         phases.withLock { current in
             current[keyPath: artifact.phaseKeyPath] = phase
+        }
+    }
+
+    /// Whether a file already at the destination can be adopted as-is.
+    ///
+    /// **The single authority on this.** Nothing upstream may decide it from a
+    /// file's existence: `resolveJMDict()` answers "where is the artifact", not
+    /// "is the artifact usable", and a caller that gates on it would adopt an
+    /// index-less database forever. `run` is reached unconditionally, and this
+    /// is what it asks.
+    ///
+    /// Existence is the whole staleness key for the tokenizer dictionary. It is
+    /// not enough for JMDict: a database promoted before the gloss index existed
+    /// is complete and current, yet answers every Latin query with zero rows and
+    /// no error — the stage's `LIKE` scan is gone and there is nothing to fall
+    /// back to. So adoption also requires the index, at the current
+    /// `JMDictFTSIndex.schemaVersion`.
+    ///
+    /// This is load-bearing rather than an optimization, and it is why the
+    /// *filename* deliberately does not encode the index: bumping
+    /// `JMDictPin.buildRevision` for it would force a full ingestion rebuild
+    /// and rename the shipped artifact for every user, which is a far larger
+    /// change than the situation warrants. Existing installs instead re-stage
+    /// themselves once — one decompress plus ~2 s — and are then adopted
+    /// normally. The cost when the database *is* current is one `fileExists`
+    /// plus two pragma reads on a lazily-opened handle.
+    ///
+    /// A platform with no FTS5 is the one case where a missing index is
+    /// correct: the build is fail-soft there by design, so requiring the index
+    /// unconditionally would re-decompress and rebuild on every launch forever.
+    private func isAdoptable(_ artifact: Artifact, at url: URL) -> Bool {
+        switch artifact {
+        case .tokenizer: true
+        case .jmDict: JMDictFTSIndex.isPresent(at: url) || !JMDictFTSIndex.isAvailable
         }
     }
 
@@ -366,7 +400,11 @@ final class DictionaryStore: Sendable {
         guard returnCode == 0 else {
             throw DictionaryStoreError.prepareFailed(returnCode: returnCode)
         }
-        try smoke(artifact, stagedArtifact, ffi: ffi)
+        // The gloss index is derived here, on the staged copy, before the smoke
+        // check — so the smoke check exercises the path the app will actually
+        // run and a silently-empty index fails the promote instead of shipping.
+        let indexed = try indexJMDict(stagedArtifact)
+        try smoke(artifact, stagedArtifact, indexed: indexed, ffi: ffi)
 
         try fm.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
         if fm.fileExists(atPath: destination.path) {
@@ -379,11 +417,42 @@ final class DictionaryStore: Sendable {
     /// The artifact-specific smoke check. The tokenizer opens the staged
     /// dictionary through the FFI; the JMDict database goes through the
     /// lookup engine (`学生` must hit ≥1 entry in both).
-    private func smoke(_ artifact: Artifact, _ stagedArtifact: URL, ffi: DictionaryFFI) throws {
+    private func smoke(
+        _ artifact: Artifact, _ stagedArtifact: URL,
+        indexed: Bool, ffi: DictionaryFFI
+    ) throws {
         switch artifact {
         case .tokenizer: try smokeQuery(stagedArtifact, ffi: ffi)
-        case .jmDict: try smokeQueryJMDict(stagedArtifact)
+        case .jmDict: try smokeQueryJMDict(stagedArtifact, indexed: indexed)
         }
+    }
+
+    /// Builds the gloss index over a staged JMDict database, and reports
+    /// whether it is there afterwards.
+    ///
+    /// Two failure classes, deliberately not treated alike.
+    ///
+    /// A platform whose SQLite cannot create an FTS5 table is an
+    /// environmental degradation: the dictionary is perfectly usable and the
+    /// only casualty is Latin gloss search, so it is logged and reported as "no
+    /// index" rather than costing the user their dictionary. That is also why
+    /// `smokeQueryJMDict` only asserts an index when one was built.
+    ///
+    /// A corpus that does not fit the `rowid` pack is not a degradation, it is
+    /// a schema violation: promoting it would alias rowids and hand the stage
+    /// another entry's gloss, silently and on every query. That fails the
+    /// prepare, discards the staging directory, and retries next launch — the
+    /// correct outcome, because there is no degraded-but-useful version of it.
+    private func indexJMDict(_ stagedArtifact: URL) throws -> Bool {
+        do {
+            try JMDictFTSIndex.build(at: stagedArtifact)
+        } catch let error as JMDictFTSIndex.IndexError {
+            throw error
+        } catch {
+            print("[dictionary-store] gloss index unavailable: \(error)")
+            return false
+        }
+        return JMDictFTSIndex.isPresent(at: stagedArtifact)
     }
 
     /// Proves the freshly decompressed dictionary is openable and actually
@@ -408,7 +477,13 @@ final class DictionaryStore: Sendable {
     /// word must hit at least one entry in the staged database. A corrupt or
     /// truncated database surfaces here as the lookup's SQLite error, not as
     /// a silent pass (an open alone would succeed — SQLite opens lazily).
-    private func smokeQueryJMDict(_ databaseURL: URL) throws {
+    ///
+    /// When an index was built it must also *answer* — a present-but-empty
+    /// `gloss_fts` passes every schema probe and then returns nothing for every
+    /// query, which is indistinguishable from a word that has no gloss.
+    /// `indexed` is false only where this platform has no FTS5, which
+    /// `indexJMDict` has already logged.
+    private func smokeQueryJMDict(_ databaseURL: URL, indexed: Bool) throws {
         let lookup = JMDictLookup(resolveDatabase: { databaseURL })
         do {
             guard try lookup.lookup(LookupCandidate(text: Self.smokeWord)) != nil else {
@@ -418,6 +493,10 @@ final class DictionaryStore: Sendable {
             }
         } catch let error as JMDictLookupError {
             throw DictionaryStoreError.smokeTestFailed(reason: error.localizedDescription)
+        }
+        guard indexed else { return }
+        guard JMDictFTSIndex.answers(at: databaseURL) else {
+            throw DictionaryStoreError.smokeTestFailed(reason: "gloss index answers nothing")
         }
     }
 

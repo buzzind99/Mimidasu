@@ -117,13 +117,95 @@ extension DictionaryStoreTests {
     func jmDictAdoptsExistingDestination() async throws {
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
         let existing = destination.appendingPathComponent(JMDictPin.preparedFileName)
-        try Data(previousDicContents.utf8).write(to: existing)
+        // Adoption is index-aware, so the file left by the "earlier launch" has
+        // to carry one — otherwise the store is right to re-stage it.
+        try JMDictFTSIndex.build(at: copyOf(smokeDatabase, to: existing))
         let store = makeStore()
 
         let url = try await store.prepareJMDict()
 
         #expect(url == existing)
         #expect(fakePrepareCalls == 0, "an existing database must short-circuit the decompress")
+    }
+
+    @Test("re-stages a JMDict database prepared before the gloss index existed")
+    func jmDictReStagesIndexLessDatabase() async throws {
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        let existing = destination.appendingPathComponent(JMDictPin.preparedFileName)
+        try FileManager.default.copyItem(at: smokeDatabase, to: existing)
+        #expect(!JMDictFTSIndex.isPresent(at: existing))
+        fakePrepareCopySource = smokeDatabase
+        let store = makeStore()
+
+        let url = try await store.prepareJMDict()
+
+        // With the `LIKE` scan deleted, an index-less database answers every
+        // Latin query with zero rows and no error — so it must not be adopted.
+        // This is the self-heal for every install that promoted before the
+        // index existed.
+        #expect(fakePrepareCalls == 1)
+        #expect(JMDictFTSIndex.isPresent(at: url))
+        #expect(JMDictFTSIndex.answers(at: url))
+    }
+
+    @Test("stamps the index so a DDL change can outrun the filename")
+    func jmDictBuildStampsTheIndex() async throws {
+        fakePrepareCopySource = smokeDatabase
+        let store = makeStore()
+
+        let url = try await store.prepareJMDict()
+
+        let database = try SQLiteDatabase(path: url.path)
+        defer { database.close() }
+        let stamp = try database.statement(JMDictFTSIndex.schemaVersionSQL)
+        #expect(try stamp.step())
+        #expect(stamp.requiredInt(0) == JMDictFTSIndex.schemaVersion)
+    }
+
+    @Test("re-stages an index built against an older schema version")
+    func jmDictReStagesStaleIndex() async throws {
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        let existing = destination.appendingPathComponent(JMDictPin.preparedFileName)
+        try copyOf(smokeDatabase, to: existing)
+        // A database whose `gloss_fts` exists under the current name but was
+        // built from different constants is the dangerous case: the search
+        // stage's `rowid >> 7` / `rowid & 127` decode would read the wrong
+        // `ord` off every row and hand back another entry's gloss, with no
+        // error anywhere in the stack. Name presence cannot catch that; the
+        // stamp can.
+        try JMDictFTSIndex.build(at: existing)
+        let stale = try SQLiteDatabase.writable(path: existing.path)
+        try stale.execute("PRAGMA user_version = 0")
+        stale.close()
+        #expect(!JMDictFTSIndex.isPresent(at: existing))
+        fakePrepareCopySource = smokeDatabase
+        let store = makeStore()
+
+        let url = try await store.prepareJMDict()
+
+        #expect(fakePrepareCalls == 1)
+        #expect(JMDictFTSIndex.isPresent(at: url))
+    }
+
+    @Test("this platform can build an FTS5 index, so a missing one means re-stage")
+    func platformHasFTS5() {
+        // Pins the assumption the adoption guard is built on. `isAdoptable`
+        // re-stages a database with no index *because* this is true — without
+        // it, a platform where the build is legitimately fail-soft would
+        // re-decompress on every launch forever. On a host without FTS5 this
+        // expectation is the thing that has to change.
+        #expect(SQLiteDatabase.supportsFTS5)
+        #expect(JMDictFTSIndex.isAvailable)
+    }
+
+    /// `content` copied to `url`, which the caller then treats as the artifact.
+    private func copyOf(_ content: URL, to url: URL) -> URL {
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.copyItem(at: content, to: url)
+        return url
     }
 
     @Test("is a no-op once the JMDict database is prepared")
@@ -228,6 +310,75 @@ extension DictionaryStoreTests {
         }
 
         #expect(error == .smokeTestFailed(reason: "no entry for 学生"))
+    }
+
+    @Test("refuses to promote a database whose gloss index cannot answer")
+    func jmDictSmokeRejectsSilentEmptyIndex() async throws {
+        // The lookup passes — 学生 exists — but every sense carries no gloss, so
+        // the index builds and answers nothing. Promoting this would ship a
+        // dictionary whose Latin search silently returns zero rows for every
+        // query, which is exactly how a broken index presents.
+        let glossless = try makeJMDictSmokeDatabase(emptyGloss: true)
+        defer { try? FileManager.default.removeItem(at: glossless.deletingLastPathComponent()) }
+        fakePrepareCopySource = glossless
+        let store = makeStore()
+
+        let error = await #expect(throws: DictionaryStore.DictionaryStoreError.self) {
+            try await store.prepareJMDict()
+        }
+
+        #expect(error == .smokeTestFailed(reason: "gloss index answers nothing"))
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: destination.appendingPathComponent(JMDictPin.preparedFileName).path
+            ),
+            "a database with a silent-empty index must not be promoted"
+        )
+    }
+
+    @Test("refuses to build an index whose rowid encoding would alias")
+    func jmDictRefusesOverflowingEntry() async throws {
+        // Seven bits address `ord`, and the pack is `entry_id * 128 + ord`.
+        // Senses are numbered from zero, so 128 of them fit exactly; the 129th
+        // has `ord = 128` and would collide onto the next entry's first rowid,
+        // making the stage read back a different entry's gloss with no error
+        // anywhere. The build fails instead — and unlike a missing FTS5 module,
+        // this is *not* fail-soft: there is no degraded-but-usable version of
+        // an index that returns the wrong rows.
+        let overflowing = try makeJMDictSmokeDatabase(sensesPerEntry: 129)
+        defer {
+            try? FileManager.default.removeItem(at: overflowing.deletingLastPathComponent())
+        }
+        fakePrepareCopySource = overflowing
+        let store = makeStore()
+
+        let error = await #expect(throws: JMDictFTSIndex.IndexError.self) {
+            try await store.prepareJMDict()
+        }
+
+        #expect(error == .senseCountOverflow(maxOrd: 128))
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: destination.appendingPathComponent(JMDictPin.preparedFileName).path
+            ),
+            "a database that cannot be indexed safely must not be promoted"
+        )
+    }
+
+    @Test("accepts an entry carrying the most senses the rowid pack can address")
+    func jmDictAcceptsTheSenseCountLimit() async throws {
+        // One below the refusal: the boundary is inclusive, so 127 senses still
+        // encodes and the prepare completes normally. Without this, "the
+        // builder refuses" would be satisfied by a threshold that is simply
+        // too low.
+        let atLimit = try makeJMDictSmokeDatabase(sensesPerEntry: 127)
+        defer { try? FileManager.default.removeItem(at: atLimit.deletingLastPathComponent()) }
+        fakePrepareCopySource = atLimit
+        let store = makeStore()
+
+        let url = try await store.prepareJMDict()
+
+        #expect(JMDictFTSIndex.isPresent(at: url))
     }
 
     @Test("fails when the bundled JMDict artifact is missing")

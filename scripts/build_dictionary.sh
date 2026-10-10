@@ -76,6 +76,12 @@ ARTIFACT_TAG="${PIN_TAG}.${PIN_BUILD}"
 PREPARED_NAME="jmdict-${ARTIFACT_TAG}.sqlite"
 ZST_NAME="${PREPARED_NAME}.zst"
 ZST_PATH="${DICT_DIR}/${ZST_NAME}"
+# The debug-checkout database. Same rows as RAW_DB plus the gloss index, which
+# the app builds at first launch into Application Support and which therefore
+# costs the bundle nothing. Tests and debug runs resolve this file (see
+# JMDictPin.devArtifactFileName), so without it every Latin gloss search would
+# run against an index-less database and silently return nothing.
+DEV_DB="${BUILD_DIR}/jmdict-${ARTIFACT_TAG}.dev.sqlite"
 
 MODE="build"
 REBUILD=0
@@ -135,6 +141,41 @@ check_pin_constant nameReleaseTag "${NAME_PIN_TAG}"
 check_pin_constant nameSourceAssetFileName "${NAME_PIN_ASSET}"
 check_pin_constant nameSourceSHA256 "${NAME_PIN_SHA256}"
 
+# The gloss FTS index's DDL lives in Swift (JMDictFTSIndex) and is re-stated
+# below to build the dev artifact. Two copies of a schema is exactly the kind
+# of duplication that rots, so the parts that must agree are grepped here and
+# the build hard-fails on drift — same idiom as the pin constants above. The
+# tokenizer options are the load-bearing ones: the whole recall argument for
+# this index rests on `case_sensitive 0` folding the case that `LIKE` could
+# not, and on `remove_diacritics 0` keeping the fold from reaching further.
+FTS_SWIFT="${REPO_ROOT}/Mimidasu/Dictionary/JMDictFTSIndex.swift"
+if [[ ! -f "${FTS_SWIFT}" ]]; then
+  echo "ERROR: ${FTS_SWIFT} not found; the gloss index DDL must exist in Swift and here." >&2
+  exit 1
+fi
+check_fts_constant() {
+  local needle="$1"
+  if ! grep -Fq -- "${needle}" "${FTS_SWIFT}"; then
+    echo "ERROR: JMDictFTSIndex no longer contains: ${needle}" >&2
+    echo "  update the dev-artifact DDL in ${BASH_SOURCE[0]} to match." >&2
+    exit 1
+  fi
+  echo "    fts.${needle}: ok"
+}
+check_fts_constant 'static let tableName = "gloss_fts"'
+check_fts_constant 'static let ordStride = 128'
+check_fts_constant 'static let ordShift = 7'
+check_fts_constant "case_sensitive 0 remove_diacritics 0"
+check_fts_constant 'static let schemaVersion = 1'
+# The stamp is what makes the dev artifact adoptable rather than permanently
+# stale, so it is interpolated from the same constant the guard above pins.
+FTS_SCHEMA_VERSION="$(sed -n 's/.*static let schemaVersion = \([0-9][0-9]*\).*/\1/p' "${FTS_SWIFT}" | head -1)"
+if [[ -z "${FTS_SCHEMA_VERSION}" ]]; then
+  echo "ERROR: could not read JMDictFTSIndex.schemaVersion out of ${FTS_SWIFT}." >&2
+  exit 1
+fi
+echo "    fts.schemaVersion: ${FTS_SCHEMA_VERSION}"
+
 # The produced artifact filename must match the Swift pin constants — the
 # versioned name is the staleness key (§0.1 item 4). preparedFileName is
 # interpolated in Swift, so guard the derivation expressions themselves
@@ -165,9 +206,14 @@ fi
 if [[ "${MODE}" == "build" && "${REBUILD}" == "0" && -s "${ZST_PATH}" ]]; then
   if ! command -v zstd >/dev/null 2>&1; then
     echo "WARNING: zstd not found; cannot verify ${ZST_NAME}, rebuilding."
-  elif zstd -q -t "${ZST_PATH}" 2>/dev/null; then
+  elif zstd -q -t "${ZST_PATH}" 2>/dev/null && [[ -s "${DEV_DB}" ]]; then
     echo "==> ${ZST_NAME} already built and valid; skipping (use --rebuild to force)."
     exit 0
+  elif zstd -q -t "${ZST_PATH}" 2>/dev/null; then
+    # The bundle is fine but the dev artifact is missing or empty — a pin bump
+    # that skipped, or an interrupted index build. Rebuild both rather than
+    # leaving a checkout whose live tests resolve an index-less database.
+    echo "==> ${ZST_NAME} is valid but $(basename "${DEV_DB}") is missing; rebuilding."
   else
     echo "WARNING: ${ZST_PATH} exists but failed its integrity check; rebuilding."
   fi
@@ -259,6 +305,41 @@ python3 "${REPO_ROOT}/scripts/jmdict_build.py" "${JSON_PATH}" "${NAME_JSON_PATH}
   "${NAME_PIN_TAG}" "${NAME_PIN_SHA256}" "${NAME_PIN_ASSET}" 2>&1 | tee "${BUILD_LOG}"
 
 zstd -q -t "${ZST_PATH}"
+
+# The dev artifact: RAW_DB plus the gloss index, built by the same DDL the app
+# applies at first launch. Debug checkouts and the live tests resolve this file
+# rather than RAW_DB, because the app has no LIKE fallback and a database with
+# no index answers every Latin gloss query with zero rows.
+echo "==> Building $(basename "${DEV_DB}") (gloss index)"
+rm -f "${DEV_DB}"
+cp "${RAW_DB}" "${DEV_DB}"
+sqlite3 "${DEV_DB}" <<FTSEOF
+CREATE VIRTUAL TABLE gloss_fts USING fts5(
+  gloss,
+  tokenize='trigram case_sensitive 0 remove_diacritics 0',
+  content='', columnsize=0);
+INSERT INTO gloss_fts(rowid, gloss) SELECT entry_id * 128 + ord, gloss FROM senses;
+INSERT INTO gloss_fts(gloss_fts) VALUES('optimize');
+PRAGMA user_version = ${FTS_SCHEMA_VERSION};
+FTSEOF
+# Present-but-empty is the failure worth catching: it passes every schema probe
+# and then answers nothing, which is indistinguishable from "no such gloss".
+# A count(*) cannot detect it — a contentless FTS5 table refuses to be scanned
+# — so the probe is a trigram of a gloss that is known to exist.
+PROBE="$(sqlite3 "${DEV_DB}" "SELECT substr(gloss, 1, 3) FROM senses WHERE gloss <> '' LIMIT 1;")"
+INDEX_ROWS="$(sqlite3 "${DEV_DB}" "SELECT count(*) FROM gloss_fts WHERE gloss_fts MATCH '\"${PROBE}\"';")"
+if [[ -z "${PROBE}" || "${INDEX_ROWS}" == "0" ]]; then
+  echo "ERROR: gloss index built but answers nothing for its own probe '${PROBE}';" >&2
+  echo "  refusing to publish $(basename "${DEV_DB}")" >&2
+  exit 1
+fi
+echo "    gloss_fts answers '${PROBE}' on ${INDEX_ROWS} senses"
+# A pin bump renames the artifact; sweep the dev artifact's predecessors the
+# same way the app sweeps stale prepared databases, so build/ cannot accumulate
+# a 140 MB file per past pin.
+rm -f "${BUILD_DIR}"/jmdict-*.dev.sqlite
+
 echo
 echo "Done. package.sh bundles ${ZST_NAME} into Mimidasu.app/Contents/Resources;"
-echo "DictionaryStore stages/decompresses it to ${PREPARED_NAME}."
+echo "DictionaryStore stages/decompresses it to ${PREPARED_NAME} and builds the index."
+echo "Debug checkouts resolve $(basename "${DEV_DB}")."

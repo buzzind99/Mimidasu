@@ -338,16 +338,19 @@ final class JMDictLookupTests {
                 == prepared
         )
 
-        // Without it, the debug checkout (repo-anchored build/<tag>.sqlite)
-        // resolves.
+        // Without it, the debug checkout (repo-anchored build/<tag>.dev.sqlite)
+        // resolves. The dev artifact, not the raw build output: the raw one has
+        // no gloss index, and a lookup that resolved it would run every Latin
+        // gloss search against a database the stage cannot query.
         #if DEBUG
-            let checkout = DictionaryStore.debugRepoURL("build/\(JMDictPin.preparedFileName)")
+            let checkout = DictionaryStore.debugRepoURL(JMDictPin.debugCheckoutPath)
             #expect(
                 JMDictLookup.defaultDatabaseURL(
                     destination: destination,
                     fileExists: { url in url == checkout }
                 ) == checkout
             )
+            #expect(checkout.lastPathComponent == JMDictPin.devArtifactFileName)
         #endif
 
         // Neither resolves → nil (lookups then throw .databaseMissing).
