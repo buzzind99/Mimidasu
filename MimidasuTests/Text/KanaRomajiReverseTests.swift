@@ -126,6 +126,72 @@ struct KanaRomajiReverseTests {
         #expect(!both.variants.contains(both.kana))
     }
 
+    // MARK: Loanword digraphs
+
+    @Test("reads the loanword digraphs whose plain keys belong to wapuro")
+    func loanwordDigraphVariants() throws {
+        // Each collision: the plain reading stays primary — wapuro input
+        // keeps its exact answer — and the loanword reading the forward
+        // path also spells rides in as a variant.
+        struct Pair {
+            let romaji: String
+            let plain: String
+            let loanword: String
+        }
+        let pairs = [
+            Pair(romaji: "ti", plain: "ち", loanword: "てぃ"),
+            Pair(romaji: "di", plain: "ぢ", loanword: "でぃ"),
+            Pair(romaji: "tu", plain: "つ", loanword: "とぅ"),
+            Pair(romaji: "du", plain: "づ", loanword: "どぅ"),
+            Pair(romaji: "tyu", plain: "ちゅ", loanword: "てゅ"),
+            Pair(romaji: "dyu", plain: "ぢゅ", loanword: "でゅ"),
+            Pair(romaji: "wo", plain: "を", loanword: "うぉ")
+        ]
+        for pair in pairs {
+            let conversion = try #require(KanaRomaji.convert(pair.romaji))
+            #expect(conversion.kana == pair.plain, "\(pair.romaji)")
+            #expect(conversion.variants == [pair.loanword], "\(pair.romaji)")
+        }
+    }
+
+    @Test("reaches the loanword spellings the transcript itself prints")
+    func loanwordFlagships() throws {
+        // The romaji the annotator prints under アイデンティティ must
+        // convert back to a reading that mirrors onto it.
+        let identity = try #require(KanaRomaji.convert("aidentiti"))
+        #expect(identity.kana == "あいでんちち")
+        #expect(identity.variants == ["あいでんてぃてぃ"])
+        #expect(identity.fullyConsumed)
+
+        let wookason = try #require(KanaRomaji.convert("wookason"))
+        // The loanword reading rides in beside the long-vowel alternate the
+        // oo↔ou machinery already offered (`wo` + `ou` → をうかそん).
+        #expect(wookason.kana == "をおかそん")
+        #expect(wookason.variants == ["うぉおかそん", "をうかそん"])
+    }
+
+    @Test("keeps the wapuro reading primary where a loanword key lands")
+    func wapuroStaysPrimary() {
+        #expect(KanaRomaji.convert("tuki")?.kana == "つき")
+        #expect(KanaRomaji.convert("tuki")?.variants == ["とぅき"])
+        #expect(KanaRomaji.convert("hati")?.kana == "はち")
+        #expect(KanaRomaji.convert("hati")?.variants == ["はてぃ"])
+        #expect(KanaRomaji.convert("duku")?.kana == "づく")
+        #expect(KanaRomaji.convert("duku")?.variants == ["どぅく"])
+    }
+
+    @Test("carries the loanword pass through sokuon and moraic n")
+    func loanwordScannerInterplay() {
+        // The geminate consumes its doubled consonant before the table sees
+        // "ti"; `n` resolves to ん before "t", which starts no な行 mora.
+        #expect(KanaRomaji.convert("chotti")?.kana == "ちょっち")
+        #expect(KanaRomaji.convert("chotti")?.variants == ["ちょってぃ"])
+        #expect(KanaRomaji.convert("konti")?.kana == "こんち")
+        #expect(KanaRomaji.convert("konti")?.variants == ["こんてぃ"])
+        // No loanword key lands, so nothing new is offered.
+        #expect(KanaRomaji.convert("toukyou")?.variants == ["とうきょお", "とおきょう"])
+    }
+
     // MARK: Partial input
 
     @Test("stops at an unfinished consonant and names it")

@@ -49,14 +49,27 @@ extension KanaRomaji {
         guard !scan.kana.isEmpty else { return nil }
         let onset = scan.leftover.isEmpty ? nil : trailingOnset(of: scan.leftover)
         // Deduped and stripped of the primary in one pass: a variant that
-        // happened to convert the same way is not a second reading, it is the
-        // same reading spelled differently. Sorted, so the candidate order (and
-        // therefore the whole search's tie-breaks) is identical every run.
-        let variants = alternateLongVowelSpellings(spelling)
-            .map { alternate in scanned(alternate).kana }
+        // happened to convert the same way is not a second reading, it is
+        // the same reading spelled differently. Sorted, so the candidate
+        // order (and therefore the whole search's tie-breaks) is identical
+        // every run.
+        var variantKana = Set(
+            alternateLongVowelSpellings(spelling).map { alternate in scanned(alternate).kana }
+        )
+        // The loanword second pass: where the plain table reads ち the
+        // loanword table reads てぃ, and which of the two a headword stores
+        // is unknowable from the letters — the forward path spells both
+        // "ti" (ティ and ち alike). The plain reading stays primary so wapuro
+        // input (tuki, dukku) keeps its exact answer; the loanword reading
+        // rides in as a variant. Both passes consume the same input, so the
+        // incompleteness signals above describe them equally.
+        let loanword = scanned(spelling, table: loanwordSyllables)
+        if loanword.kana != scan.kana {
+            variantKana.insert(loanword.kana)
+        }
         return RomajiConversion(
             kana: scan.kana,
-            variants: Set(variants).subtracting([scan.kana]).sorted(),
+            variants: variantKana.subtracting([scan.kana]).sorted(),
             fullyConsumed: scan.leftover.isEmpty,
             trailingOnset: onset
         )
@@ -107,7 +120,14 @@ private extension KanaRomaji {
     /// consonant is never a mora, so `mosh` stops after も with `sh` left
     /// over instead of eating the `s` as さ. Whatever is left over at that
     /// point is either a promise (`trailingOnset`) or noise (dropped).
-    static func scanned(_ romaji: String) -> Scan {
+    ///
+    /// `table` swaps the syllable table for `loanwordSyllables`, whose second
+    /// pass reads the loanword digraphs — every one of its keys is a plain
+    /// key of the same length, so both passes consume the same input and
+    /// differ only in the kana they emit.
+    static func scanned(
+        _ romaji: String, table: [String: String] = reverseSyllables
+    ) -> Scan {
         let characters = Array(romaji)
         var scan = Scan()
         var index = 0
@@ -128,7 +148,7 @@ private extension KanaRomaji {
                 index += next == "'" ? 2 : 1
                 continue
             }
-            if let (kana, length) = syllable(at: index, in: characters) {
+            if let (kana, length) = syllable(at: index, in: characters, table: table) {
                 scan.kana += kana
                 index += length
                 continue
@@ -139,10 +159,12 @@ private extension KanaRomaji {
     }
 
     /// The longest syllable starting at `index`, with its consumed length.
-    static func syllable(at index: Int, in characters: [Character]) -> (String, Int)? {
+    static func syllable(
+        at index: Int, in characters: [Character], table: [String: String]
+    ) -> (String, Int)? {
         for length in stride(from: min(3, characters.count - index), through: 1, by: -1) {
             let end = index + length
-            guard let kana = reverseSyllables[String(characters[index ..< end])] else { continue }
+            guard let kana = table[String(characters[index ..< end])] else { continue }
             return (kana, length)
         }
         return nil
@@ -342,6 +364,23 @@ private extension KanaRomaji {
         table.merge(extras) { _, extras in extras }
         return table
     }()
+
+    /// The loanword digraph readings the plain table cannot also spell: the
+    /// forward path spells ティ/ディ/トゥ/ドゥ/テュ/デュ/ウォ as
+    /// `ti/di/tu/du/tyu/dyu/wo`, and those keys already belong to the ち行
+    /// and を of wapuro romaji. Replacing the plain values would deafen the
+    /// search to wapuro input (`tuki` would never read つき again), so these
+    /// ride a second scan into `variants` instead.
+    private static let loanwordDigraphs: [String: String] = [
+        "ti": "てぃ", "di": "でぃ", "tu": "とぅ", "du": "どぅ",
+        "tyu": "てゅ", "dyu": "でゅ", "wo": "うぉ"
+    ]
+
+    /// The plain table with the loanword readings merged over it. Only
+    /// values change — every loanword key is a plain key of the same
+    /// length — so the loanword scan consumes exactly what the plain scan
+    /// consumes and the two disagree only where a key landed.
+    private static let loanwordSyllables: [String: String] = reverseSyllables.merging(loanwordDigraphs) { _, loanword in loanword }
 
     /// Consonant cluster → the morae it can begin.
     ///
