@@ -38,19 +38,27 @@ enum MatchHighlight {
     /// The scalar range of `pattern`'s first case-insensitive occurrence in
     /// `text`, or nil when it does not occur.
     ///
-    /// Case-insensitive because the gloss stage's SQL `LIKE` is
-    /// ASCII-case-insensitive: a query for `lose` matching `Lose` must
-    /// highlight the same run that ranked, or the badge would point at a
-    /// highlight the user cannot see. The needle is ASCII in practice, so
+    /// Case-insensitive because the gloss stage's SQL folds case: a query for
+    /// `lose` matching `Lose` must highlight the same run that ranked, or the
+    /// badge would point at a highlight the user cannot see. The contract is
+    /// that this fold agrees with the index tokenizer's, so that every row the
+    /// gloss stage returns is a row whose span can be located — the stage's
+    /// unreachable fallback depends on it. The needle is ASCII in practice, so
     /// lower-casing preserves scalar count and the range stays valid for the
     /// original string.
+    ///
+    /// The candidate scan compares slices in place rather than materialising
+    /// each one. The gloss stage grades every row a query matches — uncapped,
+    /// that is tens of thousands per keystroke — and allocating a fresh
+    /// `Array` per candidate position made this quadratic in allocations for
+    /// work that is a plain element-wise comparison.
     static func range(of pattern: String, in text: String) -> Range<Int>? {
         let needle = Array(pattern.lowercased().unicodeScalars)
         guard !needle.isEmpty else { return nil }
         let haystack = Array(text.lowercased().unicodeScalars)
         guard needle.count <= haystack.count else { return nil }
         for start in 0 ... (haystack.count - needle.count)
-            where Array(haystack[start ..< (start + needle.count)]) == needle
+            where haystack[start ..< (start + needle.count)].elementsEqual(needle)
         {
             return start ..< (start + needle.count)
         }
