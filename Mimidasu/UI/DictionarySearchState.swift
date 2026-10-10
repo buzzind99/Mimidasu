@@ -125,7 +125,10 @@ final class DictionarySearchState {
     ///
     /// The saturated arm is what a gloss-only query never needs: its total is
     /// complete on the first search, so its clicks are all reveals and its last
-    /// page simply ends the list with no footer at all.
+    /// page simply ends the list with no footer at all. A `commonOnly` search
+    /// is never saturated either — the ladder cannot measure that window
+    /// before the join that resolves `common`, so it runs every stage and its
+    /// probe arm can only ever fire on rows it already holds.
     var canLoadMore: Bool {
         visibleLimit < DictionarySearchEngine.maxRows
             && (outcome.hits.count > visibleLimit || outcome.saturated)

@@ -38,6 +38,17 @@ struct DictionarySearchStateTests {
         )
     }
 
+    /// A state over 120 rows under `かん`, a third of them common — the shape a
+    /// `mak` search has, where the prefix tier fills the window while the
+    /// common filter holds the answer well short of it.
+    private func makeCommonFilteredState() throws -> DictionarySearchStateFixture {
+        try DictionarySearchStateFixture(
+            extraWords: JMDictFixtureDatabase.bulkWords(
+                count: 120, readingPrefix: "かん", startingAt: 9_993_000
+            )
+        )
+    }
+
     /// A state whose engine points at a path that is not there, so every search
     /// lands as the missing-database fault.
     private func makeUnavailableState() -> DictionarySearchState {
@@ -384,6 +395,23 @@ struct DictionarySearchStateTests {
         #expect(state.isAtCeiling)
         // The rows past the ceiling are still there, and still counted.
         #expect(state.outcome.matchedCount == ceiling + pageSize)
+    }
+
+    @Test("a common-only answer carries no `+` and offers nothing to load")
+    func commonOnlyAnswerIsComplete() async throws {
+        let fixture = try makeCommonFilteredState()
+        let state = fixture.state
+
+        state.filters = DictionarySearchFilters(commonOnly: true)
+        state.query = "kan"
+        #expect(await pollUntil { state.outcome.hits.isEmpty == false })
+        #expect(await pollUntil { state.isSearching == false })
+
+        // The reported case: `mak` with COMMON on read `36 / 36+` and its
+        // load-more re-ran the same search forever. The count is the whole
+        // answer now, so the `+` and the button are both gone.
+        #expect(state.countText == "42 / 42")
+        #expect(state.canLoadMore == false)
     }
 
     @Test("the close resets the depth a query was paged to")
