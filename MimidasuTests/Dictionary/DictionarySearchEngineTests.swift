@@ -330,6 +330,20 @@ final class DictionarySearchEngineTests {
         #expect(DictionarySearchEngine.acceptsGlossQuery("ま") == false)
     }
 
+    @Test("keeps the scan budgets on the side of the payload they feed")
+    func scanBudgetsFeedThePayload() {
+        // A gloss cap under the payload ceiling can only hide — rows collapse
+        // to entries through `bestPerEntry`, so it has to clear `maxRows`
+        // before a screen can fill at all. A headroom above the scan ceiling
+        // truncates to the ceiling instead, which reads as a smaller headroom
+        // rather than as a broken one.
+        #expect(DictionarySearchEngine.glossFetchCap >= DictionarySearchEngine.maxRows)
+        #expect(
+            DictionarySearchEngine.prefixFetchHeadroom
+                <= DictionarySearchEngine.prefixScanCeiling
+        )
+    }
+
     // MARK: Filters
 
     @Test("splits words from names on the ingest offset")

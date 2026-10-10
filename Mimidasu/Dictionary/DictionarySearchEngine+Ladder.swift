@@ -211,6 +211,10 @@ extension DictionarySearchEngine {
     static func headwordRows(
         _ candidates: [HeadwordCandidate], db: SQLiteDatabase
     ) throws -> [CandidateRow] {
+        assert(
+            prefixFetchHeadroom <= prefixScanCeiling,
+            "headroom above the scan ceiling truncates to the ceiling instead"
+        )
         var rows: [CandidateRow] = []
         for candidate in candidates {
             try checkCancellation()

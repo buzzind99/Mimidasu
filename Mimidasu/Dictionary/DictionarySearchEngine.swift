@@ -25,13 +25,25 @@ final class DictionarySearchEngine: Sendable {
     /// Prefix survivors kept per candidate for ranking. A 1-mora prefix scan
     /// can match thousands of headwords; keeping the shortest of them is what
     /// makes the tightest ones the ones on screen.
-    static let prefixFetchHeadroom = 2000
+    ///
+    /// The headroom truncates on `matchedLength`, a key that exists before the
+    /// `entries` join, while `rank` leads with `common` — so a headroom below
+    /// the scan's real population discards exactly the common entries the
+    /// ranking would have promoted. Measured on a 1-mora query, doubling this
+    /// lifts the common entries in the first screen by roughly half again, for
+    /// single-digit milliseconds of `assemble` join time.
+    static let prefixFetchHeadroom = 8000
     /// Raw rows a prefix scan may touch before the fetch is cut. Without it a
     /// single-mora query walks the whole kana block on every keystroke.
     static let prefixScanCeiling = 20000
     /// Gloss rows fetched for ranking. The `senses` scan cannot use an index,
     /// so this is the only thing bounding a rare term's full-table walk.
-    static let glossFetchCap = 400
+    ///
+    /// It must not sit below `maxRows`: a cap under the payload ceiling can
+    /// only ever hide, and one row can be several senses of one entry, so
+    /// `bestPerEntry` collapses well under the cap. Below this a query whose
+    /// true answer fits on screen answers short.
+    static let glossFetchCap = 1200
     /// Shortest Latin query the gloss stage will answer. Below this, a
     /// substring match is noise rather than a search.
     static let glossMinLatinLength = 3
