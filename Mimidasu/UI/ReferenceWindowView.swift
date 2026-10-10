@@ -38,15 +38,11 @@ extension ReferenceWindow {
 /// scenes (D1): they are two views of the same data — the dictionary everything
 /// else looks words up in, and the words this user starred out of it — and a
 /// second window would mean a second place to look for either.
-enum ReferenceMode: String, CaseIterable, Identifiable {
+enum ReferenceMode: String {
     case dictionary
     case favorites
 
     static let storageKey = "ReferenceWindowMode"
-
-    var id: String {
-        rawValue
-    }
 
     var title: String {
         switch self {
@@ -55,7 +51,15 @@ enum ReferenceMode: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The brand mark's glyph and the switcher's selected button.
+    /// The mode a header flip lands on.
+    var other: ReferenceMode {
+        switch self {
+        case .dictionary: .favorites
+        case .favorites: .dictionary
+        }
+    }
+
+    /// The brand mark's glyph and the floating openers' glyph.
     var icon: String {
         switch self {
         case .dictionary: "book.fill"
@@ -192,9 +196,9 @@ struct ReferenceWindowView: View {
     // MARK: - Chrome
 
     /// Settings-style header band, following the favorites header: brand mark,
-    /// title, and a trailing count. The switcher sits between the title and
-    /// the count — close to the mark it describes, and far from the count the
-    /// two modes fill very differently.
+    /// title, and a trailing count. The flip sits between the title and the
+    /// count — close to the mark it retargets, and far from the count the two
+    /// modes fill very differently.
     private var header: some View {
         HStack(spacing: 9) {
             ZStack {
@@ -207,7 +211,7 @@ struct ReferenceWindowView: View {
             Text(mode.title)
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(Theme.primaryText)
-            modeSwitcher
+            modeFlipButton
             Spacer()
             countLabel
         }
@@ -215,40 +219,28 @@ struct ReferenceWindowView: View {
         .padding(.vertical, 14)
     }
 
-    /// Two icon buttons rather than a segmented capsule: the modes are named by
-    /// their glyph (a book, a star) and both icons already appear in the app's
-    /// chrome, so the switcher needs no label to be legible. The selected one
-    /// takes the accent fill; the other washes on hover, so the affordance is
-    /// discoverable without a third state.
-    private var modeSwitcher: some View {
-        HStack(spacing: 2) {
-            ForEach(ReferenceMode.allCases) { candidate in
-                modeButton(candidate)
-            }
-        }
-    }
-
-    private func modeButton(_ candidate: ReferenceMode) -> some View {
-        let selected = candidate == mode
-        return Button {
-            modeRaw = candidate.rawValue
+    /// One flip button rather than a two-button switcher: the mark and the
+    /// title already name the active mode, so a selected switcher glyph
+    /// repeated it — two identical pink circles on either side of the title.
+    /// The double arrow reads as "swap", wears the same 24pt tile-filled
+    /// circle as the entry pager's buttons, and the help text names where a
+    /// press lands.
+    private var modeFlipButton: some View {
+        Button {
+            modeRaw = mode.other.rawValue
         } label: {
-            Image(systemName: candidate.icon)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(selected ? Color.white : Theme.secondaryText)
+            Image(systemName: "arrow.left.arrow.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Theme.secondaryText)
                 .frame(width: 24, height: 24)
-                .background {
-                    if selected {
-                        Circle().fill(Theme.accentPink)
-                    }
-                }
+                .background(Theme.tileFill.clipShape(Circle()))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .hoverHighlight(Circle(), isEnabled: !selected)
-        .help(candidate.title)
-        .accessibilityLabel(candidate.title)
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .pointerStyle(.link)
+        .hoverHighlight(Circle())
+        .help("Switch to \(mode.other.title)")
+        .accessibilityLabel("Switch to \(mode.other.title)")
     }
 
     /// The trailing count, following the active mode. Favorites keeps its
