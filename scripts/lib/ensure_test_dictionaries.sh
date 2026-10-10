@@ -78,9 +78,12 @@ DEV_DB="${BUILD_DIR}/jmdict-${ARTIFACT_TAG}.dev.sqlite"
 PREPARED_JM="${PREPARED}/jmdict-${ARTIFACT_TAG}.sqlite"
 if [[ -f "${DEV_DB}" ]]; then
   # Probed with a trigram of a gloss that exists rather than a literal word, so
-  # the check holds for any corpus the pin might move to.
-  PROBE="$(sqlite3 "${PREPARED_JM}" "SELECT substr(gloss, 1, 3) FROM senses WHERE gloss <> '' LIMIT 1;" 2>/dev/null)"
-  ANSWERS="$(sqlite3 "${PREPARED_JM}" "SELECT count(*) FROM gloss_fts WHERE gloss_fts MATCH '\"${PROBE}\"';" 2>/dev/null)"
+  # the check holds for any corpus the pin might move to. Both probes must
+  # tolerate failure: on a freshly seeded database `gloss_fts` does not exist
+  # yet, sqlite3 exits non-zero, and under `set -e` an unchecked substitution
+  # would kill this script before the copy below ever runs.
+  PROBE="$(sqlite3 "${PREPARED_JM}" "SELECT substr(gloss, 1, 3) FROM senses WHERE gloss <> '' LIMIT 1;" 2>/dev/null || true)"
+  ANSWERS="$(sqlite3 "${PREPARED_JM}" "SELECT count(*) FROM gloss_fts WHERE gloss_fts MATCH '\"${PROBE}\"';" 2>/dev/null || true)"
   if [[ -z "${PROBE}" || "${ANSWERS}" == "0" || -z "${ANSWERS}" ]]; then
     echo "  indexing $PREPARED_JM"
     cp "${DEV_DB}" "${PREPARED_JM}"

@@ -311,6 +311,13 @@ zstd -q -t "${ZST_PATH}"
 # rather than RAW_DB, because the app has no LIKE fallback and a database with
 # no index answers every Latin gloss query with zero rows.
 echo "==> Building $(basename "${DEV_DB}") (gloss index)"
+# A pin bump renames the artifact; sweep the dev artifact's predecessors the
+# same way the app sweeps stale prepared databases, so build/ cannot accumulate
+# a 140 MB file per past pin. The sweep runs BEFORE the build and must stay
+# there: its glob matches every jmdict-*.dev.sqlite, the artifact this step is
+# about to produce included — swept after the build, it deletes the file the
+# live tests resolve and silently disables them.
+rm -f "${BUILD_DIR}"/jmdict-*.dev.sqlite
 rm -f "${DEV_DB}"
 cp "${RAW_DB}" "${DEV_DB}"
 sqlite3 "${DEV_DB}" <<FTSEOF
@@ -334,10 +341,6 @@ if [[ -z "${PROBE}" || "${INDEX_ROWS}" == "0" ]]; then
   exit 1
 fi
 echo "    gloss_fts answers '${PROBE}' on ${INDEX_ROWS} senses"
-# A pin bump renames the artifact; sweep the dev artifact's predecessors the
-# same way the app sweeps stale prepared databases, so build/ cannot accumulate
-# a 140 MB file per past pin.
-rm -f "${BUILD_DIR}"/jmdict-*.dev.sqlite
 
 echo
 echo "Done. package.sh bundles ${ZST_NAME} into Mimidasu.app/Contents/Resources;"
