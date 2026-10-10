@@ -211,7 +211,7 @@ struct DictionaryContentTests {
 
     @Test("marked-up hatsuon text is omitted and only zoPatts shows")
     func markedUpHatsuon() {
-        for marked in ["<あい'さつ>", "[あい]さつ", "あい･さつ", "あい~さつ"] {
+        for marked in ["<あい'さつ>", "[あい]さつ", "あい･さつ", "あい・さつ", "あい~さつ"] {
             let pill = DictionaryContent.pitchPill(for: entry(hatsuon: marked, zoPatts: "HLL"))
 
             #expect(pill == DictionaryContent.PitchPill(hatsuon: nil, zoPatts: "HLL"))

@@ -28,11 +28,11 @@ enum DictionaryContent {
     }
 
     /// `hatsuon` renders verbatim only when free of the Wadoku markup
-    /// markers (`< > [ ] ･ ~`); marked-up text omits the hatsuon part and
-    /// the pill shows `zoPatts` alone.
+    /// markers (`< > [ ] ･ ~` — both kana middle dots); marked-up text omits
+    /// the hatsuon part and the pill shows `zoPatts` alone.
     static func renderableHatsuon(_ hatsuon: String?) -> String? {
         guard let hatsuon, !hatsuon.isEmpty,
-              !hatsuon.contains(where: { marker in "<>[]･~".contains(marker) })
+              !hatsuon.contains(where: { marker in "<>[]･~・".contains(marker) })
         else { return nil }
         return hatsuon
     }
