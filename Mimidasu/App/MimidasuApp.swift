@@ -110,14 +110,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var teardownWatchdog: Timer?
     private var teardownCompleteObserver: NSObjectProtocol?
     private var keyWindowObserver: NSObjectProtocol?
-    private var favoritesWindowObserver: NSObjectProtocol?
+    private var referenceWindowObserver: NSObjectProtocol?
     private var auxiliaryCloseObserver: NSObjectProtocol?
     private var resignKeyObserver: NSObjectProtocol?
-    /// The live favorites window, if any — tracks instance identity so a
+    /// The live reference window, if any — tracks instance identity so a
     /// refocus never re-centers it, only a fresh window does.
-    private weak var favoritesWindow: NSWindow?
+    private weak var referenceWindow: NSWindow?
     /// The live Settings window, if any — same instance-identity tracking as
-    /// `favoritesWindow`: a sheet present/dismiss cycle re-keys the cached
+    /// `referenceWindow`: a sheet present/dismiss cycle re-keys the cached
     /// window without it being a fresh open.
     private weak var settingsWindow: NSWindow?
 
@@ -168,8 +168,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Settings dismisses on any click outside it: losing key status is
         // exactly that — the click landed on the main window, the desktop, or
         // another app — so resign-key closes the window. A window with an
-        // attached sheet is exempt: presenting the un-star confirmation moves
-        // key status to the sheet, and closing the window the instant the
+        // attached sheet is exempt: the only sheets this path can see are
+        // Settings' own — the cloud-provider disclosure and the
+        // dictionary-English notice — and closing the window the instant a
         // question appeared would be its own bug.
         //
         // The reference window is deliberately NOT on this path: it holds the
@@ -188,7 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 window.performClose(nil)
             }
         }
-        // The favorites list belongs to the main window's Space: it floats
+        // The reference window belongs to the main window's Space: it floats
         // over it (including fullscreen) and cannot be dragged to another
         // Space. SwiftUI exposes no scene modifier for collection behavior,
         // so it is set at the AppKit level on first key — the same bridge
@@ -203,15 +204,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the main window's Space) instead of reopening where it was last
         // closed. A fresh instance also opens centered; refocusing the open
         // window never moves it.
-        favoritesWindowObserver = NotificationCenter.default.addObserver(
+        referenceWindowObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
         ) { [weak self] note in
             let window = note.object as? NSWindow
             MainActor.assumeIsolated {
                 guard let self, let window, window.title == ReferenceWindow.title else { return }
                 window.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
-                if self.favoritesWindow !== window {
-                    self.favoritesWindow = window
+                if self.referenceWindow !== window {
+                    self.referenceWindow = window
                     window.center()
                 }
             }

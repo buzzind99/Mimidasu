@@ -27,8 +27,10 @@ enum DictionarySearchResponse: Sendable {
 @Observable
 @MainActor
 final class DictionarySearchState {
-    /// Same cadence as the Favorites field: one window, one feel.
-    static let searchDebounce = FavoritesWindowState.searchDebounce
+    /// Same cadence as the Favorites field: one window, one feel. Defined on
+    /// `ReferenceWindow`, which owns both modes, so neither mode's state type
+    /// is the other's dependency for a constant.
+    static let searchDebounce = ReferenceWindow.searchDebounce
 
     var query = "" {
         didSet { queryChanged(to: query) }

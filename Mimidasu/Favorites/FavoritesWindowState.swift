@@ -33,8 +33,9 @@ final class FavoritesWindowState {
     }
 
     /// Shared by both reference modes: one cadence for the window, so the two
-    /// search fields feel like the same control.
-    static let searchDebounce = Duration.milliseconds(150)
+    /// search fields feel like the same control. Defined on `ReferenceWindow`,
+    /// which owns both modes; this is the Favorites-mode spelling of it.
+    static let searchDebounce = ReferenceWindow.searchDebounce
 
     private let favorites: FavoritesStore
     private var searchTask: Task<Void, Never>?

@@ -19,6 +19,11 @@ enum ReferenceWindow {
     /// pointer.
     static let width: CGFloat = 460
     static let height: CGFloat = 692
+    /// The cadence both modes' search fields debounce at. It lives here, on the
+    /// window that owns both modes, rather than on either mode's state type: one
+    /// window has one feel, and a constant one mode defines for the other is a
+    /// coupling that reads as an accident.
+    static let searchDebounce = Duration.milliseconds(150)
 }
 
 extension ReferenceWindow {
