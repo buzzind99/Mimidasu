@@ -5,7 +5,8 @@ Consumes the stream-parsed JSON (already probe-passed by jmdict_probe.py —
 the run that emits the probe report must have used these exact files),
 writes the SQLite schema (JMDict words + JMnedict names in the same tables,
 names on a +10M ent_seq offset), reconciles row counts against the probe
-report, and compresses to zstd.
+report, builds the case-headword index the artifact ships with, and
+compresses to zstd.
 
 Usage: jmdict_build.py <json_path> <names_json_path> <db_path> <zst_path>
                        <probe_log_path> <artifact_tag> <pin_sha256> <pin_asset>
@@ -34,6 +35,19 @@ NAME_SEQ_OFFSET = 10_000_000
 # silently. Mirrored by JMDictPin.glossJoiner; build_dictionary.sh pins both
 # declarations against drift.
 GLOSS_JOINER = "\x1f"
+
+# The case-headword index the artifact ships with: the app's case-spelling
+# load (`JMDictCaseIndex.loadSQL`) is a scan of exactly the rows this partial
+# index selects, ~0.8 ms against a ~100 ms full B-tree walk, for ~57 KB raw.
+# Built here rather than at first launch so every install gets it straight
+# from the artifact and the app carries no writer for it at all. The DDL is
+# mirrored from JMDictCaseIndex.createSQL (Swift); build_dictionary.sh pins
+# the two against drift and probes the built database actually serves the
+# load from the index.
+HEADWORDS_CASE_DDL = (
+    "CREATE INDEX IF NOT EXISTS headwords_case ON headwords(text)"
+    " WHERE text <> lower(text)"
+)
 
 
 def nfkc(text):
@@ -445,6 +459,9 @@ def main(json_path, names_json_path, db_path, zst_path, probe_log_path,
         ("senses", str(counts["senses"])),
         ("headwords", str(counts["headwords"])),
     ])
+    # The shipped case-headword index, before VACUUM so its b-tree is compacted
+    # with everything else and the sizes below measure the final artifact.
+    conn.execute(HEADWORDS_CASE_DDL)
     conn.commit()
     # Compacts the b-trees after the streamed inserts; sizes below are
     # measured over the whole DB post-VACUUM.

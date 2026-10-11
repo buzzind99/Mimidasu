@@ -19,8 +19,10 @@ enum JMDictPin {
     /// release tag above stays the upstream GitHub identifier (it keys the
     /// download URL in `build_dictionary.sh`); this revision is the artifact
     /// staleness key — bumped when the build mapping changes under the same
-    /// upstream pin so prepared installs re-stage.
-    static let buildRevision = "6"
+    /// upstream pin so prepared installs re-stage. Revision 7 is the first
+    /// whose artifact carries the case-headword index; earlier revisions
+    /// left every index derivation to the app.
+    static let buildRevision = "7"
 
     /// The character the build joins a sense's glosses with in the stored
     /// `senses.gloss` column, and the character every consumer splits that
@@ -60,16 +62,20 @@ enum JMDictPin {
     static let preparedFileName = "\(artifactPrefix)\(releaseTag).\(buildRevision).\(artifactExtension)"
     static let bundledFileName = preparedFileName + ".zst"
 
-    /// The debug-checkout database, carrying the gloss index.
+    /// The debug-checkout database, carrying the gloss and case-headword
+    /// indexes.
     ///
-    /// The bundled `.zst` is the raw ingestion output and must stay that way —
-    /// the index is derived at first launch into Application Support, so it
-    /// costs the shipped bundle nothing. A debug checkout that resolved the
-    /// *raw* database instead would run every Latin gloss search against a
-    /// database with no index and no `LIKE` fallback, and fail silently.
-    /// `scripts/build_dictionary.sh` emits this file alongside the raw one by
-    /// applying the same DDL `JMDictFTSIndex` applies, and guards the two
-    /// against drift.
+    /// The bundled `.zst` already carries the case-headword index — the
+    /// ingestion build creates it before compression, and at 57 KB raw
+    /// (~18 KB compressed) it costs the shipped bundle nothing. The gloss
+    /// FTS index is the opposite: tens of megabytes for what it indexes, so
+    /// it stays out of the artifact and is derived at first launch into
+    /// Application Support. A debug checkout that resolved a database with
+    /// neither would run every Latin gloss search against no index and no
+    /// `LIKE` fallback, and fail silently. `scripts/build_dictionary.sh`
+    /// emits this file — the ingestion output plus the same DDL
+    /// `JMDictFTSIndex` applies at first launch — and guards the two
+    /// declarations against drift.
     static let devArtifactFileName =
         "\(artifactPrefix)\(releaseTag).\(buildRevision).dev.\(artifactExtension)"
 

@@ -53,7 +53,8 @@ PIN_URL="https://github.com/Bluskyo/JMDict_Extended/releases/download/${PIN_TAG}
 # stay the upstream release identifier (it keys the download URL); this
 # revision is the artifact staleness key — bump it when the build mapping
 # changes under the same upstream pin so prepared installs re-stage.
-PIN_BUILD="6"
+# Revision 7 is the first whose artifact carries the case-headword index.
+PIN_BUILD="7"
 
 # --- Names pin: JMnedict proper nouns, ingested into the same DB ----------------
 # Source is scriptin/jmdict-simplified (the JMDict pin above stays on
@@ -76,11 +77,14 @@ ARTIFACT_TAG="${PIN_TAG}.${PIN_BUILD}"
 PREPARED_NAME="jmdict-${ARTIFACT_TAG}.sqlite"
 ZST_NAME="${PREPARED_NAME}.zst"
 ZST_PATH="${DICT_DIR}/${ZST_NAME}"
-# The debug-checkout database. Same rows as RAW_DB plus the gloss index, which
-# the app builds at first launch into Application Support and which therefore
-# costs the bundle nothing. Tests and debug runs resolve this file (see
-# JMDictPin.devArtifactFileName), so without it every Latin gloss search would
-# run against an index-less database and silently return nothing.
+# The debug-checkout database: RAW_DB plus the gloss index. RAW_DB already
+# carries the case-headword index (jmdict_build.py builds it before
+# compression, and it ships inside the bundled artifact); the gloss index is
+# the one the app builds at first launch into Application Support and which
+# therefore costs the bundle nothing. Tests and debug runs resolve this file
+# (see JMDictPin.devArtifactFileName), so without the gloss index every Latin
+# gloss search would run against an index-less database and silently return
+# nothing.
 DEV_DB="${BUILD_DIR}/jmdict-${ARTIFACT_TAG}.dev.sqlite"
 
 MODE="build"
@@ -195,10 +199,12 @@ fi
 echo "    fts.schemaVersion: ${FTS_SCHEMA_VERSION}"
 
 # The case-headword index is a second copy of a schema kept in Swift
-# (JMDictCaseIndex), guarded the same way. The store re-stages a database that
-# lacks it, so the guard is about the dev artifact not quietly missing what
-# adoption now expects, and about the load not silently falling back to a full
-# scan — not about the engine's answers, which are the same either way.
+# (JMDictCaseIndex), guarded the same way — with the difference that the
+# shipped artifact now carries it, built by jmdict_build.py from a third
+# copy of the DDL pinned below. The app never writes the index, so these
+# guards are what keep a dropped or drifted build from shipping: the load
+# would silently fall back to a full scan of headwords. The engine's answers
+# are the same either way.
 CASE_SWIFT="${REPO_ROOT}/Mimidasu/Dictionary/JMDictCaseIndex.swift"
 if [[ ! -f "${CASE_SWIFT}" ]]; then
   echo "ERROR: ${CASE_SWIFT} not found; the case index DDL must exist in Swift and here." >&2
@@ -208,7 +214,7 @@ check_case_constant() {
   local needle="$1"
   if ! grep -Fq -- "${needle}" "${CASE_SWIFT}"; then
     echo "ERROR: JMDictCaseIndex no longer contains: ${needle}" >&2
-    echo "  update the dev-artifact DDL in ${BASH_SOURCE[0]} to match." >&2
+    echo "  update the ingestion DDL in ${BASH_SOURCE[0]} and jmdict_build.py to match." >&2
     exit 1
   fi
   echo "    case.${needle}: ok"
@@ -241,6 +247,17 @@ if [[ ! "${CASE_FLOOR}" =~ ^[0-9A-Fa-f]{1,6}$ || ! "${CASE_CEILING}" =~ ^[0-9A-F
   exit 1
 fi
 echo "    case.range: char(0x${CASE_FLOOR}) ..< char(0x${CASE_CEILING})"
+# The build's copy of the DDL, pinned the way GLOSS_JOINER is: both fragments
+# must exist in jmdict_build.py or the shipped artifact would quietly lose
+# the index every future rebuild.
+CASE_PY="${REPO_ROOT}/scripts/jmdict_build.py"
+if ! grep -Fq 'CREATE INDEX IF NOT EXISTS headwords_case ON headwords(text)' "${CASE_PY}" \
+  || ! grep -Fq '" WHERE text <> lower(text)"' "${CASE_PY}"; then
+  echo "ERROR: jmdict_build.py no longer builds the case-headword index;" >&2
+  echo "  the shipped artifact must carry it (see HEADWORDS_CASE_DDL there)." >&2
+  exit 1
+fi
+echo "    case.jmdict_build.py DDL: ok"
 
 # The produced artifact filename must match the Swift pin constants — the
 # versioned name is the staleness key (§0.1 item 4). preparedFileName is
@@ -373,10 +390,13 @@ python3 "${REPO_ROOT}/scripts/jmdict_build.py" "${JSON_PATH}" "${NAME_JSON_PATH}
 zstd -q -t "${ZST_PATH}"
 
 # The dev artifact: RAW_DB plus the gloss index, built by the same DDL the app
-# applies at first launch. Debug checkouts and the live tests resolve this file
-# rather than RAW_DB, because the app has no LIKE fallback and a database with
-# no index answers every Latin gloss query with zero rows.
-echo "==> Building $(basename "${DEV_DB}") (gloss + case indexes)"
+# applies at first launch. The case-headword index needs nothing here — RAW_DB
+# carries it because jmdict_build.py built it before compression, and the
+# probes below refuse to publish if that ever stops being true. Debug
+# checkouts and the live tests resolve this file rather than RAW_DB, because
+# the app has no LIKE fallback and a database with no gloss index answers
+# every Latin gloss query with zero rows.
+echo "==> Building $(basename "${DEV_DB}") (gloss index; case index inherited)"
 # A pin bump renames the artifact; sweep the dev artifact's predecessors the
 # same way the app sweeps stale prepared databases, so build/ cannot accumulate
 # a 140 MB file per past pin. The sweep runs BEFORE the build and must stay
@@ -394,9 +414,17 @@ CREATE VIRTUAL TABLE gloss_fts USING fts5(
 INSERT INTO gloss_fts(rowid, gloss) SELECT entry_id * 128 + ord, gloss FROM senses;
 INSERT INTO gloss_fts(gloss_fts) VALUES('optimize');
 PRAGMA user_version = ${FTS_SCHEMA_VERSION};
-CREATE INDEX IF NOT EXISTS headwords_case ON headwords(text)
-  WHERE text <> lower(text);
 FTSEOF
+# The case index ships in the artifact, so its absence here means the
+# ingestion build dropped it — refuse before any plan probe pretends
+# otherwise.
+CASE_PRESENT="$(sqlite3 "${DEV_DB}" "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'headwords_case';")"
+if [[ -z "${CASE_PRESENT}" ]]; then
+  rm -f "${DEV_DB}"
+  echo "ERROR: the built database does not carry the case-headword index (dev db removed);" >&2
+  echo "  jmdict_build.py must execute HEADWORDS_CASE_DDL before compressing." >&2
+  exit 1
+fi
 # The case index is an optimization, so the probe checks the property it exists
 # for: the load must be answered by the index rather than by the full walk. A
 # predicate that drifted from the index's would still return the same rows, and
@@ -446,5 +474,6 @@ echo "    gloss_fts answers '${PROBE}' on ${INDEX_ROWS} senses"
 
 echo
 echo "Done. package.sh bundles ${ZST_NAME} into Mimidasu.app/Contents/Resources;"
-echo "DictionaryStore stages/decompresses it to ${PREPARED_NAME} and builds the index."
+echo "DictionaryStore stages/decompresses it to ${PREPARED_NAME} and builds the"
+echo "gloss index (the case-headword index ships inside the artifact)."
 echo "Debug checkouts resolve $(basename "${DEV_DB}")."
