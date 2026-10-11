@@ -49,6 +49,40 @@ struct KanaRomajiTests {
         #expect(KanaRomaji.romaji(fromKana: kana) == expected)
     }
 
+    @Test("maps the katakana y-digraph twins to the spellings their hiragana rows spell", arguments: [
+        ("キャ", "kya"), ("キュ", "kyu"), ("キョ", "kyo"),
+        ("ギャ", "gya"), ("ギュ", "gyu"), ("ギョ", "gyo"),
+        ("シャ", "sha"), ("シュ", "shu"), ("ショ", "sho"),
+        ("ジャ", "ja"), ("ジュ", "ju"), ("ジョ", "jo"),
+        ("ヂャ", "ja"), ("ヂュ", "ju"), ("ヂョ", "jo"),
+        ("チャ", "cha"), ("チュ", "chu"), ("チョ", "cho"),
+        ("ニャ", "nya"), ("ニュ", "nyu"), ("ニョ", "nyo"),
+        ("ヒャ", "hya"), ("ヒュ", "hyu"), ("ヒョ", "hyo"),
+        ("ミャ", "mya"), ("ミュ", "myu"), ("ミョ", "myo"),
+        ("リャ", "rya"), ("リュ", "ryu"), ("リョ", "ryo"),
+        ("ビャ", "bya"), ("ビュ", "byu"), ("ビョ", "byo"),
+        ("ピャ", "pya"), ("ピュ", "pyu"), ("ピョ", "pyo"),
+    ])
+    func katakanaYDigraphTwins(kana: String, expected: String) {
+        #expect(KanaRomaji.romaji(fromKana: kana) == expected)
+    }
+
+    @Test("maps the voiced-vowel y-digraphs the reverse table already reads", arguments: [
+        ("ゔゃ", "vya"), ("ゔゅ", "vyu"), ("ゔょ", "vyo"),
+    ])
+    func voicedVowelYDigraphs(kana: String, expected: String) {
+        #expect(KanaRomaji.romaji(fromKana: kana) == expected)
+    }
+
+    /// Without the twin rows ジュ fell through singles as "jiyu", so the
+    /// romaji printed under a katakana reading never converted back.
+    @Test("spells the katakana readings whose romaji the search box reads back")
+    func katakanaDisplayFlagships() {
+        #expect(KanaRomaji.romaji(fromKana: "シャツ") == "shatsu")
+        #expect(KanaRomaji.romaji(fromKana: "ジュース") == "juusu")
+        #expect(KanaRomaji.romaji(fromKana: "シュワルツェネッガー") == "shuwarutseneggaa")
+    }
+
     // MARK: - Long vowels
 
     @Test("keeps long vowels mora-by-mora and repeats choonpu vowels", arguments: [

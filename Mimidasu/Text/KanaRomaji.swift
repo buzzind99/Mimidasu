@@ -91,6 +91,11 @@ enum KanaRomaji {
         "ふぁ": "fa", "ふぃ": "fi", "ふぇ": "fe", "ふぉ": "fo",
         "ふゃ": "fya", "ふゅ": "fyu", "ふょ": "fyo",
         "ゔぁ": "va", "ゔぃ": "vi", "ゔぇ": "ve", "ゔぉ": "vo",
+        // Compatibility normalization does not fold the small-kana scripts
+        // together, so without these rows ゔゅ falls through to singles as
+        // "vuyu" — a spelling the reverse table cannot read back (it spells
+        // the family "vya/vyu/vyo").
+        "ゔゃ": "vya", "ゔゅ": "vyu", "ゔょ": "vyo",
         "てぃ": "ti", "てゅ": "tyu", "とぅ": "tu",
         "でぃ": "di", "でゅ": "dyu", "どぅ": "du",
         "うぃ": "wi", "うぇ": "we", "うぉ": "wo",
@@ -108,6 +113,22 @@ enum KanaRomaji {
         "ツァ": "tsa", "ツィ": "tsi", "ツェ": "tse", "ツォ": "tso",
         "クァ": "kwa", "クィ": "kwi", "クェ": "kwe", "クォ": "kwo",
         "クヮ": "kwa",
+        // The katakana y-digraph twins: the same rows the hiragana block
+        // spells, which compatibility normalization likewise does not fold —
+        // without them ジュ falls through to singles as "jiyu", a spelling
+        // the reverse table cannot read back (it spells the family "ju").
+        "キャ": "kya", "キュ": "kyu", "キョ": "kyo",
+        "ギャ": "gya", "ギュ": "gyu", "ギョ": "gyo",
+        "シャ": "sha", "シュ": "shu", "ショ": "sho",
+        "ジャ": "ja", "ジュ": "ju", "ジョ": "jo",
+        "ヂャ": "ja", "ヂュ": "ju", "ヂョ": "jo",
+        "チャ": "cha", "チュ": "chu", "チョ": "cho",
+        "ニャ": "nya", "ニュ": "nyu", "ニョ": "nyo",
+        "ヒャ": "hya", "ヒュ": "hyu", "ヒョ": "hyo",
+        "ミャ": "mya", "ミュ": "myu", "ミョ": "myo",
+        "リャ": "rya", "リュ": "ryu", "リョ": "ryo",
+        "ビャ": "bya", "ビュ": "byu", "ビョ": "byo",
+        "ピャ": "pya", "ピュ": "pyu", "ピョ": "pyo",
         // Hiragana twins: compatibility normalization does not fold the
         // small-kana scripts together, so without these rows くぁ falls
         // through to singles as "kua" — a spelling the reverse table cannot

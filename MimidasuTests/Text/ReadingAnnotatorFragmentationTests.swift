@@ -176,7 +176,7 @@ struct ReadingAnnotatorFragmentationTests {
             ["シュワルツェネッガー"], gate: Self.gate("シュワルツェネッガー")
         )
 
-        #expect(describe(segments) == [["シュワルツェネッガー", "shiyuwarutseneggaa", nil]])
+        #expect(describe(segments) == [["シュワルツェネッガー", "shuwarutseneggaa", nil]])
     }
 
     @Test("a known token with a base form is ineligible at the lemma check")
