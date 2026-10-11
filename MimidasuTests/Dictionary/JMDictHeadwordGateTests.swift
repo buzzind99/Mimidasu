@@ -84,15 +84,21 @@ final class JMDictHeadwordGateTests {
         #expect(try engine.hasHeadword("そらしなそらしな") == false)
     }
 
-    @Test("throws on a missing database")
+    /// `hasHeadword` has its own `catch` and its own `openedDatabase` call, so it
+    /// earns its own copy of the infrastructure errors rather than borrowing
+    /// `lookup`'s — asserted as strongly as the ones in `JMDictLookupTests`,
+    /// which pin the exact case rather than merely the error type.
+    @Test("throws databaseMissing when no database resolves")
     func missingDatabaseThrows() throws {
         let missing = FileManager.default.temporaryDirectory
             .appendingPathComponent("mimidasu-jmdict-missing-\(UUID().uuidString).sqlite")
         let sut = JMDictLookup(resolveDatabase: { missing })
 
-        #expect(throws: JMDictLookupError.self) {
+        let thrown = #expect(throws: JMDictLookupError.self) {
             try sut.hasHeadword("食べる")
         }
+
+        #expect(thrown == .databaseMissing)
     }
 
     @Test("throws a typed sqlite error for a corrupt database")

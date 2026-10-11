@@ -62,13 +62,17 @@ final class JMDictNameEntryTests {
         #expect(reading == "きむら")
     }
 
+    /// 'keb' sorts before 'reb' under the WITHOUT ROWID primary key, so the keb
+    /// row is read first — and 9990110's two rows carry different levels (2 and
+    /// 5) so the choice is observable rather than a tie the reader could win
+    /// either way.
     @Test("coincident keb==reb spelling picks the keb row's metadata")
     func coincidentSpellingKebFirst() throws {
         let result = try #require(try engine.lookup(LookupCandidate(text: "カタ語")))
 
         let entry = try #require(result.entries.first)
         #expect(entry.entSeq == 9_990_110)
-        #expect(entry.jlpt == 2, "the keb row wins ('keb' sorts before 'reb' under the PK)")
+        #expect(entry.jlpt == 2, "the keb row wins — the reb row carries its own 5")
         #expect(entry.hatsuon == "かた'ご")
         #expect(entry.zoPatts == "HH")
     }

@@ -91,8 +91,9 @@ struct DictionarySearchEngineLiveTests {
 
         #expect(outcome.truncated)
         #expect(outcome.isFloor)
-        // Two Latin characters cannot reach the gloss stage, so no stage was
-        // ever skipped and this floor is the bound and only the bound.
+        // `ま` is Japanese input, which `acceptsGlossQuery` refuses outright, so
+        // the gloss stage was never a candidate and no stage was ever skipped:
+        // this floor is the bound and only the bound.
         #expect(outcome.saturated == false)
         // The window is not what cleared it, because nothing can.
         let deep = try engine.search("ま", filters: filters, limit: DictionarySearchEngine.maxRows)
@@ -152,9 +153,14 @@ struct DictionarySearchEngineLiveTests {
         defer { engine.close() }
 
         let task = Task {
-            // Yield so the canceller runs first: the search below is synchronous
-            // and would otherwise finish before the cancel lands.
-            await Task.yield()
+            // The sleep is the cancellation checkpoint: `task.cancel()` below
+            // runs on this thread while the task is parked here, so the search
+            // always begins in a task that is already cancelled — whether the
+            // cancel landed before the task started or during the sleep, and
+            // without betting on the scheduler the way `Task.yield()` does. The
+            // sleep's own cancellation is swallowed on purpose; the throw the
+            // test reads has to be the engine's.
+            try? await Task.sleep(for: .milliseconds(50))
             _ = try engine.search("し", filters: DictionarySearchFilters())
         }
         task.cancel()

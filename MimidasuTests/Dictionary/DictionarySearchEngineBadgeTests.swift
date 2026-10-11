@@ -191,10 +191,12 @@ final class DictionarySearchEngineBadgeTests {
     /// `headwords` is keyed `(text, entry_id, kind)`, not `(text, entry_id)`,
     /// and 9990110 stores カタ語 under both kinds. Matching the key's prefix
     /// alone returned two rows, and `entryMetadata`'s `out[entSeq] = …` kept the
-    /// last — the *reb* row, which carries no level. The entry would then render
-    /// without its JLPT badge while the tap lookup through `JMDictLookup`, which
-    /// resolves the same spelling keb-first, showed the level. One row per
-    /// entry is the fix, and this is the entry that proves it.
+    /// last — the *reb* row. The entry would then render under the wrong
+    /// writing's level while the tap lookup through `JMDictLookup`, which
+    /// resolves the same spelling keb-first, showed the kanji row's. One row per
+    /// entry is the fix, and this is the entry that proves it: its two rows
+    /// carry JLPT 2 and 5, so picking the wrong one is visible rather than a
+    /// tie the join could win either way.
     @Test("a coincident keb==reb spelling resolves its keb row's level")
     func coincidentSpellingKeepsTheKanjiLevel() throws {
         let hit = try #require(search("coincident spelling").hits.first)

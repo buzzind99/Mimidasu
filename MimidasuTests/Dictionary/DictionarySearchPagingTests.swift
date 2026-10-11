@@ -44,10 +44,16 @@ struct DictionarySearchPagingTests {
     /// the prefix stage's own `prefixFetchHeadroom` keeps, so the survivors
     /// behind that bound are the whole of what this fixture can prove. `かん`
     /// prefixes nothing in the base fixture, so the count is exact.
+    ///
+    /// The start sits well below `DictionaryContent.nameSeqOffset`: 8,001 rows
+    /// from 9_994_000 straddled it, and roughly 2,000 of them were being
+    /// classified as JMnedict names by `filters.admits`. Nothing here asserts
+    /// under a name or words scope today, so that miscount would have stayed
+    /// invisible; the margin is the guard.
     private func makeHeadroomBoundFixture() throws -> DictionarySearchFixture {
         try DictionarySearchFixture(extraWords: JMDictFixtureDatabase.bulkWords(
             count: DictionarySearchEngine.prefixFetchHeadroom + 1,
-            readingPrefix: "かん", startingAt: 9_994_000
+            readingPrefix: "かん", startingAt: 9_980_000
         ))
     }
 

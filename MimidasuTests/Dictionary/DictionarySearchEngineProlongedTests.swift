@@ -19,8 +19,14 @@ struct DictionarySearchEngineProlongedTests {
         #expect(texts.contains("ぱあてぃい"))
         #expect(texts.contains("ぱーてぃー"))
         #expect(texts.contains("パーティー"))
-        #expect(candidates.filter { candidate in candidate.matchKind == .exact }
-            .allSatisfy { candidate in candidate.probe == .exact })
+        // The exact tier is what a primary-key seek answers, so it is worth
+        // pinning rather than restating: the plain-vowel reading plus all seven
+        // dash/loanword variants, each in both scripts (8 × 2), plus the query
+        // and its uppercase probing the Latin headwords verbatim. Losing a
+        // variant's exact probe — or a script-switch probe leaking into it —
+        // moves this number, where `matchKind == .exact` implies
+        // `probe == .exact` by construction and cannot.
+        #expect(candidates.filter { candidate in candidate.probe == .exact }.count == 18)
     }
 
     @Test("a romaji query probes the script switches its conversion hides")

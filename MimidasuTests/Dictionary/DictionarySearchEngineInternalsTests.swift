@@ -490,6 +490,15 @@ final class DictionarySearchEngineInternalsTests {
         // default closures are callable without a fixture is the point, and an
         // empty query never reaches them.
         #expect(try sut.search("", filters: DictionarySearchFilters()) == .empty)
+        // The falsifiable half, and the reason the first line is a smoke test
+        // rather than a pin: closing first drives a *real* query through the
+        // default-wired instance and lands on the one branch that needs no
+        // database anywhere — a closed handle answers before the resolver is
+        // ever consulted.
+        sut.close()
+        #expect(throws: DictionarySearchError.databaseClosed) {
+            try sut.search("ま", filters: DictionarySearchFilters())
+        }
     }
 
     @Test("binds a candidate list by id")
