@@ -16,13 +16,14 @@ import Foundation
 /// default destination), so the app's real library directory only ever
 /// gains the exact file a first launch would produce.
 ///
-/// It copies the **dev artifact**, which carries the gloss index, rather than
-/// the raw ingestion output. The gloss stage has no `LIKE` fallback, so an
-/// index-less database answers every Latin query with zero rows — and that
-/// looks exactly like a database with no English glosses, which is the kind of
-/// failure a test suite reports as a pass. When only the raw artifact exists
-/// the index is built onto the copy, since building it is what a first launch
-/// does anyway.
+/// It copies the **dev artifact**, which carries the gloss and case-headword
+/// indexes, rather than the raw ingestion output. The gloss stage has no
+/// `LIKE` fallback, so an index-less database answers every Latin query with
+/// zero rows — and that looks exactly like a database with no English
+/// glosses, which is the kind of failure a test suite reports as a pass.
+/// (The case-headword index rides inside both files, shipped by the
+/// ingestion build.) When only the raw artifact exists the gloss index is
+/// built onto the copy, since building it is what a first launch does anyway.
 ///
 /// "Carries the index" means an index the store would actually **adopt**: the
 /// same `JMDictFTSIndex.isPresent` check the app makes, so a destination left

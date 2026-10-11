@@ -5,9 +5,12 @@ import Testing
 
 /// The derived index the engine's case-spelling load rides.
 ///
-/// Every test works on its own copy of a throwaway fixture database, because
-/// `build(at:)` is the one writer of a JMDict file in the app and the rule is
-/// that a writer only ever sees a staged throwaway.
+/// The index ships inside the bundled artifact, built by the ingestion
+/// script; the app has no writer for it. Every test works on its own copy of
+/// a throwaway fixture database and applies `createSQL` directly — the same
+/// statement the ingestion build executes — which keeps the DDL honest: if
+/// it ever stops producing an index the planner will serve the load from,
+/// these tests are where that shows.
 @Suite("JMDict case index")
 final class JMDictCaseIndexTests {
     private let directory: URL
@@ -60,24 +63,43 @@ final class JMDictCaseIndexTests {
         return copy
     }
 
-    @Test("building the index makes it present on the database")
-    func buildMakesItPresent() throws {
-        let url = try stagedCopy()
-
-        try JMDictCaseIndex.build(at: url)
-
-        #expect(JMDictCaseIndex.isPresent(at: url))
+    /// Applies the ingestion build's DDL to a database, the way
+    /// `scripts/jmdict_build.py` does before compressing the artifact.
+    private func applyCaseIndexDDL(at url: URL) throws {
+        let database = try SQLiteDatabase.writable(path: url.path)
+        defer { database.close() }
+        try database.execute(JMDictCaseIndex.createSQL)
     }
 
-    @Test("a database that never built it reports it absent")
-    func absentBeforeBuild() {
-        #expect(JMDictCaseIndex.isPresent(at: source.url) == false)
+    /// Whether the database carries an index under the pinned name.
+    private func carriesCaseIndex(at url: URL) throws -> Bool {
+        let database = try SQLiteDatabase(path: url.path)
+        defer { database.close() }
+        let presence = try database.statement(
+            "SELECT 1 FROM sqlite_master WHERE type = 'index'"
+                + " AND name = '\(JMDictCaseIndex.indexName)'"
+        )
+        return try presence.step()
+    }
+
+    @Test("executing the DDL leaves the index on the database")
+    func ddlMakesItPresent() throws {
+        let url = try stagedCopy()
+
+        try applyCaseIndexDDL(at: url)
+
+        #expect(try carriesCaseIndex(at: url))
+    }
+
+    @Test("a database the DDL never ran on reports no index")
+    func absentBeforeDDL() throws {
+        #expect(try carriesCaseIndex(at: source.url) == false)
     }
 
     @Test("the load is answered by the index rather than by a walk of the table")
     func loadRidesTheIndex() throws {
         let url = try stagedCopy()
-        try JMDictCaseIndex.build(at: url)
+        try applyCaseIndexDDL(at: url)
         let database = try SQLiteDatabase(path: url.path)
         defer { database.close() }
 

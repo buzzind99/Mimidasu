@@ -1,33 +1,32 @@
 import Foundation
 
-/// The derived index over the headwords that carry case, built once per
-/// prepared database and never shipped in the bundle.
+/// The derived index over the headwords that carry case, built by the
+/// ingestion pipeline and shipped inside the bundled artifact.
 ///
 /// `CaseHeadwordSpellings` reads those spellings through `loadSQL`, and that
 /// predicate has no index to ride: `headwords` is keyed
 /// `(text, entry_id, kind)`, so without one the load walks the whole
 /// 1,289,637-row B-tree, measured at ~100 ms. This index is that predicate, so
 /// SQLite can serve the load as a scan of the 2,465 rows that satisfy it —
-/// measured at 0.8 ms — for **57,344 bytes** on the pinned build and 114 ms to
-/// build. The second load, `nonASCIICaseLoadSQL`, is a primary-key range scan
-/// over 94 rows and needs no index at all.
+/// measured at 0.8 ms — for **57,344 bytes** on the pinned build (~18 KB
+/// compressed, measured against the shipped artifact). The second load,
+/// `nonASCIICaseLoadSQL`, is a primary-key range scan over 94 rows and needs
+/// no index at all.
 ///
 /// A database without the index answers identically — the same rows off a
 /// full `headwords` scan — so the index is only ever a speed-up for the
-/// load. It is nonetheless adoption-load-bearing, exactly the way the
-/// gloss index's stamp is: `DictionaryStore.isAdoptable` requires it, so a
-/// database promoted before this index existed re-stages once instead of
-/// staying on the slow path forever. What it does **not** carry is a
-/// stamp: `user_version` belongs to the gloss build, and none is needed —
-/// the DDL cannot drift (the range bounds live in the load, not the
-/// index), so presence alone is a sound staleness key.
-///
-/// Same lifecycle as `JMDictFTSIndex`: built on the staged copy inside
-/// `DictionaryStore.prepareArtifact`'s window, before the promote, so a
-/// half-built index can never reach Application Support.
+/// load. That is why its absence is a degradation the app tolerates rather
+/// than a state it repairs: the index is built once by
+/// `scripts/jmdict_build.py` from `createSQL` (the DDL source of truth,
+/// mirrored and drift-guarded by `scripts/build_dictionary.sh`), and nothing
+/// in the app writes it. Unlike the gloss index there is no stamp:
+/// `user_version` belongs to the gloss build, and none is needed — the DDL
+/// cannot drift (the range bounds live in the load, not the index), and the
+/// versioned artifact filename is the staleness key that retires databases
+/// from before the index shipped.
 enum JMDictCaseIndex {
     /// The index's name, pinned in `scripts/build_dictionary.sh` because the
-    /// dev artifact is built from a second copy of this DDL.
+    /// ingestion build and the probes key on it.
     static let indexName = "headwords_case"
 
     /// Partial on the **ASCII** load's own predicate and keyed on `text` alone,
@@ -81,32 +80,4 @@ enum JMDictCaseIndex {
     SELECT DISTINCT text FROM headwords
     WHERE text >= '\(nonASCIICaseFloor)' AND text < '\(nonASCIICaseCeiling)'
     """
-
-    static let presenceSQL =
-        "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = '\(indexName)'"
-
-    /// Builds the index over an already-decompressed, writable database.
-    ///
-    /// `IF NOT EXISTS` rather than the gloss index's drop-then-create: this one
-    /// carries no rows of its own and no content that a rebuild could
-    /// contradict, so an occupied name is the index this statement would have
-    /// built, not a stale one to clear first.
-    static func build(at url: URL) throws {
-        let database = try SQLiteDatabase.writable(path: url.path)
-        defer { database.close() }
-        try database.execute(createSQL)
-    }
-
-    /// Whether `url`'s database already carries the index.
-    ///
-    /// Load-bearing through `DictionaryStore.isAdoptable`: a promoted database
-    /// without the index is re-staged rather than adopted. Presence is the
-    /// whole check — the DDL cannot drift (see the type doc), so unlike the
-    /// gloss index there is no version to compare.
-    static func isPresent(at url: URL) -> Bool {
-        guard let database = try? SQLiteDatabase(path: url.path) else { return false }
-        defer { database.close() }
-        guard let presence = try? database.statement(presenceSQL) else { return false }
-        return (try? presence.step()) == true
-    }
 }

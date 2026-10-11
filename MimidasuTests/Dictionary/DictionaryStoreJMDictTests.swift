@@ -117,13 +117,11 @@ extension DictionaryStoreTests {
     func jmDictAdoptsExistingDestination() async throws {
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
         let existing = destination.appendingPathComponent(JMDictPin.preparedFileName)
-        // Adoption is index-aware, so the file left by the "earlier launch" has
-        // to carry both — the gloss index at its current stamp, the
-        // case-headword index by presence — otherwise the store is right to
-        // re-stage it.
+        // Adoption is index-aware, so the file left by the "earlier launch"
+        // has to carry the gloss index at its current stamp — otherwise the
+        // store is right to re-stage it.
         let adopted = copyOf(smokeDatabase, to: existing)
         try JMDictFTSIndex.build(at: adopted)
-        try JMDictCaseIndex.build(at: adopted)
         let store = makeStore()
 
         let url = try await store.prepareJMDict()
@@ -152,27 +150,32 @@ extension DictionaryStoreTests {
         #expect(JMDictFTSIndex.answers(at: url))
     }
 
-    @Test("re-stages a JMDict database prepared before the case-headword index existed")
-    func jmDictReStagesCaseIndexLessDatabase() async throws {
+    @Test("adopts a JMDict database whose case-headword index is missing")
+    func jmDictAdoptsCaseIndexLessDatabase() async throws {
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
         let existing = destination.appendingPathComponent(JMDictPin.preparedFileName)
         // A database whose gloss index is current — stamped, answering — but
-        // which predates the case-headword index entirely.
+        // which carries no case-headword index. That shape cannot reach the
+        // destination through the rev-7 artifact, so it means a regressed or
+        // hand-placed database; the store adopts it anyway. The index's
+        // absence never changes an answer, only the cost of the case-spelling
+        // load, and with no runtime builder left, gating here would turn that
+        // latency into a re-decompress on every launch.
         let earlier = copyOf(smokeDatabase, to: existing)
         try JMDictFTSIndex.build(at: earlier)
         #expect(JMDictFTSIndex.isPresent(at: existing))
-        #expect(!JMDictCaseIndex.isPresent(at: existing))
-        fakePrepareCopySource = smokeDatabase
+        let database = try SQLiteDatabase(path: existing.path)
+        let presence = try database.statement(
+            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'headwords_case'"
+        )
+        #expect(try presence.step() == false)
+        database.close()
         let store = makeStore()
 
         let url = try await store.prepareJMDict()
 
-        // Nothing the engine answers depends on the case index — without it
-        // the spelling load is a one-time full scan per launch — but adoption
-        // is what keeps installs from paying that forever, so a database that
-        // predates the index re-stages once and comes back carrying it.
-        #expect(fakePrepareCalls == 1)
-        #expect(JMDictCaseIndex.isPresent(at: url))
+        #expect(fakePrepareCalls == 0, "a latency-only degradation must not force a re-stage")
+        #expect(url == existing)
     }
 
     @Test("stamps the index so a DDL change can outrun the filename")
@@ -446,5 +449,13 @@ extension DictionaryStoreTests {
         let url = try await store.prepareJMDict()
 
         #expect(FileManager.default.fileExists(atPath: url.path))
+        // The artifact is the only source of the case-headword index now, so
+        // the promoted database must carry it straight from the decompress.
+        let database = try SQLiteDatabase(path: url.path)
+        defer { database.close() }
+        let presence = try database.statement(
+            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'headwords_case'"
+        )
+        #expect(try presence.step())
     }
 }

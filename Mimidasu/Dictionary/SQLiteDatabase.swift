@@ -113,13 +113,14 @@ final class SQLiteDatabase: @unchecked Sendable {
     ///
     /// Favorites own their database and write to it freely. The prepared
     /// dictionary is different: **never** open the promoted copy this way. The
-    /// sanctioned writers are `JMDictFTSIndex.build` and `JMDictCaseIndex.build`,
-    /// and only against the
+    /// sanctioned writer is `JMDictFTSIndex.build`, and only against the
     /// staged file inside `DictionaryStore.prepareArtifact`'s temp directory —
     /// a throwaway copy that is discarded on any failure and promoted only
     /// after it passes its smoke check. Writing to the promoted path instead
     /// would mutate the artifact the app reads concurrently, and would do it
-    /// with no staging window to fail safely in.
+    /// with no staging window to fail safely in. (The ingestion script writes
+    /// the case-headword index outside the app entirely; test fixtures write
+    /// throwaway copies only.)
     static func writable(path: String) throws(Error) -> SQLiteDatabase {
         try SQLiteDatabase(opening: path, flags: SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE)
     }

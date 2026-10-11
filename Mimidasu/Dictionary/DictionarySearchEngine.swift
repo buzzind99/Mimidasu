@@ -199,8 +199,9 @@ final class DictionarySearchEngine: Sendable {
         // Read once, here, where the handle first exists: the case-bearing
         // spellings are 2,357 rows of the pinned corpus, answered by binary
         // search from here on. A database without `JMDictCaseIndex` — one
-        // whose case build failed at prepare — answers off a full scan of
-        // `headwords` (~100 ms) on the first search, and never again.
+        // whose artifact regressed, since the index ships in it and the app
+        // builds nothing — answers off a full scan of `headwords` (~100 ms)
+        // on the first search, and never again.
         let spellings = try CaseHeadwordSpellings(db: database)
         current = .open(database, spellings)
         return Open(db: database, caseHeadwords: spellings)
