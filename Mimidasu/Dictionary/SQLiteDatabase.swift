@@ -113,7 +113,8 @@ final class SQLiteDatabase: @unchecked Sendable {
     ///
     /// Favorites own their database and write to it freely. The prepared
     /// dictionary is different: **never** open the promoted copy this way. The
-    /// one sanctioned writer is `JMDictFTSIndex.build`, and only against the
+    /// sanctioned writers are `JMDictFTSIndex.build` and `JMDictCaseIndex.build`,
+    /// and only against the
     /// staged file inside `DictionaryStore.prepareArtifact`'s temp directory —
     /// a throwaway copy that is discarded on any failure and promoted only
     /// after it passes its smoke check. Writing to the promoted path instead

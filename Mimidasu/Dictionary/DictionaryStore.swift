@@ -342,8 +342,11 @@ final class DictionaryStore: Sendable {
     /// not enough for JMDict: a database promoted before the gloss index existed
     /// is complete and current, yet answers every Latin query with zero rows and
     /// no error — the stage's `LIKE` scan is gone and there is nothing to fall
-    /// back to. So adoption also requires the index, at the current
-    /// `JMDictFTSIndex.schemaVersion`.
+    /// back to. Adoption therefore requires the gloss index at the current
+    /// `JMDictFTSIndex.schemaVersion` **and** the case-headword index by
+    /// presence alone (its DDL cannot drift — see `JMDictCaseIndex`), so a
+    /// database promoted before either existed re-stages once and comes back
+    /// carrying both.
     ///
     /// This is load-bearing rather than an optimization, and it is why the
     /// *filename* deliberately does not encode the index: bumping
@@ -352,15 +355,21 @@ final class DictionaryStore: Sendable {
     /// change than the situation warrants. Existing installs instead re-stage
     /// themselves once — one decompress plus ~2 s — and are then adopted
     /// normally. The cost when the database *is* current is one `fileExists`
-    /// plus two pragma reads on a lazily-opened handle.
+    /// plus a couple of `sqlite_master` probes on a lazily-opened handle.
     ///
-    /// A platform with no FTS5 is the one case where a missing index is
-    /// correct: the build is fail-soft there by design, so requiring the index
+    /// A platform with no FTS5 is the one case where a missing gloss index is
+    /// correct: the gloss build is fail-soft there by design, so requiring it
     /// unconditionally would re-decompress and rebuild on every launch forever.
+    /// The case index needs no such escape — a plain `CREATE INDEX` works on
+    /// any SQLite, which is why its build runs before the gloss build — so the
+    /// escape hatch still yields a database whose case load is served from the
+    /// index.
     private func isAdoptable(_ artifact: Artifact, at url: URL) -> Bool {
         switch artifact {
         case .tokenizer: true
-        case .jmDict: JMDictFTSIndex.isPresent(at: url) || !JMDictFTSIndex.isAvailable
+        case .jmDict:
+            (JMDictFTSIndex.isPresent(at: url) && JMDictCaseIndex.isPresent(at: url))
+                || !JMDictFTSIndex.isAvailable
         }
     }
 
@@ -443,7 +452,13 @@ final class DictionaryStore: Sendable {
     /// another entry's gloss, silently and on every query. That fails the
     /// prepare, discards the staging directory, and retries next launch — the
     /// correct outcome, because there is no degraded-but-useful version of it.
+    ///
+    /// The case-headword index built beside it is independent of the gloss
+    /// build — it runs first, and a plain `CREATE INDEX` needs no FTS5 — but
+    /// it is treated the same soft way, because its absence costs latency
+    /// once, never answers.
     private func indexJMDict(_ stagedArtifact: URL) throws -> Bool {
+        buildCaseIndex(stagedArtifact)
         do {
             try JMDictFTSIndex.build(at: stagedArtifact)
         } catch let error as JMDictFTSIndex.IndexError {
@@ -453,6 +468,29 @@ final class DictionaryStore: Sendable {
             return false
         }
         return JMDictFTSIndex.isPresent(at: stagedArtifact)
+    }
+
+    /// Builds the case-headword index over the same staged copy, before the
+    /// gloss build so a no-FTS5 platform still gets it — the statement is a
+    /// plain `CREATE INDEX` and needs no FTS5, and `isAdoptable` expects the
+    /// promoted database to carry it.
+    ///
+    /// Fail-soft, though no longer consequence-free: adoption requires the
+    /// index, so a staged database whose case build failed here is promoted
+    /// and then re-staged on every later launch. That loop is bounded by
+    /// reality — `CREATE INDEX` over a freshly staged writable copy fails only
+    /// where the rest of the prepare fails too (a full disk fails the
+    /// promote's move, corruption fails the smoke check) — and nothing reads
+    /// the index: the engine loads the same 2,357 spellings either way,
+    /// walking the `headwords` B-tree once per launch (~100 ms) instead of
+    /// scanning a 57 KB covering index (0.8 ms). A failure is logged and the
+    /// dictionary is promoted.
+    private func buildCaseIndex(_ stagedArtifact: URL) {
+        do {
+            try JMDictCaseIndex.build(at: stagedArtifact)
+        } catch {
+            print("[dictionary-store] case-headword index unavailable: \(error)")
+        }
     }
 
     /// Proves the freshly decompressed dictionary is openable and actually

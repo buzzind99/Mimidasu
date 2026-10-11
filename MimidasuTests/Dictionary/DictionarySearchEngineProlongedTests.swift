@@ -12,7 +12,8 @@ struct DictionarySearchEngineProlongedTests {
     func prolongedCandidates() {
         // The typed letters land on the plain-vowel conversion; the reading
         // stores the mark, which arrives through the dash variant's mirror.
-        let candidates = DictionarySearchEngine.headwordCandidates(for: "paatii")
+        let candidates = DictionarySearchEngine.headwordCandidates(for: "paatii", caseHeadwords: .empty)
+
         let texts = Set(candidates.map(\.text))
 
         #expect(texts.contains("ぱあてぃい"))
@@ -24,12 +25,15 @@ struct DictionarySearchEngineProlongedTests {
 
     @Test("a romaji query probes the script switches its conversion hides")
     func scriptSwitchCandidates() throws {
-        let candidates = DictionarySearchEngine.headwordCandidates(for: "ubefurontiadaigaku")
+        let candidates = DictionarySearchEngine.headwordCandidates(
+            for: "ubefurontiadaigaku", caseHeadwords: .empty
+        )
 
         // The loanword variant うべふろんてぃあだいがく is the form whose
         // second position switches scripts, and うべフ agrees with the
         // stored reading on three scalars — everything after is prefix scan.
         let probe = try #require(candidates.first { candidate in candidate.text == "うべフ" })
+
         #expect(probe.probe == .prefix)
         #expect(probe.matchKind == .prefix)
     }

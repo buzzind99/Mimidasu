@@ -243,6 +243,80 @@ struct DictionarySearchEngineLiveTests {
         }
     }
 
+    @Test("a mixed-case headword answers the query that folds onto it")
+    func caseBearingFlagships() throws {
+        let engine = try makeEngine()
+        defer { engine.close() }
+
+        // Every row here is one a pre-case engine answered 0 for: the query is
+        // lowercased at the SQL boundary, the B-tree orders `ActiveX` outside
+        // the range of `activex`, and only the all-caps half was reachable
+        // through the uppercase spelling.
+        struct Flagship {
+            let query: String
+            let entSeq: Int
+            let kind: DictionarySearchHit.MatchKind
+        }
+        let flagships = [
+            Flagship(query: "activex", entSeq: 5_747_363, kind: .exact), // ActiveX, the exact fold
+            Flagship(query: "iphon", entSeq: 5_008_659, kind: .prefix), // iPhone, opened as a prefix
+            // The Greek pair runs one search twice — `Α` normalizes to `α` —
+            // and is kept deliberately: the second row pins that the typed
+            // uppercase form and the folded form answer identically.
+            Flagship(query: "α", entSeq: 1_019_520, kind: .exact), // Α, case `lower` never folds
+            Flagship(query: "Α", entSeq: 1_019_520, kind: .exact) // the same name, typed in its case
+        ]
+        for flagship in flagships {
+            let outcome = try engine.search(
+                flagship.query, filters: DictionarySearchFilters(),
+                limit: DictionarySearchEngine.maxRows
+            )
+
+            let hit = try #require(
+                outcome.hits.first { candidate in candidate.entSeq == flagship.entSeq },
+                "\(flagship.query) → \(flagship.entSeq) not found"
+            )
+
+            #expect(hit.matchKind == flagship.kind, "\(flagship.query) → \(flagship.entSeq)")
+        }
+    }
+
+    @Test("every spelling the case fold changes is in the loaded case set")
+    func caseSetCoversEveryCaseFoldedSpelling() throws {
+        let url = try #require(InstalledJMDict.url)
+        let database = try SQLiteDatabase(path: url.path)
+        defer { database.close() }
+
+        // The load is two statements whose second half exists because
+        // SQLite's `lower()` is ASCII-only: on this corpus the ASCII predicate
+        // alone skips 26 rows — the JMnedict Greek-capital names. This is the
+        // backstop for the whole arrangement, and it is a corpus walk on
+        // purpose (~330 ms): a pin bump that introduces case in a block
+        // `nonASCIICaseLoadSQL` does not span has to fail here rather than
+        // quietly darken those spellings.
+        //
+        // The guard's population is the **case** fold — `lowercased()` — not
+        // `normalize`'s NFKC fold, on purpose: NFKC-only divergences (ligatures,
+        // compatibility symbols) are a separate pre-existing gap this change
+        // did not scope in, and widening the guard would turn red for rows
+        // the case loads were never designed to carry.
+        let statement = try database.statement("SELECT DISTINCT text FROM headwords")
+        var folded: Set<String> = []
+        while try statement.step() {
+            guard let text = statement.optionalText(0),
+                  text.lowercased() != text
+            else { continue }
+            folded.insert(text)
+        }
+
+        let loaded = try CaseHeadwordSpellings(db: database)
+
+        // The load is a deliberate superset — spellings already reachable by
+        // their own name cost a Set entry and answer nothing wrongly — so the
+        // assertion is containment, not equality.
+        #expect(folded.subtracting(loaded.reachableSpellings).isEmpty)
+    }
+
     @Test("a gloss whose own text contains the old \"; \" joiner stays whole")
     func embeddedJoinerGlossStaysWhole() throws {
         let engine = try makeEngine()

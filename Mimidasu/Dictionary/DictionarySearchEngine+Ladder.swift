@@ -81,11 +81,12 @@ extension DictionarySearchEngine {
     static func ladder(
         normalized: String,
         filters: DictionarySearchFilters,
-        db: SQLiteDatabase,
+        open: Open,
         tokenize: @Sendable (String) -> [DictionaryToken]?,
         limit: Int
     ) throws -> DictionarySearchOutcome {
-        let candidates = headwordCandidates(for: normalized)
+        let db = open.db
+        let candidates = headwordCandidates(for: normalized, caseHeadwords: open.caseHeadwords)
         let exact = candidates.filter { candidate in candidate.probe == .exact }
         let prefixes = candidates.filter { candidate in candidate.probe == .prefix }
         let glossEligible = acceptsGlossQuery(normalized)

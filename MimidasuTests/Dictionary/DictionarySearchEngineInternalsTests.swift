@@ -65,7 +65,7 @@ final class DictionarySearchEngineInternalsTests {
 
     @Test("a full romaji spelling converts into exact candidates")
     func fullRomajiCandidates() {
-        let full = DictionarySearchEngine.headwordCandidates(for: "makeru")
+        let full = DictionarySearchEngine.headwordCandidates(for: "makeru", caseHeadwords: .empty)
 
         // The kana spellings the romaji names, the prefix-only script-switch
         // probes, and the literal text and its uppercase probing the
@@ -79,7 +79,7 @@ final class DictionarySearchEngineInternalsTests {
 
     @Test("a digit query probes its own spelling, its uppercase deduped away")
     func digitCandidates() {
-        let digits = DictionarySearchEngine.headwordCandidates(for: "4649")
+        let digits = DictionarySearchEngine.headwordCandidates(for: "4649", caseHeadwords: .empty)
 
         #expect(Set(digits.map(\.text)) == ["4649"])
         #expect(digits.contains { candidate in candidate.probe == .exact })
@@ -88,7 +88,7 @@ final class DictionarySearchEngineInternalsTests {
 
     @Test("a lowercase Latin spelling also probes the uppercase headword")
     func latinCaseCandidates() {
-        let spellings = DictionarySearchEngine.headwordCandidates(for: "tkg")
+        let spellings = DictionarySearchEngine.headwordCandidates(for: "tkg", caseHeadwords: .empty)
 
         #expect(Set(spellings.map(\.text)) == ["tkg", "TKG"])
         #expect(spellings.filter { candidate in candidate.probe == .exact }.count == 2)
@@ -101,7 +101,7 @@ final class DictionarySearchEngineInternalsTests {
         // katakana mirrors — 74 `ベスト*` rows that outranked the seven entries
         // whose gloss actually reads "best regards". Only the literal probes
         // are left, so the gloss stage is what answers.
-        let candidates = DictionarySearchEngine.headwordCandidates(for: "best regards")
+        let candidates = DictionarySearchEngine.headwordCandidates(for: "best regards", caseHeadwords: .empty)
 
         #expect(Set(candidates.map(\.text)) == ["best regards", "BEST REGARDS"])
         #expect(KanaRomaji.convert("best")?.trailingOnset == nil)
@@ -109,7 +109,7 @@ final class DictionarySearchEngineInternalsTests {
 
     @Test("a romaji prefix expands into prefix candidates")
     func prefixCandidates() {
-        let partial = DictionarySearchEngine.headwordCandidates(for: "mak")
+        let partial = DictionarySearchEngine.headwordCandidates(for: "mak", caseHeadwords: .empty)
         // The spelling and its uppercase probe both stages; every *expansion*
         // is a prefix — an unfinished stem promises what follows, not a word.
         let literal: Set = ["mak", "MAK"]
@@ -117,6 +117,7 @@ final class DictionarySearchEngineInternalsTests {
             .allSatisfy { candidate in candidate.probe == .prefix })
 
         let texts = Set(partial.map(\.text))
+
         #expect(texts.contains("まけ"))
         #expect(texts.contains("マケ"))
         #expect(texts.contains("mak"))
@@ -125,7 +126,7 @@ final class DictionarySearchEngineInternalsTests {
 
     @Test("a kana query probes both scripts without duplicating the mirror")
     func kanaCandidates() {
-        let japanese = DictionarySearchEngine.headwordCandidates(for: "たべる")
+        let japanese = DictionarySearchEngine.headwordCandidates(for: "たべる", caseHeadwords: .empty)
 
         #expect(Set(japanese.map(\.text)) == ["たべる", "タベル", "たベ", "タべ", "たべル", "タベる"])
         // Two writings × two probes, plus the prefix-only script-switch
@@ -200,6 +201,7 @@ final class DictionarySearchEngineInternalsTests {
         }
         let name = screenRow(kind: .prefix, entryID: DictionaryContent.nameSeqOffset + 1)
         let all = words + [name]
+
         func saturated(_ rows: [DictionarySearchEngine.CandidateRow], _ scope: DictionarySearchFilters.Scope) -> Bool {
             DictionarySearchEngine.capSaturated(
                 rows, filters: DictionarySearchFilters(scope: scope),

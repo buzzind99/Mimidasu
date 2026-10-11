@@ -5,10 +5,11 @@ import Synchronization
 /// ladder that answers one typed query, whatever script it arrived in.
 ///
 /// Sendable by construction: the only mutable state is the lazily opened
-/// read-only handle, held in a `Mutex`-guarded `State`, and every query runs
-/// inside its `withLock` scope. The caller owns threading — the window runs
-/// `search` on a detached task behind a debounce and drops stale landings
-/// with its own generation counter.
+/// read-only handle and the case-bearing spellings read from it, held in a
+/// `Mutex`-guarded `State`, and every query runs inside its `withLock` scope.
+/// The caller owns threading — the window runs `search` on a detached task
+/// behind a debounce and drops stale landings with its own generation
+/// counter.
 final class DictionarySearchEngine: Sendable {
 
     // MARK: Tuning
@@ -68,9 +69,20 @@ final class DictionarySearchEngine: Sendable {
 
     // MARK: Lifecycle
 
+    /// The opened handle and the spellings read from it — one ladder
+    /// parameter rather than two, because the two are opened together and
+    /// always travel together.
+    struct Open: Sendable {
+        let db: SQLiteDatabase
+        let caseHeadwords: CaseHeadwordSpellings
+    }
+
     private enum State {
         case idle
-        case open(SQLiteDatabase)
+        /// The read-only handle plus the spellings it carries: the case-bearing
+        /// headwords are read once, beside the open, because they answer from
+        /// memory and nothing else in the engine needs them.
+        case open(SQLiteDatabase, CaseHeadwordSpellings)
         case closed
     }
 
@@ -105,7 +117,7 @@ final class DictionarySearchEngine: Sendable {
     /// seam for the closed-handle error path (the app never closes).
     func close() {
         state.withLock { current in
-            if case let .open(database) = current {
+            if case let .open(database, _) = current {
                 database.close()
             }
             current = .closed
@@ -142,9 +154,9 @@ final class DictionarySearchEngine: Sendable {
         let window = min(max(limit, 0), Self.maxRows)
         do {
             return try state.withLock { current -> DictionarySearchOutcome in
-                let db = try openedDatabase(&current)
+                let open = try openedDatabase(&current)
                 return try Self.ladder(
-                    normalized: normalized, filters: filters, db: db,
+                    normalized: normalized, filters: filters, open: open,
                     tokenize: tokenize, limit: window
                 )
             }
@@ -166,10 +178,10 @@ final class DictionarySearchEngine: Sendable {
 
     // MARK: - Database lifecycle (mutex-held)
 
-    private func openedDatabase(_ current: inout State) throws -> SQLiteDatabase {
+    private func openedDatabase(_ current: inout State) throws -> Open {
         switch current {
-        case let .open(database):
-            return database
+        case let .open(database, spellings):
+            return Open(db: database, caseHeadwords: spellings)
         case .closed:
             throw DictionarySearchError.databaseClosed
         case .idle:
@@ -184,8 +196,14 @@ final class DictionarySearchEngine: Sendable {
         } catch {
             throw DictionarySearchError(error)
         }
-        current = .open(database)
-        return database
+        // Read once, here, where the handle first exists: the case-bearing
+        // spellings are 2,357 rows of the pinned corpus, answered by binary
+        // search from here on. A database without `JMDictCaseIndex` — one
+        // whose case build failed at prepare — answers off a full scan of
+        // `headwords` (~100 ms) on the first search, and never again.
+        let spellings = try CaseHeadwordSpellings(db: database)
+        current = .open(database, spellings)
+        return Open(db: database, caseHeadwords: spellings)
     }
 }
 

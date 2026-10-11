@@ -118,8 +118,12 @@ extension DictionaryStoreTests {
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
         let existing = destination.appendingPathComponent(JMDictPin.preparedFileName)
         // Adoption is index-aware, so the file left by the "earlier launch" has
-        // to carry one — otherwise the store is right to re-stage it.
-        try JMDictFTSIndex.build(at: copyOf(smokeDatabase, to: existing))
+        // to carry both — the gloss index at its current stamp, the
+        // case-headword index by presence — otherwise the store is right to
+        // re-stage it.
+        let adopted = copyOf(smokeDatabase, to: existing)
+        try JMDictFTSIndex.build(at: adopted)
+        try JMDictCaseIndex.build(at: adopted)
         let store = makeStore()
 
         let url = try await store.prepareJMDict()
@@ -146,6 +150,29 @@ extension DictionaryStoreTests {
         #expect(fakePrepareCalls == 1)
         #expect(JMDictFTSIndex.isPresent(at: url))
         #expect(JMDictFTSIndex.answers(at: url))
+    }
+
+    @Test("re-stages a JMDict database prepared before the case-headword index existed")
+    func jmDictReStagesCaseIndexLessDatabase() async throws {
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        let existing = destination.appendingPathComponent(JMDictPin.preparedFileName)
+        // A database whose gloss index is current — stamped, answering — but
+        // which predates the case-headword index entirely.
+        let earlier = copyOf(smokeDatabase, to: existing)
+        try JMDictFTSIndex.build(at: earlier)
+        #expect(JMDictFTSIndex.isPresent(at: existing))
+        #expect(!JMDictCaseIndex.isPresent(at: existing))
+        fakePrepareCopySource = smokeDatabase
+        let store = makeStore()
+
+        let url = try await store.prepareJMDict()
+
+        // Nothing the engine answers depends on the case index — without it
+        // the spelling load is a one-time full scan per launch — but adoption
+        // is what keeps installs from paying that forever, so a database that
+        // predates the index re-stages once and comes back carrying it.
+        #expect(fakePrepareCalls == 1)
+        #expect(JMDictCaseIndex.isPresent(at: url))
     }
 
     @Test("stamps the index so a DDL change can outrun the filename")

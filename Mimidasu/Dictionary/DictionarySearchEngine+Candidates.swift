@@ -17,11 +17,17 @@ extension DictionarySearchEngine {
     /// a prefix scan (`kyou` reaches きょう *and* きょうか…), and an
     /// unfinished one expands its trailing consonant into every mora it can
     /// begin (`mak` → まか…まこ). The spelling itself probes too, its
-    /// uppercased form alongside: digits (`4649`) have no romaji reading,
-    /// and stored Latin keeps its case (`TKG`) where queries arrive
+    /// uppercased form alongside: digits (`4649`) have no romaji reading, and
+    /// stored Latin keeps its case (`TKG`) where queries arrive
     /// lowercased, so the headword a spelling names is only reachable
-    /// through its own shape.
-    static func headwordCandidates(for query: String) -> [HeadwordCandidate] {
+    /// through its own shape — or through the spellings that fold onto it
+    /// (`caseHeadwords`), which is what reaches `ActiveX` from `activex`.
+    /// The parameter is required, not defaulted: the set is read from the
+    /// opened handle and forgetting to pass it along would silently drop
+    /// every mixed-case headword from reach.
+    static func headwordCandidates(
+        for query: String, caseHeadwords: CaseHeadwordSpellings
+    ) -> [HeadwordCandidate] {
         var out: [HeadwordCandidate] = []
         var seen: Set<String> = []
         func add(_ writing: String, probe: DictionarySearchProbe,
@@ -52,7 +58,7 @@ extension DictionarySearchEngine {
         for conversion in romajiConversions(for: query) {
             emitRomajiCandidates(conversion, add: add)
         }
-        out += literalCandidates(for: query)
+        out += literalCandidates(for: query, caseHeadwords: caseHeadwords)
         return out
     }
 
@@ -94,12 +100,25 @@ extension DictionarySearchEngine {
 
     /// The spelling probes that reach the writings stored verbatim — numeric
     /// (4649, 4コマ) and Latin (TKG, www) headwords no kana conversion can
-    /// spell: the query as typed and its uppercase form, each as an exact
-    /// seek and a prefix scan. Queries arrive lowercased while those rows
-    /// keep their case, and Latin text never collides with the kana
-    /// spellings the romaji branch emits, so these append without the
-    /// shared dedupe.
-    static func literalCandidates(for query: String) -> [HeadwordCandidate] {
+    /// spell: the query as typed and its uppercase form, each as an exact seek
+    /// and a prefix scan. Queries arrive lowercased while those rows keep their
+    /// case, and the uppercase spelling only rescues the all-caps half of it —
+    /// `ActiveX` and `iPhone` are mixed case, so `caseHeadwords` answers for
+    /// them the way the uppercase form answers for `TKG`: the stored spelling
+    /// itself, probed as an exact seek when its fold is the query and as a
+    /// prefix scan when the query merely opens it (`iph` → `iPhone`).
+    ///
+    /// Deduplicated against the typed and uppercase spellings, which the
+    /// two-spelling shape could afford to skip: a folded spelling can carry
+    /// kana (`1Dayコンタクト`), and once the two sets can intersect, emitting
+    /// the same writing twice would spend a second seek proving what the first
+    /// one already knew. The set is only consulted on the Latin branch — a
+    /// kana-bearing query returns before this runs — so a spelling whose fold
+    /// carries kana is reachable only through a kana-free prefix, never
+    /// through its own exact fold.
+    static func literalCandidates(
+        for query: String, caseHeadwords: CaseHeadwordSpellings
+    ) -> [HeadwordCandidate] {
         let typed = query.unicodeScalars.count
         var spellings = [query]
         let upper = query.uppercased()
@@ -107,14 +126,33 @@ extension DictionarySearchEngine {
             spellings.append(upper)
         }
         var out: [HeadwordCandidate] = []
+        var seen: Set<String> = []
+        func add(_ writing: String, _ probe: DictionarySearchProbe) {
+            let key = "\(probe.rawValue)\u{1}\(writing)"
+            guard seen.insert(key).inserted else { return }
+            out.append(HeadwordCandidate(
+                text: writing, probe: probe,
+                matchKind: probe == .exact ? .exact : .prefix, highlightScalars: typed
+            ))
+        }
         for spelling in spellings {
             for writing in writingVariants(of: spelling) {
-                out.append(HeadwordCandidate(
-                    text: writing, probe: .exact, matchKind: .exact, highlightScalars: typed
-                ))
-                out.append(HeadwordCandidate(
-                    text: writing, probe: .prefix, matchKind: .prefix, highlightScalars: typed
-                ))
+                add(writing, .exact)
+                add(writing, .prefix)
+            }
+        }
+        for match in caseHeadwords.matches(openingFold: query) {
+            for writing in writingVariants(of: match.spelling) {
+                if match.isExact {
+                    add(writing, .exact)
+                    // The exact-tier seek already answers for the spelling
+                    // itself, but the prefix scan is what reaches the longer
+                    // spellings that start with it (`iPhone` → `iPhones`), the
+                    // way it does for every other spelling probed here.
+                    add(writing, .prefix)
+                } else {
+                    add(writing, .prefix)
+                }
             }
         }
         return out
