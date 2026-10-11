@@ -194,6 +194,54 @@ if [[ -z "${FTS_SCHEMA_VERSION}" ]]; then
 fi
 echo "    fts.schemaVersion: ${FTS_SCHEMA_VERSION}"
 
+# The case-headword index is a second copy of a schema kept in Swift
+# (JMDictCaseIndex), guarded the same way. The store re-stages a database that
+# lacks it, so the guard is about the dev artifact not quietly missing what
+# adoption now expects, and about the load not silently falling back to a full
+# scan — not about the engine's answers, which are the same either way.
+CASE_SWIFT="${REPO_ROOT}/Mimidasu/Dictionary/JMDictCaseIndex.swift"
+if [[ ! -f "${CASE_SWIFT}" ]]; then
+  echo "ERROR: ${CASE_SWIFT} not found; the case index DDL must exist in Swift and here." >&2
+  exit 1
+fi
+check_case_constant() {
+  local needle="$1"
+  if ! grep -Fq -- "${needle}" "${CASE_SWIFT}"; then
+    echo "ERROR: JMDictCaseIndex no longer contains: ${needle}" >&2
+    echo "  update the dev-artifact DDL in ${BASH_SOURCE[0]} to match." >&2
+    exit 1
+  fi
+  echo "    case.${needle}: ok"
+}
+check_case_constant 'static let indexName = "headwords_case"'
+check_case_constant "WHERE text <> lower(text)"
+# The load rides the index only if its predicate is textually the index's own,
+# so the two statements are compared rather than merely both guarded.
+CASE_PREDICATE="$(sed -n 's/.*loadSQL = "\(.*\)"$/\1/p' "${CASE_SWIFT}" | head -1)"
+if [[ "${CASE_PREDICATE}" != *"WHERE text <> lower(text)"* ]]; then
+  echo "ERROR: JMDictCaseIndex.loadSQL no longer carries the index's predicate;" >&2
+  echo "  the load would silently fall back to a full scan of headwords." >&2
+  exit 1
+fi
+echo "    case.loadSQL predicate: ok"
+# The second load is a primary-key range scan over the blocks that carry case,
+# and the engine is only complete if it is still there: the ASCII predicate
+# skips the 26 Greek-capital name rows on the pinned corpus.
+check_case_constant 'static let nonASCIICaseFloor = "'
+check_case_constant 'static let nonASCIICaseCeiling = "'
+check_case_constant 'WHERE text >='
+# The needles above pin the declarations; the probes further down must query
+# the bounds Swift actually loads, so the codepoints are read out of the Swift
+# source the same way FTS_SCHEMA_VERSION is, and probed as SQLite char(0x…) —
+# no literals here to drift.
+CASE_FLOOR="$(sed -n 's/.*nonASCIICaseFloor = "\\u{\([0-9A-Fa-f]*\)}".*/\1/p' "${CASE_SWIFT}" | head -1)"
+CASE_CEILING="$(sed -n 's/.*nonASCIICaseCeiling = "\\u{\([0-9A-Fa-f]*\)}".*/\1/p' "${CASE_SWIFT}" | head -1)"
+if [[ ! "${CASE_FLOOR}" =~ ^[0-9A-Fa-f]{1,6}$ || ! "${CASE_CEILING}" =~ ^[0-9A-Fa-f]{1,6}$ ]]; then
+  echo "ERROR: could not read the non-ASCII case bounds out of ${CASE_SWIFT}." >&2
+  exit 1
+fi
+echo "    case.range: char(0x${CASE_FLOOR}) ..< char(0x${CASE_CEILING})"
+
 # The produced artifact filename must match the Swift pin constants — the
 # versioned name is the staleness key (§0.1 item 4). preparedFileName is
 # interpolated in Swift, so guard the derivation expressions themselves
@@ -328,7 +376,7 @@ zstd -q -t "${ZST_PATH}"
 # applies at first launch. Debug checkouts and the live tests resolve this file
 # rather than RAW_DB, because the app has no LIKE fallback and a database with
 # no index answers every Latin gloss query with zero rows.
-echo "==> Building $(basename "${DEV_DB}") (gloss index)"
+echo "==> Building $(basename "${DEV_DB}") (gloss + case indexes)"
 # A pin bump renames the artifact; sweep the dev artifact's predecessors the
 # same way the app sweeps stale prepared databases, so build/ cannot accumulate
 # a 140 MB file per past pin. The sweep runs BEFORE the build and must stay
@@ -346,7 +394,42 @@ CREATE VIRTUAL TABLE gloss_fts USING fts5(
 INSERT INTO gloss_fts(rowid, gloss) SELECT entry_id * 128 + ord, gloss FROM senses;
 INSERT INTO gloss_fts(gloss_fts) VALUES('optimize');
 PRAGMA user_version = ${FTS_SCHEMA_VERSION};
+CREATE INDEX IF NOT EXISTS headwords_case ON headwords(text)
+  WHERE text <> lower(text);
 FTSEOF
+# The case index is an optimization, so the probe checks the property it exists
+# for: the load must be answered by the index rather than by the full walk. A
+# predicate that drifted from the index's would still return the same rows, and
+# only the plan would show it.
+CASE_PLAN="$(sqlite3 "${DEV_DB}" "EXPLAIN QUERY PLAN SELECT DISTINCT text FROM headwords WHERE text <> lower(text);" 2>&1)"
+if [[ "${CASE_PLAN}" != *"USING COVERING INDEX headwords_case"* ]]; then
+  rm -f "${DEV_DB}"
+  echo "ERROR: the case load is not served by headwords_case (dev db removed); got: ${CASE_PLAN}" >&2
+  echo "  refusing to publish $(basename "${DEV_DB}")" >&2
+  exit 1
+fi
+CASE_ROWS="$(sqlite3 "${DEV_DB}" "SELECT count(DISTINCT text) FROM headwords WHERE text <> lower(text);")"
+if [[ -z "${CASE_ROWS}" || "${CASE_ROWS}" == "0" ]]; then
+  rm -f "${DEV_DB}"
+  echo "ERROR: case-headword index built but the load answers nothing (dev db removed);" >&2
+  echo "  refusing to publish $(basename "${DEV_DB}")" >&2
+  exit 1
+fi
+# The range load must also answer, and it must be a range scan rather than a
+# walk: a drifted bound would quietly turn it into the full scan the ASCII
+# index exists to avoid. The bounds are Swift's own (read above), so the probe
+# queries what the app loads rather than a literal copied here.
+CASE_RANGE_PREDICATE="text >= char(0x${CASE_FLOOR}) AND text < char(0x${CASE_CEILING})"
+CASE_RANGE_PLAN="$(sqlite3 "${DEV_DB}" "EXPLAIN QUERY PLAN SELECT DISTINCT text FROM headwords WHERE ${CASE_RANGE_PREDICATE};" 2>&1)"
+CASE_RANGE_ROWS="$(sqlite3 "${DEV_DB}" "SELECT count(DISTINCT text) FROM headwords WHERE ${CASE_RANGE_PREDICATE};")"
+if [[ -z "${CASE_RANGE_ROWS}" || "${CASE_RANGE_ROWS}" == "0" \
+   || "${CASE_RANGE_PLAN}" != *"SEARCH headwords USING PRIMARY KEY"* ]]; then
+  rm -f "${DEV_DB}"
+  echo "ERROR: the non-ASCII case load is empty or not a range scan (dev db removed): ${CASE_RANGE_PLAN}" >&2
+  echo "  refusing to publish $(basename "${DEV_DB}")" >&2
+  exit 1
+fi
+echo "    headwords_case answers ${CASE_ROWS} spellings, the range load ${CASE_RANGE_ROWS}"
 # Present-but-empty is the failure worth catching: it passes every schema probe
 # and then answers nothing, which is indistinguishable from "no such gloss".
 # A count(*) cannot detect it — a contentless FTS5 table refuses to be scanned
@@ -354,7 +437,8 @@ FTSEOF
 PROBE="$(sqlite3 "${DEV_DB}" "SELECT substr(gloss, 1, 3) FROM senses WHERE gloss <> '' LIMIT 1;")"
 INDEX_ROWS="$(sqlite3 "${DEV_DB}" "SELECT count(*) FROM gloss_fts WHERE gloss_fts MATCH '\"${PROBE}\"';")"
 if [[ -z "${PROBE}" || "${INDEX_ROWS}" == "0" ]]; then
-  echo "ERROR: gloss index built but answers nothing for its own probe '${PROBE}';" >&2
+  rm -f "${DEV_DB}"
+  echo "ERROR: gloss index built but answers nothing for its own probe '${PROBE}' (dev db removed);" >&2
   echo "  refusing to publish $(basename "${DEV_DB}")" >&2
   exit 1
 fi
