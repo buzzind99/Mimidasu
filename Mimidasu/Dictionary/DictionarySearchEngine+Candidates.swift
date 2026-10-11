@@ -22,6 +22,9 @@ extension DictionarySearchEngine {
     /// lowercased, so the headword a spelling names is only reachable
     /// through its own shape — or through the spellings that fold onto it
     /// (`caseHeadwords`), which is what reaches `ActiveX` from `activex`.
+    /// Both branches run that rescue — a mixed-script query (`abc順`) is the
+    /// shape that needs it on the Japanese side, where the early return
+    /// skips the romaji converter and the literal spellings alike.
     /// The parameter is required, not defaulted: the set is read from the
     /// opened handle and forgetting to pass it along would silently drop
     /// every mixed-case headword from reach.
@@ -53,6 +56,14 @@ extension DictionarySearchEngine {
                     add(probe, probe: .prefix, matchKind: .prefix, highlight: typed)
                 }
             }
+            // A mixed-script query (`abc順`) lowercases away the case the
+            // stored spelling keeps (`ABC順`), and the B-tree's BINARY order
+            // puts that spelling outside both of the whole-string probes
+            // above. The folded spellings rescue it the way they rescue
+            // `activex` on the Latin branch.
+            emitCaseSpellingCandidates(
+                for: query, caseHeadwords: caseHeadwords, highlight: typed, add: add
+            )
             return out
         }
         for conversion in romajiConversions(for: query) {
@@ -112,10 +123,9 @@ extension DictionarySearchEngine {
     /// two-spelling shape could afford to skip: a folded spelling can carry
     /// kana (`1Dayコンタクト`), and once the two sets can intersect, emitting
     /// the same writing twice would spend a second seek proving what the first
-    /// one already knew. The set is only consulted on the Latin branch — a
-    /// kana-bearing query returns before this runs — so a spelling whose fold
-    /// carries kana is reachable only through a kana-free prefix, never
-    /// through its own exact fold.
+    /// one already knew. The rescue itself is shared with the Japanese branch
+    /// (`emitCaseSpellingCandidates`), which runs it before its early return —
+    /// only this function runs on the Latin branch.
     static func literalCandidates(
         for query: String, caseHeadwords: CaseHeadwordSpellings
     ) -> [HeadwordCandidate] {
@@ -141,21 +151,39 @@ extension DictionarySearchEngine {
                 add(writing, .prefix)
             }
         }
+        emitCaseSpellingCandidates(
+            for: query, caseHeadwords: caseHeadwords, highlight: typed
+        ) { writing, probe, _, _ in
+            add(writing, probe)
+        }
+        return out
+    }
+
+    /// The case-bearing spellings the folded query reaches, probed one at a
+    /// time: a spelling whose fold is the query itself is both an exact seek
+    /// and a prefix scan, one the query merely opens is a prefix scan alone.
+    /// The one rescue both branches run — the Japanese branch returns before
+    /// the literal spellings are ever built, and its mixed-script queries are
+    /// exactly the shape that needs the set.
+    private static func emitCaseSpellingCandidates(
+        for query: String, caseHeadwords: CaseHeadwordSpellings, highlight: Int,
+        add: (_ writing: String, _ probe: DictionarySearchProbe,
+              _ matchKind: DictionarySearchHit.MatchKind, _ highlight: Int) -> Void
+    ) {
         for match in caseHeadwords.matches(openingFold: query) {
             for writing in writingVariants(of: match.spelling) {
                 if match.isExact {
-                    add(writing, .exact)
+                    add(writing, .exact, .exact, highlight)
                     // The exact-tier seek already answers for the spelling
                     // itself, but the prefix scan is what reaches the longer
                     // spellings that start with it (`iPhone` → `iPhones`), the
                     // way it does for every other spelling probed here.
-                    add(writing, .prefix)
+                    add(writing, .prefix, .prefix, highlight)
                 } else {
-                    add(writing, .prefix)
+                    add(writing, .prefix, .prefix, highlight)
                 }
             }
         }
-        return out
     }
 
     /// The writing as typed, its kana-folded form, and — when the result is

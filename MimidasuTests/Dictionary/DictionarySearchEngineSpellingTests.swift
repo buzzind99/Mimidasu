@@ -55,4 +55,44 @@ final class DictionarySearchEngineSpellingTests {
         #expect(hit.keb == "TKG")
         #expect(hit.highlightRange == 0 ..< 3)
     }
+
+    @Test("a mixed-script query reaches the case-bearing headword its fold names")
+    func mixedScriptCaseExact() throws {
+        // `ABC順` keeps its case in the BINARY-ordered B-tree, so the
+        // whole-string probes a Japanese-script query runs (`abc順` exact,
+        // the `abc順`+sentinel prefix range) both miss it — `A` sorts before
+        // `a`. This is the Latin branch's `tkg` shape arriving with 順 riding
+        // along, rescued on this branch by the same folded spellings. The
+        // fixture word rides `extraWords`, not the shared synthetic list, so
+        // the other suites' row counts stay untouched.
+        let fixture = try DictionarySearchFixture(extraWords: [
+            JMDictFixtureDatabase.FixtureWord(
+                id: "9990180",
+                kanji: [JMDictFixtureDatabase.FixtureKanji(
+                    text: "ABC順", common: true, jlptLevel: nil, pitchAccent: nil
+                )],
+                kana: [JMDictFixtureDatabase.FixtureKana(
+                    text: "エービーシーじゅん", common: true, appliesToKanji: ["*"],
+                    jlptLevel: nil, pitchAccent: nil
+                )],
+                sense: [JMDictFixtureDatabase.FixtureSense(
+                    partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil,
+                    misc: nil,
+                    gloss: [JMDictFixtureDatabase.FixtureGloss(
+                        lang: "eng", text: "alphabetical order"
+                    )]
+                )]
+            )
+        ])
+
+        for query in ["ABC順", "abc順"] {
+            let hit = try #require(try fixture.outcome(query).hits.first)
+
+            #expect(hit.entSeq == 9_990_180, "\(query)")
+            #expect(hit.matchKind == .exact, "\(query)")
+            #expect(hit.matchedField == .keb, "\(query)")
+            #expect(hit.keb == "ABC順", "\(query)")
+            #expect(hit.highlightRange == 0 ..< 4, "\(query)")
+        }
+    }
 }

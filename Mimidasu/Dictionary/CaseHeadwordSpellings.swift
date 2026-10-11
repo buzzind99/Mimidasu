@@ -11,11 +11,11 @@ import Foundation
 /// `U+10FFFF` sentinel), and the uppercase spelling the literal candidates
 /// carry alongside rescues only the all-caps half. The tap path is unaffected —
 /// `JMDictLookup.probeText` folds NFKC and nothing else — which is why `Ajax`
-/// and `Airbnb` are findable by tapping and not by typing. One population
-/// stays out of reach here by design: a spelling whose fold carries kana
-/// (`1Dayコンタクト`) answers only through a kana-free prefix (`1day` opens
-/// it, prefix tier) — its own exact fold routes to the Japanese branch before
-/// the set is ever consulted.
+/// and `Airbnb` are findable by tapping and not by typing. No population stays
+/// out of reach: the rescue runs on both branches, so a spelling whose fold
+/// carries kana (`1Dayコンタクト`) answers through its own exact fold on the
+/// Japanese branch, and through a kana-free prefix (`1day` opens it, prefix
+/// tier) on either.
 ///
 /// The population is small and known: **2,357 distinct spellings** of the
 /// 1,289,637 `headwords` rows on the pinned build — 2,263 from the ASCII

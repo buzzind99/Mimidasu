@@ -127,16 +127,39 @@ struct CaseHeadwordSpellingsTests {
         #expect(Set(tkg.map(\.probe)) == [.exact, .prefix])
     }
 
-    @Test("a kana query never consults the set, so the two never collide")
+    @Test("a kana query opens none of the Latin folds, so the two never collide")
     func japaneseQueryIsUnaffected() {
-        // `literalCandidates` is only reached from the Latin branch, so a
-        // folded spelling that happens to carry kana cannot ride in on a
-        // Japanese query — the Japanese candidate set stays exactly what it
+        // The set answers only where the folds actually agree: a pure-kana
+        // query opens none of these Latin folds, so the Japanese branch's
+        // rescue emits nothing and its candidate set stays exactly what it
         // was without the set.
         let candidates = DictionarySearchEngine.headwordCandidates(
             for: "たべる", caseHeadwords: mixed
         )
 
         #expect(Set(candidates.map(\.text)) == ["たべる", "タベル", "たベ", "タべ", "たべル", "タベる"])
+    }
+
+    @Test("probes the spelling from the Japanese branch when the query mixes scripts")
+    func mixedScriptCaseCandidates() {
+        // `ABC順` arrives normalized as `abc順`, and the Japanese branch
+        // returns before the literal spellings are ever built — without the
+        // shared rescue both of its probes miss: the exact seek asks for
+        // `abc順`, and the B-tree's BINARY order puts `ABC順` outside the
+        // `abc順` range.
+        let candidates = DictionarySearchEngine.headwordCandidates(
+            for: "abc順", caseHeadwords: CaseHeadwordSpellings(spellings: ["ABC順"])
+        )
+
+        let spelling = candidates.filter { candidate in candidate.text == "ABC順" }
+
+        #expect(spelling.map(\.probe) == [.exact, .prefix])
+        #expect(spelling.map(\.matchKind) == [.exact, .prefix])
+        #expect(spelling.allSatisfy { candidate in candidate.highlightScalars == 4 })
+        // The query's own probes ride beside the rescue, unchanged.
+        #expect(
+            candidates.filter { candidate in candidate.text == "abc順" }.map(\.probe)
+                == [.exact, .prefix]
+        )
     }
 }

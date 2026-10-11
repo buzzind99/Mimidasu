@@ -260,6 +260,12 @@ struct DictionarySearchEngineLiveTests {
         let flagships = [
             Flagship(query: "activex", entSeq: 5_747_363, kind: .exact), // ActiveX, the exact fold
             Flagship(query: "iphon", entSeq: 5_008_659, kind: .prefix), // iPhone, opened as a prefix
+            // The mixed-script pair rides the same rescue from the Japanese
+            // branch: the query lowercases to `abc順`, whose whole-string
+            // probes both miss the cased B-tree rows.
+            Flagship(query: "abc順", entSeq: 1_000_100, kind: .exact), // ABC順, the exact fold
+            Flagship(query: "ABC順", entSeq: 1_000_100, kind: .exact), // the same word, typed in its case
+            Flagship(query: "abc兵", entSeq: 2_871_433, kind: .prefix), // ABC兵器, opened as a prefix
             // The Greek pair runs one search twice — `Α` normalizes to `α` —
             // and is kept deliberately: the second row pins that the typed
             // uppercase form and the folded form answer identically.
