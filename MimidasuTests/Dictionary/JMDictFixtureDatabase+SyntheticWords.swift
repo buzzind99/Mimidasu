@@ -8,7 +8,9 @@ extension JMDictFixtureDatabase {
     /// `count` kana-only entries whose readings all begin with `readingPrefix`,
     /// for the tests that need more rows on screen than one page of search
     /// results holds. The readings are gojūon pairs, so every one of them is a
-    /// real word shape and all `count` stay unique (up to 46²).
+    /// real word shape; they repeat every 46² offsets, so `count` past that
+    /// reuses spellings — harmless, because each entry is its own `ent_seq` and
+    /// every count in these tests is a count of entries, not of readings.
     ///
     /// `common` cycles every third entry, which is what puts common rows both
     /// inside and outside the first page — a window that only ever showed common
@@ -236,7 +238,7 @@ extension JMDictFixtureDatabase {
                     pitchAccent: FixturePitch(hatsuon: "かた'ご", accPatts: "2", zoPatts: "HH")
                 )],
                 kana: [FixtureKana(
-                    text: "カタ語", common: false, appliesToKanji: ["*"], jlptLevel: nil,
+                    text: "カタ語", common: false, appliesToKanji: ["*"], jlptLevel: 5,
                     pitchAccent: FixturePitch(hatsuon: nil, accPatts: nil, zoPatts: "LL")
                 )],
                 sense: [

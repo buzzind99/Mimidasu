@@ -6,7 +6,9 @@ import Testing
 @Suite("JMDictLookup")
 final class JMDictLookupTests {
     private let databaseURL: URL
-    private let engine: JMDictLookup
+    /// Shared with `JMDictLookupHeadwordRowTests`, which extends this suite
+    /// rather than rebuilding the fixture.
+    let engine: JMDictLookup
 
     init() throws {
         let built = try JMDictFixtureDatabase.build()
@@ -157,33 +159,6 @@ final class JMDictLookupTests {
     @Test("drops an entry whose every sense is filtered away for the candidate")
     func fullyFilteredEntryDropped() throws {
         #expect(try engine.lookup(LookupCandidate(text: "幽語")) == nil)
-    }
-
-    // MARK: Headword-row sourcing
-
-    @Test("takes jlpt and pitch verbatim from the matched kana headword row")
-    func jlptFromMatchedRow() throws {
-        let result = try #require(try engine.lookup(LookupCandidate(text: "ふろしき")))
-
-        let entry = try #require(result.entries.first)
-
-        #expect(entry.entSeq == 1_500_150)
-        #expect(entry.jlpt == nil, "the kana row's null wins over the kanji row's 2")
-        #expect(entry.hatsuon == "ふろ'[Dev]しき")
-        #expect(entry.zoPatts == "LHHHH")
-    }
-
-    @Test("leaves pitch nil when the matched headword row has none")
-    func pitchNullWhenRowLacksIt() throws {
-        let result = try #require(try engine.lookup(LookupCandidate(text: "お土産")))
-
-        let entry = try #require(result.entries.first)
-
-        #expect(entry.entSeq == 1_002_500)
-        #expect(entry.jlpt == 4)
-        #expect(entry.hatsuon == nil)
-        #expect(entry.accPatts == nil)
-        #expect(entry.zoPatts == nil)
     }
 
     // MARK: Misses

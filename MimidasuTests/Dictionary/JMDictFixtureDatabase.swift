@@ -11,7 +11,12 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// `JMDictPin.glossJoiner`, `,`-joined POS, `", "`-joined misc — and the
 /// schema mirrors the build's
 /// WITHOUT ROWID tables (headwords keyed `(text, entry_id, kind)`, senses
-/// keyed `(entry_id, ord)`), so the tests exercise the same data shapes and
+/// keyed `(entry_id, ord)`), and its word headwords carry the same
+/// enrichment `jmdict_build.py` applies before it writes — the JLPT
+/// word-level fallback, the furigana-named pitch inheritance, and the
+/// post-enrichment per-entry dedupe — while name-range entries stay
+/// plain, so no row here is a shape the shipped database cannot hold in
+/// either direction. The tests exercise the same data shapes and
 /// row ordering the shipped database carries.
 ///
 /// Fourteen synthetic entries are appended for coverage the real fixture lacks:
@@ -43,10 +48,12 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// entry `15668307` below, so the pager ranking can pin a common entry
 /// leading while the name entry stays retained;
 /// `9990110` カタ語/カタ語 — kanji and kana spellings coincide, each
-/// carrying different JLPT/pitch metadata, so the entries join's kind
-/// predicate is pinned to the keb row: exactly one row per entry ('keb'
-/// sorts before 'reb' under the WITHOUT ROWID primary key, whatever the
-/// insertion order was);
+/// carrying a different JLPT level and a different pitch (2/かた'ご on the
+/// keb row vs 5 with a zo-only "LL" accent on the reb — no hatsuon or
+/// accent pattern), so the entries join's kind predicate is pinned to the
+/// keb row: exactly one row per entry ('keb' sorts before 'reb' under the
+/// WITHOUT ROWID primary key, whatever the insertion order was), and the
+/// winner is observable rather than a tie;
 /// `9990120`–`9990140` 例子/れいし — a three-way homograph isolating the
 /// commonness and ent_seq tiebreaks: the common `9990130` carries the
 /// *highest* ent_seq, so common-first is observable only through the
@@ -162,6 +169,45 @@ enum JMDictFixtureDatabase {
         let common: Bool
         let jlptLevel: Int?
         let pitchAccent: FixturePitch?
+        /// Upstream's per-piece furigana. The builder rejoins it into the
+        /// reading a kanji writing names (see `reading(for:)`); a synthetic
+        /// entry carries none, which is the same as a writing upstream was
+        /// given none.
+        let furigana: [FixtureFurigana]?
+
+        init(
+            text: String, common: Bool, jlptLevel: Int?,
+            pitchAccent: FixturePitch?, furigana: [FixtureFurigana]?
+        ) {
+            self.text = text
+            self.common = common
+            self.jlptLevel = jlptLevel
+            self.pitchAccent = pitchAccent
+            self.furigana = furigana
+        }
+
+        /// The shape every synthetic entry writes: a real upstream writing that
+        /// upstream gave no furigana.
+        init(text: String, common: Bool, jlptLevel: Int?, pitchAccent: FixturePitch?) {
+            self.init(
+                text: text, common: common, jlptLevel: jlptLevel,
+                pitchAccent: pitchAccent, furigana: nil
+            )
+        }
+    }
+
+    struct FixtureFurigana: Decodable {
+        /// The kanji (or okurigana) this piece covers.
+        let ruby: String
+        /// Its reading — omitted upstream when the reading *is* the ruby.
+        let rt: String?
+        /// What the piece contributes to the reading: the `rt` when there is
+        /// a non-empty one, the ruby otherwise — the okurigana fallback, and
+        /// the builder's `rt or ruby` also treats an empty `rt` as absent.
+        var text: String {
+            guard let rt, !rt.isEmpty else { return ruby }
+            return rt
+        }
     }
 
     struct FixtureKana: Decodable {
@@ -221,6 +267,31 @@ enum JMDictFixtureDatabase {
 // MARK: - Insertion (build-script mapping)
 
 private extension JMDictFixtureDatabase {
+    /// One headword row, already resolved against the builder's two rules.
+    private struct Headword {
+        let kind: String
+        let text: String?
+        let jlpt: Int?
+        /// A pitch as the three columns it lands in.
+        let accent: Accent
+    }
+
+    /// A pitch, or the all-null `noAccent` a writing with none carries — which
+    /// is also the only shape a kanji row is allowed to inherit *over*.
+    private struct Accent {
+        let hatsuon: String?
+        let acc: String?
+        let zo: String?
+    }
+
+    /// The builder's dedupe key: one row per spelling-and-kind per entry.
+    private struct RowKey: Hashable {
+        let text: String?
+        let kind: String
+    }
+
+    private static let noAccent = Accent(hatsuon: nil, acc: nil, zo: nil)
+
     private static func insert(_ word: FixtureWord, _ db: OpaquePointer) throws {
         guard let entSeq = Int(word.id) else {
             throw FixtureError.badEntryID(word.id)
@@ -234,11 +305,13 @@ private extension JMDictFixtureDatabase {
             .text(nfkc(kana.first?.text)),
             .int(common ? 1 : 0)
         ])
-        for object in kanji {
-            try insertHeadword(db, entSeq: entSeq, kind: "keb", text: nfkc(object.text), object: object)
-        }
-        for object in kana {
-            try insertHeadword(db, entSeq: entSeq, kind: "reb", text: nfkc(object.text), object: object)
+        // The builder dedupes per entry after enrichment: the NFKC fold can
+        // land two of one entry's own same-kind writings on one PK, and the
+        // first in source order wins.
+        var seen = Set<RowKey>()
+        let rows = headwordRows(entSeq: entSeq, kanji: kanji, kana: kana)
+        for row in rows where seen.insert(RowKey(text: row.text, kind: row.kind)).inserted {
+            try insertHeadword(db, entSeq: entSeq, row: row)
         }
         for (ord, sense) in (word.sense ?? []).enumerated() {
             let glosses = (sense.gloss ?? [])
@@ -257,31 +330,91 @@ private extension JMDictFixtureDatabase {
         }
     }
 
-    private static func insertHeadword(
-        _ db: OpaquePointer, entSeq: Int, kind: String, text: String?, object: FixtureKanji
-    ) throws {
-        try insertRow(db, "INSERT INTO headwords VALUES (?,?,?,?,?,?,?)", [
-            .int(entSeq),
-            .text(text),
-            .text(kind),
-            .int(object.jlptLevel),
-            .text(object.pitchAccent?.hatsuon),
-            .text(object.pitchAccent?.accPatts),
-            .text(object.pitchAccent?.zoPatts)
-        ])
+    /// The entry's headword rows in source order, as the builder writes them.
+    ///
+    /// `jmdict_build.py`'s `normalized_headword_rows` enriches every word
+    /// headword row before it writes it, and the fixture mirrors it rule
+    /// for rule. JLPT rides individual kanji writings upstream but reads
+    /// as word-level in the card, so a writing with no level of its own
+    /// takes the word's first non-null level in source order (kanji
+    /// writings, then kana), whatever level that is — a writing carrying
+    /// its own keeps it, which is why 彼処's kanji row keeps 1 while あそこ
+    /// keeps its own 5. Pitch is per-reading and crosses one way only:
+    /// a kanji row with no accent inherits the row its furigana names
+    /// (お土産 → おみやげ), and a kana row never borrows. Name-range entries
+    /// never reach any of this — the builder's names path writes plain
+    /// rows — so they skip the enrichment here too. Breaking any of these
+    /// stores rows no shipped artifact carries, and every assertion made
+    /// against one pins the fixture rather than the app.
+    private static func headwordRows(
+        entSeq: Int, kanji: [FixtureKanji], kana: [FixtureKana]
+    ) -> [Headword] {
+        if entSeq >= DictionaryContent.nameSeqOffset {
+            return kanji.map { object in
+                Headword(kind: "keb", text: nfkc(object.text), jlpt: nil, accent: noAccent)
+            } + kana.map { object in
+                Headword(kind: "reb", text: nfkc(object.text), jlpt: nil, accent: noAccent)
+            }
+        }
+        let fallbackLevel = jlptFallback(kanji: kanji, kana: kana)
+        let kanaAccents = Dictionary(
+            kana.map { object in (nfkc(object.text) ?? "", accent(of: object.pitchAccent) ?? noAccent) },
+            uniquingKeysWith: { _, latest in latest }
+        )
+        return kanji.map { object in
+            Headword(
+                kind: "keb",
+                text: nfkc(object.text),
+                jlpt: object.jlptLevel ?? fallbackLevel,
+                accent: accent(of: object.pitchAccent)
+                    ?? reading(for: object).flatMap { reading in kanaAccents[reading] }
+                    ?? noAccent
+            )
+        } + kana.map { object in
+            Headword(
+                kind: "reb",
+                text: nfkc(object.text),
+                jlpt: object.jlptLevel ?? fallbackLevel,
+                accent: accent(of: object.pitchAccent) ?? noAccent
+            )
+        }
+    }
+
+    /// The word's first non-null level in source order — kanji writings, then
+    /// kana — which is the builder's `jlpt_fallback`.
+    private static func jlptFallback(kanji: [FixtureKanji], kana: [FixtureKana]) -> Int? {
+        kanji.compactMap(\.jlptLevel).first ?? kana.compactMap(\.jlptLevel).first
+    }
+
+    /// A writing's own accent, or nil when it carries none of the three
+    /// columns — the builder's "has no accent" test, and the only case that
+    /// inherits one.
+    private static func accent(of pitch: FixturePitch?) -> Accent? {
+        guard let pitch, pitch.hatsuon != nil || pitch.accPatts != nil || pitch.zoPatts != nil
+        else { return nil }
+        return Accent(hatsuon: pitch.hatsuon, acc: pitch.accPatts, zo: pitch.zoPatts)
+    }
+
+    /// The reading a kanji writing's furigana names — the builder's
+    /// `reading_for_keb`. Normalized onto the spelling the kana rows are keyed
+    /// by, so a halfwidth reading still finds its row.
+    private static func reading(for kanji: FixtureKanji) -> String? {
+        let text = (kanji.furigana ?? []).map(\.text).joined()
+        guard !text.isEmpty else { return nil }
+        return nfkc(text)
     }
 
     private static func insertHeadword(
-        _ db: OpaquePointer, entSeq: Int, kind: String, text: String?, object: FixtureKana
+        _ db: OpaquePointer, entSeq: Int, row: Headword
     ) throws {
         try insertRow(db, "INSERT INTO headwords VALUES (?,?,?,?,?,?,?)", [
             .int(entSeq),
-            .text(text),
-            .text(kind),
-            .int(object.jlptLevel),
-            .text(object.pitchAccent?.hatsuon),
-            .text(object.pitchAccent?.accPatts),
-            .text(object.pitchAccent?.zoPatts)
+            .text(row.text),
+            .text(row.kind),
+            .int(row.jlpt),
+            .text(row.accent.hatsuon),
+            .text(row.accent.acc),
+            .text(row.accent.zo)
         ])
     }
 
