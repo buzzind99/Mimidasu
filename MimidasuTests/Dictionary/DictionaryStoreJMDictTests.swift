@@ -25,6 +25,22 @@ extension DictionaryStoreTests {
         )
     }
 
+    @Test("names a failed index build apart from a failed smoke query")
+    func indexBuildFailedMessage() {
+        let index = DictionaryStore.DictionaryStoreError.indexBuildFailed(
+            reason: "SQLite error 8: attempt to write a readonly database"
+        )
+
+        // Distinct copy: the two failures surface the same way to the user (a
+        // prepare that failed and retries), and the status bar must not claim
+        // a smoke query failed when the index build is what stopped it.
+        #expect(
+            index.errorDescription
+                == "Dictionary index could not be built: SQLite error 8: "
+                + "attempt to write a readonly database."
+        )
+    }
+
     // MARK: resolveJMDict
 
     #if DEBUG
@@ -311,21 +327,27 @@ extension DictionaryStoreTests {
         #expect(fakePrepareCalls == 2, "the retry must re-attempt the decompression")
     }
 
-    @Test("fails the JMDict smoke query when the artifact is not a database")
+    @Test("fails the JMDict prepare when the artifact is not a database")
     func jmDictSmokeRejectsNonDatabase() async throws {
         // The default fake prepare writes the plain placeholder payload —
-        // not SQLite — so the JMDict lookup over the staged file must throw.
+        // not SQLite — so the derived index cannot be built on it, and the
+        // prepare must fail rather than promote a file no engine can read.
         let store = makeStore()
 
         let error = await #expect(throws: DictionaryStore.DictionaryStoreError.self) {
             try await store.prepareJMDict()
         }
 
-        guard case let .smokeTestFailed(reason) = error else {
-            Issue.record("expected .smokeTestFailed, got \(error)")
+        guard case let .indexBuildFailed(reason) = error else {
+            Issue.record("expected .indexBuildFailed, got \(error)")
             return
         }
-        #expect(reason.contains("JMDict database error"))
+        #expect(reason.contains("file is not a database"))
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: destination.appendingPathComponent(JMDictPin.preparedFileName).path
+            )
+        )
     }
 
     @Test("fails the JMDict smoke query when the smoke word has no entry")
@@ -392,6 +414,50 @@ extension DictionaryStoreTests {
                 atPath: destination.appendingPathComponent(JMDictPin.preparedFileName).path
             ),
             "a database that cannot be indexed safely must not be promoted"
+        )
+    }
+
+    /// Fail-soft is for exactly one failure: a platform whose SQLite cannot
+    /// create an FTS5 table at all. A read-only staged artifact stands in for
+    /// every *transient* one — a full disk mid-insert of the ~140 MB index, an
+    /// I/O error — none of which are degradation. Swallowing them promoted an
+    /// index-less database that `isAdoptable` then rejected on every later
+    /// launch (FTS5 being available here, the index is not optional), so the
+    /// store decompressed, failed, and promoted again forever, silently. The
+    /// prepare must fail loudly instead, leaving nothing behind.
+    @Test("refuses to degrade a transient index-build failure into a silent promote")
+    func jmDictTransientIndexFailureIsNotFailSoft() async throws {
+        // A read-only staged copy: `senses` reads fine, so the lookup smoke
+        // passes and the index build is the only thing that fails — the shape of
+        // a mid-insert disk-full, where the database itself is still valid.
+        // This leans on FileManager.copyItem preserving the 0444 mode through
+        // both copies it feeds (production staging, then the fake prepare);
+        // were that ever to change, the index would build and this test would
+        // fail loudly below — never silently pass.
+        let staged = tempRoot.appendingPathComponent("read-only-source.sqlite")
+        try FileManager.default.copyItem(at: smokeDatabase, to: staged)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o444], ofItemAtPath: staged.path
+        )
+        defer { try? FileManager.default.removeItem(at: staged) }
+        fakePrepareCopySource = staged
+        let store = makeStore()
+
+        let error = await #expect(throws: DictionaryStore.DictionaryStoreError.self) {
+            try await store.prepareJMDict()
+        }
+
+        // Exact equality pins the whole `describe` format, code included.
+        #expect(
+            error == .indexBuildFailed(
+                reason: "SQLite error 8: attempt to write a readonly database"
+            )
+        )
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: destination.appendingPathComponent(JMDictPin.preparedFileName).path
+            ),
+            "an index-less database must never be promoted on a platform that can build one"
         )
     }
 

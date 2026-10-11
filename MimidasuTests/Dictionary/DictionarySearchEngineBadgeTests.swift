@@ -85,6 +85,29 @@ final class DictionarySearchEngineBadgeTests {
         #expect(DictionaryContent.jlptBadge(hit.jlpt) == "≈N5")
     }
 
+    // MARK: Gloss-stage gate
+
+    /// The adoption contract deliberately promotes an index-less database where
+    /// SQLite has no FTS5 (`DictionaryStore.isAdoptable`), so the ladder can
+    /// legitimately be handed one. The gloss stage reads `gloss_fts`
+    /// unconditionally, and `no such table: gloss_fts` would abort the *whole*
+    /// ladder — headword hits included — surfacing as "no matches". The gate
+    /// closes instead, so the tiers that can still answer do.
+    @Test("closes the gloss stage where the platform cannot build the index")
+    func glossGateNeedsAnIndex() {
+        #expect(DictionarySearchEngine.acceptsGlossQuery("bridge", fts5Available: true) == true)
+        #expect(
+            DictionarySearchEngine.acceptsGlossQuery("bridge", fts5Available: false) == false,
+            "an index-less platform must not run a stage that reads the index"
+        )
+        // The default is the live platform's own capability, so this host is
+        // pinned to the path the ladder actually takes. Pinning the capability
+        // itself keeps the tripwire below two-directional: without it, a
+        // default hard-coded to `true` would be indistinguishable on this host.
+        #expect(JMDictFTSIndex.isAvailable)
+        #expect(DictionarySearchEngine.acceptsGlossQuery("bridge") == JMDictFTSIndex.isAvailable)
+    }
+
     // MARK: Name types
 
     /// A name row's collapsed header is now the only place its types appear, so
@@ -142,16 +165,43 @@ final class DictionarySearchEngineBadgeTests {
 
     /// The entries join must read the level off a writing through
     /// `headwords.text` — the leading column of that table's primary key —
-    /// preferring the kanji writing and falling back to the reading for the
-    /// kana-only entries that have none. Anything else (a scan on `entry_id`,
+    /// preferring the keb writing and falling back to the reading for the
+    /// kana-only entries that have no keb. Anything else (a scan on `entry_id`,
     /// a join the planner cannot seek) would turn every keystroke's metadata
     /// fetch into a table walk.
     @Test("the entries join seeks headwords by its leading primary-key column")
-    func entriesJoinIsASeek() {
+    func entriesJoinIsASeek() throws {
         let sql = DictionarySearchEngine.entriesSQL(count: 2)
 
         #expect(sql.contains("LEFT JOIN headwords h ON h.text = COALESCE(e.keb, e.reb)"))
         #expect(sql.contains("h.entry_id = e.ent_seq"))
+        // The whole primary key, so a coincident keb==reb spelling cannot fan
+        // the join out and hand the caller whichever row stepped last.
+        let kindPredicate = "h.kind = CASE WHEN e.keb IS NULL THEN 'reb' ELSE 'keb' END"
+        #expect(sql.contains(kindPredicate))
+        // The predicate must live in the ON clause: relocated into the WHERE
+        // clause it would silently inner the join and drop every kana-only
+        // entry's metadata row.
+        #expect(
+            try (#require(sql.firstRange(of: kindPredicate))).upperBound
+                < #require(sql.firstRange(of: "WHERE e.ent_seq")).lowerBound
+        )
+    }
+
+    /// `headwords` is keyed `(text, entry_id, kind)`, not `(text, entry_id)`,
+    /// and 9990110 stores カタ語 under both kinds. Matching the key's prefix
+    /// alone returned two rows, and `entryMetadata`'s `out[entSeq] = …` kept the
+    /// last — the *reb* row, which carries no level. The entry would then render
+    /// without its JLPT badge while the tap lookup through `JMDictLookup`, which
+    /// resolves the same spelling keb-first, showed the level. One row per
+    /// entry is the fix, and this is the entry that proves it.
+    @Test("a coincident keb==reb spelling resolves its keb row's level")
+    func coincidentSpellingKeepsTheKanjiLevel() throws {
+        let hit = try #require(search("coincident spelling").hits.first)
+
+        #expect(hit.entSeq == 9_990_110)
+        #expect(hit.keb == "カタ語")
+        #expect(hit.jlpt == 2, "the keb row wins, as it does through JMDictLookup")
     }
 
     @Test("the name-type fetch is a chunked primary-key range scan")

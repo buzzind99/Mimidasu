@@ -378,11 +378,21 @@ extension DictionarySearchEngine {
     /// the kanji row is where the entry's level lives — and an entry with no
     /// kanji writing at all (keb NULL) reads it off its reading instead, which
     /// is what `COALESCE` buys: without the fallback the level of every
-    /// kana-only entry vanished on gloss-tier hits. The join stays entry-scoped
-    /// and `(text, entry_id)` is unique, so the fallback cannot fan a row out.
+    /// kana-only entry vanished on gloss-tier hits.
+    ///
+    /// The `kind` predicate is what makes the join exactly one row. The key is
+    /// `(text, entry_id, kind)`, not `(text, entry_id)`: an entry whose kanji
+    /// and kana writings are spelled alike stores that text twice, once per
+    /// kind, and `COALESCE` matches both. Left alone, the join fans out and the
+    /// caller's `out[entSeq] = …` keeps whichever row steps last — the `reb`
+    /// row, contradicting both this doc and `JMDictLookup`, which resolve a
+    /// coincident spelling keb-first. The predicate pins the kind to the same
+    /// writing `COALESCE` chose, so the join stays entry-scoped and the whole
+    /// primary key is matched rather than a prefix of it.
     static func entriesSQL(count: Int) -> String {
         "SELECT e.ent_seq, e.keb, e.reb, e.common, h.jlpt FROM entries e "
             + "LEFT JOIN headwords h ON h.text = COALESCE(e.keb, e.reb) AND h.entry_id = e.ent_seq "
+            + "AND h.kind = CASE WHEN e.keb IS NULL THEN 'reb' ELSE 'keb' END "
             + "WHERE e.ent_seq IN (" + placeholders(count) + ")"
     }
 

@@ -173,9 +173,13 @@ extension DictionarySearchEngine {
     }
 
     /// The gloss stage's gate: Latin input only (Japanese input has already
-    /// been searched as writing), and long enough for a substring to mean
-    /// something.
-    static func acceptsGlossQuery(_ query: String) -> Bool {
+    /// been searched as writing), long enough for a substring to mean
+    /// something, and runnable at all — a platform with no FTS5 has no index
+    /// to read, and the stage would abort the whole ladder on `no such table`.
+    static func acceptsGlossQuery(
+        _ query: String, fts5Available: Bool = JMDictFTSIndex.isAvailable
+    ) -> Bool {
+        guard fts5Available else { return false }
         guard !KanaClassification.containsJapanese(query) else { return false }
         let latin = query.unicodeScalars.filter { scalar in
             scalar.isASCII && scalar.properties.isAlphabetic

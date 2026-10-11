@@ -43,9 +43,10 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// entry `15668307` below, so the pager ranking can pin a common entry
 /// leading while the name entry stays retained;
 /// `9990110` カタ語/カタ語 — kanji and kana spellings coincide, each
-/// carrying different JLPT/pitch metadata, so the first-row-wins metadata
-/// pickup is pinned to the keb row ('keb' sorts before 'reb' under the
-/// WITHOUT ROWID primary key, whatever the insertion order was);
+/// carrying different JLPT/pitch metadata, so the entries join's kind
+/// predicate is pinned to the keb row: exactly one row per entry ('keb'
+/// sorts before 'reb' under the WITHOUT ROWID primary key, whatever the
+/// insertion order was);
 /// `9990120`–`9990140` 例子/れいし — a three-way homograph isolating the
 /// commonness and ent_seq tiebreaks: the common `9990130` carries the
 /// *highest* ent_seq, so common-first is observable only through the

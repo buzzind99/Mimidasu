@@ -24,6 +24,13 @@ final class DictionaryStore: Sendable {
         case bundledJMDictMissing
         case prepareFailed(returnCode: Int32)
         case smokeTestFailed(reason: String)
+        /// The derived gloss index could not be built on a platform that has
+        /// FTS5 — a truncated artifact, a full disk mid-insert, an I/O error.
+        /// Its own case rather than the smoke query's, because the failure is
+        /// detected before the smoke check runs and is not that check's to
+        /// report; both are the same user-facing outcome, a failed prepare that
+        /// retries next launch.
+        case indexBuildFailed(reason: String)
 
         var errorDescription: String? {
             switch self {
@@ -37,6 +44,8 @@ final class DictionaryStore: Sendable {
                 "Dictionary decompression failed (return code \(returnCode))."
             case let .smokeTestFailed(reason):
                 "Dictionary failed its smoke query: \(reason)."
+            case let .indexBuildFailed(reason):
+                "Dictionary index could not be built: \(reason)."
             }
         }
     }
@@ -414,7 +423,10 @@ final class DictionaryStore: Sendable {
         // The gloss index is derived here, on the staged copy, before the smoke
         // check — so the smoke check exercises the path the app will actually
         // run and a silently-empty index fails the promote instead of shipping.
-        let indexed = try indexJMDict(stagedArtifact)
+        // Only the JMDict artifact has one: the tokenizer dictionary is not a
+        // SQLite database at all, and handing it to the index builder is a
+        // guaranteed `file is not a database`.
+        let indexed = artifact == .jmDict ? try indexJMDict(stagedArtifact) : false
         try smoke(artifact, stagedArtifact, indexed: indexed, ffi: ffi)
 
         try fm.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
@@ -458,16 +470,41 @@ final class DictionaryStore: Sendable {
     /// It is also the only index built here: the case-headword index ships
     /// inside the artifact (`JMDictCaseIndex`), and its absence would be a
     /// latency-only degradation the promote tolerates.
+    ///
+    /// Every *other* failure is transient — a full disk mid-insert of the ~140 MB
+    /// index, an I/O error — and is rethrown rather than degraded. Swallowing it
+    /// would promote an index-less database that `isAdoptable` then rejects on
+    /// every later launch (FTS5 being available, the index is not optional
+    /// there), so the store would decompress, fail, and promote again forever,
+    /// silently. Failing the prepare is loud, retryable, and leaves the
+    /// destination untouched.
     private func indexJMDict(_ stagedArtifact: URL) throws -> Bool {
         do {
             try JMDictFTSIndex.build(at: stagedArtifact)
         } catch let error as JMDictFTSIndex.IndexError {
             throw error
         } catch {
-            print("[dictionary-store] gloss index unavailable: \(error)")
+            // `SQLiteDatabase.Error` carries no `errorDescription`, so its
+            // `localizedDescription` would reach the status bar as an opaque
+            // "operation couldn't be completed"; the case's own message is the
+            // one that says what actually went wrong.
+            let reason = (error as? SQLiteDatabase.Error).map(Self.describe) ?? "\(error)"
+            if SQLiteDatabase.supportsFTS5 {
+                throw DictionaryStoreError.indexBuildFailed(reason: reason)
+            }
+            print("[dictionary-store] gloss index unavailable: \(reason)")
             return false
         }
         return JMDictFTSIndex.isPresent(at: stagedArtifact)
+    }
+
+    /// SQLite's own words for a failed index build, in the same
+    /// code-and-message shape `JMDictLookupError` reports its failures in.
+    private static func describe(_ error: SQLiteDatabase.Error) -> String {
+        switch error {
+        case .unavailable: "database unavailable"
+        case let .sqlite(code, message): "SQLite error \(code): \(message)"
+        }
     }
 
     /// Proves the freshly decompressed dictionary is openable and actually
