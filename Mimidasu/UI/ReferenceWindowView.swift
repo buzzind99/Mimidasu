@@ -149,26 +149,39 @@ struct ReferenceWindowView: View {
         ReferenceMode(rawValue: modeRaw) ?? .dictionary
     }
 
+    /// The active mode's surface. Its own view so the notice pill can overlay
+    /// it directly — attaching the overlay to the whole window would put it
+    /// over the header instead of over the list the press came from.
+    @ViewBuilder
+    private var modeContent: some View {
+        switch mode {
+        case .dictionary:
+            DictionarySearchView(
+                model: model,
+                state: dictionaryState,
+                onFavoriteRemoval: fileFavoriteRemoval,
+                searchFocus: $dictionarySearchFocused
+            )
+        case .favorites:
+            FavoritesView(
+                model: model,
+                state: favoritesState,
+                onFavoriteRemoval: fileFavoriteRemoval,
+                searchFocus: $favoritesSearchFocused
+            )
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
             Rectangle().fill(Theme.divider).frame(height: 1)
-            switch mode {
-            case .dictionary:
-                DictionarySearchView(
-                    model: model,
-                    state: dictionaryState,
-                    onFavoriteRemoval: fileFavoriteRemoval,
-                    searchFocus: $dictionarySearchFocused
-                )
-            case .favorites:
-                FavoritesView(
-                    model: model,
-                    state: favoritesState,
-                    onFavoriteRemoval: fileFavoriteRemoval,
-                    searchFocus: $favoritesSearchFocused
-                )
-            }
+            modeContent
+                // Below the header, not over it: the pill would otherwise cover
+                // the title and the mode flip for the two seconds it lives.
+                .overlay(alignment: .top) {
+                    NoticePillView(center: model.notices)
+                }
         }
         // The whole window's size; `.top` keeps a short list and the empty
         // states pinned to the top instead of floating in the middle.
