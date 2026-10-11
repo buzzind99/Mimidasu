@@ -67,9 +67,12 @@ final class DictionarySearchEngineInternalsTests {
     func fullRomajiCandidates() {
         let full = DictionarySearchEngine.headwordCandidates(for: "makeru")
 
-        // The kana spellings the romaji names, plus the literal text and its
-        // uppercase probing the headwords stored verbatim.
-        #expect(Set(full.map(\.text)) == ["まける", "マケル", "makeru", "MAKERU"])
+        // The kana spellings the romaji names, the prefix-only script-switch
+        // probes, and the literal text and its uppercase probing the
+        // headwords stored verbatim.
+        #expect(Set(full.map(\.text)) == [
+            "まける", "マケル", "まケ", "マけ", "まけル", "マケる", "makeru", "MAKERU"
+        ])
         #expect(full.filter { candidate in candidate.probe == .exact }.count == 4)
         #expect(full.first?.highlightScalars == 3)
     }
@@ -124,10 +127,11 @@ final class DictionarySearchEngineInternalsTests {
     func kanaCandidates() {
         let japanese = DictionarySearchEngine.headwordCandidates(for: "たべる")
 
-        #expect(Set(japanese.map(\.text)) == ["たべる", "タベル"])
-        // Two writings × two probes, each de-duplicated: the mirror is never
-        // probed twice, and no writing is probed for the same stage twice.
-        #expect(japanese.count == 4)
+        #expect(Set(japanese.map(\.text)) == ["たべる", "タベル", "たベ", "タべ", "たべル", "タベる"])
+        // Two writings × two probes, plus the prefix-only script-switch
+        // probes, each de-duplicated: the mirror is never probed twice, and
+        // no writing is probed for the same stage twice.
+        #expect(japanese.count == 8)
         #expect(japanese.allSatisfy { candidate in candidate.highlightScalars == 3 })
     }
 

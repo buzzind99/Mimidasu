@@ -10,7 +10,9 @@ extension DictionarySearchEngine {
     /// Every headword probe one query implies.
     ///
     /// Japanese input probes its own script plus the kana mirrors that make
-    /// マケル reach まける and vice versa. Latin input goes through the romaji
+    /// マケル reach まける and vice versa — and, prefix-stage only, the
+    /// script-switch shapes that reach readings written in both scripts. Latin
+    /// input goes through the romaji
     /// converter instead: a fully consumed spelling is both an exact seek and
     /// a prefix scan (`kyou` reaches きょう *and* きょうか…), and an
     /// unfinished one expands its trailing consonant into every mora it can
@@ -37,31 +39,57 @@ extension DictionarySearchEngine {
             for writing in writingVariants(of: query) {
                 add(writing, probe: .exact, matchKind: .exact, highlight: typed)
                 add(writing, probe: .prefix, matchKind: .prefix, highlight: typed)
+                // Mixed-script readings sit outside the range of their own
+                // all-hiragana prefix, so the whole-string probes above
+                // cannot reach them; the switch probes each agree with the
+                // reading on one more scalar, and the scan ignores the rest.
+                for probe in KanaRomaji.scriptSwitchProbes(of: writing) {
+                    add(probe, probe: .prefix, matchKind: .prefix, highlight: typed)
+                }
             }
             return out
         }
         for conversion in romajiConversions(for: query) {
-            for kana in [conversion.kana] + conversion.variants {
-                let typed = kana == conversion.kana
-                    ? conversion.typedScalarCount
-                    : kana.unicodeScalars.count
-                if conversion.fullyConsumed {
-                    for writing in writingVariants(of: kana) {
-                        add(writing, probe: .exact, matchKind: .exact, highlight: typed)
-                        add(writing, probe: .prefix, matchKind: .prefix, highlight: typed)
-                    }
+            emitRomajiCandidates(conversion, add: add)
+        }
+        out += literalCandidates(for: query)
+        return out
+    }
+
+    /// One conversion's probes: every reading it offers — the primary kana,
+    /// the long-vowel/loanword/prolonged-sound variants — as exact and prefix
+    /// candidates when fully consumed, the script-switch shapes beside them,
+    /// and the trailing-onset expansions when the scan stopped on a promise.
+    private static func emitRomajiCandidates(
+        _ conversion: KanaRomaji.RomajiConversion,
+        add: (_ writing: String, _ probe: DictionarySearchProbe,
+              _ matchKind: DictionarySearchHit.MatchKind, _ highlight: Int) -> Void
+    ) {
+        for kana in [conversion.kana] + conversion.variants {
+            let typed = kana == conversion.kana
+                ? conversion.typedScalarCount
+                : kana.unicodeScalars.count
+            if conversion.fullyConsumed {
+                for writing in writingVariants(of: kana) {
+                    add(writing, .exact, .exact, typed)
+                    add(writing, .prefix, .prefix, typed)
                 }
-                if let onset = conversion.trailingOnset {
-                    for mora in KanaRomaji.onsetExpansions(onset) {
-                        for writing in writingVariants(of: kana + mora) {
-                            add(writing, probe: .prefix, matchKind: .prefix, highlight: typed)
-                        }
+                // The dash variants ride in `variants`, so every form the
+                // probes issue from — こおひい and its こーひー — is already
+                // in this loop; the mark is script-neutral, so a probe on
+                // the dash form aligns with the marked reading.
+                for probe in KanaRomaji.scriptSwitchProbes(of: kana) {
+                    add(probe, .prefix, .prefix, typed)
+                }
+            }
+            if let onset = conversion.trailingOnset {
+                for mora in KanaRomaji.onsetExpansions(onset) {
+                    for writing in writingVariants(of: kana + mora) {
+                        add(writing, .prefix, .prefix, typed)
                     }
                 }
             }
         }
-        out += literalCandidates(for: query)
-        return out
     }
 
     /// The spelling probes that reach the writings stored verbatim — numeric

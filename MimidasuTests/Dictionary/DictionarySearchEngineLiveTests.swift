@@ -213,6 +213,36 @@ struct DictionarySearchEngineLiveTests {
         #expect(outcome.matchedCount == 7)
     }
 
+    @Test("the romaji the transcript prints reaches the ー and mixed-script readings")
+    func prolongedAndMixedScriptFlagships() throws {
+        let engine = try makeEngine()
+        defer { engine.close() }
+
+        // The typed letters land on plain-vowel kana (ぱあてぃい) and the
+        // hiragana spelling of a mixed reading; the readings that store the
+        // prolonged-sound mark, and the readings written in both scripts,
+        // arrive through the dash variants and the script-switch probes.
+        // Each pair is a live row the pre-variant engine answered 0 for.
+        let flagships: [(query: String, entSeq: Int64)] = [
+            ("paatii", 1_100_760), // パーティー
+            ("keeki", 1_047_860), // ケーキ
+            ("koohii", 1_049_180), // コーヒー
+            ("juusu", 1_065_950), // ジュース
+            ("uchiagepaatii", 2_652_980), // うちあげパーティー
+            ("ubefurontiadaigaku", 5_742_895) // うべフロンティアだいがく
+        ]
+        for flagship in flagships {
+            let outcome = try engine.search(
+                flagship.query, filters: DictionarySearchFilters(),
+                limit: DictionarySearchEngine.maxRows * 10
+            )
+            #expect(
+                outcome.hits.contains { hit in hit.entSeq == flagship.entSeq },
+                "\(flagship.query) → \(flagship.entSeq)"
+            )
+        }
+    }
+
     @Test("a gloss whose own text contains the old \"; \" joiner stays whole")
     func embeddedJoinerGlossStaysWhole() throws {
         let engine = try makeEngine()
