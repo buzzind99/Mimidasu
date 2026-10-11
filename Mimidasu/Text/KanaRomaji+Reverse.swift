@@ -21,17 +21,20 @@ extension KanaRomaji {
         /// Converted prefix, hiragana, primary long-vowel spelling.
         let kana: String
         /// Alternate readings the letters cannot disambiguate: the long-vowel
-        /// spellings (`ou` ↔ `oo` → おう / おお), the loanword digraphs
-        /// (`ti` → てぃ beside ち), and the prolonged-sound forms the mark
-        /// hides (こーひー under こおひい). The primary is never repeated
-        /// here.
+        /// spellings (`ou` ↔ `oo` → おう / おお, `ee` ↔ `ei` → ええ / えい),
+        /// the loanword digraphs
+        /// (`ti` → てぃ beside ち), the ぢ/づ family the forward path spells
+        /// with the じ/ず keys (`ji` → ぢ beside じ), the historical kana
+        /// (`wi` → ゐ beside うぃ), and the prolonged-sound forms the mark
+        /// hides (こーひー under こおひい). Every table applies to every
+        /// long-vowel spelling. The primary is never repeated here.
         let variants: [String]
         /// Whether every input character became kana. False means `kana` is a
         /// prefix of the intended word, not a conversion of it.
         let fullyConsumed: Bool
         /// A valid-but-incomplete trailing consonant cluster — the remainder is
-        /// a promise the user is still typing (`k`, `sh`, `kk`), never an
-        /// invalid character (`x` in `max` leaves nil).
+        /// a promise the user is still typing (`k`, `sh`, `kk`, `x`), never an
+        /// invalid character (`q` in `moq` leaves nil).
         let trailingOnset: String?
 
         /// The morae the typed input actually consumed: what a highlight
@@ -45,32 +48,31 @@ extension KanaRomaji {
     /// Converts romanized input to hiragana, or nil when nothing converts at
     /// all (`mk`, `zz`). Accepts both hepburn and wapuro spellings — users
     /// type hepburn, the forward path emits wapuro — plus macrons and
-    /// circumflex long vowels, whose both readings land in `variants`.
+    /// circumflex long vowels, read under their row's doubled-vowel spelling.
+    /// The o and e rows are the two-readings rows (`ou`/`oo` → おう/おお,
+    /// `ei`/`ee` → えい/ええ), and each keeps both; the other rows have one
+    /// reading each.
     static func convert(_ romaji: String) -> RomajiConversion? {
         let spelling = expandedLongVowels(romaji.lowercased())
         let scan = scanned(spelling)
         guard !scan.kana.isEmpty else { return nil }
         let onset = scan.leftover.isEmpty ? nil : trailingOnset(of: scan.leftover)
-        // Deduped and stripped of the primary in one pass: a variant that
-        // happened to convert the same way is not a second reading, it is
-        // the same reading spelled differently. Sorted, so the candidate
-        // order (and therefore the whole search's tie-breaks) is identical
-        // every run.
-        var variantKana = Set(
-            alternateLongVowelSpellings(spelling).map { alternate in scanned(alternate).kana }
-        )
-        // The loanword second pass: where the plain table reads ち the
-        // loanword table reads てぃ, and which of the two a headword stores
-        // is unknowable from the letters — the forward path spells both
-        // "ti" (ティ and ち alike). The plain reading stays primary so wapuro
-        // input (tuki, dukku) keeps its exact answer; the loanword reading
-        // rides in as a variant. Both passes consume the same input, so the
-        // incompleteness signals above describe them equally.
-        let loanword = scanned(spelling, table: loanwordSyllables)
-        if loanword.kana != scan.kana {
-            variantKana.insert(loanword.kana)
+        // Every long-o spelling the letters allow, the typed one first. Each is
+        // read under the plain table and every alternate table, so an alternate
+        // spelling carries the same family of readings its primary does.
+        let spellings = [spelling] + alternateLongVowelSpellings(spelling)
+        // Deduped in one pass: a reading that happens to convert the same way
+        // is not a second reading, it is the same reading spelled differently.
+        // The primary rides along and is stripped at the end. Sorted, so the
+        // candidate order (and therefore the whole search's tie-breaks) is
+        // identical every run.
+        var variantKana: Set<String> = []
+        for table in [reverseSyllables] + alternateSyllableTables {
+            for candidate in spellings {
+                variantKana.insert(scanned(candidate, table: table).kana)
+            }
         }
-        // The prolonged-sound mark is the third unknowable: the forward path
+        // The prolonged-sound mark is the last unknowable: the forward path
         // spells ー by repeating the last vowel, so the letters name the
         // plain-vowel form while the reading stores the mark. Every reading
         // above offers its dash forms — こおひい hides こーひー (コーヒー),
@@ -194,10 +196,10 @@ private extension KanaRomaji {
     /// over instead of eating the `s` as さ. Whatever is left over at that
     /// point is either a promise (`trailingOnset`) or noise (dropped).
     ///
-    /// `table` swaps the syllable table for `loanwordSyllables`, whose second
-    /// pass reads the loanword digraphs — every one of its keys is a plain
-    /// key of the same length, so both passes consume the same input and
-    /// differ only in the kana they emit.
+    /// `table` swaps the syllable table for one of `alternateSyllableTables`,
+    /// whose passes read a family of alternate readings — every key of each
+    /// is a plain key of the same length, so all passes consume the same
+    /// input and differ only in the kana they emit.
     static func scanned(
         _ romaji: String, table: [String: String] = reverseSyllables
     ) -> Scan {
@@ -268,7 +270,7 @@ private extension KanaRomaji {
     }
 
     /// The remainder itself, when it is a valid but unfinished onset — nil for
-    /// an invalid trailing character (`max`), so the caller drops the chunk and
+    /// an invalid trailing character (`moq`), so the caller drops the chunk and
     /// searches the prefix it did convert.
     ///
     /// The whole remainder or nothing: truncating it to the longest legal
@@ -308,13 +310,16 @@ private extension KanaRomaji {
 
 private extension KanaRomaji {
     /// Replaces the macrons and circumflexes real IMEs accept with the plain
-    /// `ou`/`uu` spelling the scanner reads, so `tōkyō` needs no macro branch
-    /// of its own.
+    /// doubled-vowel spelling the scanner reads (`ō` → `ou`, `ā` → `aa`), so
+    /// `tōkyō` and `chīzu` need no macro branch of their own.
     static func expandedLongVowels(_ romaji: String) -> String {
         var out = ""
         out.reserveCapacity(romaji.count)
         for character in romaji {
             switch character {
+            case "ā", "â": out += "aa"
+            case "ī", "î": out += "ii"
+            case "ē", "ê": out += "ee"
             case "ō", "ô": out += "ou"
             case "ū", "û": out += "uu"
             default: out.append(character)
@@ -323,10 +328,11 @@ private extension KanaRomaji {
         return out
     }
 
-    /// The spellings that differ from this one only in how one long `o` is
-    /// written. `ou`/`oo` are the same word in two romaji systems, so both are
-    /// worth a prefix scan — but only for the `o`-row, where the ambiguity
-    /// actually exists; the scanner resolves `uu` to う either way.
+    /// The spellings that differ from this one only in how one long `o` or
+    /// long `e` is written. `ou`/`oo` are the same word in two romaji systems,
+    /// and Hepburn `ee` is the long `e` wapuro spells `ei` (せんせえ / せんせい),
+    /// so both pairs bridge both ways; the scanner resolves `uu` to う either
+    /// way, and `aa`/`ii` have one reading apiece.
     ///
     /// One rewrite per occurrence, never all of them at once: `toukyou` offers
     /// `tookyou` (both long `o`s read お) *and* `toukyoo` (only the second
@@ -336,7 +342,9 @@ private extension KanaRomaji {
     /// spelling no word carries.
     static func alternateLongVowelSpellings(_ spelling: String) -> [String] {
         var out: Set<String> = []
-        for (needle, replacement) in [("oo", "ou"), ("ou", "oo")] {
+        for (needle, replacement) in [
+            ("oo", "ou"), ("ou", "oo"), ("ee", "ei"), ("ei", "ee")
+        ] {
             var index = spelling.startIndex
             while let found = spelling.range(of: needle, range: index ..< spelling.endIndex) {
                 index = found.upperBound
@@ -429,152 +437,4 @@ private extension KanaRomaji {
         }
         return out
     }
-}
-
-// MARK: - Tables
-
-private extension KanaRomaji {
-    /// Romaji syllable → hiragana. Greedy longest-match consumes from here,
-    /// which is what makes `toukyou` land on とうきょう (と + う) and
-    /// `tookyou` on とおきょう (と + お) with no special-casing.
-    ///
-    /// Only the five vowels have one-character keys — see `scanned(_:)`.
-    static let reverseSyllables: [String: String] = {
-        // One conjugation row: the consonant (empty for the vowels) plus the
-        // vowel sequence and the morae that pair with it.
-        struct Row {
-            let consonant: String
-            let vowels: String
-            let morae: String
-        }
-        var table: [String: String] = [:]
-        // Each row spells out its own vowel sequence, because the y-row has
-        // three morae (や ゆ よ) — zipping `aiueo` against it would pair them
-        // with the wrong vowels and drop `yo` entirely.
-        let rows = [
-            Row(consonant: "", vowels: "aiueo", morae: "あいうえお"),
-            Row(consonant: "k", vowels: "aiueo", morae: "かきくけこ"),
-            Row(consonant: "g", vowels: "aiueo", morae: "がぎぐげご"),
-            Row(consonant: "s", vowels: "aiueo", morae: "さしすせそ"),
-            Row(consonant: "z", vowels: "aiueo", morae: "ざじずぜぞ"),
-            Row(consonant: "t", vowels: "aiueo", morae: "たちつてと"),
-            Row(consonant: "d", vowels: "aiueo", morae: "だぢづでど"),
-            Row(consonant: "n", vowels: "aiueo", morae: "なにぬねの"),
-            Row(consonant: "h", vowels: "aiueo", morae: "はひふへほ"),
-            Row(consonant: "b", vowels: "aiueo", morae: "ばびぶべぼ"),
-            Row(consonant: "p", vowels: "aiueo", morae: "ぱぴぷぺぽ"),
-            Row(consonant: "m", vowels: "aiueo", morae: "まみむめも"),
-            Row(consonant: "r", vowels: "aiueo", morae: "らりるれろ"),
-            Row(consonant: "y", vowels: "auo", morae: "やゆよ"),
-            // The w-row is は行 history: modern Japanese carries わ alone,
-            // and the forward table spells it "wa" — without this row the
-            // romaji the transcript prints (wakaru under 分かる) could never
-            // be read back.
-            Row(consonant: "w", vowels: "a", morae: "わ")
-        ]
-        for row in rows {
-            for (vowel, kana) in zip(row.vowels, row.morae) {
-                table[row.consonant + String(vowel)] = String(kana)
-            }
-        }
-        let extras: [String: String] = [
-            // Hepburn alternates for the sibilants.
-            "si": "し", "shi": "し", "ti": "ち", "chi": "ち",
-            "tu": "つ", "tsu": "つ", "di": "ぢ", "du": "づ",
-            "dzu": "づ", "ji": "じ", "zi": "じ", "wo": "を",
-            "wu": "う",
-            // y-digraphs.
-            "kya": "きゃ", "kyu": "きゅ", "kyo": "きょ",
-            "gya": "ぎゃ", "gyu": "ぎゅ", "gyo": "ぎょ",
-            "sha": "しゃ", "shu": "しゅ", "she": "しぇ", "sho": "しょ",
-            "sya": "しゃ", "syu": "しゅ", "syo": "しょ",
-            "cha": "ちゃ", "chu": "ちゅ", "che": "ちぇ", "cho": "ちょ",
-            "tya": "ちゃ", "tyu": "ちゅ", "tyo": "ちょ",
-            "ja": "じゃ", "ju": "じゅ", "je": "じぇ", "jo": "じょ",
-            "jya": "じゃ", "jyu": "じゅ", "jyo": "じょ",
-            "zya": "じゃ", "zyu": "じゅ", "zyo": "じょ",
-            "nya": "にゃ", "nyu": "にゅ", "nyo": "にょ",
-            "hya": "ひゃ", "hyu": "ひゅ", "hyo": "ひょ",
-            "bya": "びゃ", "byu": "びゅ", "byo": "びょ",
-            "pya": "ぴゃ", "pyu": "ぴゅ", "pyo": "ぴょ",
-            "mya": "みゃ", "myu": "みゅ", "myo": "みょ",
-            "rya": "りゃ", "ryu": "りゅ", "ryo": "りょ",
-            "dya": "ぢゃ", "dyu": "ぢゅ", "dyo": "ぢょ",
-            // Foreign loanword forms.
-            "fa": "ふぁ", "fi": "ふぃ", "fe": "ふぇ", "fo": "ふぉ",
-            "fya": "ふゃ", "fyu": "ふゅ", "fyo": "ふょ",
-            "va": "ゔぁ", "vi": "ゔぃ", "ve": "ゔぇ", "vo": "ゔぉ",
-            "vya": "ゔゃ", "vyu": "ゔゅ", "vyo": "ゔょ",
-            "wi": "うぃ", "we": "うぇ", "ye": "いぇ",
-            // The forward path spells ゔ "vu" (see its table), and the
-            // loanword small ゅ "xu" — the only spelling ヴュ-html has.
-            "vu": "ゔ", "xu": "ゅ",
-            // The forward table above is Hepburn, and ふ round-trips as "fu"
-            // (`furoshiki`, not `huroshiki`). "hu" stays for wapuro input; both
-            // are one mora either way.
-            "fu": "ふ",
-            "tsa": "つぁ", "tsi": "つぃ", "tse": "つぇ", "tso": "つぉ",
-            "kwa": "くぁ", "kwi": "くぃ", "kwe": "くぇ", "kwo": "くぉ"
-        ]
-        table.merge(extras) { _, extras in extras }
-        return table
-    }()
-
-    /// The loanword digraph readings the plain table cannot also spell: the
-    /// forward path spells ティ/ディ/トゥ/ドゥ/テュ/デュ/ウォ as
-    /// `ti/di/tu/du/tyu/dyu/wo`, and those keys already belong to the ち行
-    /// and を of wapuro romaji. Replacing the plain values would deafen the
-    /// search to wapuro input (`tuki` would never read つき again), so these
-    /// ride a second scan into `variants` instead.
-    private static let loanwordDigraphs: [String: String] = [
-        "ti": "てぃ", "di": "でぃ", "tu": "とぅ", "du": "どぅ",
-        "tyu": "てゅ", "dyu": "でゅ", "wo": "うぉ"
-    ]
-
-    /// The plain table with the loanword readings merged over it. Only
-    /// values change — every loanword key is a plain key of the same
-    /// length — so the loanword scan consumes exactly what the plain scan
-    /// consumes and the two disagree only where a key landed.
-    private static let loanwordSyllables: [String: String] = reverseSyllables.merging(loanwordDigraphs) { _, loanword in loanword }
-
-    /// Consonant cluster → the morae it can begin.
-    ///
-    /// A plain consonant lists its five row morae (`k` → か…こ) without its
-    /// y-digraphs: an IME typing `ka` promises か, and a `ky` promise is its
-    /// own cluster. A digraph lists only the digraph morae, because `sh`
-    /// means し*ゃ/し*ゅ/し*ぇ/しょ — never a bare し.
-    static let onsetMorae: [String: [String]] = [
-        "k": ["か", "き", "く", "け", "こ"],
-        "ky": ["きゃ", "きゅ", "きょ"],
-        "g": ["が", "ぎ", "ぐ", "げ", "ご"],
-        "gy": ["ぎゃ", "ぎゅ", "ぎょ"],
-        "s": ["さ", "し", "す", "せ", "そ"],
-        "sh": ["しゃ", "しゅ", "しぇ", "しょ"],
-        "z": ["ざ", "じ", "ず", "ぜ", "ぞ"],
-        "j": ["じゃ", "じゅ", "じぇ", "じょ"],
-        "t": ["た", "ち", "つ", "て", "と"],
-        "ch": ["ちゃ", "ちゅ", "ちぇ", "ちょ"],
-        "ts": ["つ", "つぁ", "つぃ", "つぇ", "つぉ"],
-        "d": ["だ", "ぢ", "づ", "で", "ど"],
-        "dy": ["ぢゃ", "ぢゅ", "ぢょ"],
-        "n": ["な", "に", "ぬ", "ね", "の"],
-        "ny": ["にゃ", "にゅ", "にょ"],
-        "h": ["は", "ひ", "ふ", "へ", "ほ"],
-        "hy": ["ひゃ", "ひゅ", "ひょ"],
-        "f": ["ふ", "ふぁ", "ふぃ", "ふぇ", "ふぉ"],
-        "fy": ["ふゃ", "ふゅ", "ふょ"],
-        "b": ["ば", "び", "ぶ", "べ", "ぼ"],
-        "by": ["びゃ", "びゅ", "びょ"],
-        "p": ["ぱ", "ぴ", "ぷ", "ぺ", "ぽ"],
-        "py": ["ぴゃ", "ぴゅ", "ぴょ"],
-        "m": ["ま", "み", "む", "め", "も"],
-        "my": ["みゃ", "みゅ", "みょ"],
-        "r": ["ら", "り", "る", "れ", "ろ"],
-        "ry": ["りゃ", "りゅ", "りょ"],
-        "y": ["や", "ゆ", "よ"],
-        "w": ["わ"],
-        "v": ["ゔぁ", "ゔぃ", "ゔぇ", "ゔぉ"],
-        "c": ["か", "き", "く", "け", "こ"],
-        "l": ["ら", "り", "る", "れ", "ろ"]
-    ]
 }

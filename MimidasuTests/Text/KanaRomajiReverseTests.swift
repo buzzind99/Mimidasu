@@ -27,7 +27,7 @@ struct KanaRomajiReverseTests {
         // hiragana — the katakana mirror is the caller's candidate, not the
         // converter's claim.
         #expect(KanaRomaji.convert("fasuto")?.kana == "ふぁすと")
-        #expect(KanaRomaji.convert("vuxu")?.kana == "ゔゅ")
+        #expect(KanaRomaji.convert("vyu")?.kana == "ゔゅ")
         #expect(KanaRomaji.convert("shi")?.kana == "し")
         #expect(KanaRomaji.convert("wo")?.kana == "を")
         #expect(KanaRomaji.convert("wi")?.kana == "うぃ")
@@ -106,6 +106,31 @@ struct KanaRomajiReverseTests {
         #expect(longUcircumflex.kana == "くう")
     }
 
+    @Test("reads the ā ī ē and â ê î long vowels that used to void the whole query")
+    func aieLongVowels() throws {
+        let chiizu = try #require(KanaRomaji.convert("chīzu"))
+        #expect(chiizu.kana == "ちいず")
+        #expect(chiizu.fullyConsumed)
+        #expect(chiizu.variants.contains("ちーず"))
+
+        let chahan = try #require(KanaRomaji.convert("chāhan"))
+        #expect(chahan.kana == "ちゃあはん")
+        #expect(chahan.fullyConsumed)
+        #expect(chahan.variants.contains("ちゃーはん"))
+
+        // e takes the mark, so the え of せえ is the one it can stand for.
+        let seefu = try #require(KanaRomaji.convert("sēfu"))
+        #expect(seefu.kana == "せえふ")
+        #expect(seefu.variants.contains("せーふ"))
+        // The ee spelling bridges to ei, so せいふ rides beside the dash form.
+        #expect(seefu.variants.contains("せいふ"))
+
+        #expect(KanaRomaji.convert("chîzu")?.kana == "ちいず")
+        #expect(KanaRomaji.convert("sêfu")?.kana == "せえふ")
+        #expect(KanaRomaji.convert("kâ")?.kana == "かあ")
+        #expect(KanaRomaji.convert("ī")?.kana == "いい")
+    }
+
     @Test("keeps both readings of an ambiguous long o, whichever way it is typed")
     func longVowelVariants() throws {
         let wapuro = try #require(KanaRomaji.convert("toukyou"))
@@ -134,32 +159,40 @@ struct KanaRomajiReverseTests {
         #expect(!both.variants.contains(both.kana))
     }
 
+    @Test("keeps both readings of an ambiguous long e, whichever way it is typed")
+    func longEBothReadings() throws {
+        // Hepburn `ee` and wapuro `ei` are the same long e, and neither
+        // reading can win: the word is せんせい (先生), セーフ is せえふ.
+        let sensee = try #require(KanaRomaji.convert("sensee"))
+        #expect(sensee.kana == "せんせえ")
+        #expect(sensee.fullyConsumed)
+        #expect(sensee.variants.contains("せんせい"))
+
+        let sensei = try #require(KanaRomaji.convert("sensei"))
+        #expect(sensei.kana == "せんせい")
+        #expect(sensei.fullyConsumed)
+        #expect(sensei.variants.contains("せんせえ"))
+    }
+
     // MARK: Loanword digraphs
 
-    @Test("reads the loanword digraphs whose plain keys belong to wapuro")
-    func loanwordDigraphVariants() throws {
-        // Each collision: the plain reading stays primary — wapuro input
-        // keeps its exact answer — and the loanword reading the forward
-        // path also spells rides in as a variant.
-        struct Pair {
-            let romaji: String
-            let plain: String
-            let loanword: String
-        }
-        let pairs = [
-            Pair(romaji: "ti", plain: "ち", loanword: "てぃ"),
-            Pair(romaji: "di", plain: "ぢ", loanword: "でぃ"),
-            Pair(romaji: "tu", plain: "つ", loanword: "とぅ"),
-            Pair(romaji: "du", plain: "づ", loanword: "どぅ"),
-            Pair(romaji: "tyu", plain: "ちゅ", loanword: "てゅ"),
-            Pair(romaji: "dyu", plain: "ぢゅ", loanword: "でゅ"),
-            Pair(romaji: "wo", plain: "を", loanword: "うぉ")
-        ]
-        for pair in pairs {
-            let conversion = try #require(KanaRomaji.convert(pair.romaji))
-            #expect(conversion.kana == pair.plain, "\(pair.romaji)")
-            #expect(conversion.variants == [pair.loanword], "\(pair.romaji)")
-        }
+    @Test("reads the loanword digraphs whose plain keys belong to wapuro",
+          arguments: [
+              ("ti", "ち", "てぃ"),
+              ("di", "ぢ", "でぃ"),
+              ("tu", "つ", "とぅ"),
+              ("du", "づ", "どぅ"),
+              ("tyu", "ちゅ", "てゅ"),
+              ("dyu", "ぢゅ", "でゅ"),
+              ("wo", "を", "うぉ")
+          ])
+    func loanwordDigraphVariants(romaji: String, plain: String, loanword: String) throws {
+        // The plain reading stays primary — wapuro input keeps its exact
+        // answer — and the loanword reading the forward path also spells
+        // rides in as a variant.
+        let conversion = try #require(KanaRomaji.convert(romaji))
+        #expect(conversion.kana == plain, "\(romaji)")
+        #expect(conversion.variants == [loanword], "\(romaji)")
     }
 
     @Test("reaches the loanword spellings the transcript itself prints")
@@ -177,7 +210,9 @@ struct KanaRomajiReverseTests {
         // loanword form's own run hides うぉーかそん (うぉーかそん mirrors to
         // ウォーカソン).
         #expect(wookason.kana == "をおかそん")
-        #expect(wookason.variants == ["うぉおかそん", "うぉーかそん", "をうかそん"])
+        // The loanword reading runs over the long-o alternate too, so the
+        // alternate's うぉうかそん joins the set.
+        #expect(wookason.variants == ["うぉうかそん", "うぉおかそん", "うぉーかそん", "をうかそん"])
     }
 
     @Test("keeps the wapuro reading primary where a loanword key lands")
@@ -215,9 +250,10 @@ struct KanaRomajiReverseTests {
             "ぱあちー", "ぱあてぃい", "ぱあてぃー",
             "ぱーちい", "ぱーちー", "ぱーてぃい", "ぱーてぃー"
         ])
-        #expect(KanaRomaji.convert("keeki")?.variants == ["けーき"])
+        #expect(KanaRomaji.convert("keeki")?.variants == ["けいき", "けーき"])
         #expect(KanaRomaji.convert("koohii")?.variants.contains("こーひー") == true)
-        #expect(KanaRomaji.convert("juusu")?.variants == ["じゅーす"])
+        // The ぢゅ reading of the ju spelling rides the variants with its own dash form.
+        #expect(KanaRomaji.convert("juusu")?.variants == ["じゅーす", "ぢゅうす", "ぢゅーす"])
         #expect(KanaRomaji.convert("uchiagepaatii")?.variants.contains("うちあげぱーてぃー") == true)
     }
 
@@ -236,6 +272,11 @@ struct KanaRomajiReverseTests {
         // っ and ん never prolong.
         #expect(KanaRomaji.prolongedSoundVariants(of: "まんう").isEmpty)
         #expect(KanaRomaji.prolongedSoundVariants(of: "うっう").isEmpty)
+        // Neither do を (no row vowel — the reason wookason never offers
+        // をーかそん even though the forward path prints `woo` for をお) or
+        // the small vowel kana.
+        #expect(KanaRomaji.prolongedSoundVariants(of: "をお").isEmpty)
+        #expect(KanaRomaji.prolongedSoundVariants(of: "ぁ").isEmpty)
         // More than four runs: singles plus the full set only.
         #expect(KanaRomaji.prolongedSoundVariants(of: "おおおおおお").count == 6)
     }
@@ -265,6 +306,69 @@ struct KanaRomajiReverseTests {
         #expect(KanaRomaji.scriptSwitchProbes(of: "").isEmpty)
     }
 
+    // MARK: IME rows
+
+    @Test("reads the c row the Japanese IMEs spell, with ci and ce as し and せ")
+    func cRow() {
+        #expect(KanaRomaji.convert("ca")?.kana == "か")
+        #expect(KanaRomaji.convert("ci")?.kana == "し")
+        #expect(KanaRomaji.convert("cu")?.kana == "く")
+        #expect(KanaRomaji.convert("ce")?.kana == "せ")
+        #expect(KanaRomaji.convert("co")?.kana == "こ")
+        // The digraph still wins over the bare consonant: chi is ち, not c + hi.
+        #expect(KanaRomaji.convert("chi")?.kana == "ち")
+        #expect(KanaRomaji.convert("koca")?.kana == "こか")
+        #expect(KanaRomaji.convert("koca")?.fullyConsumed == true)
+        #expect(KanaRomaji.convert("ice")?.kana == "いせ")
+    }
+
+    @Test("reads the l row as the small vowel kana")
+    func lRow() {
+        #expect(KanaRomaji.convert("la")?.kana == "ぁ")
+        #expect(KanaRomaji.convert("li")?.kana == "ぃ")
+        #expect(KanaRomaji.convert("lu")?.kana == "ぅ")
+        #expect(KanaRomaji.convert("le")?.kana == "ぇ")
+        #expect(KanaRomaji.convert("lo")?.kana == "ぉ")
+        // A lone small vowel offers nothing beside itself.
+        #expect(KanaRomaji.convert("la")?.variants.isEmpty == true)
+    }
+
+    @Test("reads the x small kana, with xu as ぅ and the y-digraphs as small ゃゅょ")
+    func xSmallKana() {
+        #expect(KanaRomaji.convert("xa")?.kana == "ぁ")
+        #expect(KanaRomaji.convert("xi")?.kana == "ぃ")
+        #expect(KanaRomaji.convert("xu")?.kana == "ぅ")
+        #expect(KanaRomaji.convert("xe")?.kana == "ぇ")
+        #expect(KanaRomaji.convert("xo")?.kana == "ぉ")
+        #expect(KanaRomaji.convert("xya")?.kana == "ゃ")
+        #expect(KanaRomaji.convert("xyu")?.kana == "ゅ")
+        #expect(KanaRomaji.convert("xyo")?.kana == "ょ")
+    }
+
+    @Test("promises a c, l, or x onset the way it promises k")
+    func cAndLOnsets() throws {
+        let koc = try #require(KanaRomaji.convert("koc"))
+        #expect(koc.kana == "こ")
+        #expect(koc.fullyConsumed == false)
+        #expect(koc.trailingOnset == "c")
+        #expect(KanaRomaji.onsetExpansions("c") == ["か", "し", "く", "せ", "こ"])
+        #expect(KanaRomaji.onsetExpansions("l") == ["ぁ", "ぃ", "ぅ", "ぇ", "ぉ"])
+        // `x` promises the same small vowels as `l`; `xy` the small ゃゅょ.
+        #expect(KanaRomaji.onsetExpansions("x") == ["ぁ", "ぃ", "ぅ", "ぇ", "ぉ"])
+        #expect(KanaRomaji.onsetExpansions("xy") == ["ゃ", "ゅ", "ょ"])
+        let box = try #require(KanaRomaji.convert("box"))
+        #expect(box.kana == "ぼ")
+        #expect(box.fullyConsumed == false)
+        #expect(box.trailingOnset == "x")
+        let dol = try #require(KanaRomaji.convert("dol"))
+        #expect(dol.kana == "ど")
+        #expect(dol.fullyConsumed == false)
+        #expect(dol.trailingOnset == "l")
+        // A lone consonant converts nothing, c and l included.
+        #expect(KanaRomaji.convert("c") == nil)
+        #expect(KanaRomaji.convert("l") == nil)
+    }
+
     // MARK: Partial input
 
     @Test("stops at an unfinished consonant and names it")
@@ -286,9 +390,6 @@ struct KanaRomajiReverseTests {
         #expect(makk.kana == "まっ")
         #expect(makk.trailingOnset == "k")
         #expect(makk.fullyConsumed == false)
-        // The two-letter form of the same promise, for the `onsetExpansions`
-        // path a user lands on when they type the cluster out in full.
-        #expect(KanaRomaji.onsetExpansions("kk") == ["っか", "っき", "っく", "っけ", "っこ"])
 
         // `n` and `nn` are complete moras — the scan never leaves them over.
         #expect(KanaRomaji.convert("man")?.fullyConsumed == true)
@@ -298,20 +399,23 @@ struct KanaRomajiReverseTests {
 
     @Test("drops a trailing character that cannot start a mora, keeping the prefix")
     func invalidTrailingCharacter() throws {
-        let max = try #require(KanaRomaji.convert("max"))
+        // `q` starts no mora and no onset, so the leftover is noise. (`x`
+        // became a legal promise when the small-kana rows moved in — `max`
+        // now names an onset.)
+        let moq = try #require(KanaRomaji.convert("moq"))
 
-        #expect(max.kana == "ま")
-        #expect(max.trailingOnset == nil)
-        #expect(max.fullyConsumed == false)
+        #expect(moq.kana == "も")
+        #expect(moq.trailingOnset == nil)
+        #expect(moq.fullyConsumed == false)
     }
 
     @Test("a leftover that is not a whole onset promises nothing",
-          arguments: zip(["best", "test", "ice"], ["べ", "て", "い"]))
+          arguments: zip(["best", "test", "ith"], ["べ", "て", "い"]))
     func noTruncatedOnsetPromise(romaji: String, kana: String) throws {
         // The scan still converts what it can — `best` reads べ — but `st` is
         // not an onset, and truncating it to the legal `s` promised さしすせそ
         // to a query that was never romaji. The word is spelled `besuto`, which
-        // consumes whole.
+        // consumes whole. `th` is the same shape: no key, no onset.
         let partial = try #require(KanaRomaji.convert(romaji))
 
         #expect(partial.kana == kana)
@@ -350,7 +454,6 @@ struct KanaRomajiReverseTests {
         #expect(KanaRomaji.onsetExpansions("j") == ["じゃ", "じゅ", "じぇ", "じょ"])
         #expect(KanaRomaji.onsetExpansions("ky") == ["きゃ", "きゅ", "きょ"])
         #expect(KanaRomaji.onsetExpansions("ts") == ["つ", "つぁ", "つぃ", "つぇ", "つぉ"])
-        #expect(KanaRomaji.onsetExpansions("c") == ["か", "き", "く", "け", "こ"])
     }
 
     @Test("carries the sokuon through a geminating expansion")
