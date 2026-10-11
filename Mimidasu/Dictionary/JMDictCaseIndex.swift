@@ -73,6 +73,18 @@ enum JMDictCaseIndex {
     /// matches a spelling only where the two folds actually agree.
     static let loadSQL = "SELECT DISTINCT text FROM headwords WHERE text <> lower(text)"
 
+    /// The catch-all range's bounds, chosen against the **shipped corpus** rather
+    /// than against Unicode: it spans every block the pinned artifact needs (the
+    /// JMnedict Greek-capital names live at U+0391) and, on the way, sweeps
+    /// every case-bearing block that happens to sit below the ceiling —
+    /// Cherokee (U+13A0) rides inside the scan — none of which the corpus
+    /// carries a single row in. It stops short of the later case-bearing
+    /// scripts — Glagolitic (U+2C00), Adlam (U+1E900), Deseret (U+10400).
+    /// Widening past them is not a correctness fix for this load, it is a
+    /// range scan over more of the B-tree; a corpus that ever does carry one
+    /// turns
+    /// `DictionarySearchEngineLiveTests.caseSetCoversEveryCaseFoldedSpelling`
+    /// red, which is the tripwire that raises the ceiling on purpose.
     static let nonASCIICaseFloor = "\u{00C0}"
     static let nonASCIICaseCeiling = "\u{1FFF}"
 

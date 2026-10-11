@@ -12,7 +12,7 @@ import Foundation
 ///
 /// The two halves of a highlight must agree: *compare* folded (hiragana and
 /// katakana are the same text for matching purposes) but *slice* the original
-/// (the user sees アルバイト, not ある的时间和).
+/// (the user sees アルゴリズム, never the folded あるごりずむ).
 enum MatchHighlight {
     /// The three runs one highlighted field is drawn from.
     struct Parts: Equatable {

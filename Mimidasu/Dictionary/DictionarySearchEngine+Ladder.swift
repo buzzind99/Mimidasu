@@ -409,9 +409,9 @@ extension DictionarySearchEngine {
         // trap — it is not ASCII but folds to one, so testing the folded text
         // for ASCII would wrongly admit it; the column's own byte width is what
         // settles it. Everything else — an accented character, `İ` — takes the
-        // fragment-wise path, which derives its text from the column itself and
-        // so cannot get this wrong. 36,413 of 656,706 senses (5.5%); among the
-        // rows a dense query reaches, `ing`, it is 389 of 52,172 (0.7%).
+        // fragment-wise path, which re-derives each gloss's scalars; the span
+        // it emits counts folded offsets against unfolded text, exact only
+        // while the fold keeps the scalar count. 36,413 of 656,706 senses (5.5%); `ing`, 389 of 52,172 (0.7%).
         guard byteCount == column.unicodeScalars.count else {
             return glossMatchByFragment(pattern: pattern, column: column)
         }
