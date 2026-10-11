@@ -23,15 +23,18 @@ extension AppModel {
 
 // MARK: - Hosts
 
-/// The un-star step both dictionary hosts run: the model decides whether a
-/// press was an add or a removal still to be confirmed, and only the latter is
+/// The un-star step every star site runs: the model has already decided whether
+/// a press was an add or a removal still to be confirmed, and only the latter is
 /// worth a question. Filing the question is the window's job, so the headword
 /// goes out and the host keeps nothing.
+///
+/// Takes the outcome rather than the entry so all three sites share it — the
+/// dictionary search row has a `DictionarySearchHit`, not a `JMDictEntry`, and a
+/// signature the row cannot call is a signature that will drift into a second,
+/// private copy.
 @MainActor
-private func forwardRemovalRequest(
-    for entry: JMDictEntry, model: AppModel, to onRequest: (String) -> Void
-) {
-    if case let .pendingRemoval(headword) = model.toggleFavorite(entry) {
+func forwardRemovalRequest(_ outcome: FavoriteToggle, to onRequest: (String) -> Void) {
+    if case let .pendingRemoval(headword) = outcome {
         onRequest(headword)
     }
 }
@@ -90,7 +93,7 @@ struct DictionaryPopoverView: View {
     /// The model decides whether a press was an add or a removal to confirm;
     /// only a removal raises the question.
     private func requestRemovalIfPending(_ entry: JMDictEntry) {
-        forwardRemovalRequest(for: entry, model: model, to: onFavoriteRemovalRequest)
+        forwardRemovalRequest(model.toggleFavorite(entry), to: onFavoriteRemovalRequest)
     }
 }
 
@@ -165,7 +168,7 @@ struct DictionaryCardView: View {
     /// The model decides whether a press was an add or a removal to confirm;
     /// only a removal raises the question.
     private func requestRemovalIfPending(_ entry: JMDictEntry) {
-        forwardRemovalRequest(for: entry, model: model, to: onFavoriteRemovalRequest)
+        forwardRemovalRequest(model.toggleFavorite(entry), to: onFavoriteRemovalRequest)
     }
 
     /// The card's kicker doubles as the card's opener: the card holds one

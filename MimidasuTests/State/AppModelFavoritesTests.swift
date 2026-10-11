@@ -3,7 +3,9 @@ import Foundation
 import Testing
 
 /// Tests the star's *outcomes* — which notice pill or toast each toggle
-/// result earns, and how membership is derived from the displayed entry.
+/// result earns, and how membership is derived from the displayed entry. The
+/// headword form is the one every star site funnels through, so it carries the
+/// add, the refusal, and the fault; the entry form only has to forward to it.
 /// The store's own matching, ordering, and cap live in `FavoritesStoreTests`.
 @MainActor
 @Suite("AppModel favorites")
@@ -66,6 +68,25 @@ struct AppModelFavoritesTests {
         let outcome = model.toggleFavorite(entry())
 
         #expect(outcome == .pendingRemoval(headword: "見る") && model.isFavorite(entry()))
+    }
+
+    @Test("the headword form adds and posts the same confirm pill an entry does")
+    func headwordFormAddsAndConfirms() async {
+        let model = await makeSUT(favorites: isolatedFavorites())
+
+        let outcome = model.toggleFavorite(headword: "見る", reading: "みる")
+
+        #expect(outcome == .added && model.notices.message == "Added to favorites")
+    }
+
+    @Test("the headword form asks before removing, naming the headword")
+    func headwordFormAsksFirst() async {
+        let model = await makeSUT(favorites: isolatedFavorites())
+        model.toggleFavorite(headword: "見る", reading: "みる")
+
+        let outcome = model.toggleFavorite(headword: "見る", reading: "みる")
+
+        #expect(outcome == .pendingRemoval(headword: "見る"))
     }
 
     @Test("a question left unanswered leaves the list untouched")

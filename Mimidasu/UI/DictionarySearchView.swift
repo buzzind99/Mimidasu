@@ -555,18 +555,17 @@ private extension DictionarySearchView {
         state.lookupState.toggle(word)
     }
 
-    /// Stars the way every other star in the app does, through the shared
-    /// construction. A word already starred answers with the removal question
-    /// rather than un-starring, which is why an un-star here needs the window's
-    /// alert — the store's cap warning and the transcript notice are not
-    /// reachable from a search row otherwise.
+    /// Stars the way every other star in the app does: the model decides, the
+    /// window files the question. A word already starred answers with the
+    /// removal question rather than un-starring, which is why an un-star here
+    /// needs the window's alert — and an add, a refused press at the cap, and a
+    /// broken store each report themselves, which is what calling the store
+    /// directly from here threw away.
     private func toggleFavorite(_ hit: DictionarySearchHit) {
-        guard let headword = hit.headword else { return }
-        if model.favorites.isFavorite(headword: headword) {
-            onFavoriteRemoval(headword)
-            return
-        }
-        _ = model.favorites.toggle(FavoriteWord.starred(headword: headword, reading: hit.reb))
+        forwardRemovalRequest(
+            model.toggleFavorite(headword: hit.headword, reading: hit.reb),
+            to: onFavoriteRemoval
+        )
     }
 
     // MARK: - Highlight

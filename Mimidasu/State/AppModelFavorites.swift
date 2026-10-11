@@ -29,25 +29,39 @@ extension AppModel {
         )
     }
 
-    /// Stars the displayed entry's headword. An entry that is already a
-    /// favorite does not un-star on this press: it reports
-    /// `.pendingRemoval(headword)`, changes nothing, and the window raises the
-    /// confirmation from its single slot — hosts only forward the headword, so
-    /// the popover and the card, mounted together for one lookup, cannot both
-    /// present. `DictionaryContent.headword` is already `keb ?? reb`, so
-    /// homographs sharing a `keb` share one row and one star state: they are
-    /// the same word.
+    /// Stars the displayed entry's headword — the entry every dictionary host
+    /// has in hand. A thin forwarder to the headword form below, which is the
+    /// one that owns the outcomes.
     @discardableResult
     func toggleFavorite(_ entry: JMDictEntry) -> FavoriteToggle {
-        // Every JMDict row carries at least one `reb`, so this only trips on a
-        // hand-built entry; it stays silent rather than blaming a store that is
-        // fine, and names nothing the user could act on.
-        guard let headword = DictionaryContent.headword(of: entry) else { return .failed }
+        toggleFavorite(headword: DictionaryContent.headword(of: entry), reading: entry.reb)
+    }
+
+    /// Stars `headword`, read in `reading`. The one star press, and the only
+    /// place its outcome is decided — a notice for an add or a refusal, a toast
+    /// for a broken store — so the popover, the sidebar card, and a dictionary
+    /// search row cannot disagree about what a press reports.
+    ///
+    /// An entry that is already a favorite does not un-star on this press: it
+    /// reports `.pendingRemoval(headword)`, changes nothing, and the window
+    /// raises the confirmation from its single slot — hosts only forward the
+    /// headword, so the popover and the card, mounted together for one lookup,
+    /// cannot both present.
+    ///
+    /// Identity is the headword alone, and every caller derives it the same
+    /// way (`keb ?? reb` on both sides), so homographs sharing a `keb` share
+    /// one row and one star state: they are the same word.
+    @discardableResult
+    func toggleFavorite(headword: String?, reading: String?) -> FavoriteToggle {
+        // Every JMDict row carries at least one `reb`, so a nil headword only
+        // arrives from a hand-built entry; it stays silent rather than blaming a
+        // store that is fine, and names nothing the user could act on.
+        guard let headword else { return .failed }
         if favorites.isFavorite(headword: headword) {
             return .pendingRemoval(headword: headword)
         }
         let outcome = favorites.toggle(FavoriteWord.starred(
-            headword: headword, reading: entry.reb
+            headword: headword, reading: reading
         ))
         switch outcome {
         case .added:
