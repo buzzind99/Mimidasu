@@ -23,6 +23,13 @@ BUILD_DIR="build"
 PIN_SWIFT="Mimidasu/Dictionary/JMDictPin.swift"
 PIN_TAG=$(python3 -c 'import re, sys; print(re.search(r"releaseTag\s*=\s*\"([^\"]+)\"", open(sys.argv[1]).read()).group(1))' "$PIN_SWIFT")
 PIN_BUILD=$(python3 -c 'import re, sys; print(re.search(r"buildRevision\s*=\s*\"([^\"]+)\"", open(sys.argv[1]).read()).group(1))' "$PIN_SWIFT")
+# The gloss-index table name is read from Swift for the same reason
+# build_dictionary.sh reads it: one source of truth, so a rename in
+# JMDictFTSIndex.swift cannot leave this probe querying a table that no
+# longer exists. Anchored to a declaration line, so a doc comment quoting the
+# constant can never be the match.
+FTS_SWIFT="Mimidasu/Dictionary/JMDictFTSIndex.swift"
+FTS_TABLE_NAME=$(python3 -c 'import re, sys; print(re.search(r"^[ \t]*static let tableName\s*=\s*\"([^\"]+)\"", open(sys.argv[1]).read(), re.M).group(1))' "$FTS_SWIFT")
 # The artifact name keys on tag + build revision (build_dictionary.sh's
 # ARTIFACT_TAG); tests resolve the prepared DB by JMDictPin.preparedFileName.
 ARTIFACT_TAG="${PIN_TAG}.${PIN_BUILD}"
@@ -78,12 +85,25 @@ DEV_DB="${BUILD_DIR}/jmdict-${ARTIFACT_TAG}.dev.sqlite"
 PREPARED_JM="${PREPARED}/jmdict-${ARTIFACT_TAG}.sqlite"
 if [[ -f "${DEV_DB}" ]]; then
   # Probed with a trigram of a gloss that exists rather than a literal word, so
-  # the check holds for any corpus the pin might move to. Both probes must
-  # tolerate failure: on a freshly seeded database `gloss_fts` does not exist
-  # yet, sqlite3 exits non-zero, and under `set -e` an unchecked substitution
-  # would kill this script before the copy below ever runs.
-  PROBE="$(sqlite3 "${PREPARED_JM}" "SELECT substr(gloss, 1, 3) FROM senses WHERE gloss <> '' LIMIT 1;" 2>/dev/null || true)"
-  ANSWERS="$(sqlite3 "${PREPARED_JM}" "SELECT count(*) FROM gloss_fts WHERE gloss_fts MATCH '\"${PROBE}\"';" 2>/dev/null || true)"
+  # the check holds for any corpus the pin might move to. The probe skips glosses
+  # whose first three characters contain a quote, so it needs no escaping in the
+  # MATCH literal — and it cannot be escaped in SQL instead, because FTS5
+  # requires a constant MATCH argument and a computed phrase degrades to a scan
+  # of the contentless table. The same usability guards keep the pick answerable:
+  # FTS5 returns zero rows for a shorter-than-three-character phrase, and a
+  # trigram holding a space or newline would not survive command substitution.
+  # Both probes must tolerate failure: on a freshly
+  # seeded database the gloss index does not exist yet, sqlite3 exits non-zero,
+  # and under `set -e` an unchecked substitution would kill this script before
+  # the copy below ever runs.
+  PROBE="$(sqlite3 "${PREPARED_JM}" "SELECT substr(gloss, 1, 3) FROM senses
+    WHERE gloss <> '' AND substr(gloss, 1, 3) NOT GLOB '*[\"'']*'
+      AND length(substr(gloss, 1, 3)) = 3
+      AND instr(substr(gloss, 1, 3), ' ') = 0
+      AND instr(substr(gloss, 1, 3), char(10)) = 0
+      AND instr(substr(gloss, 1, 3), char(13)) = 0
+    LIMIT 1;" 2>/dev/null || true)"
+  ANSWERS="$(sqlite3 "${PREPARED_JM}" "SELECT count(*) FROM ${FTS_TABLE_NAME} WHERE ${FTS_TABLE_NAME} MATCH '\"${PROBE}\"';" 2>/dev/null || true)"
   if [[ -z "${PROBE}" || "${ANSWERS}" == "0" || -z "${ANSWERS}" ]]; then
     echo "  indexing $PREPARED_JM"
     cp "${DEV_DB}" "${PREPARED_JM}"

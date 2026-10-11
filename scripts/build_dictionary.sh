@@ -191,12 +191,32 @@ check_fts_constant "case_sensitive 0 remove_diacritics 0"
 check_fts_constant 'static let schemaVersion = 1'
 # The stamp is what makes the dev artifact adoptable rather than permanently
 # stale, so it is interpolated from the same constant the guard above pins.
-FTS_SCHEMA_VERSION="$(sed -n 's/.*static let schemaVersion = \([0-9][0-9]*\).*/\1/p' "${FTS_SWIFT}" | head -1)"
+FTS_SCHEMA_VERSION="$(sed -n 's/^[[:space:]]*static let schemaVersion = \([0-9][0-9]*\).*/\1/p' "${FTS_SWIFT}" | head -1)"
 if [[ -z "${FTS_SCHEMA_VERSION}" ]]; then
   echo "ERROR: could not read JMDictFTSIndex.schemaVersion out of ${FTS_SWIFT}." >&2
   exit 1
 fi
 echo "    fts.schemaVersion: ${FTS_SCHEMA_VERSION}"
+# The table name and the rowid stride are read rather than repeated, so the
+# skip guard above, the DDL heredoc below, and the `MAX(ord)` guard all speak
+# about the same values Swift does. The patterns anchor to a declaration line
+# (`^[[:space:]]*`), so a doc comment quoting the constant can never be the
+# line the parse picks up.
+FTS_TABLE_NAME="$(sed -n 's/^[[:space:]]*static let tableName = "\([^"]*\)".*/\1/p' "${FTS_SWIFT}" | head -1)"
+FTS_ORD_STRIDE="$(sed -n 's/^[[:space:]]*static let ordStride = \([0-9][0-9]*\).*/\1/p' "${FTS_SWIFT}" | head -1)"
+FTS_ORD_SHIFT="$(sed -n 's/^[[:space:]]*static let ordShift = \([0-9][0-9]*\).*/\1/p' "${FTS_SWIFT}" | head -1)"
+if [[ -z "${FTS_TABLE_NAME}" || -z "${FTS_ORD_STRIDE}" || -z "${FTS_ORD_SHIFT}" ]]; then
+  echo "ERROR: could not read JMDictFTSIndex.tableName/ordStride/ordShift out of ${FTS_SWIFT}." >&2
+  exit 1
+fi
+# Swift only `assert`s the stride/shift relation (stripped from release
+# builds), so bumping one while missing the other would ship a dev database
+# that release builds decode wrongly.
+if (( FTS_ORD_STRIDE != (1 << FTS_ORD_SHIFT) )); then
+  echo "ERROR: JMDictFTSIndex ordStride ${FTS_ORD_STRIDE} != 1 << ordShift ${FTS_ORD_SHIFT}." >&2
+  exit 1
+fi
+echo "    fts.${FTS_TABLE_NAME} rowid stride: ${FTS_ORD_STRIDE}"
 
 # The case-headword index is a second copy of a schema kept in Swift
 # (JMDictCaseIndex), guarded the same way — with the difference that the
@@ -280,6 +300,26 @@ if ! grep -Fq 'bundledFileName = preparedFileName + ".zst"' "${PIN_SWIFT}"; then
   exit 1
 fi
 
+# The dev artifact is adoptable only if it carries the gloss index at the
+# current stamp — the same condition `JMDictFTSIndex.isPresent` applies on the
+# app side, and for the same reason: an index-less database is complete and
+# SQLite-valid yet answers every Latin gloss query with zero rows and no error,
+# because the `LIKE` fallback is gone. `-s` cannot see that difference; an
+# interrupted index build (Ctrl-C, or an sqlite3 without the trigram tokenizer)
+# leaves exactly that file behind. The table presence is checked as well as the
+# stamp, so a database that was stamped but whose `gloss_fts` never landed is
+# still rebuilt.
+dev_db_is_adoptable() {
+  [[ -s "${DEV_DB}" ]] || return 1
+  local stamp table
+  stamp="$(sqlite3 "${DEV_DB}" 'PRAGMA user_version;' 2>/dev/null || true)"
+  [[ "${stamp}" == "${FTS_SCHEMA_VERSION}" ]] || return 1
+  table="$(sqlite3 "${DEV_DB}" \
+    "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = '${FTS_TABLE_NAME}';" \
+    2>/dev/null || true)"
+  [[ "${table}" == "1" ]]
+}
+
 # Up-to-date skip (build mode only): the artifact name is versioned by the
 # pin tag + build revision, so a pin bump or a revision bump naturally misses
 # and rebuilds. A truncated artifact from an interrupted build fails
@@ -289,14 +329,15 @@ fi
 if [[ "${MODE}" == "build" && "${REBUILD}" == "0" && -s "${ZST_PATH}" ]]; then
   if ! command -v zstd >/dev/null 2>&1; then
     echo "WARNING: zstd not found; cannot verify ${ZST_NAME}, rebuilding."
-  elif zstd -q -t "${ZST_PATH}" 2>/dev/null && [[ -s "${DEV_DB}" ]]; then
+  elif zstd -q -t "${ZST_PATH}" 2>/dev/null && dev_db_is_adoptable; then
     echo "==> ${ZST_NAME} already built and valid; skipping (use --rebuild to force)."
     exit 0
   elif zstd -q -t "${ZST_PATH}" 2>/dev/null; then
-    # The bundle is fine but the dev artifact is missing or empty — a pin bump
-    # that skipped, or an interrupted index build. Rebuild both rather than
-    # leaving a checkout whose live tests resolve an index-less database.
-    echo "==> ${ZST_NAME} is valid but $(basename "${DEV_DB}") is missing; rebuilding."
+    # The bundle is fine but the dev artifact is missing, empty, unstamped or
+    # index-less — a pin bump that skipped, or an interrupted index build.
+    # Rebuild both rather than leaving a checkout whose live tests resolve a
+    # database that answers every gloss query with nothing.
+    echo "==> ${ZST_NAME} is valid but $(basename "${DEV_DB}") is missing or carries no current gloss index; rebuilding."
   else
     echo "WARNING: ${ZST_PATH} exists but failed its integrity check; rebuilding."
   fi
@@ -406,13 +447,32 @@ echo "==> Building $(basename "${DEV_DB}") (gloss index; case index inherited)"
 rm -f "${BUILD_DIR}"/jmdict-*.dev.sqlite
 rm -f "${DEV_DB}"
 cp "${RAW_DB}" "${DEV_DB}"
-sqlite3 "${DEV_DB}" <<FTSEOF
-CREATE VIRTUAL TABLE gloss_fts USING fts5(
+# The rowid pack is load-bearing: every gloss row is read back by primary key,
+# so two senses colliding onto one rowid hands the stage another entry's gloss,
+# wrong answers with no error anywhere. Swift's `guardMaxOrd` refuses the same
+# corpus at first launch; the dev artifact is what the live tests resolve, so it
+# gets the same refusal here — before the index is written, not after.
+MAX_ORD="$(sqlite3 "${DEV_DB}" 'SELECT MAX(ord) FROM senses;')"
+if [[ -n "${MAX_ORD}" ]] && (( MAX_ORD >= FTS_ORD_STRIDE )); then
+  rm -f "${DEV_DB}"
+  echo "ERROR: a sense carries ord ${MAX_ORD}, past the ${FTS_ORD_STRIDE}-wide rowid pack (dev db removed);" >&2
+  echo "  refusing to publish $(basename "${DEV_DB}")" >&2
+  exit 1
+fi
+echo "    max(ord) ${MAX_ORD:-0} fits the ${FTS_ORD_STRIDE}-wide rowid pack"
+# `-bail` is load-bearing, not tidiness. Without it sqlite3 logs the failed
+# statement and carries on, so a `CREATE VIRTUAL TABLE` that cannot be created
+# (an sqlite3 built without the trigram tokenizer) still reaches the trailing
+# `PRAGMA user_version` — leaving a complete, SQLite-valid, *index-less*
+# database stamped as current, which every later skip would bless.
+sqlite3 -bail "${DEV_DB}" <<FTSEOF
+CREATE VIRTUAL TABLE ${FTS_TABLE_NAME} USING fts5(
   gloss,
   tokenize='trigram case_sensitive 0 remove_diacritics 0',
   content='', columnsize=0);
-INSERT INTO gloss_fts(rowid, gloss) SELECT entry_id * 128 + ord, gloss FROM senses;
-INSERT INTO gloss_fts(gloss_fts) VALUES('optimize');
+INSERT INTO ${FTS_TABLE_NAME}(rowid, gloss)
+  SELECT entry_id * ${FTS_ORD_STRIDE} + ord, gloss FROM senses;
+INSERT INTO ${FTS_TABLE_NAME}(${FTS_TABLE_NAME}) VALUES('optimize');
 PRAGMA user_version = ${FTS_SCHEMA_VERSION};
 FTSEOF
 # The case index ships in the artifact, so its absence here means the
@@ -462,15 +522,54 @@ echo "    headwords_case answers ${CASE_ROWS} spellings, the range load ${CASE_R
 # and then answers nothing, which is indistinguishable from "no such gloss".
 # A count(*) cannot detect it — a contentless FTS5 table refuses to be scanned
 # — so the probe is a trigram of a gloss that is known to exist.
-PROBE="$(sqlite3 "${DEV_DB}" "SELECT substr(gloss, 1, 3) FROM senses WHERE gloss <> '' LIMIT 1;")"
-INDEX_ROWS="$(sqlite3 "${DEV_DB}" "SELECT count(*) FROM gloss_fts WHERE gloss_fts MATCH '\"${PROBE}\"';")"
-if [[ -z "${PROBE}" || "${INDEX_ROWS}" == "0" ]]; then
+#
+# The trigram is chosen from glosses whose first three characters contain
+# neither quote, so it can be spliced into the MATCH literal below without
+# escaping. Escaping it *in SQL* is not an option: FTS5 requires the MATCH
+# argument to be a constant, so a phrase computed from the row (however it is
+# quoted) makes SQLite stop treating MATCH as a constraint and try to scan the
+# contentless table instead — the probe dies with "table does not support
+# scanning". Filtering the probe source by quoting is the one shape that keeps
+# the argument a literal: 329 glosses in the pinned corpus carry a quote
+# *anywhere* in their trigram, and 656,377 of 656,706 still qualify, so this
+# costs the probe no reach. The remaining guards keep the pick *usable* rather
+# than merely quote-free: FTS5 answers a shorter-than-three-character phrase
+# with zero rows and no error, and a trigram holding a space or newline would
+# not survive the trip through command substitution intact — either shape
+# would trip the guard below on a perfectly healthy index.
+PROBE="$(sqlite3 "${DEV_DB}" "SELECT substr(gloss, 1, 3) FROM senses
+  WHERE gloss <> '' AND substr(gloss, 1, 3) NOT GLOB '*[\"'']*'
+    AND length(substr(gloss, 1, 3)) = 3
+    AND instr(substr(gloss, 1, 3), ' ') = 0
+    AND instr(substr(gloss, 1, 3), char(10)) = 0
+    AND instr(substr(gloss, 1, 3), char(13)) = 0
+  LIMIT 1;")"
+INDEX_ROWS="$(sqlite3 "${DEV_DB}" "SELECT count(*) FROM ${FTS_TABLE_NAME} WHERE ${FTS_TABLE_NAME} MATCH '\"${PROBE}\"';")"
+if [[ -z "${PROBE}" || "${INDEX_ROWS}" == "0" || -z "${INDEX_ROWS}" ]]; then
   rm -f "${DEV_DB}"
   echo "ERROR: gloss index built but answers nothing for its own probe '${PROBE}' (dev db removed);" >&2
   echo "  refusing to publish $(basename "${DEV_DB}")" >&2
   exit 1
 fi
-echo "    gloss_fts answers '${PROBE}' on ${INDEX_ROWS} senses"
+echo "    ${FTS_TABLE_NAME} answers '${PROBE}' on ${INDEX_ROWS} senses"
+
+# Sweep the artifacts earlier pins left behind. Deliberately last: RAW_DB is
+# what the dev artifact was just built from, and a run interrupted before this
+# point must still leave the checkout with a usable pair. `jmdict-*.sqlite`
+# matches the dev artifact too (its name only adds `.dev`), so it is excluded
+# by name rather than by pattern.
+for stale in "${BUILD_DIR}"/jmdict-*.sqlite; do
+  if [[ -e "${stale}" && "${stale}" != "${RAW_DB}" && "${stale}" != "${DEV_DB}" ]]; then
+    echo "    sweeping stale $(basename "${stale}")"
+    rm -f "${stale}"
+  fi
+done
+for stale in "${DICT_DIR}"/jmdict-*.sqlite.zst; do
+  if [[ -e "${stale}" && "${stale}" != "${ZST_PATH}" ]]; then
+    echo "    sweeping stale $(basename "${stale}")"
+    rm -f "${stale}"
+  fi
+done
 
 echo
 echo "Done. package.sh bundles ${ZST_NAME} into Mimidasu.app/Contents/Resources;"
