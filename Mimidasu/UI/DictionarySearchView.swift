@@ -93,16 +93,16 @@ struct DictionarySearchView: View {
             set: { newValue in
                 var filters = state.filters
                 filters.scope = newValue
+                // Names are never common: entering the scope clears the flag.
+                filters.commonOnly = filters.commonOnly && newValue != .names
                 state.filters = filters
             }
         )
     }
 
     /// Names are never common in the source data, so "Common only" over Names
-    /// is structurally zero rows. The chip greys out rather than offering a
-    /// filter that can only ever empty the list; the scope change that makes it
-    /// *possible* again clears it, so no state is left behind reading as a live
-    /// filter with no effect.
+    /// is structurally zero rows. Entering Names clears the flag, so none is
+    /// left behind reading as a live filter with no effect.
     private var commonOnlyToggle: some View {
         let disabled = state.filters.scope == .names
         let selected = state.filters.commonOnly && !disabled
@@ -131,10 +131,15 @@ struct DictionarySearchView: View {
     private var results: some View {
         if state.unavailable {
             unavailableCard
+        } else if state.fault != nil {
+            faultCard
         } else if state.debouncedQuery.isEmpty {
             hintCard
         } else if state.outcome.isEmpty {
-            noMatchesCard
+            // Gated on `isSearching`: while a search is in flight the outcome
+            // still belongs to the previous query, so an empty outcome reads
+            // as a wait — never as a denial of the new query.
+            messageCard(state.isSearching ? "Searching…" : "No matches for “\(state.debouncedQuery)”.")
         } else {
             rowList
         }
@@ -198,7 +203,9 @@ struct DictionarySearchView: View {
     }
 
     private var truncationFooter: some View {
-        Text("Showing top \(DictionarySearchEngine.maxRows) — refine your search")
+        // Keyed off what is on screen: a filter press at the ceiling can leave
+        // fewer survivors than the constant, and the footer must name those.
+        Text("Showing top \(state.visibleHits.count) — refine your search")
             .font(.system(size: 11))
             .foregroundStyle(Theme.secondaryText)
             .frame(maxWidth: .infinity, alignment: .center)
@@ -206,29 +213,25 @@ struct DictionarySearchView: View {
     }
 
     private var hintCard: some View {
-        Text("Search the dictionary — try 負ける · makeru · lose · mak")
-            .font(.system(size: 13))
-            .foregroundStyle(Theme.secondaryText)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.vertical, 24)
+        messageCard("Search the dictionary — try 負ける · makeru · lose · mak")
     }
 
-    /// Names the term the rows were actually built from, so the card can never
-    /// deny a query the list has not applied yet.
-    private var noMatchesCard: some View {
-        Text("No matches for “\(state.debouncedQuery)”.")
-            .font(.system(size: 13))
-            .foregroundStyle(Theme.secondaryText)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.vertical, 24)
+    /// Infrastructure failure — never "no matches", which would claim the
+    /// dictionary was consulted. The typed error stays in the state (tests
+    /// read `fault`); the card itself stays generic, so no raw SQLite text
+    /// reaches the HUD.
+    private var faultCard: some View {
+        messageCard("The dictionary couldn't be searched. Try again — relaunch if it persists.")
     }
 
-    /// The dictionary has not finished building. Reads as a wait, not as an
-    /// answer: the store kicks the build off again behind this card, and the
-    /// next keystroke finds it.
+    /// The dictionary has not finished building: a wait, with the store
+    /// re-kicking the build behind it.
     private var unavailableCard: some View {
-        Text("The dictionary isn't ready yet — it downloads on first launch. "
-            + "Results appear as soon as it does.")
+        messageCard("The dictionary isn't ready yet — it downloads on first launch. Results appear as soon as it does.")
+    }
+
+    private func messageCard(_ text: String) -> some View {
+        Text(text)
             .font(.system(size: 13))
             .foregroundStyle(Theme.secondaryText)
             .fixedSize(horizontal: false, vertical: true)
@@ -313,7 +316,7 @@ private extension DictionarySearchView {
     private func headwordText(_ hit: DictionarySearchHit) -> some View {
         highlighted(
             hit.headword ?? hit.reb ?? "—",
-            range: hit.matchedField == .keb ? hit.highlightRange : nil,
+            range: (hit.matchedField == .keb || (hit.matchedField == .reb && hit.keb == nil)) ? hit.highlightRange : nil,
             base: Theme.primaryText
         )
         .font(.system(size: 26))
@@ -352,10 +355,11 @@ private extension DictionarySearchView {
     /// leads because it is the part with no counterpart on a Favorites row: it
     /// is what tells the user whether this row answered what they typed.
     private func badgeRow(_ hit: DictionarySearchHit) -> some View {
-        FlowLayout(
-            spacing: 6, lineSpacing: 6, fingerprint: badges(for: hit).map(\.text).joined(separator: "\n")
+        let rowBadges = badges(for: hit)
+        return FlowLayout(
+            spacing: 6, lineSpacing: 6, fingerprint: rowBadges.map(\.text).joined(separator: "\n")
         ) {
-            ForEach(Array(badges(for: hit).enumerated()), id: \.offset) { _, badge in
+            ForEach(Array(rowBadges.enumerated()), id: \.offset) { _, badge in
                 DictionaryBadgeView(
                     text: badge.text,
                     color: badge.color,

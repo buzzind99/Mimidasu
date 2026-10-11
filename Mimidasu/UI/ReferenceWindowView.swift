@@ -262,14 +262,22 @@ struct ReferenceWindowView: View {
     /// one number that says both "this is what you got" and "this is all there
     /// is" (D12). Its total carries a `+` when the search stopped short, so
     /// the two halves do not read as equal claims. Empty while the query is
-    /// empty — `0 / 0` on an untouched field is noise.
+    /// empty — `0 / 0` on an untouched field is noise — while a search is in
+    /// flight, when the outcome still belongs to the previous query, and
+    /// whenever the card beside it says the dictionary was never consulted
+    /// (a missing database or a fault), where `0 / 0` would be that same
+    /// denial in numbers.
     @ViewBuilder
     private var countLabel: some View {
         switch mode {
         case .favorites:
             countText(favoritesState.countText())
         case .dictionary:
-            if !dictionaryState.debouncedQuery.isEmpty {
+            if !dictionaryState.debouncedQuery.isEmpty,
+               !dictionaryState.isSearching,
+               !dictionaryState.unavailable,
+               dictionaryState.fault == nil
+            {
                 countText(dictionaryState.countText)
             }
         }
@@ -286,8 +294,15 @@ struct ReferenceWindowView: View {
 
     /// Routes the close to both modes. Each state object documents why the reset
     /// belongs here rather than on the next show; the host's only job is to not
-    /// let one mode's rows survive into the next visit.
+    /// let one mode's rows survive into the next visit. The un-star slot dies
+    /// with the window too: the alert is a sheet on this window, so a close
+    /// with the sheet up would otherwise reopen onto a stale question.
     private func resetForClose() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            pendingRemoval = nil
+        }
         favoritesState.resetForClose()
         dictionaryState.resetForClose()
     }

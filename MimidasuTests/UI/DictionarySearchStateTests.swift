@@ -163,6 +163,9 @@ struct DictionarySearchStateTests {
         // its expansion survives this press even though Names will drop it.
         #expect(state.lookupState.expanded == ["飴"])
         #expect(await pollUntil { state.outcome.hits.map(\.entSeq) == [15_668_307] })
+        // The Names landing is what drops it: no row of the new result holds
+        // 飴, so the expansion cannot outlive the rows that made it.
+        #expect(state.lookupState.expanded.isEmpty)
     }
 
     @Test("switching back prunes against the screen the press left behind")
@@ -172,14 +175,17 @@ struct DictionarySearchStateTests {
 
         state.query = "あめ"
         #expect(await pollUntil { state.outcome.hits.count == 4 })
-        state.lookupState.toggle(FavoriteWord(
-            headword: "飴", reading: "あめ", romaji: "ame", addedAt: 0
-        ))
         state.filters = DictionarySearchFilters(scope: .names)
         #expect(await pollUntil { state.outcome.hits.map(\.entSeq) == [15_668_307] })
 
-        // Back to All: the prune runs against the rows on screen at the press —
-        // the Names rows, which 飴 is not part of.
+        // An expansion the Names screen never held: switching back to All
+        // prunes against the Names rows still on screen, so it dies at the
+        // press — before the All landing can land at all. (The landing pass
+        // cannot be what drops it: for the same query the Names rows are a
+        // subset of the All rows, so a way-back landing never prunes.)
+        state.lookupState.toggle(FavoriteWord(
+            headword: "飴", reading: "あめ", romaji: "ame", addedAt: 0
+        ))
         state.filters = DictionarySearchFilters(scope: .all)
         #expect(state.lookupState.expanded.isEmpty)
         #expect(await pollUntil { state.outcome.hits.count == 4 })

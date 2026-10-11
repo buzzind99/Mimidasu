@@ -43,7 +43,7 @@ final class DictionarySearchState {
         didSet {
             guard filters != oldValue else { return }
             pruneLookupState()
-            run(trimmed: trimmedQuery, filters: filters)
+            run(trimmed: debouncedQuery, filters: filters)
         }
     }
 
@@ -57,6 +57,12 @@ final class DictionarySearchState {
     /// empty result — and the launch-time dictionary kick-off is re-fired, so
     /// the next keystroke can find it.
     private(set) var unavailable = false
+    /// A search that failed for infrastructure reasons other than a missing
+    /// database (corrupt artifact, I/O error, a stale handle after a re-stage
+    /// swapped the file, a closed engine). The view names it with a fault
+    /// card, never as "no matches" — a dictionary that failed to open is not
+    /// an answer.
+    private(set) var fault: DictionarySearchError?
     /// Results dropped by the generation guard — the guard's observable half,
     /// the same contract `FavoritesLookupState.discardedLandings` offers.
     private(set) var discardedLandings = 0
@@ -77,10 +83,6 @@ final class DictionarySearchState {
         engine = model.dictionarySearch
         lookupState = FavoritesLookupState(lookup: model.jmDictLookup)
         prepareDictionary = { model.prepareDictionaries() }
-    }
-
-    private var trimmedQuery: String {
-        query.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func queryChanged(to newValue: String) {
@@ -136,10 +138,14 @@ final class DictionarySearchState {
     }
 
     /// The window is as deep as it may go and rows remain — the only state in
-    /// which refining beats scrolling. `matchedCount` is the only thing that can
-    /// say so here: at the ceiling the held rows cannot outnumber the window.
+    /// which refining beats scrolling. At the ceiling the held rows cannot
+    /// outnumber the window, so `matchedCount > visibleLimit` says so directly;
+    /// a floor total (`saturated` or `truncated`) counts too: under saturation
+    /// `matchedCount` is short of the answer, so rows behind the skipped stage
+    /// are possible even when the count lands exactly on the ceiling.
     var isAtCeiling: Bool {
-        visibleLimit >= DictionarySearchEngine.maxRows && outcome.matchedCount > visibleLimit
+        visibleLimit >= DictionarySearchEngine.maxRows
+            && (outcome.matchedCount > visibleLimit || outcome.isFloor)
     }
 
     /// Reveals another page, re-searching only when a stage was skipped.
@@ -180,8 +186,12 @@ final class DictionarySearchState {
             outcome = .empty
             isSearching = false
             unavailable = false
+            fault = nil
             return
         }
+        // A fresh attempt drops the previous fault so the retry reads as a
+        // wait, not as a standing "relaunch" verdict on a search now running.
+        fault = nil
         isSearching = true
         let engine = engine
         let limit = visibleLimit
@@ -199,7 +209,7 @@ final class DictionarySearchState {
         search = work
         Task { @MainActor [weak self] in
             let response = await work.value
-            guard let self, !Task.isCancelled else { return }
+            guard let self else { return }
             guard generation == current else {
                 discardedLandings += 1
                 return
@@ -208,11 +218,17 @@ final class DictionarySearchState {
             switch response {
             case let .success(hits):
                 unavailable = false
+                fault = nil
                 outcome = hits
+                pruneLookupState()
             case let .failure(failure):
-                unavailable = failure == .databaseMissing
-                if unavailable {
+                if failure == .databaseMissing {
+                    unavailable = true
+                    fault = nil
                     prepareDictionary()
+                } else {
+                    unavailable = false
+                    fault = failure
                 }
                 outcome = .empty
             case .cancelled:
@@ -223,6 +239,12 @@ final class DictionarySearchState {
 
     /// Drops expansion state for rows the current result no longer holds, so an
     /// in-flight lookup cannot land on a row that has since been filtered out.
+    /// Runs twice: on the filter press (against the rows on screen now) and
+    /// when a successful outcome lands (against the rows the re-search found) —
+    /// the landing pass is what achieves the stated purpose. A failed search
+    /// does not prune: it holds no rows to prune against, and collapsing every
+    /// open row over a possibly-transient fault would drop lookups the next
+    /// keystroke puts right back.
     private func pruneLookupState() {
         let headwords = Set(outcome.hits.compactMap(\.headword))
         for headword in lookupState.expanded where !headwords.contains(headword) {
@@ -258,6 +280,13 @@ final class DictionarySearchState {
             outcome = .empty
             isSearching = false
             unavailable = false
+            fault = nil
+            // The class doc promises the close wipes the filters — a reopened
+            // window searching Names-only with COMMON greyed is a silent
+            // scope the chrome never explains. Set after `debouncedQuery = ""`
+            // so the `filters.didSet` re-run takes the empty-query early exit
+            // rather than searching the query just wiped.
+            filters = DictionarySearchFilters()
             visibleLimit = DictionarySearchEngine.pageSize
             entryIndices.removeAll()
             lookupState.reset()
