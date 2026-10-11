@@ -20,8 +20,11 @@ extension KanaRomaji {
     struct RomajiConversion: Equatable, Sendable {
         /// Converted prefix, hiragana, primary long-vowel spelling.
         let kana: String
-        /// Alternate readings where the long-vowel spelling is ambiguous. The
-        /// primary is never repeated here.
+        /// Alternate readings the letters cannot disambiguate: the long-vowel
+        /// spellings (`ou` ↔ `oo` → おう / おお), the loanword digraphs
+        /// (`ti` → てぃ beside ち), and the prolonged-sound forms the mark
+        /// hides (こーひー under こおひい). The primary is never repeated
+        /// here.
         let variants: [String]
         /// Whether every input character became kana. False means `kana` is a
         /// prefix of the intended word, not a conversion of it.
@@ -67,6 +70,14 @@ extension KanaRomaji {
         if loanword.kana != scan.kana {
             variantKana.insert(loanword.kana)
         }
+        // The prolonged-sound mark is the third unknowable: the forward path
+        // spells ー by repeating the last vowel, so the letters name the
+        // plain-vowel form while the reading stores the mark. Every reading
+        // above offers its dash forms — こおひい hides こーひー (コーヒー),
+        // and the loanword reading てぃい hides てぃー the same way.
+        for reading in [scan.kana] + variantKana {
+            variantKana.formUnion(prolongedSoundVariants(of: reading))
+        }
         return RomajiConversion(
             kana: scan.kana,
             variants: variantKana.subtracting([scan.kana]).sorted(),
@@ -96,10 +107,72 @@ extension KanaRomaji {
     /// and ゜ (0x309C) onto ・ (0x30FB). Kanji, Latin, and the prolonged-sound
     /// mark ー pass through untouched.
     static func katakanaMirror(_ kana: String) -> String {
-        String(String.UnicodeScalarView(kana.unicodeScalars.map { scalar in
-            guard (0x3041 ... 0x3096).contains(scalar.value) else { return scalar }
-            return Unicode.Scalar(scalar.value + 0x60)!
-        }))
+        String(String.UnicodeScalarView(kana.unicodeScalars.map(mirroredScalar)))
+    }
+
+    /// The readings the prolonged-sound mark hides: the forward path spells ー
+    /// by repeating the last vowel (コーヒー → `koohii`), so a typed spelling
+    /// lands on the plain-vowel form (こおひい) no headword carries — the
+    /// reading stores the mark itself. Rewrites mora + successor vowel into
+    /// mora + ー wherever the mark could have stood: the exact inverse of the
+    /// forward's handling, e taking え/い and o taking お/う because both
+    /// spellings reach the same romaji. All subsets of a form's runs (more
+    /// than 4: singles plus the full set), sorted, the input excluded.
+    static func prolongedSoundVariants(of kana: String) -> [String] {
+        let units = moraUnits(of: kana)
+        let runs = prolongedRunPositions(in: units)
+        guard !runs.isEmpty else { return [] }
+        var subsets = runs.map { run in [run] }
+        if runs.count <= 4 {
+            for mask in 1 ..< (1 << runs.count) {
+                var subset: [Int] = []
+                for bit in 0 ..< runs.count where mask & (1 << bit) != 0 {
+                    subset.append(runs[bit])
+                }
+                subsets.append(subset)
+            }
+        } else {
+            subsets.append(runs)
+        }
+        var out: Set<String> = []
+        for subset in subsets {
+            var rewritten = units
+            for index in subset {
+                rewritten[index + 1] = "ー"
+            }
+            let candidate = rewritten.joined()
+            if candidate != kana {
+                out.insert(candidate)
+            }
+        }
+        return out.sorted()
+    }
+
+    /// The script-switch prefix probes a kana form issues, one pair per
+    /// position j ≥ 1: the form as written through j with the j-th kana
+    /// mirrored, and the mirrored head with the j-th kana as written. A
+    /// mixed-script reading (うべフロンティアだいがく, アパート…) sits
+    /// outside the range of its own all-hiragana prefix, so no whole-string
+    /// probe reaches it — but a reading is hit by whichever probe its own
+    /// script agrees with on the first j + 1 scalars, and everything after
+    /// that is irrelevant to a prefix scan. All-katakana and kanji-bearing
+    /// forms issue nothing: the whole-string mirror already covers the
+    /// pure-katakana readings, and a mixed head matches nothing.
+    static func scriptSwitchProbes(of form: String) -> [String] {
+        let scalars = Array(form.unicodeScalars)
+        guard scalars.count >= 2,
+              scalars.allSatisfy({ scalar in
+                  (0x3041 ... 0x309F).contains(scalar.value) || scalar.value == 0x30FC
+              })
+        else { return [] }
+        var out: [String] = []
+        for j in 1 ..< scalars.count {
+            let head = String(String.UnicodeScalarView(scalars[0 ..< j]))
+            let here = String(scalars[j])
+            out.append(head + katakanaMirror(here))
+            out.append(katakanaMirror(head) + here)
+        }
+        return out
     }
 }
 
@@ -273,6 +346,88 @@ private extension KanaRomaji {
             }
         }
         return out.sorted()
+    }
+}
+
+// MARK: - Prolonged-sound mark
+
+private extension KanaRomaji {
+    /// The scalar shift behind `katakanaMirror`, guarded the same way: only
+    /// the paired hiragana range moves, so ゛/゜ never land on ・.
+    static func mirroredScalar(_ scalar: Unicode.Scalar) -> Unicode.Scalar {
+        guard (0x3041 ... 0x3096).contains(scalar.value) else { return scalar }
+        return Unicode.Scalar(scalar.value + 0x60)!
+    }
+
+    /// The small kana that ride their base mora (てぃ, きょ), with the
+    /// vowel each contributes.
+    static let trailingSmallVowels: [Character: Character] = [
+        "ぁ": "a", "ぃ": "i", "ぅ": "u", "ぇ": "e", "ぉ": "o",
+        "ゃ": "a", "ゅ": "u", "ょ": "o"
+    ]
+
+    /// Full-size kana → the row vowel the mora carries. Everything the
+    /// reverse tables emit except っ (a gemination promise, unprolongable
+    /// where it strands) and ん (which the forward path never prolongs).
+    static let rowVowels: [Character: Character] = {
+        var map: [Character: Character] = [:]
+        let rows: [(String, String)] = [
+            ("あいうえお", "aiueo"), ("かきくけこ", "aiueo"), ("がぎぐげご", "aiueo"),
+            ("さしすせそ", "aiueo"), ("ざじずぜぞ", "aiueo"), ("たちつてと", "aiueo"),
+            ("だぢづでど", "aiueo"), ("なにぬねの", "aiueo"), ("はひふへほ", "aiueo"),
+            ("ばびぶべぼ", "aiueo"), ("ぱぴぷぺぽ", "aiueo"), ("まみむめも", "aiueo"),
+            ("らりるれろ", "aiueo"), ("やゆよ", "auo"), ("わ", "a"), ("ゔ", "u")
+        ]
+        for (morae, vowels) in rows {
+            for (mora, vowel) in zip(morae, vowels) {
+                map[mora] = vowel
+            }
+        }
+        return map
+    }()
+
+    /// Successor plain vowels a ー may stand for, by the mora's vowel. e
+    /// takes え and い (けーき from `keeki`); o takes お and う (こーひー
+    /// from `koohii`, とーきょー from `tookyoo`).
+    static let prolongedSuccessors: [Character: [Character]] = [
+        "a": ["あ"], "i": ["い"], "u": ["う"], "e": ["え", "い"], "o": ["お", "う"]
+    ]
+
+    /// Mora units: a base kana followed by a small vowel/y kana is one unit,
+    /// so てぃい is てぃ + い and the successor vowel is testable per unit.
+    static func moraUnits(of kana: String) -> [String] {
+        let characters = Array(kana)
+        var units: [String] = []
+        var index = 0
+        while index < characters.count {
+            if index + 1 < characters.count, trailingSmallVowels[characters[index + 1]] != nil {
+                units.append(String(characters[index ... index + 1]))
+                index += 2
+            } else {
+                units.append(String(characters[index]))
+                index += 1
+            }
+        }
+        return units
+    }
+
+    /// Positions whose unit is a mora or digraph followed by a plain vowel
+    /// its prolonged-sound mark could have absorbed.
+    static func prolongedRunPositions(in units: [String]) -> [Int] {
+        var out: [Int] = []
+        for index in 0 ..< max(0, units.count - 1) {
+            let unit = Array(units[index])
+            guard let vowel = unit.count == 2
+                ? trailingSmallVowels[unit[1]]
+                : rowVowels[unit[0]],
+                let allowed = prolongedSuccessors[vowel],
+                units[index + 1].count == 1,
+                let next = units[index + 1].first,
+                allowed.contains(next)
+            else { continue }
+            out.append(index)
+        }
+        return out
     }
 }
 

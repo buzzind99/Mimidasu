@@ -112,10 +112,18 @@ struct KanaRomajiReverseTests {
         #expect(wapuro.kana == "とうきょう")
         // One rewrite per occurrence: `tookyou` reads both long vowels as お,
         // `toukyoo` only the second one. Neither is knowable from the letters.
-        #expect(wapuro.variants == ["とうきょお", "とおきょう"])
+        // Each reading also offers the ー forms its runs hide, so every
+        // subset of {と+う→とー, きょ+う→きょー} rides along.
+        #expect(wapuro.variants == [
+            "とうきょお", "とうきょー", "とおきょう", "とおきょー",
+            "とーきょう", "とーきょお", "とーきょー"
+        ])
         let hepburn = try #require(KanaRomaji.convert("tookyou"))
         #expect(hepburn.kana == "とおきょう")
-        #expect(hepburn.variants == ["とうきょう", "とおきょお"])
+        #expect(hepburn.variants == [
+            "とうきょう", "とうきょー", "とおきょお", "とおきょー",
+            "とーきょう", "とーきょお", "とーきょー"
+        ])
         // No `o`-row long vowel, so no alternate reading to test.
         let none = try #require(KanaRomaji.convert("man"))
         #expect(none.variants.isEmpty)
@@ -165,9 +173,11 @@ struct KanaRomajiReverseTests {
 
         let wookason = try #require(KanaRomaji.convert("wookason"))
         // The loanword reading rides in beside the long-vowel alternate the
-        // oo↔ou machinery already offered (`wo` + `ou` → をうかそん).
+        // oo↔ou machinery already offered (`wo` + `ou` → をうかそん), and the
+        // loanword form's own run hides うぉーかそん (うぉーかそん mirrors to
+        // ウォーカソン).
         #expect(wookason.kana == "をおかそん")
-        #expect(wookason.variants == ["うぉおかそん", "をうかそん"])
+        #expect(wookason.variants == ["うぉおかそん", "うぉーかそん", "をうかそん"])
     }
 
     @Test("keeps the wapuro reading primary where a loanword key lands")
@@ -189,7 +199,70 @@ struct KanaRomajiReverseTests {
         #expect(KanaRomaji.convert("konti")?.kana == "こんち")
         #expect(KanaRomaji.convert("konti")?.variants == ["こんてぃ"])
         // No loanword key lands, so nothing new is offered.
-        #expect(KanaRomaji.convert("toukyou")?.variants == ["とうきょお", "とおきょう"])
+        #expect(KanaRomaji.convert("makeru")?.variants.isEmpty == true)
+    }
+
+    // MARK: Prolonged-sound mark
+
+    @Test("hides the ー readings the forward path spells by repeating a vowel")
+    func prolongedSoundVariants() throws {
+        // Every subset of the two runs: each mark alone and both together.
+        // The primary keeps its wapuro ち reading; the loanword reading rides
+        // the variants and offers its own dash forms beside them.
+        let paatii = try #require(KanaRomaji.convert("paatii"))
+        #expect(paatii.kana == "ぱあちい")
+        #expect(paatii.variants == [
+            "ぱあちー", "ぱあてぃい", "ぱあてぃー",
+            "ぱーちい", "ぱーちー", "ぱーてぃい", "ぱーてぃー"
+        ])
+        #expect(KanaRomaji.convert("keeki")?.variants == ["けーき"])
+        #expect(KanaRomaji.convert("koohii")?.variants.contains("こーひー") == true)
+        #expect(KanaRomaji.convert("juusu")?.variants == ["じゅーす"])
+        #expect(KanaRomaji.convert("uchiagepaatii")?.variants.contains("うちあげぱーてぃー") == true)
+    }
+
+    @Test("rewrites only the successors each mora's mark can stand for")
+    func prolongedSuccessorDiscipline() {
+        // e takes え and い, o takes お and う; a, i, and u take their own
+        // vowel alone.
+        #expect(KanaRomaji.prolongedSoundVariants(of: "けい") == ["けー"])
+        #expect(KanaRomaji.prolongedSoundVariants(of: "こお") == ["こー"])
+        #expect(KanaRomaji.prolongedSoundVariants(of: "こう") == ["こー"])
+        #expect(KanaRomaji.prolongedSoundVariants(of: "あい").isEmpty)
+        #expect(KanaRomaji.prolongedSoundVariants(of: "ちゅう") == ["ちゅー"])
+        // A digraph is one mora: the small kana names its vowel.
+        #expect(KanaRomaji.prolongedSoundVariants(of: "きょう") == ["きょー"])
+        #expect(KanaRomaji.prolongedSoundVariants(of: "てぃい") == ["てぃー"])
+        // っ and ん never prolong.
+        #expect(KanaRomaji.prolongedSoundVariants(of: "まんう").isEmpty)
+        #expect(KanaRomaji.prolongedSoundVariants(of: "うっう").isEmpty)
+        // More than four runs: singles plus the full set only.
+        #expect(KanaRomaji.prolongedSoundVariants(of: "おおおおおお").count == 6)
+    }
+
+    // MARK: Script-switch probes
+
+    @Test("issues both script directions at every position past the first")
+    func scriptSwitchProbes() {
+        #expect(KanaRomaji.scriptSwitchProbes(of: "たべる") == ["たベ", "タべ", "たべル", "タベる"])
+        // The dash form's probes align with the marked reading: the mark is
+        // script-neutral, so the mirrored head carries the ー across.
+        #expect(KanaRomaji.scriptSwitchProbes(of: "あぱーとあらし").contains("アパートあ"))
+        #expect(KanaRomaji.scriptSwitchProbes(of: "こーひー").contains("コーヒー"))
+        // A mixed reading is reached from its own hiragana spelling's form:
+        // hiragana head, katakana at the switch.
+        #expect(KanaRomaji.scriptSwitchProbes(of: "うべふろんてぃあだいがく").contains("うべフ"))
+    }
+
+    @Test("kanji-bearing, katakana, and too-short forms issue nothing")
+    func scriptSwitchGuards() {
+        // All-katakana readings are already covered by the whole-string
+        // mirror; a mixed head matches nothing; one scalar has no position
+        // past the first.
+        #expect(KanaRomaji.scriptSwitchProbes(of: "アパート").isEmpty)
+        #expect(KanaRomaji.scriptSwitchProbes(of: "負ける").isEmpty)
+        #expect(KanaRomaji.scriptSwitchProbes(of: "か").isEmpty)
+        #expect(KanaRomaji.scriptSwitchProbes(of: "").isEmpty)
     }
 
     // MARK: Partial input
