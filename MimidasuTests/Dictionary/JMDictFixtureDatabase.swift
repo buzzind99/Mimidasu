@@ -134,6 +134,13 @@ enum JMDictFixtureDatabase {
           PRIMARY KEY(text, entry_id, kind)) WITHOUT ROWID;
         CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
         """)
+        // One explicit transaction around the whole build: without it every
+        // row lands in its own implicit transaction, and an 8,001-row
+        // headroom fixture spends ~8s in fsyncs alone. A throw mid-build
+        // propagates with the transaction still open; closing the handle
+        // (the `defer` above) rolls it back, so no explicit ROLLBACK is
+        // needed on the error path.
+        try exec(db, "BEGIN")
         for word in fixture.words + syntheticWords + extraWords {
             try insert(word, db)
         }
@@ -146,6 +153,7 @@ enum JMDictFixtureDatabase {
         try exec(db, JMDictFTSIndex.createSQL)
         try exec(db, JMDictFTSIndex.insertSQL)
         try exec(db, JMDictFTSIndex.optimizeSQL)
+        try exec(db, "COMMIT")
         return Built(url: url)
     }
 
