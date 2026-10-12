@@ -80,7 +80,6 @@ fi
 XCODEBUILD_STATUS="$build_status" T_START="$t_start" T_COV="$t_cov" FAST="$FAST" \
   python3 - <<'PY'
 import json, os, shutil, subprocess, sys, time
-from concurrent.futures import ThreadPoolExecutor
 
 fast = os.environ.get("FAST") == "1"
 
@@ -156,29 +155,22 @@ if fast:
     records = []
 else:
     # Per-line data: summary, gates, build/lcov.info + uncovered report; full
-    # detail in artifacts. Per-file xccov calls run concurrently — each one
-    # re-opens the result bundle archive.
+    # detail in artifacts. One `xccov view` over the whole archive: the old
+    # per-file loop re-opened the 96MB result bundle 140+ times (~19s); a
+    # single pass returns identical per-line data in under a second.
     xccov = subprocess.run(["xcrun", "--find", "xccov"],
                            capture_output=True, text=True, check=True).stdout.strip()
 
-    def read_file_cov(path):
-        doc = json.loads(subprocess.run(
-            [xccov, "view", "--archive", "--json", "--file", path,
-             "build/cov.xcresult"],
-            capture_output=True, text=True, check=True).stdout)
-        per_line = doc.get(path) if isinstance(doc, dict) else doc
-        da = sorted((e["line"], e.get("executionCount", 0))
-                    for e in per_line if e.get("isExecutable"))
-        return (os.path.relpath(path, os.getcwd()), da)
-
-    paths = [
-        path for path in subprocess.run(
-            [xccov, "view", "--archive", "--file-list", "build/cov.xcresult"],
-            capture_output=True, text=True, check=True).stdout.splitlines()
+    doc = json.loads(subprocess.run(
+        [xccov, "view", "--archive", "--json", "build/cov.xcresult"],
+        capture_output=True, text=True, check=True).stdout)
+    records = [
+        (os.path.relpath(path, os.getcwd()),
+         sorted((e["line"], e.get("executionCount", 0))
+                for e in lines if e.get("isExecutable")))
+        for path, lines in doc.items()
         if "/Mimidasu/" in path and "/MimidasuTests/" not in path
     ]
-    with ThreadPoolExecutor(max_workers=min(8, len(paths) or 1)) as pool:
-        records = list(pool.map(read_file_cov, paths))
 
 agg = {label: [0, 0] for label, _ in prefixes}
 overall = [0, 0]
