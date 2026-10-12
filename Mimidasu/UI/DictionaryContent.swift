@@ -103,6 +103,14 @@ enum DictionaryContent {
         "relig": "RELIGION"
     ]
 
+    /// Filter row's vocabulary: every `nameTypeLabels` value, alphabetical.
+    static let allNameTypeBadges: [String] = [
+        "CHARACTER", "COMPANY NAME", "CREATURE", "DEITY", "DOCUMENT", "EVENT",
+        "FICTION", "GIVEN NAME", "GROUP", "LEGEND", "MYTHOLOGY", "NAME",
+        "OBJECT", "ORGANIZATION", "PLACE NAME", "PRODUCT", "RELIGION",
+        "SERVICE", "SHIP", "STATION", "SURNAME", "WORK"
+    ]
+
     /// JMnedict ingest offset: name entries ride `ent_seq + 10M`, above
     /// every JMDict row.
     static let nameSeqOffset = 10_000_000

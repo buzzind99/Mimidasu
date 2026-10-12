@@ -49,6 +49,32 @@ struct GlossMatchOccurrenceTests {
         #expect(match.range == 25 ..< 29)
     }
 
+    @Test("a padded fragment trims before grading")
+    func paddedFragmentTrims() {
+        let match = DictionarySearchEngine.glossMatch(pattern: "sand", column: "  sand  ")
+
+        #expect(match.kind == .glossWordBoundary)
+        #expect(match.gloss == "sand")
+        #expect(match.range == 0 ..< 4)
+    }
+
+    @Test("a pattern occurring nowhere keeps its place without a tier")
+    func absentPatternFallsBack() {
+        let match = DictionarySearchEngine.glossMatch(pattern: "zzz", column: "to eat")
+
+        #expect(match.kind == .glossSubstring)
+        #expect(match.gloss == "to eat")
+        #expect(match.range == 0 ..< 3)
+    }
+
+    @Test("an empty pattern grades nothing in the fragment path")
+    func emptyPatternInFragmentPath() {
+        let match = DictionarySearchEngine.glossMatchByFragment(pattern: "", column: "to eat")
+
+        #expect(match.kind == .glossSubstring)
+        #expect(match.gloss == "to eat")
+    }
+
     private static let joiner = String(JMDictPin.glossJoiner)
 
     private static let glossListInputs = [

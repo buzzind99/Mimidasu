@@ -61,6 +61,11 @@ final class DictionarySearchState {
         }
     }
 
+    /// Whether the filter panel is open. Chrome only: flipping it re-runs
+    /// nothing and survives filter presses, and the close wipes it alongside
+    /// the filters themselves.
+    var filtersExpanded = false
+
     private(set) var outcome = DictionarySearchOutcome.empty
     private(set) var isSearching = false
     /// How deep the window has been paged. One page to begin with;
@@ -301,6 +306,7 @@ final class DictionarySearchState {
             // so the `filters.didSet` re-run takes the empty-query early exit
             // rather than searching the query just wiped.
             filters = DictionarySearchFilters()
+            filtersExpanded = false
             visibleLimit = DictionarySearchEngine.pageSize
             entryIndices.removeAll()
             lookupState.reset()

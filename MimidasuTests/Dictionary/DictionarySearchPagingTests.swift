@@ -183,6 +183,30 @@ struct DictionarySearchPagingTests {
         #expect(outcome.saturated == false)
     }
 
+    @Test("a JLPT-filtered search is never saturated")
+    func jlptFilteredIsNeverSaturated() throws {
+        let fixture = try makeCommonFilteredFixture()
+
+        // The bulk rows carry no JLPT level, so the filter drops every one —
+        // saturation still stays refused, which is the point: the probe cannot
+        // see the join the filter reads.
+        let outcome = try fixture.outcome("kan", jlptLevels: [5])
+
+        #expect(outcome.saturated == false)
+    }
+
+    @Test("a name-type-filtered search is never saturated")
+    func nameTypeFilteredIsNeverSaturated() throws {
+        let fixture = try makeCommonFilteredFixture()
+
+        // The bulk rows are words, so the surname filter drops every one —
+        // saturation still stays refused: the probe cannot see the badges the
+        // filter reads.
+        let outcome = try fixture.outcome("kan", nameTypes: ["SURNAME"])
+
+        #expect(outcome.saturated == false)
+    }
+
     @Test("a common-only search returns every row it found")
     func commonOnlyHoldsTheWholeAnswer() throws {
         let fixture = try makeCommonFilteredFixture()

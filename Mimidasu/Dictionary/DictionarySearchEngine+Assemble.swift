@@ -41,11 +41,15 @@ extension DictionarySearchEngine {
 
     /// Merge, filter, rank, bound, join, and decorate.
     ///
-    /// The sequence is load-bearing: scope filters pre-join (a predicate on
-    /// `ent_seq` alone), `commonOnly` filters on the pre-fetched flag, and the
-    /// window is cut *before* the `headwords` join — every input to the ranking
-    /// decision is available pre-join, so cutting there is lossless and skips
-    /// the join for every row that will not be shown.
+    /// The sequence is load-bearing: scope and match-group filters run pre-join
+    /// (a predicate on `ent_seq` and the row's own tier alone), `commonOnly`
+    /// filters on the pre-fetched flag, and the window is cut *before* the
+    /// `headwords` join — every input to the ranking decision is available
+    /// pre-join, so cutting there is lossless and skips the join for every row
+    /// that will not be shown. The JLPT and name-type filters run after the
+    /// common filter over the full survivor set instead: their levels and
+    /// badges need the `entries`/`senses` joins, so the window is cut only once
+    /// they have run and the fetched metadata is reused for the rows on screen.
     ///
     /// Note what is *not* here: the caller's window. Every row the stages
     /// found is ranked and counted, up to `maxRows` built — the window is the
@@ -60,7 +64,7 @@ extension DictionarySearchEngine {
         saturated: Bool,
         truncated: Bool
     ) throws -> DictionarySearchOutcome {
-        let survivors = bestPerEntry(rows)
+        let survivors = bestPerEntry(rows.filter { row in filters.admits(matchKind: row.matchKind) })
             .filter { entryID, _ in filters.admits(entSeq: entryID) }
         let flags = try commonFlags(for: survivors.keys.sorted(), db: db)
         let scored = survivors.compactMap { entryID, row in
@@ -68,29 +72,70 @@ extension DictionarySearchEngine {
                 ScoredRow(entryID: entryID, row: row, common: common)
             }
         }
-        let kept = filters.commonOnly
-            ? rank(scored.filter { scored in scored.common })
-            : rank(scored)
-        // Every ranking key is decided above, so the window is cut here and the
-        // `headwords` join runs for these rows alone.
-        let window = Array(kept.prefix(Self.maxRows))
-        let metadata = try entryMetadata(for: window.map(\.entryID), db: db)
-        let built = window.compactMap { scored in
-            metadata[scored.entryID].map { meta in RankedRow(row: scored.row, metadata: meta) }
+        let commonKept = filters.commonOnly
+            ? scored.filter { candidate in candidate.common }
+            : scored
+        guard filters.filtersJLPT || filters.filtersNameTypes else {
+            let kept = rank(commonKept)
+            // Every ranking key is decided above, so the window is cut here and the
+            // `headwords` join runs for these rows alone.
+            let window = Array(kept.prefix(Self.maxRows))
+            let metadata = try entryMetadata(for: window.map(\.entryID), db: db)
+            let nameTypes = try namePosTokens(forEntryIDs: window.map(\.entryID), db: db)
+            return try DictionarySearchOutcome(
+                hits: windowHits(
+                    window: window, metadata: metadata, nameTokens: nameTypes, db: db
+                ),
+                matchedCount: kept.count, saturated: saturated, truncated: truncated
+            )
+        }
+        // The post-join path: levels and badges need the `entries`/`senses`
+        // joins, so they run over the full survivor set before the rank — the
+        // count below is the post-filter count, and the window build reuses
+        // what was fetched here instead of reading it twice.
+        let fullMetadata = try entryMetadata(for: commonKept.map(\.entryID), db: db)
+        let fullNameTokens = try namePosTokens(forEntryIDs: commonKept.map(\.entryID), db: db)
+        let filtered = commonKept.filter { candidate in
+            guard let meta = fullMetadata[candidate.entryID] else { return false }
+            guard filters.admits(jlpt: candidate.row.jlpt ?? meta.jlpt) else { return false }
+            guard filters.admitsName(
+                isName: candidate.entryID >= DictionaryContent.nameSeqOffset,
+                badges: DictionaryContent.nameTypeBadges(
+                    posTokens: fullNameTokens[candidate.entryID] ?? []
+                )
+            ) else { return false }
+            return true
+        }
+        let kept = rank(filtered)
+        // Every ranking key is decided above, so the window is cut here — the
+        // metadata join already ran, and the build below reuses it.
+        return try DictionarySearchOutcome(
+            hits: windowHits(
+                window: Array(kept.prefix(Self.maxRows)),
+                metadata: fullMetadata, nameTokens: fullNameTokens, db: db
+            ),
+            matchedCount: kept.count, saturated: saturated, truncated: truncated
+        )
+    }
+
+    /// Builds the window's hits from already-joined metadata: the preview join
+    /// runs for these rows alone. The outcome's count stays the caller's — the
+    /// full ranked total, never the window.
+    static func windowHits(
+        window: [ScoredRow], metadata: [Int: EntryMetadata], nameTokens: [Int: [String?]],
+        db: SQLiteDatabase
+    ) throws -> [DictionarySearchHit] {
+        let built = window.compactMap { candidate in
+            metadata[candidate.entryID].map { meta in RankedRow(row: candidate.row, metadata: meta) }
         }
         let previews = try firstSenseGlosses(for: built.map(\.metadata.entSeq), db: db)
-        let nameTypes = try namePosTokens(for: built, db: db)
-        let hits = built.map { ranked in
+        return built.map { ranked in
             hit(
                 for: ranked,
                 preview: preview(for: ranked.row, firstSense: previews),
-                nameTypes: nameTypes[ranked.metadata.entSeq] ?? []
+                nameTypes: nameTokens[ranked.metadata.entSeq] ?? []
             )
         }
-        return DictionarySearchOutcome(
-            hits: hits, matchedCount: kept.count,
-            saturated: saturated, truncated: truncated
-        )
     }
 
     /// One row per entry: the best tier wins, and with it that tier's field
@@ -212,8 +257,16 @@ extension DictionarySearchEngine {
     static func namePosTokens(
         for ranked: [RankedRow], db: SQLiteDatabase
     ) throws -> [Int: [String?]] {
-        let nameIDs = ranked.compactMap { row -> Int? in
-            row.metadata.entSeq >= DictionaryContent.nameSeqOffset ? row.metadata.entSeq : nil
+        try namePosTokens(forEntryIDs: ranked.map(\.metadata.entSeq), db: db)
+    }
+
+    /// The same fetch over bare entry ids, for the post-join filter path that
+    /// has survivors but no joined rows yet.
+    static func namePosTokens(
+        forEntryIDs entryIDs: [Int], db: SQLiteDatabase
+    ) throws -> [Int: [String?]] {
+        let nameIDs = entryIDs.filter { entryID in
+            entryID >= DictionaryContent.nameSeqOffset
         }
         guard !nameIDs.isEmpty else { return [:] }
         var out: [Int: [String?]] = [:]

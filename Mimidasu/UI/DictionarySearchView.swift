@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Full-dictionary search: one field that accepts Japanese, romaji, or an
-/// English meaning, and a filter row narrowing words from names and rare
-/// entries.
+/// English meaning, and a collapsible filter panel narrowing words from names
+/// and rare entries.
 ///
 /// The rows are favorites rows on purpose. A search result and a starred word
 /// are the same object to this app — the dictionary is where a word is defined,
@@ -36,7 +36,9 @@ struct DictionarySearchView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             searchField
-            filterRow
+            if state.filtersExpanded {
+                filterPanel
+            }
             results
         }
         .padding(14)
@@ -46,25 +48,77 @@ struct DictionarySearchView: View {
 
     private var searchField: some View {
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.secondaryText)
-            TextField("Search the dictionary", text: query)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .focused(searchFocus, equals: true)
-            // In the field rather than over the list: the list is not blocked
-            // (it keeps showing the previous results) and the window never
-            // flashes a spinner-sized hole in the middle of itself.
-            if state.isSearching {
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.7)
-                    .frame(width: 14, height: 14)
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.secondaryText)
+                TextField("Search the dictionary", text: query)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .focused(searchFocus, equals: true)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    // Claims the remainder, so the spinner sibling keeps its own
+                    // slot: the stack lays children out sequentially, and the
+                    // 8pt spacing is a minimum gap the typed text cannot cross.
+                    // Clipped so a long query scrolls inside its own box rather
+                    // than drawing past it toward the spinner.
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .clipped()
+                // A layout sibling rather than an overlay: its slot is real
+                // layout, so the text and the spinner can never share pixels —
+                // an overlay would need a separately-reserved inset that can
+                // race the spinner's own appearance.
+                //
+                // In the field rather than over the list: the list is not blocked
+                // (it keeps showing the previous results) and the window never
+                // flashes a spinner-sized hole in the middle of itself.
+                if state.isSearching {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.7)
+                        .frame(width: 14, height: 14)
+                }
             }
+            .padding(9)
+            .cardSurface(radius: 9)
+            filterButton
         }
-        .padding(9)
-        .cardSurface(radius: 9)
+    }
+
+    /// The funnel beside the field: collapses the filter panel behind it. Wears
+    /// the accent while the panel is open or a filter is active, so a collapsed
+    /// panel with live filters still reads as filtered — with a dot for users
+    /// who do not read color alone.
+    private var filterButton: some View {
+        let expanded = state.filtersExpanded
+        let hasActiveFilters = state.filters != DictionarySearchFilters()
+        let highlighted = expanded || hasActiveFilters
+        let help = expanded ? "Hide filters" : hasActiveFilters ? "Show filters (filters active)" : "Show filters"
+        return Button {
+            state.filtersExpanded.toggle()
+        } label: {
+            Image(systemName: highlighted
+                ? "line.3.horizontal.decrease.circle.fill"
+                : "line.3.horizontal.decrease.circle")
+                .font(.system(size: 18))
+                .foregroundStyle(highlighted ? Theme.accentPink : Theme.secondaryText)
+                .frame(width: 34, height: 34)
+                .contentShape(Circle())
+                .overlay(alignment: .topTrailing) {
+                    if hasActiveFilters, !expanded {
+                        Circle()
+                            .fill(Theme.accentPink)
+                            .frame(width: 8, height: 8)
+                            .padding(.top, 4)
+                            .padding(.trailing, 4)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
+        .help(help)
+        .accessibilityLabel(help)
     }
 
     private var query: Binding<String> {
@@ -74,58 +128,10 @@ struct DictionarySearchView: View {
         )
     }
 
-    private var filterRow: some View {
-        HStack(spacing: 8) {
-            ModePicker(
-                help: "Which entries to search",
-                modes: DictionarySearchFilters.Scope.allCases,
-                selection: scope,
-                label: \.label
-            )
-            commonOnlyToggle
-            Spacer(minLength: 0)
-        }
-    }
-
-    private var scope: Binding<DictionarySearchFilters.Scope> {
-        Binding(
-            get: { state.filters.scope },
-            set: { newValue in
-                var filters = state.filters
-                filters.scope = newValue
-                // Nothing to clear here: `DictionarySearchState.filters`
-                // normalizes COMMON away under Names on the way in, for every
-                // writer, so the chip below can never be left reading live
-                // over a scope that can never satisfy it.
-                state.filters = filters
-            }
-        )
-    }
-
-    /// Names are never common in the source data, so "Common only" over Names
-    /// is structurally zero rows. `DictionarySearchState` clears the flag on the
-    /// way into that scope, so none is left behind reading as a live filter the
-    /// user could switch back off.
-    private var commonOnlyToggle: some View {
-        let disabled = state.filters.scope == .names
-        let selected = state.filters.commonOnly && !disabled
-        return Button {
-            var filters = state.filters
-            filters.commonOnly.toggle()
-            state.filters = filters
-        } label: {
-            DictionaryBadgeView(
-                text: "COMMON", color: selected ? Theme.accentPink : Theme.secondaryText
-            )
-            .opacity(disabled ? 0.4 : 1)
-        }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-        .hoverHighlight(Capsule(), isEnabled: !selected && !disabled)
-        .help(disabled
-            ? "Name entries are never marked common"
-            : "Only entries the dictionary marks common")
-        .accessibilityLabel("Common entries only")
+    /// The collapsible filters live in `DictionaryFilterPanel`, split out so
+    /// both types stay inside the body budget.
+    private var filterPanel: some View {
+        DictionaryFilterPanel(state: state)
     }
 
     // MARK: - Results

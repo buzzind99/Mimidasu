@@ -30,6 +30,33 @@ struct DictionarySearchFilters: Equatable, Sendable {
     /// so this and `.names` are structurally empty — the UI greys the toggle
     /// out rather than showing a filter that can only answer zero.
     var commonOnly = false
+    /// Which match tiers may answer. Lemma folds into `.exact` — the lemma
+    /// retry is skipped when `.exact` is off — so the three groups cover all
+    /// six tiers with no tier left homeless.
+    var matchGroups: Set<MatchGroup> = Set(MatchGroup.allCases)
+    /// JLPT levels an entry must carry. Empty means no filtering; a nil level
+    /// fails while effective, because names carry no JLPT in the real database.
+    var jlptLevels: Set<Int> = []
+    /// Name-type badge labels an entry must carry (e.g. "SURNAME"). Empty
+    /// means no filtering; non-names and badgeless names fail while effective.
+    var nameTypes: Set<String> = []
+
+    /// Which match tier a hit belongs to, for the filter row. Three groups
+    /// cover the six tiers: lemma folds into `.exact` because the retry only
+    /// runs on empty rows and earns the same badge family.
+    enum MatchGroup: String, Equatable, Sendable, CaseIterable {
+        case exact
+        case prefix
+        case gloss
+
+        var label: String {
+            switch self {
+            case .exact: "Exact"
+            case .prefix: "Prefix"
+            case .gloss: "Gloss"
+            }
+        }
+    }
 
     /// Whether `entSeq` falls in this scope. The boundary is the JMnedict
     /// ingest offset, the same one `DictionaryContent.nameSeqOffset` reads.
@@ -39,6 +66,46 @@ struct DictionarySearchFilters: Equatable, Sendable {
         case .words: entSeq < DictionaryContent.nameSeqOffset
         case .names: entSeq >= DictionaryContent.nameSeqOffset
         }
+    }
+
+    /// Whether a match tier may answer. Exact and lemma share `.exact`; the
+    /// three gloss sub-tiers share `.gloss`.
+    func admits(matchKind: DictionarySearchHit.MatchKind) -> Bool {
+        switch matchKind {
+        case .exact, .lemma: matchGroups.contains(.exact)
+        case .prefix: matchGroups.contains(.prefix)
+        case .glossWordBoundary, .glossPrefix, .glossSubstring: matchGroups.contains(.gloss)
+        }
+    }
+
+    /// Whether the JLPT selection filters anything. Levels describe word
+    /// entries, so the row is moot under Names and the UI disables it there.
+    var filtersJLPT: Bool {
+        !jlptLevels.isEmpty && scope != .names
+    }
+
+    /// Whether the name-type selection filters anything. Types describe name
+    /// entries, so the row is moot under Words and the UI disables it there.
+    var filtersNameTypes: Bool {
+        !nameTypes.isEmpty && scope != .words
+    }
+
+    /// Whether a JLPT level passes. True when the filter is not effective;
+    /// while effective the level must be selected, and nil fails — names carry
+    /// no JLPT, so an active level selection drops them.
+    func admits(jlpt: Int?) -> Bool {
+        guard filtersJLPT else { return true }
+        guard let jlpt else { return false }
+        return jlptLevels.contains(jlpt)
+    }
+
+    /// Whether an entry passes the name-type selection. True when the filter
+    /// is not effective; while effective the entry must be a name whose badge
+    /// set intersects the selection — non-names and badgeless names fail.
+    func admitsName(isName: Bool, badges: [String]) -> Bool {
+        guard filtersNameTypes else { return true }
+        guard isName else { return false }
+        return badges.contains { badge in nameTypes.contains(badge) }
     }
 }
 

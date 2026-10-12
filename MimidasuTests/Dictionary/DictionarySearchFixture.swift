@@ -27,10 +27,17 @@ final class DictionarySearchFixture {
         _ query: String,
         scope: DictionarySearchFilters.Scope = .all,
         commonOnly: Bool = false,
-        limit: Int = DictionarySearchEngine.pageSize
+        limit: Int = DictionarySearchEngine.pageSize,
+        matchGroups: Set<DictionarySearchFilters.MatchGroup> = Set(DictionarySearchFilters.MatchGroup.allCases),
+        jlptLevels: Set<Int> = [],
+        nameTypes: Set<String> = []
     ) throws -> DictionarySearchOutcome {
         try engine.search(
-            query, filters: DictionarySearchFilters(scope: scope, commonOnly: commonOnly),
+            query,
+            filters: DictionarySearchFilters(
+                scope: scope, commonOnly: commonOnly, matchGroups: matchGroups,
+                jlptLevels: jlptLevels, nameTypes: nameTypes
+            ),
             limit: limit
         )
     }
