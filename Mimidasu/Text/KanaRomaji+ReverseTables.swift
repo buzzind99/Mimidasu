@@ -172,8 +172,12 @@ extension KanaRomaji {
         "r": ["ら", "り", "る", "れ", "ろ"],
         "ry": ["りゃ", "りゅ", "りょ"],
         "y": ["や", "ゆ", "よ"],
-        "w": ["わ"],
+        // The w-row proper is わ alone; wi/we/wo are extras keys (うぃ, うぇ,
+        // を), with ゐ/ゑ as wi/we's historical alternates — so a typed `w`
+        // can land any of the four morae below.
+        "w": ["わ", "ゐ", "ゑ", "を"],
         "v": ["ゔぁ", "ゔぃ", "ゔぇ", "ゔぉ"],
+        "vy": ["ゔゃ", "ゔゅ", "ゔょ"],
         "c": ["か", "し", "く", "せ", "こ"],
         "l": ["ぁ", "ぃ", "ぅ", "ぇ", "ぉ"],
         "x": ["ぁ", "ぃ", "ぅ", "ぇ", "ぉ"],

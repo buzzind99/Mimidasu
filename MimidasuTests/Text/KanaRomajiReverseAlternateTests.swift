@@ -28,7 +28,13 @@ struct KanaRomajiReverseAlternateTests {
     }
 
     @Test("reads back the romaji the forward path prints for each alternate kana",
-          arguments: ["ぢ", "づ", "ぢゃ", "ぢゅ", "ぢょ", "はなぢ", "ちぢみ", "くゎ", "ゐ", "ゑ"])
+          arguments: [
+              "ぢ", "づ", "ぢゃ", "ぢゅ", "ぢょ", "はなぢ", "ちぢみ",
+              // The historical kana, bare and prolonged: the mark cannot stand
+              // on a kana the prolonged pass has no vowel for, so ゐ/ゑ/くゎ
+              // each need one before ゐー/ゑー/くゎー can read back at all.
+              "くゎ", "ゐ", "ゑ", "ゐー", "ゑー", "くゎー"
+          ])
     func forwardPrintedRoundTrip(kana: String) throws {
         let romaji = try #require(KanaRomaji.romaji(fromKana: kana))
         let conversion = try #require(KanaRomaji.convert(romaji))

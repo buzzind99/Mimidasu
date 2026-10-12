@@ -367,16 +367,20 @@ private extension KanaRomaji {
         return Unicode.Scalar(scalar.value + 0x60)!
     }
 
-    /// The small kana that ride their base mora (てぃ, きょ), with the
+    /// The small kana that ride their base mora (てぃ, きょ, くゎ), with the
     /// vowel each contributes.
     static let trailingSmallVowels: [Character: Character] = [
         "ぁ": "a", "ぃ": "i", "ぅ": "u", "ぇ": "e", "ぉ": "o",
-        "ゃ": "a", "ゅ": "u", "ょ": "o"
+        "ゃ": "a", "ゅ": "u", "ょ": "o", "ゎ": "a"
     ]
 
-    /// Full-size kana → the row vowel the mora carries. Everything the
-    /// reverse tables emit except っ (a gemination promise, unprolongable
-    /// where it strands) and ん (which the forward path never prolongs).
+    /// Full-size kana → the row vowel the mora carries. The only full-size
+    /// table emission missing here is を (the forward path prints "wo", but
+    /// no stored reading carries を at all, so there is nothing a prolonged
+    /// を could reach). Two more kana reach readings without a row vowel,
+    /// from the scanner rather than the tables: っ (a gemination promise,
+    /// unprolongable where it strands) and ん (which the forward path never
+    /// prolongs).
     static let rowVowels: [Character: Character] = {
         var map: [Character: Character] = [:]
         let rows: [(String, String)] = [
@@ -384,7 +388,8 @@ private extension KanaRomaji {
             ("さしすせそ", "aiueo"), ("ざじずぜぞ", "aiueo"), ("たちつてと", "aiueo"),
             ("だぢづでど", "aiueo"), ("なにぬねの", "aiueo"), ("はひふへほ", "aiueo"),
             ("ばびぶべぼ", "aiueo"), ("ぱぴぷぺぽ", "aiueo"), ("まみむめも", "aiueo"),
-            ("らりるれろ", "aiueo"), ("やゆよ", "auo"), ("わ", "a"), ("ゔ", "u")
+            ("らりるれろ", "aiueo"), ("やゆよ", "auo"), ("わ", "a"), ("ゔ", "u"),
+            ("ゐゑ", "ie")
         ]
         for (morae, vowels) in rows {
             for (mora, vowel) in zip(morae, vowels) {
