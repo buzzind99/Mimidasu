@@ -36,6 +36,15 @@ struct FavoritesView: View {
 
     var body: some View {
         windowContent(state.results)
+            // Reconcile on activation. The `onChange` below is dead while this
+            // mode is unmounted — a mode switch tears the view out of the
+            // hierarchy — so a word removed elsewhere in that span (a search
+            // row's star, the popover) would otherwise stay listed until the
+            // next mutation landed here. Idempotent: it recomputes from the
+            // store and prunes expansions.
+            .onAppear {
+                state.favoritesChanged()
+            }
             .onChange(of: model.favorites.words) { _, _ in
                 state.favoritesChanged()
             }
