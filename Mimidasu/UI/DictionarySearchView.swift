@@ -93,8 +93,7 @@ struct DictionarySearchView: View {
         }
     }
 
-    /// The funnel beside the field: badge-styled while open or filtered, and
-    /// framed a touch smaller than the field card so the pair reads as one row.
+    /// The funnel beside the field: badge-styled while open or filtered, framed a touch smaller than the field card.
     private var filterButton: some View {
         let expanded = state.filtersExpanded
         let hasActiveFilters = state.filters != DictionarySearchFilters()
@@ -118,7 +117,7 @@ struct DictionarySearchView: View {
         .buttonStyle(.plain)
         .pointerStyle(.link)
         .help(help)
-        .accessibilityLabel(help)
+        .accessibilityLabel(help) // names the state; SwiftUI has no expanded trait
     }
 
     private var query: Binding<String> {

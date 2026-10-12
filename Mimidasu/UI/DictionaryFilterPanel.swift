@@ -49,6 +49,10 @@ struct DictionaryFilterPanel: View {
     /// it never offers a press that would visibly do nothing — and while
     /// disabled it wears neither the hover wash nor the link cursor.
     private var resetButton: some View {
+        // Raw equality is the right read here: a kept-but-ignored selection
+        // (JLPT under Names, name types under Words) only exists alongside a
+        // non-default scope, which narrows on its own — so Reset is never
+        // enabled over a search identical to the defaults.
         let isDefault = state.filters == DictionarySearchFilters()
         return Button {
             state.filters = DictionarySearchFilters()
@@ -215,6 +219,8 @@ struct DictionaryFilterPanel: View {
         .pointerStyle(.link)
         .hoverHighlight(Circle())
         .help(namesExpanded ? "Collapse name types" : "Show all name types")
+        // No expanded trait exists in SwiftUI — the label itself carries the
+        // state, the same pattern the row chevrons use.
         .accessibilityLabel(namesExpanded ? "Collapse name types" : "Show all name types")
     }
 
@@ -261,6 +267,13 @@ struct DictionaryFilterPanel: View {
             filters.jlptLevels.remove(level)
         } else {
             filters.jlptLevels.insert(level)
+            // JLPT and name types are mutually exclusive under All — their
+            // conjunction answers zero rows — so setting one clears the
+            // other. Under Words/Names the other row's selection is merely
+            // kept-but-ignored, and stays untouched.
+            if filters.scope == .all {
+                filters.nameTypes = []
+            }
         }
         state.filters = filters
     }
@@ -277,6 +290,10 @@ struct DictionaryFilterPanel: View {
             filters.nameTypes.remove(badge)
         } else {
             filters.nameTypes.insert(badge)
+            // Mirror of the JLPT toggle above: mutually exclusive under All.
+            if filters.scope == .all {
+                filters.jlptLevels = []
+            }
         }
         state.filters = filters
     }
@@ -292,11 +309,25 @@ struct DictionaryFilterPanel: View {
             get: { state.filters.scope },
             set: { newValue in
                 var filters = state.filters
+                let leaving = filters.scope
                 filters.scope = newValue
                 // Nothing to clear here: `DictionarySearchState.filters`
                 // normalizes COMMON away under Names on the way in, for every
                 // writer, so the chip below can never be left reading live
                 // over a scope that can never satisfy it.
+                //
+                // Entering All can reunite two selections the scoped rows kept
+                // apart: JLPT picked under Words plus name types kept under
+                // Words (or vice versa under Names). The side that was live in
+                // the scope being left wins; the kept-but-ignored side clears,
+                // so All never lands in the provably-empty conjunction.
+                if newValue == .all {
+                    switch leaving {
+                    case .words: filters.nameTypes = []
+                    case .names: filters.jlptLevels = []
+                    case .all: break
+                    }
+                }
                 state.filters = filters
             }
         )
@@ -355,6 +386,7 @@ private struct FilterBadgeButton: View {
         .hoverHighlight(Capsule(), isEnabled: !selected && !disabled)
         .help(help)
         .accessibilityLabel(accessibility)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }
 
@@ -390,6 +422,9 @@ private struct ScopeBadgePicker: View {
         .help("Which entries to search")
     }
 
+    /// One scope segment: the visible label plus a selected trait and a
+    /// state-carrying accessibility label, so VoiceOver names the scope and
+    /// whether it is the active one.
     private func segment(_ scope: DictionarySearchFilters.Scope) -> some View {
         let isSelected = scope == selection
         return Button {
@@ -411,5 +446,7 @@ private struct ScopeBadgePicker: View {
         }
         .buttonStyle(.plain)
         .hoverHighlight(Capsule(), isEnabled: !isSelected)
+        .accessibilityLabel("\(scope.label) scope")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 }

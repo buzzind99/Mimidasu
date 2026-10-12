@@ -36,9 +36,13 @@ struct DictionarySearchFilters: Equatable, Sendable {
     var matchGroups: Set<MatchGroup> = Set(MatchGroup.allCases)
     /// JLPT levels an entry must carry. Empty means no filtering; a nil level
     /// fails while effective, because names carry no JLPT in the real database.
+    /// Mutually exclusive with `nameTypes` under `.all` — the filter panel
+    /// clears one when the other is set there, since their conjunction can
+    /// only answer zero rows (words fail the badge check, names fail this one).
     var jlptLevels: Set<Int> = []
     /// Name-type badge labels an entry must carry (e.g. "SURNAME"). Empty
     /// means no filtering; non-names and badgeless names fail while effective.
+    /// Mutually exclusive with `jlptLevels` under `.all` — see above.
     var nameTypes: Set<String> = []
 
     /// Which match tier a hit belongs to, for the filter row. Three groups
@@ -221,12 +225,15 @@ struct DictionarySearchOutcome: Equatable, Sendable {
     /// it filled the window exactly and `matchedCount` does not exceed it, and
     /// why the header marks such a total with `+`.
     ///
-    /// Never true for a `commonOnly` search: `commonOnly` resolves against the
-    /// pre-join pre-fetch, so a common-only search's window *can* be measured
-    /// pre-join — but it is still refused, because `capSaturated` measures tiers
-    /// only and cannot see `common` at all, so a window full of uncommon rows
-    /// would read as full and hide the common ones behind it. Such a search runs
-    /// every stage and this is `false` — its total is exact, not a floor.
+    /// Never true for a search carrying `requiresExactCount`: `commonOnly`
+    /// resolves against the pre-join pre-fetch, so a common-only search's
+    /// window *can* be measured pre-join — but it is still refused, because
+    /// `capSaturated` measures tiers only and cannot see `common` at all, so
+    /// a window full of uncommon rows would read as full and hide the common
+    /// ones behind it. The JLPT and name-type filters refuse for the same
+    /// reason (their levels and badges need joins the probe cannot see). Such
+    /// a search runs every stage and this is `false` — its total is exact,
+    /// not a floor.
     let saturated: Bool
 
     /// A headword scan hit one of its own bounds — `prefixScanCeiling`, which
