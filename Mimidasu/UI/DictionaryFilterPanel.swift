@@ -1,18 +1,24 @@
 import SwiftUI
 
 /// The collapsible filter panel behind the dictionary search field's funnel
-/// button: scope + COMMON, then the match, JLPT, and name-type rows. Gone
-/// entirely while `filtersExpanded` is false, so the list keeps the room.
+/// button: scope + reset, COMMON on its own row, then the match, JLPT, and
+/// name-type rows. Gone entirely while `filtersExpanded` is false, so the
+/// list keeps the room.
 ///
 /// Split from `DictionarySearchView` so both types stay inside the body
 /// budget — the rows below are the panel's, and the result list stays the
 /// window chrome's.
 struct DictionaryFilterPanel: View {
     let state: DictionarySearchState
+    /// The Names row's disclosure. Local chrome state, not a search filter:
+    /// the panel itself is torn down with the close, so this always returns
+    /// to collapsed — which is the specified default.
+    @State private var namesExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             scopeRow
+            commonRow
             matchRow
             jlptRow
             nameTypeRow
@@ -22,9 +28,41 @@ struct DictionaryFilterPanel: View {
     private var scopeRow: some View {
         HStack(spacing: 8) {
             ScopeBadgePicker(selection: scope)
+            Spacer(minLength: 0)
+            resetButton
+        }
+    }
+
+    /// COMMON on its own captioned row, matching the Match / JLPT / Names
+    /// rows below. Moved out of the scope row so that slot can carry the
+    /// Reset control instead.
+    private var commonRow: some View {
+        HStack(spacing: 6) {
+            caption("Common")
             commonOnlyToggle
             Spacer(minLength: 0)
         }
+    }
+
+    /// Clears every filter back to the defaults. Sits at the row's trailing
+    /// edge, aligned under the funnel button. Disabled at the defaults, so
+    /// it never offers a press that would visibly do nothing — and while
+    /// disabled it wears neither the hover wash nor the link cursor.
+    private var resetButton: some View {
+        let isDefault = state.filters == DictionarySearchFilters()
+        return Button {
+            state.filters = DictionarySearchFilters()
+        } label: {
+            Text("Reset")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(isDefault ? Theme.secondaryText.opacity(0.6) : Theme.accentPink)
+        }
+        .buttonStyle(.plain)
+        .modifier(LinkCursor(enabled: !isDefault))
+        .disabled(isDefault)
+        .opacity(isDefault ? 0.7 : 1)
+        .help("Reset all filters")
+        .accessibilityLabel("Reset all filters")
     }
 
     /// Which match tiers may answer. Every group toggles independently, and All
@@ -35,7 +73,7 @@ struct DictionaryFilterPanel: View {
             caption("Match")
             ForEach(DictionarySearchFilters.MatchGroup.allCases, id: \.self) { group in
                 FilterBadgeButton(
-                    text: group.label,
+                    text: group.label.uppercased(),
                     selected: state.filters.matchGroups.contains(group),
                     help: matchHelp(for: group),
                     accessibility: "\(group.label) matches only"
@@ -65,6 +103,7 @@ struct DictionaryFilterPanel: View {
                 FilterBadgeButton(
                     text: "N\(level)",
                     selected: state.filters.jlptLevels.contains(level),
+                    selectedColor: Theme.brandViolet,
                     disabled: disabled,
                     help: "Only JLPT N\(level) entries",
                     accessibility: "JLPT N\(level) only"
@@ -75,6 +114,7 @@ struct DictionaryFilterPanel: View {
             FilterBadgeButton(
                 text: "All",
                 selected: state.filters.jlptLevels.isEmpty,
+                selectedColor: Theme.brandViolet,
                 disabled: disabled,
                 help: "All JLPT levels",
                 accessibility: "All JLPT levels"
@@ -89,19 +129,23 @@ struct DictionaryFilterPanel: View {
 
     /// Name-type badges an entry must carry. Disabled under Words — types
     /// describe name entries — with the selection kept, mirroring the JLPT row.
-    /// The chips wrap: twenty-two types plus All never fit one line.
+    /// Collapsible: twenty-two types plus All never fit one line, so the
+    /// collapsed row shows only the pinned SURNAME / GIVEN NAME / PLACE NAME
+    /// chips (plus any active selection the pins would hide, plus All), with
+    /// a chevron flowing right after the last badge toggling the full list.
     private var nameTypeRow: some View {
         let disabled = state.filters.scope == .words
         return HStack(alignment: .top, spacing: 6) {
             caption("Names")
             FlowLayout(
                 spacing: 6, lineSpacing: 6,
-                fingerprint: state.filters.nameTypes.sorted().joined(separator: "\n")
+                fingerprint: nameFingerprint
             ) {
-                ForEach(DictionaryContent.allNameTypeBadges, id: \.self) { badge in
+                ForEach(visibleNameBadges, id: \.self) { badge in
                     FilterBadgeButton(
                         text: badge,
                         selected: state.filters.nameTypes.contains(badge),
+                        selectedColor: Theme.brandViolet,
                         disabled: disabled,
                         help: "Only \(badge) entries",
                         accessibility: "\(badge) only"
@@ -112,12 +156,14 @@ struct DictionaryFilterPanel: View {
                 FilterBadgeButton(
                     text: "All",
                     selected: state.filters.nameTypes.isEmpty,
+                    selectedColor: Theme.brandViolet,
                     disabled: disabled,
                     help: "All name types",
                     accessibility: "All name types"
                 ) {
                     clearNameTypes()
                 }
+                namesDisclosureButton
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -125,13 +171,63 @@ struct DictionaryFilterPanel: View {
         .help("Name types apply to name entries")
     }
 
+    /// The pinned chips the collapsed Names row keeps, in display order:
+    /// surname, given name, place name.
+    private static let pinnedNameBadges = ["SURNAME", "GIVEN NAME", "PLACE NAME"]
+
+    /// The type chips on screen now. Collapsed: the pins in pinned order,
+    /// plus any selected type the pins would otherwise hide — a live filter
+    /// must never vanish behind the disclosure — in `allNameTypeBadges`
+    /// order. Expanded: all.
+    private var visibleNameBadges: [String] {
+        guard !namesExpanded else { return DictionaryContent.allNameTypeBadges }
+        let selected = state.filters.nameTypes
+        let extras = DictionaryContent.allNameTypeBadges.filter { badge in
+            selected.contains(badge) && !Self.pinnedNameBadges.contains(badge)
+        }
+        return Self.pinnedNameBadges + extras
+    }
+
+    /// Keys the `FlowLayout` cache on what it lays out: the disclosure state,
+    /// the chips on screen, and the selection (which recolors them).
+    private var nameFingerprint: String {
+        let expanded = namesExpanded ? "open" : "shut"
+        let visible = visibleNameBadges.joined(separator: "\n")
+        let selected = state.filters.nameTypes.sorted().joined(separator: "\n")
+        return "\(expanded)\n\(visible)\n\(selected)"
+    }
+
+    /// The chevron toggling the Names row. A child of the flow, so it sits
+    /// right after the last badge rather than pinned to the window's
+    /// trailing edge. Chrome, not a filter, so it stays enabled while the
+    /// chips themselves are disabled under Words.
+    private var namesDisclosureButton: some View {
+        Button {
+            namesExpanded.toggle()
+        } label: {
+            Image(systemName: namesExpanded ? "chevron.up" : "chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Theme.secondaryText)
+                .frame(width: 20, height: 20)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
+        .hoverHighlight(Circle())
+        .help(namesExpanded ? "Collapse name types" : "Show all name types")
+        .accessibilityLabel(namesExpanded ? "Collapse name types" : "Show all name types")
+    }
+
     /// The small leading label each filter row carries, fixed wide so the
-    /// chips line up in one column down the panel.
+    /// chips line up in one column down the panel. Wide enough for "Common"
+    /// (the double-m makes it the longest caption) and single-line, so no
+    /// caption can ever wrap onto two lines.
     private func caption(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11, weight: .medium))
             .foregroundStyle(Theme.secondaryText)
-            .frame(width: 44, alignment: .leading)
+            .lineLimit(1)
+            .frame(width: 50, alignment: .leading)
     }
 
     private func matchHelp(for group: DictionarySearchFilters.MatchGroup) -> String {
@@ -216,6 +312,7 @@ struct DictionaryFilterPanel: View {
         return FilterBadgeButton(
             text: "COMMON",
             selected: selected,
+            selectedColor: Theme.dotGreen,
             disabled: disabled,
             help: disabled
                 ? "Name entries are never marked common"
@@ -230,13 +327,17 @@ struct DictionaryFilterPanel: View {
     }
 }
 
-/// One toggle chip in the search filter panel: a `DictionaryBadgeView` reading
-/// selected in accent and unselected in grey, so every row speaks the same
-/// selected language as the scope capsule. File-level rather than nested so
-/// the panel's rows stay out of the type-body budget.
+/// One toggle chip in the search filter panel: the shared
+/// `DictionaryBadgeView` reading unselected in grey and selected in the
+/// row's semantic color — pink for match tiers, green for COMMON, purple
+/// for JLPT and name types — so a live filter wears exactly the color its
+/// result badges wear. Offers the link cursor while enabled, like every
+/// other control in the panel. File-level rather than nested so the panel's
+/// rows stay out of the type-body budget.
 private struct FilterBadgeButton: View {
     let text: String
     let selected: Bool
+    var selectedColor: Color = Theme.accentPink
     var disabled = false
     var help: String
     var accessibility: String
@@ -245,14 +346,29 @@ private struct FilterBadgeButton: View {
     var body: some View {
         Button(action: action) {
             DictionaryBadgeView(
-                text: text, color: selected ? Theme.accentPink : Theme.secondaryText
+                text: text, color: selected ? selectedColor : Theme.secondaryText
             )
         }
         .buttonStyle(.plain)
+        .modifier(LinkCursor(enabled: !disabled))
         .disabled(disabled)
         .hoverHighlight(Capsule(), isEnabled: !selected && !disabled)
         .help(help)
         .accessibilityLabel(accessibility)
+    }
+}
+
+/// The link cursor, only while `enabled`: a disabled control must never
+/// offer the pointing hand.
+private struct LinkCursor: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.pointerStyle(.link)
+        } else {
+            content
+        }
     }
 }
 

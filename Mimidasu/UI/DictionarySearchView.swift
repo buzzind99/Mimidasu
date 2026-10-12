@@ -24,6 +24,8 @@ struct DictionarySearchView: View {
     /// row's type is fixed, so this cannot drift with the UI scale.
     private static let trailingLineDrop: CGFloat = 4
 
+    /// The field card's measured height; the funnel circle frames to this.
+    @State private var fieldHeight: CGFloat = 34
     /// One chip in a row's badge line. `isMatch` chips carry the leading
     /// magnifier that marks them as the row's *reason for being here*, rather
     /// than as one more fact about the word.
@@ -82,14 +84,17 @@ struct DictionarySearchView: View {
             }
             .padding(9)
             .cardSurface(radius: 9)
+            .onHeightChange { height in
+                if fieldHeight != height {
+                    fieldHeight = height
+                }
+            }
             filterButton
         }
     }
 
-    /// The funnel beside the field: collapses the filter panel behind it. Wears
-    /// the accent while the panel is open or a filter is active, so a collapsed
-    /// panel with live filters still reads as filtered — with a dot for users
-    /// who do not read color alone.
+    /// The funnel beside the field: badge-styled while open or filtered, and
+    /// framed a touch smaller than the field card so the pair reads as one row.
     private var filterButton: some View {
         let expanded = state.filtersExpanded
         let hasActiveFilters = state.filters != DictionarySearchFilters()
@@ -98,20 +103,15 @@ struct DictionarySearchView: View {
         return Button {
             state.filtersExpanded.toggle()
         } label: {
-            Image(systemName: highlighted
-                ? "line.3.horizontal.decrease.circle.fill"
-                : "line.3.horizontal.decrease.circle")
+            Image(systemName: "line.3.horizontal.decrease")
                 .font(.system(size: 18))
                 .foregroundStyle(highlighted ? Theme.accentPink : Theme.secondaryText)
-                .frame(width: 34, height: 34)
+                .frame(width: max(fieldHeight - 4, 28), height: max(fieldHeight - 4, 28))
                 .contentShape(Circle())
-                .overlay(alignment: .topTrailing) {
-                    if hasActiveFilters, !expanded {
-                        Circle()
-                            .fill(Theme.accentPink)
-                            .frame(width: 8, height: 8)
-                            .padding(.top, 4)
-                            .padding(.trailing, 4)
+                .background {
+                    if highlighted {
+                        Circle().fill(Theme.accentPink.opacity(0.14))
+                            .overlay(Circle().stroke(Theme.accentPink.opacity(0.55)))
                     }
                 }
         }
