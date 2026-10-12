@@ -397,8 +397,8 @@ struct DictionarySearchStateTests {
         #expect(state.canLoadMore == false)
     }
 
-    @Test("a filter press keeps the depth it was paged to")
-    func filterChangeKeepsTheDepth() async throws {
+    @Test("a filter press starts one page deep again")
+    func filterChangeResetsTheDepth() async throws {
         let fixture = try makePagedState(count: 120)
         let state = fixture.state
 
@@ -407,9 +407,12 @@ struct DictionarySearchStateTests {
         state.loadMore()
         #expect(state.visibleLimit == DictionarySearchEngine.pageSize * 2)
 
+        // The depth belonged to the unfiltered answer: the filtered search
+        // starts one page deep, like a new query, instead of running a
+        // 100-row scan and showing 100 rows.
         state.filters = DictionarySearchFilters(commonOnly: true)
-        #expect(state.visibleLimit == DictionarySearchEngine.pageSize * 2)
-        #expect(await pollUntil { state.outcome.hits.allSatisfy { hit in hit.common } })
+        #expect(state.visibleLimit == DictionarySearchEngine.pageSize)
+        #expect(await pollUntil { state.outcome.hits.allSatisfy { hit in hit.common } && state.isSearching == false })
         #expect(state.outcome.hits.isEmpty == false)
     }
 

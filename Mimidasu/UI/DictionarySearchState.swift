@@ -56,6 +56,11 @@ final class DictionarySearchState {
                 filters.commonOnly = false
             }
             guard filters != oldValue else { return }
+            // A new filter set starts one page deep, like a new query: the
+            // depth belonged to the previous answer, and without the reset a
+            // filter press after Load-more runs a 100-row scan and shows 100
+            // rows instead of the first page.
+            visibleLimit = DictionarySearchEngine.pageSize
             pruneLookupState()
             run(trimmed: debouncedQuery, filters: filters)
         }
