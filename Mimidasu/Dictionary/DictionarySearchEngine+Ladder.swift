@@ -132,8 +132,15 @@ extension DictionarySearchEngine {
         }
         // The lemma retry is the one stage gated on emptiness: an inflected
         // form only needs re-reading when nothing else found the word. It
-        // folds into `.exact`, so it is skipped when `.exact` is off.
-        if !saturated, exactEnabled, rows.isEmpty, KanaClassification.containsJapanese(normalized) {
+        // folds into `.exact`, so it is skipped when `.exact` is off. The
+        // gate reads the pre-join scope predicate rather than the raw
+        // accumulator: rows that will all be filtered out of scope must not
+        // block the retry, or a query whose exact/prefix hits are all
+        // out-of-scope returns empty without ever trying the lemma path.
+        // (Tiers need no check — disabled groups skip their stages outright,
+        // so every row here already carries an enabled tier.)
+        let hasInScopeRows = rows.contains { row in filters.admits(entSeq: row.entryID) }
+        if !saturated, exactEnabled, !hasInScopeRows, KanaClassification.containsJapanese(normalized) {
             let lemmas = lemmaCandidates(for: normalized, tokenize: tokenize)
             if !lemmas.isEmpty {
                 try collect("lemma", lemmas)
@@ -378,12 +385,19 @@ extension DictionarySearchEngine {
             // exact — while the false negative would publish a truncated total
             // as the whole answer.
             truncated = truncated || count >= prefixScanCeiling
-            guard scanned.count > prefixFetchHeadroom else {
-                rows += scanned
+            // Shortest-first in both arms, not just the trimmed one: the
+            // unbounded path sorts every scan, and `bestPerEntry` keeps the
+            // first row on tier ties — so B-tree order here and sorted order
+            // there would pick a different representative writing (and with
+            // it a different highlight and JLPT level) for the same entry
+            // depending on whether a filter forced the unbounded scan.
+            let ordered = shortestFirst(scanned)
+            guard ordered.count > prefixFetchHeadroom else {
+                rows += ordered
                 continue
             }
             truncated = true
-            rows += Array(shortestFirst(scanned).prefix(prefixFetchHeadroom))
+            rows += Array(ordered.prefix(prefixFetchHeadroom))
         }
         return HeadwordRows(rows: rows, truncated: truncated)
     }

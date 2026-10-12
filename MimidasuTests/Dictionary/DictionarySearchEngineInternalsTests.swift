@@ -353,6 +353,10 @@ final class DictionarySearchEngineInternalsTests {
         // would hide rows the post-join filters would have kept and turn the
         // filtered total back into a floor.
         #expect(!DictionarySearchEngine.prefixUnboundedSQL.contains("LIMIT"))
+        #expect(DictionarySearchEngine.prefixUnboundedSQL.contains("h.text >= ?1 AND h.text < ?2"))
+        // Positive control: the bounded twin keeps the range *and* the ceiling.
+        #expect(DictionarySearchEngine.prefixSQL.contains("h.text >= ?1 AND h.text < ?2"))
+        #expect(DictionarySearchEngine.prefixSQL.contains("LIMIT ?3"))
     }
 
     @Test("clamps a highlight to the string it is drawn into")
