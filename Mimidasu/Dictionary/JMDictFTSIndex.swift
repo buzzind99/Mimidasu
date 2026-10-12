@@ -202,6 +202,16 @@ enum JMDictFTSIndex {
     /// it. A missing row, a partial build, or a tokenizer mismatch all answer
     /// zero, and any of them is exactly the silent failure worth refusing to
     /// promote over.
+    ///
+    /// The probe has to be one the index *can* answer, which shapes the pick
+    /// two ways while leaving the corpus otherwise untouched — `probeSourceSQL`
+    /// excludes glosses too short to form a trigram, and a quote in the gloss
+    /// it lands on is neutralised at bind time by `phrase()` rather than
+    /// forced out of the pick. Whitespace needs no filter here:
+    /// the trigram tokenizer indexes every three-scalar window, whitespace
+    /// included (probed on the pinned build — `'ab cd'` yields `ab␣`,
+    /// `b␣c`, `␣cd`), and there is no shell here to strip a trailing newline
+    /// the way the build scripts' command substitution does.
     static func answers(at url: URL) -> Bool {
         guard let database = try? SQLiteDatabase(path: url.path) else { return false }
         defer { database.close() }
@@ -217,15 +227,35 @@ enum JMDictFTSIndex {
         return (try? match.step()) == true
     }
 
-    /// One non-empty gloss, to derive the answer probe from.
-    static let probeSourceSQL = "SELECT gloss FROM senses WHERE gloss <> '' LIMIT 1"
+    /// One gloss the probe can actually be built from: its first three scalars
+    /// have to exist.
+    ///
+    /// FTS5 answers a phrase shorter than three characters with zero rows and
+    /// no error, so such a gloss could never stand in: `firstTrigram` cannot
+    /// build a three-scalar phrase from it and `answers(at:)` — and the
+    /// caller with it, as `smokeTestFailed` — fails on a perfectly healthy
+    /// index.
+    /// The corpus is not shy about them: 1,252 of the pinned build's 656,706
+    /// `senses` gloss columns are one or two scalars long. They simply do not
+    /// happen to be the `LIMIT 1` row, so this is a guard against a future
+    /// corpus rather than a fix for a live failure. `length(substr(…, 1, 3))`
+    /// rather than `length(gloss)` so the predicate means *at least* three
+    /// scalars — the prefix `firstTrigram` takes — rather than exactly three.
+    static let probeSourceSQL = """
+    SELECT gloss FROM senses
+    WHERE length(substr(gloss, 1, 3)) = 3
+    LIMIT 1
+    """
 
     /// The shortest thing the trigram tokenizer can express: the first three
     /// scalars of `gloss`.
     ///
-    /// Three scalars of *any* script form a trigram — punctuation is indexed
-    /// too — so this needs no knowledge of the corpus and cannot pick a probe
-    /// the index would legitimately not hold.
+    /// Three scalars of *any* script form a trigram — punctuation and
+    /// whitespace are indexed too — so this needs no knowledge of the corpus
+    /// and cannot pick a probe the index would legitimately not hold. The one
+    /// shape it cannot answer is fewer than three scalars, which
+    /// `probeSourceSQL` now filters out before this ever runs; the optional
+    /// stays because a nil here is a refused promotion, not a trap.
     static func firstTrigram(of gloss: String) -> String? {
         let scalars = Array(gloss.unicodeScalars.prefix(3))
         guard scalars.count == 3 else { return nil }

@@ -166,6 +166,26 @@ extension DictionaryStoreTests {
         #expect(JMDictFTSIndex.answers(at: url))
     }
 
+    @Test("the answer probe walks past a gloss too short to form a trigram")
+    func jmDictAnswerProbeSkipsUnusableTrigrams() throws {
+        let url = try makeJMDictSmokeDatabase(leadingShortGloss: true)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        try JMDictFTSIndex.build(at: url)
+
+        #expect(JMDictFTSIndex.isPresent(at: url))
+        // The first sense row's gloss is one scalar: `firstTrigram` cannot
+        // build a three-scalar phrase from it, so taking it as the probe source
+        // would refuse to promote a database whose index is completely healthy
+        // — a loud one-shot prepare failure, retried at the next trigger and
+        // failing the same way every time. FTS5 would answer such a short
+        // phrase with zero rows and no error anyway, so nothing shorter can
+        // stand in. The filter belongs in the probe *source*, not in the
+        // caller: a phrase built from three scalars that exist is the only one
+        // the trigram tokenizer can hold.
+        #expect(JMDictFTSIndex.answers(at: url))
+    }
+
     @Test("adopts a JMDict database whose case-headword index is missing")
     func jmDictAdoptsCaseIndexLessDatabase() async throws {
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
@@ -431,9 +451,10 @@ extension DictionaryStoreTests {
         // passes and the index build is the only thing that fails — the shape of
         // a mid-insert disk-full, where the database itself is still valid.
         // This leans on FileManager.copyItem preserving the 0444 mode through
-        // both copies it feeds (production staging, then the fake prepare);
-        // were that ever to change, the index would build and this test would
-        // fail loudly below — never silently pass.
+        // the single copy that feeds the fake prepare (`fakePrepareCopySource`
+        // is read directly, not through production staging); were that ever to
+        // change, the index would build and this test would fail loudly below —
+        // never silently pass.
         let staged = tempRoot.appendingPathComponent("read-only-source.sqlite")
         try FileManager.default.copyItem(at: smokeDatabase, to: staged)
         try FileManager.default.setAttributes(

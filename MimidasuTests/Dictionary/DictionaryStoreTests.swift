@@ -119,8 +119,17 @@ private enum SmokeDatabaseError: Error {
 /// `emptyGloss` builds an otherwise valid database whose senses carry no gloss
 /// text, which the lookup accepts but the gloss index cannot answer — the
 /// silent-empty failure the promote-time smoke check exists to catch.
+/// `leadingShortGloss` (only meaningful with `includeSmokeWord`) prepends a
+/// sense whose gloss is a single scalar — the shape a corpus does carry plenty
+/// of (1,252 of the pinned build's 656,706 `senses` gloss columns) and what
+/// the answer probe has to walk past: `firstTrigram` cannot build a
+/// three-scalar phrase from such a row, so the probe would refuse a perfectly
+/// healthy index over it. FTS5 answers a shorter-than-three-character phrase
+/// with zero rows and no error, which is why nothing shorter can stand in
+/// either.
 func makeJMDictSmokeDatabase(
-    includeSmokeWord: Bool = true, sensesPerEntry: Int = 1, emptyGloss: Bool = false
+    includeSmokeWord: Bool = true, sensesPerEntry: Int = 1, emptyGloss: Bool = false,
+    leadingShortGloss: Bool = false
 ) throws -> URL {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("mimidasu-jmdict-smoke-\(UUID().uuidString)", isDirectory: true)
@@ -155,7 +164,14 @@ func makeJMDictSmokeDatabase(
     """)
     if includeSmokeWord {
         let gloss = emptyGloss ? "''" : "'student'"
-        var statements = "INSERT INTO entries VALUES (1000000, '学生', 'がくせい', 1);"
+        var statements = ""
+        if leadingShortGloss {
+            // Inserted first, so it is the row `senses` scans first — the probe
+            // source has no ORDER BY and `senses` here is a plain table, so read
+            // order is insertion order.
+            statements += "INSERT INTO senses VALUES (999999, 0, 'n', 'a', NULL, NULL, NULL);"
+        }
+        statements += "INSERT INTO entries VALUES (1000000, '学生', 'がくせい', 1);"
         for ord in 0 ..< sensesPerEntry {
             statements += "INSERT INTO senses VALUES (1000000, \(ord), 'n', \(gloss), NULL, NULL, NULL);"
         }
