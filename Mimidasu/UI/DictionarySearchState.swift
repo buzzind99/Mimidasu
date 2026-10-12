@@ -44,6 +44,18 @@ final class DictionarySearchState {
     var filters = DictionarySearchFilters() {
         didSet {
             guard filters != oldValue else { return }
+            // Names are never marked common, so a filter set carrying COMMON
+            // into the Names scope can only answer zero rows — and the chip
+            // greys out there, so the user cannot undo it from the chrome that
+            // shows it. Normalized here rather than at the scope picker, so
+            // every writer gets the same state and the search below runs on the
+            // corrected filters. An in-place member write does not re-enter
+            // this observer, so the prune and the re-run happen once; a write
+            // that only normalizes *to* what is already set returns above.
+            if filters.scope == .names, filters.commonOnly {
+                filters.commonOnly = false
+            }
+            guard filters != oldValue else { return }
             pruneLookupState()
             run(trimmed: debouncedQuery, filters: filters)
         }

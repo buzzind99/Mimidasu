@@ -41,6 +41,35 @@ struct DictionarySearchStateFaultTests {
         #expect(state.fault == nil)
     }
 
+    @Test("a SQLite-reported failure faults too, not just a closed database")
+    func sqliteFailureIsAFault() async throws {
+        // A file that is present and is not a database: the engine opens it
+        // read-only, and the first statement is what SQLite refuses
+        // (SQLITE_NOTADB). The landing has to name it — the missing-database
+        // arm would offer a re-prepare the user already did and an empty result
+        // is the one reading a corrupt artifact must never get.
+        let corrupt = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimidasu-search-state-corrupt-\(UUID().uuidString).sqlite")
+        try Data("not a database".utf8).write(to: corrupt)
+        defer { try? FileManager.default.removeItem(at: corrupt) }
+
+        let model = AppModel(
+            favorites: isolatedFavorites(),
+            dictionarySearch: DictionarySearchEngine(resolveDatabase: { corrupt })
+        )
+        let state = DictionarySearchState(model: model)
+        state.query = "食べる"
+
+        #expect(await pollUntil { state.fault != nil })
+        guard case .sqlite = state.fault else {
+            Issue.record("expected .sqlite, got \(String(describing: state.fault))")
+            return
+        }
+        #expect(state.unavailable == false)
+        #expect(state.outcome.isEmpty)
+        #expect(state.isSearching == false)
+    }
+
     @Test("a filter press re-runs the debounced query, not the cleared field")
     func filterPressUsesDebouncedQuery() async throws {
         let fixture = try makeState()
@@ -138,8 +167,8 @@ struct DictionarySearchStateFaultTests {
         state.query = "かんそう"
         #expect(await pollUntil { state.outcome.saturated && state.isSearching == false })
 
-        // Every click re-searches (a skipped stage is the only way a deeper
-        // window finds anything), so each page waits for its landing.
+        // Every click is a reveal, not a re-search: the first landing already
+        // holds all 1000 rows, so the window simply widens over rows in hand.
         while state.canLoadMore {
             state.loadMore()
             #expect(await pollUntil { state.isSearching == false })

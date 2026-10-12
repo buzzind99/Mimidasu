@@ -43,18 +43,13 @@ struct DictionarySearchPagingTests {
     /// `headroom + 1` rows under one reading prefix: exactly one row past what
     /// the prefix stage's own `prefixFetchHeadroom` keeps, so the survivors
     /// behind that bound are the whole of what this fixture can prove. `かん`
-    /// prefixes nothing in the base fixture, so the count is exact.
-    ///
-    /// The start sits well below `DictionaryContent.nameSeqOffset`: 8,001 rows
-    /// from 9_994_000 straddled it, and roughly 2,000 of them were being
-    /// classified as JMnedict names by `filters.admits`. Nothing here asserts
-    /// under a name or words scope today, so that miscount would have stayed
-    /// invisible; the margin is the guard.
+    /// prefixes nothing in the base fixture, so the count is exact. The rows
+    /// and the margin under `DictionaryContent.nameSeqOffset` are the shared
+    /// `headroomBoundWords` factory's — see it for the straddle this replaced.
     private func makeHeadroomBoundFixture() throws -> DictionarySearchFixture {
-        try DictionarySearchFixture(extraWords: JMDictFixtureDatabase.bulkWords(
-            count: DictionarySearchEngine.prefixFetchHeadroom + 1,
-            readingPrefix: "かん", startingAt: 9_980_000
-        ))
+        try DictionarySearchFixture(
+            extraWords: JMDictFixtureDatabase.headroomBoundWords()
+        )
     }
 
     @Test("returns every row it found, not just the window")

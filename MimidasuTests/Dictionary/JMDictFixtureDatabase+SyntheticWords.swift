@@ -1,4 +1,5 @@
 import Foundation
+@testable import Mimidasu
 
 // MARK: - Synthetic entries
 
@@ -74,6 +75,27 @@ extension JMDictFixtureDatabase {
             )
         }
         return exact + prefixed
+    }
+
+    /// `prefixFetchHeadroom + 1` word-range entries whose readings begin with
+    /// `readingPrefix` — one row past what the prefix stage's own survivor
+    /// bound keeps, the shape in which `matchedCount` is a floor with no stage
+    /// having been skipped (the reported `ま` case: a truncated total read as
+    /// the whole answer).
+    ///
+    /// Both suites that need the shape take it from here, because the defect
+    /// this replaced was one of them drifting: the paging suite moved its start
+    /// below the name boundary and the state suite kept the old one, which
+    /// straddled `DictionaryContent.nameSeqOffset` — 8,001 entries from
+    /// 9_994_000 put ~2,000 of them in the JMnedict range, where
+    /// `filters.admits` classifies them as names and no `.all`-scope count
+    /// notices. The start below leaves ~12,000 of headroom under the boundary.
+    static func headroomBoundWords(readingPrefix: String = "かん") -> [FixtureWord] {
+        bulkWords(
+            count: DictionarySearchEngine.prefixFetchHeadroom + 1,
+            readingPrefix: readingPrefix,
+            startingAt: 9_980_000
+        )
     }
 
     enum SyntheticWords {

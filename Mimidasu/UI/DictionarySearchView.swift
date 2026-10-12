@@ -93,16 +93,19 @@ struct DictionarySearchView: View {
             set: { newValue in
                 var filters = state.filters
                 filters.scope = newValue
-                // Names are never common: entering the scope clears the flag.
-                filters.commonOnly = filters.commonOnly && newValue != .names
+                // Nothing to clear here: `DictionarySearchState.filters`
+                // normalizes COMMON away under Names on the way in, for every
+                // writer, so the chip below can never be left reading live
+                // over a scope that can never satisfy it.
                 state.filters = filters
             }
         )
     }
 
     /// Names are never common in the source data, so "Common only" over Names
-    /// is structurally zero rows. Entering Names clears the flag, so none is
-    /// left behind reading as a live filter with no effect.
+    /// is structurally zero rows. `DictionarySearchState` clears the flag on the
+    /// way into that scope, so none is left behind reading as a live filter the
+    /// user could switch back off.
     private var commonOnlyToggle: some View {
         let disabled = state.filters.scope == .names
         let selected = state.filters.commonOnly && !disabled

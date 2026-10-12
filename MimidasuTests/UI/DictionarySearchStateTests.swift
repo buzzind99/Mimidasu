@@ -53,12 +53,11 @@ struct DictionarySearchStateTests {
     /// prefix stage's own `prefixFetchHeadroom` keeps. It is the only shape in
     /// which `matchedCount` is a floor with no stage having been skipped, which
     /// is the reported `ま` case: a truncated total read as the whole answer.
+    /// Shared with the paging suite's twin, so neither can drift past the name
+    /// boundary the other already moved below.
     private func makeHeadroomBoundState() throws -> DictionarySearchStateFixture {
         try DictionarySearchStateFixture(
-            extraWords: JMDictFixtureDatabase.bulkWords(
-                count: DictionarySearchEngine.prefixFetchHeadroom + 1,
-                readingPrefix: "かん", startingAt: 9_994_000
-            )
+            extraWords: JMDictFixtureDatabase.headroomBoundWords()
         )
     }
 
@@ -454,6 +453,20 @@ struct DictionarySearchStateTests {
         // answer now, so the `+` and the button are both gone.
         #expect(state.countText == "42 / 42")
         #expect(state.canLoadMore == false)
+    }
+
+    @Test("entering Names clears COMMON, whatever writer asked for it")
+    func namesScopeDropsCommonOnly() throws {
+        let fixture = try makeState()
+        let state = fixture.state
+
+        state.filters = DictionarySearchFilters(scope: .names, commonOnly: true)
+
+        // The filter pair answers zero rows by construction (no JMnedict entry
+        // is marked common) and the chip is disabled in that scope, so a state
+        // that kept the flag would be stuck behind chrome that cannot clear it.
+        #expect(state.filters.commonOnly == false)
+        #expect(state.filters.scope == .names)
     }
 
     @Test("the close resets the depth a query was paged to")
