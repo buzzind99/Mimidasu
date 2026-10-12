@@ -196,6 +196,11 @@ extension DictionarySearchEngine {
     ) throws -> [Int: Bool] {
         var out: [Int: Bool] = [:]
         for chunk in chunks(entSeqs, size: entryChunkSize) {
+            // The exact-count path walks the full kana block here with no
+            // bound, so each chunk yields to cancellation like the scan loops
+            // do — a stale filtered keystroke must not hold the engine mutex
+            // through the whole post-join fetch while the next one queues.
+            try checkCancellation()
             let statement = try db.statement(commonFlagsSQL(count: chunk.count))
             bind(chunk, to: statement)
             while try statement.step() {
@@ -213,6 +218,7 @@ extension DictionarySearchEngine {
     ) throws -> [Int: EntryMetadata] {
         var out: [Int: EntryMetadata] = [:]
         for chunk in chunks(Array(entSeqs), size: entryChunkSize) {
+            try checkCancellation()
             let statement = try db.statement(entriesSQL(count: chunk.count))
             bind(chunk, to: statement)
             while try statement.step() {
@@ -238,6 +244,7 @@ extension DictionarySearchEngine {
     ) throws -> [Int: [String]] {
         var out: [Int: [String]] = [:]
         for chunk in chunks(entSeqs, size: entryChunkSize) {
+            try checkCancellation()
             let statement = try db.statement(firstSenseSQL(count: chunk.count))
             bind(chunk, to: statement)
             while try statement.step() {
@@ -271,6 +278,7 @@ extension DictionarySearchEngine {
         guard !nameIDs.isEmpty else { return [:] }
         var out: [Int: [String?]] = [:]
         for chunk in chunks(nameIDs, size: entryChunkSize) {
+            try checkCancellation()
             let statement = try db.statement(namePosSQL(count: chunk.count))
             bind(chunk, to: statement)
             while try statement.step() {
