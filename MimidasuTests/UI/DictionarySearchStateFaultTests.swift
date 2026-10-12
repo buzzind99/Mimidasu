@@ -169,17 +169,28 @@ struct DictionarySearchStateFaultTests {
         let fixture = try makeHeadroomBoundState()
         let state = fixture.state
 
-        // The same headroom + 1 word rows the ceiling case below pages, but
-        // with COMMON on: 2667 common entries (every third offset from 0, per
-        // `bulkWords`) reach the pre-fetch unbounded, so the header reads the
-        // exact total. Without the unbounded scan this would read `50 / 2667+`
-        // — a floor no click could lift, the way the unfiltered total is.
+        // The shared headroom + 1 word rows (`headroomBoundWords`: offsets
+        // 0..<8001, common on every third offset from 0 per `bulkWords`, so
+        // 2667 common entries), with COMMON on: every one reaches the
+        // pre-fetch unbounded, so the header reads the exact total. Without
+        // the unbounded scan this would read `50 / 2667+` — a floor no click
+        // could lift, the way the unfiltered total is. (The paging twin
+        // `commonOnlyOverHeadroomIsExact` uses headroom + 2 rows instead, so
+        // its hidden row is common and its count discriminates; here the
+        // header shape is the point, not the margin.)
         state.filters = DictionarySearchFilters(commonOnly: true)
         state.query = "かん"
-        #expect(await pollUntil { state.outcome.hits.isEmpty == false })
-        #expect(await pollUntil { state.isSearching == false })
+        #expect(
+            await pollUntil { state.outcome.hits.isEmpty == false },
+            "the common-only headroom search lands"
+        )
+        #expect(await pollUntil { state.isSearching == false }, "the search settles")
 
-        #expect(state.countText == "50 / 2667")
+        #expect(state.countText == "\(DictionarySearchEngine.pageSize) / 2667")
+        #expect(state.visibleHits.count == DictionarySearchEngine.pageSize)
+        #expect(state.outcome.matchedCount == 2667)
+        #expect(state.outcome.truncated == false)
+        #expect(state.outcome.saturated == false)
         #expect(state.outcome.isFloor == false)
         #expect(state.countText.contains("+") == false)
     }

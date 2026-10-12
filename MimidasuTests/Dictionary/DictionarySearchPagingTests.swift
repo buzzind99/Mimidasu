@@ -182,22 +182,29 @@ struct DictionarySearchPagingTests {
 
     @Test("a common-only search over a headroom-bound population reports an exact total")
     func commonOnlyOverHeadroomIsExact() throws {
-        // 8001 word rows under `かん`, common on every third offset starting at
-        // 0 — offsets 0, 3, …, 8000, so 2667 common entries, verified against
-        // `bulkWords`' `offset.isMultiple(of: 3)` rule. `かん` prefixes nothing
-        // in the base fixture, so the count is exact. The bounded path keeps
-        // only 8000 survivors and would hide one row the common filter would
-        // have kept; unbounded, all 8001 reach the pre-fetch and the count is
-        // exact rather than a floor.
-        let fixture = try makeHeadroomBoundFixture()
+        // Headroom + 2 word rows under `かん`, common on every third offset
+        // from 0 — offsets 0, 3, …, 8001, so 2668 common entries, verified
+        // against `bulkWords`' `offset.isMultiple(of: 3)` rule. `かん` prefixes
+        // nothing in the base fixture, so the count is exact. The bounded path
+        // keeps only the first 8000 survivors (offsets 0..<8000, every reading
+        // the same length) and would hide offset 8001 — common — reporting
+        // 2667; unbounded, every row reaches the pre-fetch and the count is
+        // the exact 2668 rather than a floor. One past the shared factory on
+        // purpose: its headroom + 1 hides offset 8000, which is *not* common,
+        // so 2667 passes with or without the fix and proves nothing.
+        let headroom = DictionarySearchEngine.prefixFetchHeadroom
+        let fixture = try DictionarySearchFixture(extraWords: JMDictFixtureDatabase.bulkWords(
+            count: headroom + 2, readingPrefix: "かん", startingAt: 9_980_000
+        ))
 
         let outcome = try fixture.outcome("かん", commonOnly: true)
 
-        #expect(outcome.matchedCount == 2667)
+        #expect(outcome.matchedCount == 2668)
         #expect(outcome.truncated == false)
         #expect(outcome.saturated == false)
         #expect(outcome.isFloor == false)
         #expect(outcome.hits.count == min(outcome.matchedCount, DictionarySearchEngine.maxRows))
+        #expect(outcome.hits.allSatisfy { hit in hit.common })
     }
 
     @Test("a name-type-filtered search over headroom-bound names reports an exact total")
@@ -216,6 +223,18 @@ struct DictionarySearchPagingTests {
         #expect(outcome.truncated == false)
         #expect(outcome.saturated == false)
         #expect(outcome.isFloor == false)
+        // The count alone proves nothing — every row carries the badge, so a
+        // filter that did nothing reports the same total. The payload and the
+        // negative control are what pin it.
+        #expect(outcome.hits.count == min(outcome.matchedCount, DictionarySearchEngine.maxRows))
+        #expect(outcome.hits.allSatisfy { hit in hit.isName })
+        #expect(outcome.hits.allSatisfy { hit in
+            DictionaryContent.nameTypeBadges(posTokens: hit.namePosTokens).contains("SURNAME")
+        })
+        let dropped = try fixture.outcome("かん", scope: .names, nameTypes: ["GIVEN NAME"])
+        #expect(dropped.matchedCount == 0)
+        #expect(dropped.hits.isEmpty)
+        #expect(dropped.isFloor == false)
     }
 
     @Test("a JLPT-filtered search over a headroom-bound population is never a floor")
@@ -254,10 +273,15 @@ struct DictionarySearchPagingTests {
 
         // The bulk rows carry no JLPT level, so the filter drops every one —
         // saturation still stays refused, which is the point: the probe cannot
-        // see the join the filter reads.
+        // see the join the filter reads. Assert the empty answer too: an
+        // ignored filter over this fixture is also unsaturated, so the flag
+        // alone cannot tell them apart.
         let outcome = try fixture.outcome("kan", jlptLevels: [5])
 
         #expect(outcome.saturated == false)
+        #expect(outcome.matchedCount == 0)
+        #expect(outcome.hits.isEmpty)
+        #expect(outcome.isFloor == false)
     }
 
     @Test("a name-type-filtered search is never saturated")
@@ -266,10 +290,14 @@ struct DictionarySearchPagingTests {
 
         // The bulk rows are words, so the surname filter drops every one —
         // saturation still stays refused: the probe cannot see the badges the
-        // filter reads.
+        // filter reads. Same discrimination problem as the JLPT twin above —
+        // pin the empty answer, not just the flag.
         let outcome = try fixture.outcome("kan", nameTypes: ["SURNAME"])
 
         #expect(outcome.saturated == false)
+        #expect(outcome.matchedCount == 0)
+        #expect(outcome.hits.isEmpty)
+        #expect(outcome.isFloor == false)
     }
 
     @Test("a common-only search returns every row it found")
