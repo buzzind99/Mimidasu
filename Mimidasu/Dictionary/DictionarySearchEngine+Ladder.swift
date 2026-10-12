@@ -563,7 +563,8 @@ extension DictionarySearchEngine {
 
     /// The gloss sub-tiers: a whole-word match first, then one starting the
     /// gloss, then a bare substring — `"to lose"` outranks `"closet"` for the
-    /// query `lose`, which is the difference between a useful hit and noise.
+    /// query `lose`. The stage grades through the array overload below, so this
+    /// `String` form is test-facing only — shared grading, not an oracle or dependency.
     static func glossMatchKind(
         gloss: String, range: Range<Int>
     ) -> DictionarySearchHit.MatchKind {
@@ -575,9 +576,8 @@ extension DictionarySearchEngine {
     /// grading several fragments of one column out of a single array.
     ///
     /// `range` is relative to the matched gloss, but `scalars` is the whole
-    /// column, so `offset` is where that gloss starts — the two are what keep
-    /// the neighbour lookups pointing at the characters around the match
-    /// instead of at the start of the column.
+    /// column, so `offset` is where that gloss starts — the two keep the
+    /// neighbour lookups pointing at the match's characters, not the column's.
     private static func glossMatchKind(
         scalars: [Unicode.Scalar], range: Range<Int>, length: Int, offset: Int
     ) -> DictionarySearchHit.MatchKind {

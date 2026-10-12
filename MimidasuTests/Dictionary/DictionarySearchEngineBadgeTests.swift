@@ -179,9 +179,15 @@ final class DictionarySearchEngineBadgeTests {
         // the join out and hand the caller whichever row stepped last.
         let kindPredicate = "h.kind = CASE WHEN e.keb IS NULL THEN 'reb' ELSE 'keb' END"
         #expect(sql.contains(kindPredicate))
-        // The predicate must live in the ON clause: relocated into the WHERE
-        // clause it would silently inner the join and drop every kana-only
-        // entry's metadata row.
+        // The predicate belongs in the ON clause — but not because a WHERE
+        // relocation loses the kana-only entries. Probed on the shipped
+        // artifact, both placements return the same 621,944 distinct
+        // `ent_seq`: for a kana-only entry the CASE evaluates 'reb' and
+        // matches its own row, so nothing is dropped. The placement only shows
+        // up for an entry whose pinned `headwords` row is missing outright (0
+        // on the pinned corpus), where ON keeps the entry with a NULL level and
+        // WHERE drops it. So what this pins is the statement's shape against an
+        // outright `JOIN` rewrite, not a row loss the corpus can produce.
         #expect(
             try (#require(sql.firstRange(of: kindPredicate))).upperBound
                 < #require(sql.firstRange(of: "WHERE e.ent_seq")).lowerBound

@@ -91,13 +91,18 @@ struct JMDictGlossIndexRecallTests {
         defer { db.close() }
         let pattern = query.lowercased()
 
-        // `glossMatch` falls back to spanning the whole column when the fold in
-        // `MatchHighlight.range` cannot locate the pattern in any of its
-        // glosses. That fallback is only unreachable while that fold agrees
-        // with the tokenizer's — and it is load-bearing now rather than
+        // The gloss stage folds and locates in `glossMatch`/`glossMatchByFragment`,
+        // its own copy of the same fold — this test never calls the stage. What
+        // is checked here is that every row the index returns is locatable by an
+        // independent implementation. `glossMatch` falls back to spanning the
+        // whole column when its own fold cannot locate the pattern in any of
+        // its glosses, and the fallback is only unreachable while that fold
+        // agrees with the tokenizer's — which is load-bearing now rather than
         // incidental, because FTS5 folds case `LIKE` never reached. A row can
         // match the index and then be impossible to point at inside its own
         // text, which would render as a hit whose highlight lights up nothing.
+        // The oracle is deliberately a *different* implementation: sharing the
+        // stage's code would make this test agree with whatever the stage did.
         //
         // Graded over the production join's own output rather than a
         // re-query, so what is checked is exactly what the stage sees.

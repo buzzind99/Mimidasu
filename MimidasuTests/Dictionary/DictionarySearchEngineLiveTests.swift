@@ -155,10 +155,16 @@ struct DictionarySearchEngineLiveTests {
         let task = Task {
             // The sleep is the cancellation checkpoint: `task.cancel()` below
             // runs on this thread while the task is parked here, so the search
-            // always begins in a task that is already cancelled — whether the
-            // cancel landed before the task started or during the sleep, and
+            // begins in a task that is already cancelled under either ordering —
+            // the cancel landing before the task starts, or during the sleep —
             // without betting on the scheduler the way `Task.yield()` does. The
-            // sleep's own cancellation is swallowed on purpose; the throw the
+            // one case it does not cover is this thread being descheduled for
+            // longer than the 50 ms park: the sleep would expire uncancelled,
+            // and if the whole search then beat `task.cancel()` there would be
+            // no throw at all for the assertion below to read. The engine's own
+            // cancellation checks during the scan are what normally still
+            // throws, so the mechanism is the budget, not the certainty. The
+            // sleep's own cancellation is swallowed on purpose; any throw the
             // test reads has to be the engine's.
             try? await Task.sleep(for: .milliseconds(50))
             _ = try engine.search("し", filters: DictionarySearchFilters())
@@ -451,8 +457,8 @@ struct DictionarySearchEngineLiveTests {
         // sense rows over 46,394 entries — and the gloss stage is the only
         // source of all but a couple of dozen of them. A database adopted
         // without `gloss_fts` throws out of `glossRows` rather than returning
-        // empty, and the search state turns that into "no results"; this asserts
-        // the ladder itself still fills.
+        // empty, and the search state turns that into the fault card (never
+        // "no matches"); this asserts the ladder itself still fills.
         //
         // It is also `i` + `on` as romaji (いおん / イオン), so the headword
         // stages contribute too — the gloss tier has to dominate the window

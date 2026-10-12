@@ -79,10 +79,11 @@ enum JMDictCaseIndex {
     /// every case-bearing block that happens to sit below the ceiling —
     /// Cherokee (U+13A0) rides inside the scan — none of which the corpus
     /// carries a single row in. It stops short of the later case-bearing
-    /// scripts — Glagolitic (U+2C00), Adlam (U+1E900), Deseret (U+10400).
-    /// Widening past them is not a correctness fix for this load, it is a
-    /// range scan over more of the B-tree; a corpus that ever does carry one
-    /// turns
+    /// scripts — among them Glagolitic (U+2C00), Adlam (U+1E900) and Deseret
+    /// (U+10400); Coptic, Latin Extended-C/D, Old Hungarian, Cherokee's
+    /// lowercase block (U+AB70) and others lie beyond it too. Widening past
+    /// them is not a correctness fix for this load, it is a range scan over
+    /// more of the B-tree; a corpus that ever does carry one turns
     /// `DictionarySearchEngineLiveTests.caseSetCoversEveryCaseFoldedSpelling`
     /// red, which is the tripwire that raises the ceiling on purpose.
     static let nonASCIICaseFloor = "\u{00C0}"

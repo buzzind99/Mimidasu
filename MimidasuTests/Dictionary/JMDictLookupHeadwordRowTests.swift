@@ -11,13 +11,13 @@ import Testing
 /// fixture, and so every row these read, is the same one the parent builds.
 extension JMDictLookupTests {
     /// `JMDictLookupTests` mirrors the build's `jlpt_fallback`, so a row with no
-    /// level of its own never reaches the database wearing its sibling's —
-    /// ふろしき's reb row carries the kanji row's 2 in the shipped artifact
-    /// too, exactly as `omiyageInheritsPitch`'s twin pins for pitch. So the
-    /// contract is pinned on 彼処/あそこ instead, where the two rows genuinely
-    /// disagree: the kanji writing carries JLPT 1 and か[Dev]し'こ, the kana one
-    /// its own 5 and あそ'こ, and the matched row is the only thing that can
-    /// choose between them.
+    /// level of its own never reaches the database level-less — it wears its
+    /// sibling's: ふろしき's reb row carries the kanji row's 2 in the shipped
+    /// artifact too, exactly as `omiyageInheritsPitch`'s twin pins for pitch.
+    /// So the contract is pinned on 彼処/あそこ instead, where the two rows
+    /// genuinely disagree: the kanji writing carries JLPT 1 and か[Dev]し'こ,
+    /// the kana one its own 5 and あそ'こ, and the matched row is the only
+    /// thing that can choose between them.
     @Test("takes jlpt and pitch verbatim from the matched kana headword row")
     func jlptFromMatchedRow() throws {
         let result = try #require(try engine.lookup(LookupCandidate(text: "あそこ")))

@@ -19,7 +19,8 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// either direction. The tests exercise the same data shapes and
 /// row ordering the shipped database carries.
 ///
-/// Fourteen synthetic entries are appended for coverage the real fixture lacks:
+/// Nineteen synthetic entries are appended — seventeen in the word range and
+/// two in the name range below — for coverage the real fixture lacks:
 /// `9990010` 仮語/かご — uncommon entry whose senses exercise the
 /// kanji-restriction rules (restricted to another writing, empty list =
 /// matches none, unrestricted);
@@ -67,7 +68,14 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// normalizes every stored text at insert exactly as `jmdict_build.py`
 /// does, so the writing lands as ASCII TKG and a fullwidth tap folds onto
 /// it at the SQL boundary — the lookup path a search row's expand hands
-/// the lookup engine.
+/// the lookup engine;
+/// `9990170` 4649/よろしく — a numeric kanji writing whose reading is kana,
+/// the literal-spelling shape (the real 4649 is ent_seq 2846370). The digits
+/// half is what the suite pins today: `DictionarySearchEngineSpellingTests`'s
+/// `digitExact`/`digitPrefix` assert ent_seq 9_990_170. The kana reading makes
+/// the entry reachable by romaji too, but no fixture-side test searches
+/// `yoroshiku` yet — the shape carries both spellings, the suite only grades
+/// one.
 ///
 /// Two JMnedict-shaped name entries ride the offset ent_seq range the build
 /// maps `int(id) + 10_000_000` into (JMnedict ids 5668306/5668307 →
