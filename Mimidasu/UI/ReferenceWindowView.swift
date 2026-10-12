@@ -12,13 +12,13 @@ enum ReferenceWindow {
     static let title = "Dictionary"
     static let sceneID = "dictionary"
     /// The fixed content size. Width is dictated by the row content; height is
-    /// sized to six collapsed Favorites rows — a 73.6 pt row plus the 10 pt
+    /// sized to seven collapsed Favorites rows — a 73.6 pt row plus the 10 pt
     /// `LazyVStack` gap, in a slot that also holds the notice card, the search
     /// field, their gaps, and the content padding. Dictionary mode shares the
     /// frame deliberately: a mode switch must not resize the window under the
     /// pointer.
     static let width: CGFloat = 460
-    static let height: CGFloat = 692
+    static let height: CGFloat = 775.6
     /// The cadence both modes' search fields debounce at. It lives here, on the
     /// window that owns both modes, rather than on either mode's state type: one
     /// window has one feel, and a constant one mode defines for the other is a
