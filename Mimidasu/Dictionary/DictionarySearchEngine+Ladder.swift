@@ -43,6 +43,28 @@ extension DictionarySearchEngine {
         /// The matched sense's gloss — gloss hits only. It leads the preview so
         /// the highlight always points into a string the row renders.
         let matchedGloss: String?
+        /// Whether this row came from the potential/passive unwrap fallback.
+        /// Base lemma rows outrank unwrap rows when tier and commonness tie,
+        /// and `assemble` drops unwrap rows outright when a base lemma
+        /// survives filtering — the unwrap must never outrank the genuine
+        /// base (入れる → 入る, くれる → くる).
+        let isUnwrap: Bool
+
+        init(
+            entryID: Int, matchedField: DictionarySearchHit.MatchedField,
+            matchKind: DictionarySearchHit.MatchKind, jlpt: Int?,
+            matchedLength: Int, highlightRange: Range<Int>?,
+            matchedGloss: String?, isUnwrap: Bool = false
+        ) {
+            self.entryID = entryID
+            self.matchedField = matchedField
+            self.matchKind = matchKind
+            self.jlpt = jlpt
+            self.matchedLength = matchedLength
+            self.highlightRange = highlightRange
+            self.matchedGloss = matchedGloss
+            self.isUnwrap = isUnwrap
+        }
     }
 
     /// One headword stage's rows, and whether one of that stage's own bounds
@@ -130,28 +152,161 @@ extension DictionarySearchEngine {
             saturated = capSaturated(rows, filters: filters, limit: limit, remaining: glossEnabled && glossEligible
                 ? [DictionarySearchHit.MatchKind.glossWordBoundary.rawValue] : [])
         }
-        // The lemma retry is the one stage gated on emptiness: an inflected
-        // form only needs re-reading when nothing else found the word. It
-        // folds into `.exact`, so it is skipped when `.exact` is off. The
-        // gate reads the pre-join scope predicate rather than the raw
-        // accumulator: rows that will all be filtered out of scope must not
-        // block the retry, or a query whose exact/prefix hits are all
-        // out-of-scope returns empty without ever trying the lemma path.
-        // (Tiers need no check — disabled groups skip their stages outright,
-        // so every row here already carries an enabled tier.)
-        let hasInScopeRows = rows.contains { row in filters.admits(entSeq: row.entryID) }
-        if !saturated, exactEnabled, !hasInScopeRows, KanaClassification.containsJapanese(normalized) {
-            let lemmas = lemmaCandidates(for: normalized, tokenize: tokenize)
-            if !lemmas.isEmpty {
-                try collect("lemma", lemmas)
-            }
+        // The lemma retry is the one stage gated on emptiness — see
+        // `collectLemmaRetry` for the gate, the dual arms, and the
+        // base-before-unwrap order. Lemma tier 1 is absent from the
+        // `remaining` lists above by the same emptiness gate: a saturated
+        // window implies in-scope rows, which already skip the retry.
+        var lemmaState = LemmaRetryState(rows: rows, truncated: truncated, saturated: saturated)
+        try collectLemmaRetry(
+            normalized: normalized, filters: filters, db: db,
+            state: &lemmaState, tokenize: tokenize
+        )
+        rows = lemmaState.rows
+        truncated = lemmaState.truncated
+        saturated = lemmaState.saturated
+        if !saturated {
+            saturated = capSaturated(rows, filters: filters, limit: limit, remaining: glossEnabled && glossEligible
+                ? [DictionarySearchHit.MatchKind.glossWordBoundary.rawValue] : [])
         }
         if !saturated, glossEnabled, glossEligible {
+            try checkCancellation()
             rows += try stage("gloss") { try glossRows(pattern: normalized, scope: filters.scope, db: db) }
         }
         return try stage("assemble") {
             try assemble(rows, filters: filters, db: db, saturated: saturated, truncated: truncated)
         }
+    }
+
+    /// The lemma retry: the one stage gated on emptiness. An inflected form
+    /// only needs re-reading when nothing else found the word. It folds into
+    /// `.exact`, so it is skipped when `.exact` is off or the window already
+    /// saturated. The gate reads the pre-join scope predicate rather than the
+    /// raw accumulator: rows that will all be filtered out of scope must not
+    /// block the retry. Entry-level filters (`requiresExactCount`:
+    /// common-only, JLPT, name types) are invisible pre-join, so a filtered
+    /// search always runs the retry — mirroring `capSaturated`'s refusal.
+    /// Romaji input lemmatizes through its converted kana: `tabetai`
+    /// converts to たべたい, whose base たべる the headword probes never
+    /// reach. The raw romaji is never tokenized and an unfinished spelling
+    /// (`mak`) is not a word, so only a fully consumed conversion opens the
+    /// romaji arm. Mixed-script runs both arms. The base probes run first
+    /// and the potential unwrap only when they miss — a dictionary -える
+    /// verb (入れる → 入る) must not outrank the genuine base. Under
+    /// `requiresExactCount` both stages run pre-join (emptiness proves
+    /// nothing there); `assemble` then drops unwrap rows when a base lemma
+    /// survives filtering, and ranks any survivors base-first.
+    /// The retry's mutable accumulator, passed as one parameter to respect
+    /// the parameter-count budget.
+    struct LemmaRetryState {
+        var rows: [CandidateRow]
+        var truncated: Bool
+        /// Caller-owned: read once as the entry gate, written back unchanged.
+        /// Saturation after the lemma stages is recomputed by the caller via
+        /// `capSaturated`, so this retry never mutates it internally.
+        var saturated: Bool
+    }
+
+    static func collectLemmaRetry(
+        normalized: String, filters: DictionarySearchFilters,
+        db: SQLiteDatabase, state: inout LemmaRetryState,
+        tokenize: @Sendable (String) -> [DictionaryToken]?
+    ) throws {
+        guard !state.saturated, filters.matchGroups.contains(.exact) else { return }
+        try checkCancellation()
+        let retryUnbounded = filters.requiresExactCount
+        let hasInScopeRows = state.rows.contains { row in filters.admits(entSeq: row.entryID) }
+        guard filters.requiresExactCount || !hasInScopeRows else { return }
+        let isJapanese = KanaClassification.containsJapanese(normalized)
+        let conversions = romajiConversions(for: normalized).filter { conversion in
+            conversion.fullyConsumed
+        }
+        guard isJapanese || !conversions.isEmpty else { return }
+        func collect(_ label: String, _ candidates: [HeadwordCandidate], isUnwrap: Bool = false) throws {
+            let scanned = try stage(label) {
+                try headwordRows(candidates, db: db, unbounded: retryUnbounded)
+            }
+            // Names never lemmatize: a name has no dictionary form, so a
+            // lemma probe that lands on a name row (a stem spray, a shared
+            // spelling) is dropped rather than badged LEMMA. Exact-only
+            // probes are primary-key seeks, so no scan bound is at stake.
+            let kept = scanned.rows.filter { row in
+                row.entryID < DictionaryContent.nameSeqOffset
+            }
+            if isUnwrap {
+                state.rows += kept.map { row in
+                    CandidateRow(
+                        entryID: row.entryID, matchedField: row.matchedField,
+                        matchKind: row.matchKind, jlpt: row.jlpt,
+                        matchedLength: row.matchedLength, highlightRange: row.highlightRange,
+                        matchedGloss: row.matchedGloss, isUnwrap: true
+                    )
+                }
+            } else {
+                state.rows += kept
+            }
+            state.truncated = state.truncated || scanned.truncated
+        }
+        let base = lemmaRetryCandidates(
+            normalized: normalized, isJapanese: isJapanese,
+            conversions: conversions, tokenize: tokenize, unwrapOnly: false
+        )
+        if !base.isEmpty {
+            try collect("lemma", base)
+        }
+        let baseHit = state.rows.contains { row in filters.admits(entSeq: row.entryID) }
+        guard filters.requiresExactCount || !baseHit else { return }
+        try checkCancellation()
+        let unwrap = lemmaRetryCandidates(
+            normalized: normalized, isJapanese: isJapanese,
+            conversions: conversions, tokenize: tokenize, unwrapOnly: true
+        )
+        if !unwrap.isEmpty {
+            try collect("lemma-unwrap", unwrap, isUnwrap: true)
+        }
+    }
+
+    /// The lemma retry's candidates for one stage: the Japanese arm reads the
+    /// whole query, the romaji arm each hoisted conversion's kana, unioned and
+    /// deduplicated by (probe, text). The base stage probes base + reading;
+    /// the unwrap stage probes the potential/passive fallback alone, and the
+    /// ladder only runs it when the base misses (or always under
+    /// `requiresExactCount`, where pre-join emptiness proves nothing).
+    static func lemmaRetryCandidates(
+        normalized: String, isJapanese: Bool,
+        conversions: [KanaRomaji.RomajiConversion],
+        tokenize: @Sendable (String) -> [DictionaryToken]?,
+        unwrapOnly: Bool
+    ) -> [HeadwordCandidate] {
+        var out: [HeadwordCandidate] = []
+        var seen: Set<String> = []
+        func add(_ candidates: [HeadwordCandidate]) {
+            for candidate in candidates {
+                let key = "\(candidate.probe.rawValue):\(candidate.text)"
+                guard seen.insert(key).inserted else { continue }
+                out.append(candidate)
+            }
+        }
+        if isJapanese {
+            if unwrapOnly {
+                add(potentialUnwrapCandidates(for: normalized, tokenize: tokenize))
+            } else {
+                add(lemmaBaseCandidates(for: normalized, tokenize: tokenize))
+            }
+        }
+        if !conversions.isEmpty {
+            let probed = romajiProbedPairs(for: conversions)
+            if unwrapOnly {
+                add(romajiLemmaCandidates(for: conversions, probed: probed) { kana in
+                    potentialUnwrapCandidates(for: kana, tokenize: tokenize)
+                })
+            } else {
+                add(romajiLemmaCandidates(for: conversions, probed: probed) { kana in
+                    lemmaBaseCandidates(for: kana, tokenize: tokenize)
+                })
+            }
+        }
+        return out
     }
 
     /// Whether the requested window is already better than anything a remaining

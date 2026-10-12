@@ -76,7 +76,7 @@ extension DictionarySearchEngine {
             ? scored.filter { candidate in candidate.common }
             : scored
         guard filters.filtersJLPT || filters.filtersNameTypes else {
-            let kept = rank(commonKept)
+            let kept = rank(dropSpuriousUnwrap(commonKept))
             // Every ranking key is decided above, so the window is cut here and the
             // `headwords` join runs for these rows alone.
             let window = Array(kept.prefix(Self.maxRows))
@@ -106,7 +106,7 @@ extension DictionarySearchEngine {
             ) else { return false }
             return true
         }
-        let kept = rank(filtered)
+        let kept = rank(dropSpuriousUnwrap(filtered))
         // Every ranking key is decided above, so the window is cut here — the
         // metadata join already ran, and the build below reuses it.
         return try DictionarySearchOutcome(
@@ -155,8 +155,8 @@ extension DictionarySearchEngine {
         return best
     }
 
-    /// The full rank, in order: tier, then commonness, then how tight the
-    /// matched text is, then `ent_seq`.
+    /// The full rank, in order: tier, then commonness, then base-before-unwrap,
+    /// then how tight the matched text is, then `ent_seq`.
     ///
     /// The last key is not cosmetic — without a total order the same query
     /// could reshuffle its rows between two keystrokes, and a list that moves
@@ -165,7 +165,10 @@ extension DictionarySearchEngine {
     /// already collapsed to one row per entry, so the key is unique and the
     /// window is a deterministic prefix.
     /// Commonness descending sinks names in All scope on its own, since
-    /// JMnedict entries are never common.
+    /// JMnedict entries are never common. Base-before-unwrap keeps a genuine
+    /// dictionary -える verb above its shorter unwrap (くれる above くる)
+    /// when tier and commonness tie — length alone would rank the unwrap
+    /// first.
     static func rank(_ rows: [ScoredRow]) -> [ScoredRow] {
         rows.sorted { lhs, rhs in
             if lhs.row.matchKind != rhs.row.matchKind {
@@ -174,10 +177,30 @@ extension DictionarySearchEngine {
             if lhs.common != rhs.common {
                 return lhs.common
             }
+            if lhs.row.isUnwrap != rhs.row.isUnwrap {
+                return !lhs.row.isUnwrap
+            }
             if lhs.row.matchedLength != rhs.row.matchedLength {
                 return lhs.row.matchedLength < rhs.row.matchedLength
             }
             return lhs.entryID < rhs.entryID
+        }
+    }
+
+    /// Drops the unwrap fallback when a base lemma survives filtering. The
+    /// ladder runs both stages under `requiresExactCount` (pre-join emptiness
+    /// proves nothing there), but the unwrap is still a fallback: when the
+    /// base answers, the unwrap entry (入れる → 入る, くれる → くる) must not
+    /// appear at all, matching the unfiltered path where it never runs.
+    /// When no base lemma survives, the unwrap rows are kept as the fallback.
+    static func dropSpuriousUnwrap(_ rows: [ScoredRow]) -> [ScoredRow] {
+        guard rows.contains(where: { candidate in
+            candidate.row.matchKind == .lemma && !candidate.row.isUnwrap
+        }) else {
+            return rows
+        }
+        return rows.filter { candidate in
+            !(candidate.row.matchKind == .lemma && candidate.row.isUnwrap)
         }
     }
 

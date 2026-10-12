@@ -215,31 +215,174 @@ extension DictionarySearchEngine {
         return [conversion]
     }
 
+    /// Whether the query's leading romaji token fully converts to kana — the
+    /// lemma gate's romaji arm. A trailing-onset-only conversion (`mak` → ま
+    /// plus a `k` promise) is still an unfinished spelling, not a word to
+    /// lemmatize, so only a fully consumed conversion counts.
+    static func hasFullyConsumedRomaji(_ query: String) -> Bool {
+        romajiConversions(for: query).contains { conversion in conversion.fullyConsumed }
+    }
+
+    /// The romaji bridge for the lemma retry: lemmatizes each fully-consumed
+    /// conversion's primary kana the way `lemmaBaseCandidates` lemmatizes a
+    /// kana query. Converted variants ride the exact/prefix probes already;
+    /// probing their lemmas too is a fan-out decision for later, not this
+    /// bridge. Candidates whose (probe, text) an exact/prefix probe already
+    /// covers are dropped — the exact tier already answers for a
+    /// dictionary-form spelling, and a second seek would only prove it again.
+    /// Literal and case spellings are Latin while lemma texts are Japanese,
+    /// so only the kana probes need covering. The potential unwrap rides
+    /// separately via `includeUnwrap` so the ladder can probe the base first
+    /// and the unwrap only on a miss.
+    static func romajiLemmaCandidates(
+        for query: String, tokenize: @Sendable (String) -> [DictionaryToken]?,
+        includeUnwrap: Bool = true
+    ) -> [HeadwordCandidate] {
+        let conversions = romajiConversions(for: query).filter { conversion in
+            conversion.fullyConsumed
+        }
+        guard !conversions.isEmpty else { return [] }
+        return romajiLemmaCandidates(
+            for: conversions, probed: romajiProbedPairs(for: conversions)
+        ) { kana in
+            lemmaCandidates(for: kana, tokenize: tokenize, includeUnwrap: includeUnwrap)
+        }
+    }
+
+    /// The conversions overload behind the query overload above: the ladder
+    /// hoists one `romajiConversions` and shares it between its gate
+    /// check and both lemma stages instead of re-scanning the spelling. Each
+    /// conversion's lemmas come from the `lemmas` closure so callers choose
+    /// the base or unwrap shape per stage; this core only filters
+    /// already-covered (probe, text) pairs.
+    static func romajiLemmaCandidates(
+        for conversions: [KanaRomaji.RomajiConversion],
+        probed: Set<String>,
+        lemmas: @Sendable (String) -> [HeadwordCandidate]
+    ) -> [HeadwordCandidate] {
+        var seen: Set<String> = []
+        var out: [HeadwordCandidate] = []
+        for conversion in conversions {
+            for lemma in lemmas(conversion.kana) {
+                let key = "\(lemma.probe.rawValue):\(lemma.text)"
+                guard !probed.contains(key), seen.insert(key).inserted else { continue }
+                out.append(lemma)
+            }
+        }
+        return out
+    }
+
+    /// The (probe, text) pairs the headword stages already cover for these
+    /// conversions: every converted reading's writings as exact + prefix, and
+    /// the script-switch shapes as prefix-only. Shared by the query overload
+    /// and the ladder's hoisted path so both filter identically.
+    static func romajiProbedPairs(
+        for conversions: [KanaRomaji.RomajiConversion]
+    ) -> Set<String> {
+        var probed: Set<String> = []
+        for conversion in conversions {
+            for kana in [conversion.kana] + conversion.variants {
+                for writing in writingVariants(of: kana) {
+                    probed.insert("\(DictionarySearchProbe.exact.rawValue):\(writing)")
+                    probed.insert("\(DictionarySearchProbe.prefix.rawValue):\(writing)")
+                }
+                for probe in KanaRomaji.scriptSwitchProbes(of: kana) {
+                    probed.insert("\(DictionarySearchProbe.prefix.rawValue):\(probe)")
+                }
+            }
+        }
+        return probed
+    }
+
     /// The tokenizer's reading of an inflected form: its content token's base
     /// writing and kana reading, probed as a lemma retry. Bound tokens are
-    /// skipped — a 助動詞 lemmatizes away from the surface the user typed, so
-    /// the resulting hit would be about a word they never searched for.
+    /// skipped — a bound token (助動詞, non-independent verb, `ない`)
+    /// lemmatizes away from the surface the user typed, so the resulting hit
+    /// would be about a word they never searched for. The potential unwrap is
+    /// a fallback, not a co-probe: callers that rank across entries must probe
+    /// the base first (`includeUnwrap: false`) and the unwrap only when the
+    /// base misses, or a dictionary -える verb (入れる → 入る, くれる → くる)
+    /// outranks the genuine base on commonness/length. This combined shape
+    /// stays for direct unit tests; the ladder uses the split arms below.
     static func lemmaCandidates(
+        for query: String, tokenize: @Sendable (String) -> [DictionaryToken]?,
+        includeUnwrap: Bool = true
+    ) -> [HeadwordCandidate] {
+        let base = lemmaBaseCandidates(for: query, tokenize: tokenize)
+        guard includeUnwrap else { return base }
+        let unwrap = potentialUnwrapCandidates(for: query, tokenize: tokenize)
+        guard !unwrap.isEmpty else { return base }
+        var seen = Set(base.map { candidate in "\(candidate.probe.rawValue):\(candidate.text)" })
+        var out = base
+        for candidate in unwrap {
+            let key = "\(candidate.probe.rawValue):\(candidate.text)"
+            guard seen.insert(key).inserted else { continue }
+            out.append(candidate)
+        }
+        return out
+    }
+
+    /// The base + folded-reading probes of the first content token.
+    static func lemmaBaseCandidates(
         for query: String, tokenize: @Sendable (String) -> [DictionaryToken]?
     ) -> [HeadwordCandidate] {
-        guard let tokens = tokenize(query),
-              let content = tokens.first(where: { token in
-                  token.base != nil && token.bound != true
-              })
+        guard let content = lemmaContentToken(for: query, tokenize: tokenize) else { return [] }
+        var writings: [String] = []
+        if let base = content.base, !base.isEmpty {
+            writings.append(base)
+        }
+        if let reading = content.reading.map(ReadingAlignment.foldedKana),
+           !reading.isEmpty
+        {
+            writings.append(reading)
+        }
+        return lemmaProbes(for: writings)
+    }
+
+    /// The unwrapped-potential probe of the first content token's base, or
+    /// empty when the base doesn't shape like a potential/passive. IPADIC
+    /// lexicalizes potentials and passives with the inflected form itself as
+    /// the base (作れる, 書かれる), while headwords carry the source verb
+    /// (作る, 書く) — without this fallback the lemma probe misses.
+    static func potentialUnwrapCandidates(
+        for query: String, tokenize: @Sendable (String) -> [DictionaryToken]?
+    ) -> [HeadwordCandidate] {
+        guard let content = lemmaContentToken(for: query, tokenize: tokenize),
+              let base = content.base, !base.isEmpty,
+              let unwrapped = JMDictExpansion.dictionaryForm(ofPotential: base),
+              !unwrapped.isEmpty
         else { return [] }
+        return lemmaProbes(for: [unwrapped])
+    }
+
+    /// The first content token: a token carrying a base form that is not
+    /// bound. Shared by the base and unwrap arms so both read the same word.
+    private static func lemmaContentToken(
+        for query: String, tokenize: @Sendable (String) -> [DictionaryToken]?
+    ) -> DictionaryToken? {
+        tokenize(query)?.first(where: { token in
+            token.base != nil && token.bound != true
+        })
+    }
+
+    /// Exact-only lemma probes for each writing, deduplicated across
+    /// kana variants. A lemma hit means a headword of the entry *is* the
+    /// query's dictionary form: a prefix extension (a compound, a derivation,
+    /// a coincidental longer spelling) is a different word, so it must never
+    /// ride the lemma tier — a stem-shaped probe like たべ from たべます
+    /// previously badged every たべ* headword (食べ汚す, …) LEMMA. Every
+    /// probe is badge-only (`highlightScalars: 0`): the retry matched
+    /// something the user never typed.
+    private static func lemmaProbes(for writings: [String]) -> [HeadwordCandidate] {
+        guard !writings.isEmpty else { return [] }
         var out: [HeadwordCandidate] = []
         var seen: Set<String> = []
-        for writing in [content.base, content.reading.map(ReadingAlignment.foldedKana)]
-            .compactMap({ text in text })
-            .filter({ text in !text.isEmpty })
-        {
+        for writing in writings {
             for variant in writingVariants(of: writing) where seen.insert(variant).inserted {
-                for probe in [DictionarySearchProbe.exact, .prefix] {
-                    out.append(HeadwordCandidate(
-                        text: variant, probe: probe,
-                        matchKind: .lemma, highlightScalars: 0
-                    ))
-                }
+                out.append(HeadwordCandidate(
+                    text: variant, probe: .exact,
+                    matchKind: .lemma, highlightScalars: 0
+                ))
             }
         }
         return out
