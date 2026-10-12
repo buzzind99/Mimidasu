@@ -33,7 +33,7 @@ struct CloudDisclosureSheet: View {
                 SettingsPill(label: "Cancel") {
                     onDecline()
                 }
-                SettingsPill(label: confirmLabel, prominent: true) {
+                SettingsPill(label: "Use \(provider.shortName)", prominent: true) {
                     onConfirm()
                 }
             }
@@ -61,15 +61,6 @@ struct CloudDisclosureSheet: View {
             "Lines you explicitly re-translate will be sent to "
                 + "\(provider.displayName) over the internet to be translated. "
                 + "The live translation engine is unchanged. "
-        }
-    }
-
-    private var confirmLabel: String {
-        switch intent {
-        case .providerSwitch:
-            "Use \(provider.shortName)"
-        case .retranslateEngine:
-            "Retry with \(provider.shortName)"
         }
     }
 }
