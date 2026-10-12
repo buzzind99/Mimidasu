@@ -225,8 +225,8 @@ struct SettingsRetranslateCard: View {
     private var appleFastOption: Option {
         Option(
             engine: .appleFast,
-            title: "Apple (MTL)",
-            subtitle: "Traditional machine translation engine — may need to download a language pack on first use"
+            title: "Apple (NMT)",
+            subtitle: "Traditional machine translation — may need to download a language pack on first use"
         )
     }
 
@@ -234,7 +234,7 @@ struct SettingsRetranslateCard: View {
         Option(
             engine: .appleHighFidelity,
             title: "Apple Intelligence",
-            subtitle: "On-device Apple Intelligence model — different phrasing than the traditional engine"
+            subtitle: "Apple Intelligence translation — high fidelity LLM based translation engine using Apple Foundation Model"
         )
     }
 
