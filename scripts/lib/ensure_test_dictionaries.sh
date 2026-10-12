@@ -83,32 +83,51 @@ seed "$JMDICT_ZST" "$PREPARED/jmdict-${ARTIFACT_TAG}.sqlite"
 # build_dictionary.sh has already indexed.
 DEV_DB="${BUILD_DIR}/jmdict-${ARTIFACT_TAG}.dev.sqlite"
 PREPARED_JM="${PREPARED}/jmdict-${ARTIFACT_TAG}.sqlite"
-if [[ -f "${DEV_DB}" ]]; then
+# `-s`, not `-f`: a 0-byte artifact (an interrupted copy in build_dictionary.sh)
+# must not pass the gate, or the probe below fails on it and the copy at the
+# end replaces a good prepared database with an empty file.
+if [[ -s "${DEV_DB}" ]]; then
   # Probed with a trigram of a gloss that exists rather than a literal word, so
   # the check holds for any corpus the pin might move to. The probe skips glosses
   # whose first three characters contain a quote, so it needs no escaping in the
   # MATCH literal — and it cannot be escaped in SQL instead, because FTS5
   # requires a constant MATCH argument and a computed phrase degrades to a scan
-  # of the contentless table. The same usability guards keep the pick answerable:
-  # FTS5 returns zero rows for a shorter-than-three-character phrase, and a
-  # trigram holding a space or newline would not survive command substitution.
+  # of the contentless table. The second guard keeps the pick *usable*: FTS5
+  # returns zero rows, no error, for a phrase shorter than three characters, so
+  # the trigram has to be exactly three scalars long.
+  #
+  # The whitespace exclusions are belt-and-braces, and only one is load-bearing.
+  # The trigram tokenizer indexes every three-scalar window, whitespace included
+  # (probed on the pinned SQLite: 'ab cd' yields 'ab ', 'b c' and ' cd', and the
+  # phrases "ab ", "ab<TAB>", "ab<LF>", "ab<CR>", "ab<VT>" and "ab<FF>" each
+  # match their own row), so no separator has to be avoided there. What does
+  # bite is command substitution in the assignment below: it strips trailing
+  # newlines, so a trigram ending in one would collapse below three scalars by
+  # the time it reaches MATCH. char(10) earns its place for that reason alone;
+  # the space and char(13) filters are kept because each costs one instr()
+  # call per row in a scan that already happens, and the comment they sit
+  # under must not read as a claim the tokenizer does not honour.
+  #
   # Both probes must tolerate failure: on a freshly
   # seeded database the gloss index does not exist yet, sqlite3 exits non-zero,
   # and under `set -e` an unchecked substitution would kill this script before
   # the copy below ever runs.
+  #
+  # This WHERE clause is kept byte-identical to the one in
+  # scripts/build_dictionary.sh.
   PROBE="$(sqlite3 "${PREPARED_JM}" "SELECT substr(gloss, 1, 3) FROM senses
-    WHERE gloss <> '' AND substr(gloss, 1, 3) NOT GLOB '*[\"'']*'
-      AND length(substr(gloss, 1, 3)) = 3
-      AND instr(substr(gloss, 1, 3), ' ') = 0
-      AND instr(substr(gloss, 1, 3), char(10)) = 0
-      AND instr(substr(gloss, 1, 3), char(13)) = 0
-    LIMIT 1;" 2>/dev/null || true)"
+  WHERE gloss <> '' AND substr(gloss, 1, 3) NOT GLOB '*[\"'']*'
+    AND length(substr(gloss, 1, 3)) = 3
+    AND instr(substr(gloss, 1, 3), ' ') = 0
+    AND instr(substr(gloss, 1, 3), char(10)) = 0
+    AND instr(substr(gloss, 1, 3), char(13)) = 0
+  LIMIT 1;" 2>/dev/null || true)"
   ANSWERS="$(sqlite3 "${PREPARED_JM}" "SELECT count(*) FROM ${FTS_TABLE_NAME} WHERE ${FTS_TABLE_NAME} MATCH '\"${PROBE}\"';" 2>/dev/null || true)"
   if [[ -z "${PROBE}" || "${ANSWERS}" == "0" || -z "${ANSWERS}" ]]; then
     echo "  indexing $PREPARED_JM"
     cp "${DEV_DB}" "${PREPARED_JM}"
   fi
 else
-  echo "ERROR: ${DEV_DB} not found; run scripts/build_dictionary.sh" >&2
+  echo "ERROR: ${DEV_DB} is missing or empty; run scripts/build_dictionary.sh" >&2
   exit 1
 fi

@@ -177,9 +177,27 @@ if [[ ! -f "${FTS_SWIFT}" ]]; then
 fi
 check_fts_constant() {
   local needle="$1"
-  if ! grep -Fq -- "${needle}" "${FTS_SWIFT}"; then
+  local hit=0
+  if [[ "${needle}" == "static let schemaVersion = "* ]]; then
+    # Anchored to a declaration line and boundary-checked after the pinned
+    # value: a bare substring match would let `static let schemaVersion = 10`
+    # satisfy the needle for `... = 1`, so a bump would sail past this tripwire
+    # without anyone acknowledging it. The bump has to land here — where this
+    # message sends the editor — because the stamp below is interpolated from
+    # Swift and nothing in the DDL mentions the version.
+    if grep -Eq "^[[:space:]]*${needle}([^0-9]|$)" "${FTS_SWIFT}"; then
+      hit=1
+    fi
+  elif grep -Fq -- "${needle}" "${FTS_SWIFT}"; then
+    hit=1
+  fi
+  if (( ! hit )); then
     echo "ERROR: JMDictFTSIndex no longer contains: ${needle}" >&2
-    echo "  update the dev-artifact DDL in ${BASH_SOURCE[0]} to match." >&2
+    if [[ "${needle}" == "static let schemaVersion = "* ]]; then
+      echo "  update this grep literal (the stamp itself is interpolated from Swift)." >&2
+    else
+      echo "  update the dev-artifact DDL in ${BASH_SOURCE[0]} to match." >&2
+    fi
     exit 1
   fi
   echo "    fts.${needle}: ok"
@@ -243,7 +261,15 @@ check_case_constant 'static let indexName = "headwords_case"'
 check_case_constant "WHERE text <> lower(text)"
 # The load rides the index only if its predicate is textually the index's own,
 # so the two statements are compared rather than merely both guarded.
-CASE_PREDICATE="$(sed -n 's/.*loadSQL = "\(.*\)"$/\1/p' "${CASE_SWIFT}" | head -1)"
+CASE_PREDICATE="$(sed -n 's/^[[:space:]]*static let loadSQL = "\(.*\)"$/\1/p' "${CASE_SWIFT}" | head -1)"
+if [[ -z "${CASE_PREDICATE}" ]]; then
+  # A failed parse and a dropped predicate are different problems — the first
+  # means `loadSQL` stopped matching this one-line declaration (reformatted to
+  # a `"""` literal, say), not that its WHERE clause changed.
+  echo "ERROR: could not read JMDictCaseIndex.loadSQL out of ${CASE_SWIFT};" >&2
+  echo "  expected a single-line static let loadSQL = \"…\" declaration." >&2
+  exit 1
+fi
 if [[ "${CASE_PREDICATE}" != *"WHERE text <> lower(text)"* ]]; then
   echo "ERROR: JMDictCaseIndex.loadSQL no longer carries the index's predicate;" >&2
   echo "  the load would silently fall back to a full scan of headwords." >&2
@@ -329,17 +355,23 @@ dev_db_is_adoptable() {
 if [[ "${MODE}" == "build" && "${REBUILD}" == "0" && -s "${ZST_PATH}" ]]; then
   if ! command -v zstd >/dev/null 2>&1; then
     echo "WARNING: zstd not found; cannot verify ${ZST_NAME}, rebuilding."
-  elif zstd -q -t "${ZST_PATH}" 2>/dev/null && dev_db_is_adoptable; then
-    echo "==> ${ZST_NAME} already built and valid; skipping (use --rebuild to force)."
-    exit 0
-  elif zstd -q -t "${ZST_PATH}" 2>/dev/null; then
-    # The bundle is fine but the dev artifact is missing, empty, unstamped or
-    # index-less — a pin bump that skipped, or an interrupted index build.
-    # Rebuild both rather than leaving a checkout whose live tests resolve a
-    # database that answers every gloss query with nothing.
-    echo "==> ${ZST_NAME} is valid but $(basename "${DEV_DB}") is missing or carries no current gloss index; rebuilding."
   else
-    echo "WARNING: ${ZST_PATH} exists but failed its integrity check; rebuilding."
+    # Tested once and kept: the two arms below ask the same question, so the
+    # old chain read the whole artifact twice to learn the same answer.
+    ZST_INTACT=1
+    zstd -q -t "${ZST_PATH}" 2>/dev/null || ZST_INTACT=0
+    if (( ZST_INTACT )) && dev_db_is_adoptable; then
+      echo "==> ${ZST_NAME} already built and valid; skipping (use --rebuild to force)."
+      exit 0
+    elif (( ZST_INTACT )); then
+      # The bundle is fine but the dev artifact is missing, empty, unstamped or
+      # index-less — a pin bump that skipped, or an interrupted index build.
+      # Rebuild both rather than leaving a checkout whose live tests resolve a
+      # database that answers every gloss query with nothing.
+      echo "==> ${ZST_NAME} is valid but $(basename "${DEV_DB}") is missing or carries no current gloss index; rebuilding."
+    else
+      echo "WARNING: ${ZST_PATH} exists but failed its integrity check; rebuilding."
+    fi
   fi
 fi
 
@@ -530,13 +562,26 @@ echo "    headwords_case answers ${CASE_ROWS} spellings, the range load ${CASE_R
 # quoted) makes SQLite stop treating MATCH as a constraint and try to scan the
 # contentless table instead — the probe dies with "table does not support
 # scanning". Filtering the probe source by quoting is the one shape that keeps
-# the argument a literal: 329 glosses in the pinned corpus carry a quote
-# *anywhere* in their trigram, and 656,377 of 656,706 still qualify, so this
-# costs the probe no reach. The remaining guards keep the pick *usable* rather
+# the argument a literal: 329 of the pinned corpus's 656,706 gloss columns
+# carry a quote in the three characters the probe splices, so the quote filter
+# drops only those — 656,377 still qualify — and this costs the probe no reach.
+# The second guard keeps the pick *usable* rather
 # than merely quote-free: FTS5 answers a shorter-than-three-character phrase
-# with zero rows and no error, and a trigram holding a space or newline would
-# not survive the trip through command substitution intact — either shape
-# would trip the guard below on a perfectly healthy index.
+# with zero rows and no error, so the trigram has to be exactly three scalars.
+#
+# The whitespace exclusions are belt-and-braces, and only one is load-bearing.
+# The trigram tokenizer indexes every three-scalar window, whitespace included
+# (probed on the pinned SQLite: 'ab cd' yields 'ab ', 'b c' and ' cd', and the
+# phrases "ab ", "ab<TAB>", "ab<LF>", "ab<CR>", "ab<VT>" and "ab<FF>" each
+# match their own row), so no separator has to be avoided in the phrase itself.
+# What does bite is command substitution in the assignment below: it strips
+# trailing newlines, so a trigram ending in one would collapse below three
+# scalars by the time it reached MATCH. char(10) earns its place for that
+# reason alone; the space and char(13) filters are kept because each costs one
+# instr() call per row in a scan that already happens, and because a comment
+# reading as "the tokenizer separates here" would be the false lead the next
+# editor acts on. This WHERE clause is kept byte-identical to the one in
+# scripts/lib/ensure_test_dictionaries.sh.
 PROBE="$(sqlite3 "${DEV_DB}" "SELECT substr(gloss, 1, 3) FROM senses
   WHERE gloss <> '' AND substr(gloss, 1, 3) NOT GLOB '*[\"'']*'
     AND length(substr(gloss, 1, 3)) = 3
