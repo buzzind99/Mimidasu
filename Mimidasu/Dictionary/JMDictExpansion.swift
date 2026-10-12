@@ -102,20 +102,65 @@ enum JMDictExpansion {
         "ぺ": "ぷ", "め": "む", "れ": "る"
     ]
 
-    /// The dictionary form a potential-form lemma unwraps to, or nil when
-    /// the lemma doesn't shape like one. IPADIC lexicalizes potential forms
-    /// as standalone verbs whose base is the potential itself (作れる), and
-    /// JMDict headwords only carry the source verb (作る) — without this
-    /// rewrite the lemma candidate misses and the tap falls through to the
-    /// kanji splits. A られる tail unwraps plain (作られる → 作る, 食べられる →
-    /// 食べる); otherwise the え-row tail kana shifts onto its う-row
-    /// counterpart (作れる → 作る, 書ける → 書く). A wrong guess is inert — it
-    /// merely misses the headword index, and any lemma that exists still
-    /// hits on its own candidate first.
+    /// The あ-row kana a godan れる-passive ends on, mapped onto its う-row
+    /// counterpart (書かれる: か → く; 読まれる: ま → む; 買われる: わ → う).
+    /// The られる tail below already covers ら-stem passives (作られる →
+    /// 作る) and ichidan passives (食べられる → 食べる); this map covers
+    /// every other godan stem.
+    private static let passiveARowShift: [Character: Character] = [
+        "わ": "う", "か": "く", "が": "ぐ", "さ": "す", "ざ": "ず",
+        "た": "つ", "だ": "づ", "な": "ぬ", "は": "ふ", "ば": "ぶ",
+        "ぱ": "ぷ", "ま": "む", "ら": "る"
+    ]
+
+    /// The dictionary form a potential/passive-form lemma unwraps to, or nil
+    /// when the lemma doesn't shape like one. IPADIC lexicalizes potential
+    /// and passive forms as standalone verbs whose base is the inflected
+    /// form itself (作れる, 書かれる), and JMDict headwords only carry the
+    /// source verb (作る, 書く) — without this rewrite the lemma candidate
+    /// misses and the tap falls through to the kanji splits. A られる tail
+    /// unwraps plain (作られる → 作る, 食べられる → 食べる); a godan あ-row +
+    /// れる tail shifts onto its う-row counterpart (書かれる → 書く,
+    /// 読まれる → 読む); otherwise the え-row tail kana shifts onto its
+    /// う-row counterpart (作れる → 作る, 書ける → 書く). The irregulars map
+    /// before the generic branches (bare される → する, こられる/これる →
+    /// くる including くる-prefixed suffixes); bare られる (a suffix without
+    /// a stem) unwraps to nil. A される suffix with a stem stays on the
+    /// generic あ-row path (話される → 話す): shape alone cannot separate a
+    /// godan さ-row passive from a する-compound passive (愛される), and the
+    /// godan reading matches the existing あ-row coverage. The input is
+    /// kana-folded first, so katakana and halfwidth spellings ride the same
+    /// tables. Shape alone cannot separate a potential from a dictionary
+    /// -える verb (入れる → 入る, くれる → くる both fire), so callers that
+    /// rank across entries must probe the lemma itself first and try the
+    /// unwrap only when it misses — the tap expansion's trailing order and
+    /// the search ladder's two-stage lemma retry both do this.
     static func dictionaryForm(ofPotential lemma: String) -> String? {
-        let characters = Array(lemma)
+        let folded = ReadingAlignment.foldedKana(lemma)
+        if folded == "される" {
+            return "する"
+        }
+        if folded == "こられる" || folded == "これる" {
+            return "くる"
+        }
+        if folded.hasSuffix("こられる"), folded.count > 4 {
+            return String(folded.dropLast(4)) + "くる"
+        }
+        if folded.hasSuffix("これる"), folded.count > 3 {
+            return String(folded.dropLast(3)) + "くる"
+        }
+        if folded == "られる" {
+            return nil
+        }
+        let characters = Array(folded)
         if characters.count > 3, characters.suffix(3).elementsEqual(["ら", "れ", "る"]) {
             return String(characters.dropLast(3)) + "る"
+        }
+        if characters.count > 3,
+           characters.suffix(2).elementsEqual(["れ", "る"]),
+           let shifted = passiveARowShift[characters[characters.count - 3]]
+        {
+            return String(characters.dropLast(3)) + String(shifted)
         }
         guard characters.count > 2, characters.last == "る",
               let shifted = potentialTailShift[characters[characters.count - 2]]

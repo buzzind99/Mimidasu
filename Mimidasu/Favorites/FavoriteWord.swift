@@ -96,8 +96,9 @@ struct FavoriteWord: Identifiable, Equatable, Sendable {
             // lemma is the potential itself (勝て before なければ → 勝てる),
             // so the starred dictionary form hides behind one tail shift —
             // the same unwrap the tap lookup walks (作れる → 作る). The tail
-            // map carries only genuine potential shapes (え-row + る, られる),
-            // so anything else — なさる, 得る — unwraps to nil, and the one
+            // map carries only genuine potential/passive shapes (え-row + る,
+            // られる, あ-row + れる), so anything else — なさる, 得る —
+            // unwraps to nil, and the one
             // real overlap (売れる unwraps to 売る) is a true potential
             // relation: a starred 売る lighting 売れます is this feature's
             // contract, not a collision to gate away. The unwrap matches by

@@ -92,8 +92,32 @@ final class JMDictPotentialUnwrapTests {
         #expect(JMDictExpansion.dictionaryForm(ofPotential: input) == expected)
     }
 
+    @Test("a godan れる passive unwraps through the あ-row shift", arguments: [
+        ("書かれる", "書く"), ("泳がれる", "泳ぐ"), ("話される", "話す"),
+        ("待たれる", "待つ"), ("読まれる", "読む"), ("遊ばれる", "遊ぶ"),
+        ("買われる", "買う"), ("かかれる", "かく"), ("かわれる", "かう")
+    ])
+    func godanPassiveTail(input: String, expected: String) {
+        #expect(JMDictExpansion.dictionaryForm(ofPotential: input) == expected)
+    }
+
+    @Test("a katakana potential shapes unwraps like its hiragana form", arguments: [
+        ("ツクれる", "つくる"), ("カカれる", "かく"), ("タベられる", "たべる")
+    ])
+    func katakanaTail(input: String, expected: String) {
+        #expect(JMDictExpansion.dictionaryForm(ofPotential: input) == expected)
+    }
+
+    @Test("irregular verbs unwrap to their dictionary forms", arguments: [
+        ("される", "する"), ("こられる", "くる"),
+        ("これる", "くる"), ("持ってこられる", "持ってくる"), ("持ってこれる", "持ってくる")
+    ])
+    func irregularTail(input: String, expected: String) {
+        #expect(JMDictExpansion.dictionaryForm(ofPotential: input) == expected)
+    }
+
     @Test("lemmas that don't shape like a potential unwrap to nil", arguments: [
-        "言う", "出来る", "食べた", "だ", "る", "ぬる", "行った"
+        "言う", "出来る", "食べた", "だ", "る", "ぬる", "行った", "られる", "れる"
     ])
     func nonPotentialLemma(input: String) {
         #expect(JMDictExpansion.dictionaryForm(ofPotential: input) == nil)
