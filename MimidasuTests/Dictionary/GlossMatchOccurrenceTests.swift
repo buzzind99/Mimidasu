@@ -49,17 +49,26 @@ struct GlossMatchOccurrenceTests {
         #expect(match.range == 25 ..< 29)
     }
 
-    @Test("a padded fragment trims before grading")
-    func paddedFragmentTrims() {
-        let match = DictionarySearchEngine.glossMatch(pattern: "sand", column: "  sand  ")
+    @Test("a padded fragment trims before grading", arguments: [
+        ("  sand  ", "sand", DictionarySearchHit.MatchKind.glossWordBoundary, 0 ..< 4),
+        ("  sandé  ", "sandé", DictionarySearchHit.MatchKind.glossPrefix, 0 ..< 4)
+    ])
+    func paddedFragmentTrims(column: String, gloss: String, kind: DictionarySearchHit.MatchKind, range: Range<Int>) {
+        // The ASCII column takes the scalar-array fast path, the é column
+        // (two bytes, one scalar) the fragment-wise path — trimming lives in
+        // both, so both need the pin.
+        let match = DictionarySearchEngine.glossMatch(pattern: "sand", column: column)
 
-        #expect(match.kind == .glossWordBoundary)
-        #expect(match.gloss == "sand")
-        #expect(match.range == 0 ..< 4)
+        #expect(match.kind == kind)
+        #expect(match.gloss == gloss)
+        #expect(match.range == range)
     }
 
-    @Test("a pattern occurring nowhere keeps its place without a tier")
+    @Test("a pattern occurring nowhere keeps a pattern-length span at substring tier")
     func absentPatternFallsBack() {
+        // The 0..<3 is not a found span — it is the pattern's own length
+        // clamped into the gloss, the fallback's way of keeping the row's
+        // place without claiming an occurrence.
         let match = DictionarySearchEngine.glossMatch(pattern: "zzz", column: "to eat")
 
         #expect(match.kind == .glossSubstring)
@@ -67,12 +76,22 @@ struct GlossMatchOccurrenceTests {
         #expect(match.range == 0 ..< 3)
     }
 
-    @Test("an empty pattern grades nothing in the fragment path")
-    func emptyPatternInFragmentPath() {
-        let match = DictionarySearchEngine.glossMatchByFragment(pattern: "", column: "to eat")
+    @Test("an empty pattern grades nothing in either path")
+    func emptyPatternGradesNothing() {
+        for match in [
+            DictionarySearchEngine.glossMatch(pattern: "", column: "to eat"),
+            DictionarySearchEngine.glossMatchByFragment(pattern: "", column: "to eat")
+        ] {
+            #expect(match.kind == .glossSubstring)
+            #expect(match.gloss == "to eat")
+            #expect(match.range == 0 ..< 0)
+        }
+        // An empty column has no first gloss to keep: no span at all.
+        let empty = DictionarySearchEngine.glossMatch(pattern: "zzz", column: "")
 
-        #expect(match.kind == .glossSubstring)
-        #expect(match.gloss == "to eat")
+        #expect(empty.kind == .glossSubstring)
+        #expect(empty.gloss == "")
+        #expect(empty.range == nil)
     }
 
     private static let joiner = String(JMDictPin.glossJoiner)

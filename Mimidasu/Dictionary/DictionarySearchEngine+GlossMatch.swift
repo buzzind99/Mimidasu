@@ -88,7 +88,7 @@ extension DictionarySearchEngine {
                 // Only the winner's text is materialised. Every row the index
                 // matches used to build a `String` here, to serve the thousand rows
                 // `assemble` actually shows.
-                if kind.rawValue < bestKind?.rawValue ?? .max {
+                if kind.rawValue < (bestKind?.rawValue ?? .max) {
                     bestKind = kind
                     bestRange = lowerBound ..< upperBound
                     bestBounds = lower ..< upper
@@ -139,7 +139,7 @@ extension DictionarySearchEngine {
                     scalars: scalars, range: range, length: scalars.count, offset: 0
                 )
                 let match = GlossMatch(gloss: gloss, range: range, kind: kind)
-                if best == nil || kind.rawValue < best?.kind.rawValue ?? .max {
+                if best == nil || kind.rawValue < (best?.kind.rawValue ?? .max) {
                     best = match
                 }
                 if kind == .glossWordBoundary {
@@ -152,11 +152,14 @@ extension DictionarySearchEngine {
     }
 
     /// A column whose fold reproduced none of its glosses. The hit keeps its
-    /// place, spanned by the pattern's own length.
+    /// place, spanned by the pattern's own length — over the column's first
+    /// gloss, not the raw joined column, so the preview never carries the
+    /// joiner and the highlight points at a string the row renders.
     static func glossMatchFallback(pattern: String, column: String) -> GlossMatch {
-        let scalars = column.unicodeScalars.count
+        let first = glossList(column).first ?? ""
+        let scalars = first.unicodeScalars.count
         return GlossMatch(
-            gloss: column,
+            gloss: first,
             range: scalars == 0 ? nil : 0 ..< min(pattern.unicodeScalars.count, scalars),
             kind: .glossSubstring
         )
