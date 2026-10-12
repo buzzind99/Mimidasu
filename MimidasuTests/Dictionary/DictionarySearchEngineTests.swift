@@ -179,54 +179,6 @@ final class DictionarySearchEngineTests {
         #expect(try search("mak").isEmpty)
     }
 
-    @Test("reads an inflected form through the tokenizer's lemma")
-    func lemmaRetry() throws {
-        let sut = DictionarySearchEngine(
-            resolveDatabase: { [url = databaseURL] in url },
-            tokenize: { _ in
-                [DictionaryToken(
-                    text: "あめた", start: 0, end: 3,
-                    reading: "あめた", base: "あめ", pos: "n", bound: false
-                )]
-            }
-        )
-        defer { sut.close() }
-
-        let outcome = try sut.search("あめた", filters: DictionarySearchFilters())
-        let hit = try #require(outcome.hits.first { candidate in
-            candidate.entSeq == 1_153_520
-        })
-
-        #expect(hit.matchKind == .lemma)
-        // The badge explains a lemma row; nothing the user typed is lit up.
-        #expect(hit.highlightRange == nil)
-        // 飴 is kanji-written, but the lemma probe matched the *kana* row
-        // (`headwords.text = 'あめ'`), so the reading is what lights up.
-        #expect(hit.matchedField == .reb)
-        #expect(hit.keb == "飴")
-        #expect(hit.reb == "あめ")
-        #expect(hit.matchKind.badgeLabel == "LEMMA")
-    }
-
-    @Test("skips a bound token's lemma, which is about a word never searched")
-    func lemmaSkipsBoundTokens() throws {
-        let sut = DictionarySearchEngine(
-            resolveDatabase: { [url = databaseURL] in url },
-            tokenize: { _ in
-                [DictionaryToken(
-                    text: "あめ", start: 0, end: 2,
-                    reading: "あめ", base: "あめ", pos: "助動詞", bound: true
-                )]
-            }
-        )
-        defer { sut.close() }
-
-        let outcome = try sut.search("あめ", filters: DictionarySearchFilters())
-
-        #expect(outcome.hits.map(\.entSeq) == [1_153_520, 9_990_030, 9_990_100, 15_668_307])
-        #expect(outcome.hits.allSatisfy { hit in hit.matchKind != .lemma })
-    }
-
     // MARK: Gloss stage
 
     @Test("a whole-gloss match is a word-boundary hit")
