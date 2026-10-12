@@ -54,6 +54,11 @@ extension DictionarySearchEngine {
     /// `prefixFetchHeadroom` are constants, so a deeper search re-runs the same
     /// scan and reaches the same bound. Only the first is worth a re-search;
     /// both are worth a floor on the total.
+    ///
+    /// A search carrying `requiresExactCount` never reports this: its prefix
+    /// scans run unbounded (`prefixUnboundedSQL`, no ceiling, no headroom
+    /// trim), so every candidate row reaches the post-join filters and the
+    /// total is exact.
     struct HeadwordRows {
         let rows: [CandidateRow]
         let truncated: Bool
@@ -98,12 +103,15 @@ extension DictionarySearchEngine {
         var rows: [CandidateRow] = []
         var saturated = false
         var truncated = false
+        // Entry-level filters need an exact total the bounded scan cannot
+        // give, so the stages below scan unbounded while they hold.
+        let unbounded = filters.requiresExactCount
         // The three headword stages share one accumulator because they share one
         // question: not only which rows did this stage find, but did a bound of
         // its own hide any. Collecting the answer at the call site would let the
         // exact stage's `continue` silently drop it.
         func collect(_ label: String, _ candidates: [HeadwordCandidate]) throws {
-            let scanned = try stage(label) { try headwordRows(candidates, db: db) }
+            let scanned = try stage(label) { try headwordRows(candidates, db: db, unbounded: unbounded) }
             rows += scanned.rows
             truncated = truncated || scanned.truncated
         }
@@ -167,7 +175,7 @@ extension DictionarySearchEngine {
     static func capSaturated(
         _ rows: [CandidateRow], filters: DictionarySearchFilters, limit: Int, remaining: [Int]
     ) -> Bool {
-        guard !filters.commonOnly, !filters.filtersJLPT, !filters.filtersNameTypes else { return false }
+        guard !filters.requiresExactCount else { return false }
         guard let best = remaining.min() else { return false }
         // The window is the *ranked* top `limit`, so its worst row is the
         // worst tier among the best `limit` tiers — not the worst tier in
@@ -302,8 +310,15 @@ extension DictionarySearchEngine {
     /// read `10402` where the true count is 21532. Both bounds are reported,
     /// and both are constants, so the flag is not something a wider window can
     /// clear.
+    ///
+    /// `unbounded` lifts both bounds for searches carrying entry-level filters
+    /// (`requiresExactCount`): prefix probes read `prefixUnboundedSQL` with no
+    /// `LIMIT` and no ceiling bind, never set `truncated`, and keep every
+    /// scanned row (still `shortestFirst`-ordered, untrimmed), so the post-join
+    /// filters in `assemble` count exactly. Exact probes are untouched in both
+    /// modes — a primary-key seek has no limit of its own and cannot truncate.
     static func headwordRows(
-        _ candidates: [HeadwordCandidate], db: SQLiteDatabase
+        _ candidates: [HeadwordCandidate], db: SQLiteDatabase, unbounded: Bool
     ) throws -> HeadwordRows {
         assert(
             prefixFetchHeadroom <= prefixScanCeiling,
@@ -314,10 +329,13 @@ extension DictionarySearchEngine {
         for candidate in candidates {
             try checkCancellation()
             let statement = try db.statement(
-                candidate.probe == .exact ? exactSQL : prefixSQL
+                candidate.probe == .exact ? exactSQL : (unbounded ? prefixUnboundedSQL : prefixSQL)
             )
             if candidate.probe == .exact {
                 statement.bind(candidate.text, at: 1)
+            } else if unbounded {
+                statement.bind(candidate.text, at: 1)
+                statement.bind(candidate.text + scalarRangeCeiling, at: 2)
             } else {
                 statement.bind(candidate.text, at: 1)
                 statement.bind(candidate.text + scalarRangeCeiling, at: 2)
@@ -344,6 +362,13 @@ extension DictionarySearchEngine {
             guard candidate.probe == .prefix else {
                 // An exact seek has no limit of its own, so it cannot truncate.
                 rows += scanned
+                continue
+            }
+            if unbounded {
+                // No bound ran, so nothing was hidden: keep every scanned row,
+                // still shortest-first so the ranking meets them in the order
+                // the headroom path would have kept.
+                rows += shortestFirst(scanned)
                 continue
             }
             // The scan's own ceiling reports as "reached", never as "not

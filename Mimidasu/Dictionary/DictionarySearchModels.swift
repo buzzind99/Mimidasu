@@ -90,6 +90,16 @@ struct DictionarySearchFilters: Equatable, Sendable {
         !nameTypes.isEmpty && scope != .words
     }
 
+    /// Whether this filter set needs an exact total. The common, JLPT, and
+    /// name-type filters are the ones the pre-join scan cannot see — `common`
+    /// needs the `entries` pre-fetch and levels/badges need the
+    /// `entries`/`senses` joins — so a search carrying any of them must see
+    /// every candidate row to count exactly, and the ladder scans unbounded
+    /// while they hold.
+    var requiresExactCount: Bool {
+        commonOnly || filtersJLPT || filtersNameTypes
+    }
+
     /// Whether a JLPT level passes. True when the filter is not effective;
     /// while effective the level must be selected, and nil fails — names carry
     /// no JLPT, so an active level selection drops them.
@@ -231,6 +241,10 @@ struct DictionarySearchOutcome: Equatable, Sendable {
     /// search returns the identical truncated answer. Reading this as
     /// saturation would put `canLoadMore`'s probe arm and `loadMore`'s
     /// re-search on a path that can only re-pay full price for the same rows.
+    ///
+    /// Entry-level filters lift the bounds instead: a search carrying
+    /// `requiresExactCount` scans unbounded, so its total is exact — never a
+    /// floor from truncation — and this stays `false` for it.
     let truncated: Bool
 
     /// Whether `matchedCount` is a floor over a larger answer rather than the

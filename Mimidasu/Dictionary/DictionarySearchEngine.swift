@@ -33,9 +33,17 @@ final class DictionarySearchEngine: Sendable {
     /// ranking would have promoted. Measured on a 1-mora query, doubling this
     /// lifts the common entries in the first screen by roughly half again, for
     /// single-digit milliseconds of `assemble` join time.
+    ///
+    /// Applies only when no entry-level filter is active: a search carrying
+    /// `requiresExactCount` scans unbounded (`prefixUnboundedSQL`) and keeps
+    /// every row, so its filtered total is exact rather than a floor.
     static let prefixFetchHeadroom = 8000
     /// Raw rows a prefix scan may touch before the fetch is cut. Without it a
     /// single-mora query walks the whole kana block on every keystroke.
+    ///
+    /// Applies only when no entry-level filter is active, like the headroom
+    /// above — a filtered search (`requiresExactCount`) scans unbounded so no
+    /// bound can hide rows from the post-join filters.
     static let prefixScanCeiling = 20000
     /// Shortest Latin query the gloss stage will answer.
     ///

@@ -6,6 +6,7 @@ import Testing
 /// a fault that is not a missing database names itself, a filter press answers
 /// the debounced query rather than the live field, a successful landing prunes
 /// the expansions its rows dropped, a floor total still counts at the ceiling,
+/// a filtered total over the same bound reads exact with no `+`,
 /// and the close wipes the query and the filters together without letting the
 /// filters resurrect the search. Split from `DictionarySearchStateTests` so
 /// neither suite exceeds the type-body budget.
@@ -14,6 +15,15 @@ import Testing
 struct DictionarySearchStateFaultTests {
     private func makeState() throws -> DictionarySearchStateFixture {
         try DictionarySearchStateFixture()
+    }
+
+    /// A state over `headroom + 1` rows under `かん` — the twin of the main
+    /// suite's helper, kept here so the exact-total case lives beside the floor
+    /// case it answers without pushing either suite past the type-body budget.
+    private func makeHeadroomBoundState() throws -> DictionarySearchStateFixture {
+        try DictionarySearchStateFixture(
+            extraWords: JMDictFixtureDatabase.headroomBoundWords()
+        )
     }
 
     @Test("a closed-database fault names itself instead of showing no matches")
@@ -152,6 +162,26 @@ struct DictionarySearchStateFaultTests {
         state.query = "たべる"
         #expect(await pollUntil { state.outcome.hits.map(\.entSeq) == [1_358_280] })
         #expect(state.lookupState.expanded.isEmpty)
+    }
+
+    @Test("a common-only search over a headroom-bound population carries no `+`")
+    func headroomBoundCommonOnlyIsExact() async throws {
+        let fixture = try makeHeadroomBoundState()
+        let state = fixture.state
+
+        // The same headroom + 1 word rows the ceiling case below pages, but
+        // with COMMON on: 2667 common entries (every third offset from 0, per
+        // `bulkWords`) reach the pre-fetch unbounded, so the header reads the
+        // exact total. Without the unbounded scan this would read `50 / 2667+`
+        // — a floor no click could lift, the way the unfiltered total is.
+        state.filters = DictionarySearchFilters(commonOnly: true)
+        state.query = "かん"
+        #expect(await pollUntil { state.outcome.hits.isEmpty == false })
+        #expect(await pollUntil { state.isSearching == false })
+
+        #expect(state.countText == "50 / 2667")
+        #expect(state.outcome.isFloor == false)
+        #expect(state.countText.contains("+") == false)
     }
 
     @Test("a saturated ceiling counts its own rows, so hidden rows still read")

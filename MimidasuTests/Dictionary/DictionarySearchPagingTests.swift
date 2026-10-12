@@ -52,6 +52,17 @@ struct DictionarySearchPagingTests {
         )
     }
 
+    /// `headroom + 1` surname names under `かん`: the NAME twin of the word
+    /// headroom shape, so a name-type-filtered search has a full factory count
+    /// to prove exact. Shared from `headroomBoundNames`, whose start sits safely
+    /// above `DictionaryContent.nameSeqOffset` — see that factory for the
+    /// straddle the word twin's comment records.
+    private func makeHeadroomBoundNamesFixture() throws -> DictionarySearchFixture {
+        try DictionarySearchFixture(
+            extraWords: JMDictFixtureDatabase.headroomBoundNames()
+        )
+    }
+
     @Test("returns every row it found, not just the window")
     func returnsEveryFoundRow() throws {
         // 120 rows, so no stage is ever skipped for want of window space: the
@@ -167,6 +178,60 @@ struct DictionarySearchPagingTests {
         #expect(deep.truncated)
         #expect(deep.saturated == false)
         #expect(deep.matchedCount == narrow.matchedCount)
+    }
+
+    @Test("a common-only search over a headroom-bound population reports an exact total")
+    func commonOnlyOverHeadroomIsExact() throws {
+        // 8001 word rows under `かん`, common on every third offset starting at
+        // 0 — offsets 0, 3, …, 8000, so 2667 common entries, verified against
+        // `bulkWords`' `offset.isMultiple(of: 3)` rule. `かん` prefixes nothing
+        // in the base fixture, so the count is exact. The bounded path keeps
+        // only 8000 survivors and would hide one row the common filter would
+        // have kept; unbounded, all 8001 reach the pre-fetch and the count is
+        // exact rather than a floor.
+        let fixture = try makeHeadroomBoundFixture()
+
+        let outcome = try fixture.outcome("かん", commonOnly: true)
+
+        #expect(outcome.matchedCount == 2667)
+        #expect(outcome.truncated == false)
+        #expect(outcome.saturated == false)
+        #expect(outcome.isFloor == false)
+        #expect(outcome.hits.count == min(outcome.matchedCount, DictionarySearchEngine.maxRows))
+    }
+
+    @Test("a name-type-filtered search over headroom-bound names reports an exact total")
+    func nameTypeFilteredOverHeadroomNamesIsExact() throws {
+        // Headroom + 1 surname names under `かん`, every one carrying the
+        // SURNAME badge through `bulkNames`' `["surname"]` sense — the NAME twin
+        // of the word headroom shape. No base-fixture name starts with `かん`,
+        // so the count is the full factory count. The bounded path keeps 8000
+        // survivors and would hide one row the post-join badge filter would have
+        // kept; unbounded, every candidate row reaches it and the total is exact.
+        let fixture = try makeHeadroomBoundNamesFixture()
+
+        let outcome = try fixture.outcome("かん", scope: .names, nameTypes: ["SURNAME"])
+
+        #expect(outcome.matchedCount == DictionarySearchEngine.prefixFetchHeadroom + 1)
+        #expect(outcome.truncated == false)
+        #expect(outcome.saturated == false)
+        #expect(outcome.isFloor == false)
+    }
+
+    @Test("a JLPT-filtered search over a headroom-bound population is never a floor")
+    func jlptFilteredOverHeadroomIsNeverFloor() throws {
+        // The same 8001 word rows, none carrying a JLPT level — the bulk
+        // factory writes nil throughout — so the N5 filter drops every one and
+        // the answer is empty. The point is the flags, not the zero: unbounded,
+        // no bound ran, so the empty total is exact rather than a floor a wider
+        // window could lift.
+        let fixture = try makeHeadroomBoundFixture()
+
+        let outcome = try fixture.outcome("かん", jlptLevels: [5])
+
+        #expect(outcome.matchedCount == 0)
+        #expect(outcome.truncated == false)
+        #expect(outcome.isFloor == false)
     }
 
     @Test("a common-only search reports a total it can honour, with no floor")

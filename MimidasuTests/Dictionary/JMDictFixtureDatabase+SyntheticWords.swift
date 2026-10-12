@@ -98,6 +98,61 @@ extension JMDictFixtureDatabase {
         )
     }
 
+    /// `count` name-range entries whose kana readings all begin with
+    /// `readingPrefix`, for the filtered-exact-total tests that need a
+    /// headroom-bound NAME population. The readings are the same gojūon pairs
+    /// `bulkWords` writes, so every one is a real word shape; past 46² offsets
+    /// spellings reuse — harmless, because each entry is its own `ent_seq` and
+    /// every count here is a count of entries, not of readings.
+    ///
+    /// Every entry rides at/above `DictionaryContent.nameSeqOffset` with a
+    /// `surname` sense, so the `SURNAME` badge filter keeps all of them — the
+    /// NAME twin of the word headroom shape, in which a bounded scan would hide
+    /// rows the post-join badge filter would have kept and turn the filtered
+    /// total into a floor. The kanji writings sit outside the prefix range, so
+    /// only the kana rows match; `common` is false throughout because names are
+    /// never common, and `jlpt` stays nil because names carry none — mirroring
+    /// the 15668306/15668307 fixture entries and the builder's name-ingest
+    /// path, which writes plain rows with no JLPT enrichment.
+    static func bulkNames(
+        count: Int, readingPrefix: String, startingAt entSeq: Int
+    ) -> [FixtureWord] {
+        let gojuon = Array("あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん")
+        return (0 ..< count).map { offset in
+            let reading = readingPrefix
+                + String(gojuon[(offset / gojuon.count) % gojuon.count])
+                + String(gojuon[offset % gojuon.count])
+            return FixtureWord(
+                id: String(entSeq + offset),
+                kanji: [FixtureKanji(
+                    text: "名\(offset)", common: false, jlptLevel: nil, pitchAccent: nil
+                )],
+                kana: [FixtureKana(
+                    text: reading, common: false, appliesToKanji: nil,
+                    jlptLevel: nil, pitchAccent: nil
+                )],
+                sense: [FixtureSense(
+                    partOfSpeech: ["surname"], appliesToKanji: nil, appliesToKana: nil,
+                    misc: nil, gloss: [FixtureGloss(lang: "eng", text: "bulk name \(offset)")]
+                )]
+            )
+        }
+    }
+
+    /// `prefixFetchHeadroom + 1` name-range entries under `readingPrefix` — one
+    /// row past what the prefix stage's own survivor bound keeps, the NAME twin
+    /// of `headroomBoundWords`. The start sits safely above
+    /// `DictionaryContent.nameSeqOffset` with margin, so no entry straddles the
+    /// word/name boundary the way the old shared start did — see that
+    /// factory's comment for the straddle this avoids.
+    static func headroomBoundNames(readingPrefix: String = "かん") -> [FixtureWord] {
+        bulkNames(
+            count: DictionarySearchEngine.prefixFetchHeadroom + 1,
+            readingPrefix: readingPrefix,
+            startingAt: DictionaryContent.nameSeqOffset + 20000
+        )
+    }
+
     enum SyntheticWords {
         static let all: [FixtureWord] = [
             FixtureWord(

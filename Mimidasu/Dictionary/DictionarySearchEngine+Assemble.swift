@@ -392,6 +392,19 @@ extension DictionarySearchEngine {
     LIMIT ?3
     """
 
+    /// The exact-count variant of the prefix scan: the same range with no
+    /// `LIMIT`, so no scan bound. The ladder reads this while
+    /// `requiresExactCount` holds — the entry-level filters run after the
+    /// `entries`/`senses` joins in `assemble`, and a bounded scan could hide
+    /// rows those filters would have kept, turning the filtered total into a
+    /// floor. Unbounded, every candidate row reaches them and the total is
+    /// exact. `ORDER BY LENGTH(h.text)` stays absent for the same reason as
+    /// above; `headwordRows` sorts the survivors short-first in Swift.
+    static let prefixUnboundedSQL = """
+    SELECT h.entry_id, h.text, h.kind, h.jlpt FROM headwords h
+    WHERE h.text >= ?1 AND h.text < ?2
+    """
+
     /// The gloss stage: the trigram index joined back to `senses` for the matched
     /// text, scoped by `rowid`.
     ///
