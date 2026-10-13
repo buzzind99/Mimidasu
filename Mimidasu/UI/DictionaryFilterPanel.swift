@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The collapsible filter panel behind the dictionary search field's funnel
-/// button: scope + reset, COMMON on its own row, then the match, JLPT, and
-/// name-type rows. Gone entirely while `filtersExpanded` is false, so the
+/// button: scope + reset, then the match, JLPT (+ COMMON), and name-type
+/// rows. Gone entirely while `filtersExpanded` is false, so the
 /// list keeps the room.
 ///
 /// Split from `DictionarySearchView` so both types stay inside the body
@@ -18,7 +18,6 @@ struct DictionaryFilterPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             scopeRow
-            commonRow
             matchRow
             jlptRow
             nameTypeRow
@@ -30,17 +29,6 @@ struct DictionaryFilterPanel: View {
             ScopeBadgePicker(selection: scope)
             Spacer(minLength: 0)
             resetButton
-        }
-    }
-
-    /// COMMON on its own captioned row, matching the Match / JLPT / Names
-    /// rows below. Moved out of the scope row so that slot can carry the
-    /// Reset control instead.
-    private var commonRow: some View {
-        HStack(spacing: 6) {
-            caption("Common")
-            commonOnlyToggle
-            Spacer(minLength: 0)
         }
     }
 
@@ -97,8 +85,9 @@ struct DictionaryFilterPanel: View {
         }
     }
 
-    /// JLPT levels an entry must carry. Disabled under Names — levels describe
-    /// word entries — with the selection kept, so switching back restores it.
+    /// JLPT levels an entry must carry, with COMMON riding the same row past
+    /// a divider. Both describe word entries, so the row disables under
+    /// Names with the selections kept, restoring on the way back.
     private var jlptRow: some View {
         let disabled = state.filters.scope == .names
         return HStack(spacing: 6) {
@@ -125,6 +114,12 @@ struct DictionaryFilterPanel: View {
             ) {
                 clearJLPTLevels()
             }
+            Rectangle()
+                .fill(Theme.secondaryText.opacity(0.4))
+                .frame(width: 1, height: 16)
+                .padding(.horizontal, 2)
+                .accessibilityHidden(true)
+            commonOnlyToggle
             Spacer(minLength: 0)
         }
         .opacity(disabled ? 0.4 : 1)
@@ -225,15 +220,15 @@ struct DictionaryFilterPanel: View {
     }
 
     /// The small leading label each filter row carries, fixed wide so the
-    /// chips line up in one column down the panel. Wide enough for "Common"
-    /// (the double-m makes it the longest caption) and single-line, so no
-    /// caption can ever wrap onto two lines.
+    /// chips line up in one column down the panel. Wide enough for "Match"
+    /// / "Names" (the longest captions) and single-line, so no caption can
+    /// ever wrap onto two lines.
     private func caption(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11, weight: .medium))
             .foregroundStyle(Theme.secondaryText)
             .lineLimit(1)
-            .frame(width: 50, alignment: .leading)
+            .frame(width: 42, alignment: .leading)
     }
 
     private func matchHelp(for group: DictionarySearchFilters.MatchGroup) -> String {
@@ -336,7 +331,9 @@ struct DictionaryFilterPanel: View {
     /// Names are never common in the source data, so "Common only" over Names
     /// is structurally zero rows. `DictionarySearchState` clears the flag on the
     /// way into that scope, so none is left behind reading as a live filter the
-    /// user could switch back off.
+    /// user could switch back off. Lives in the JLPT row past the divider, so
+    /// the row's own dimming covers the disabled state — no local opacity here,
+    /// or Names would double-dim the chip.
     private var commonOnlyToggle: some View {
         let disabled = state.filters.scope == .names
         let selected = state.filters.commonOnly && !disabled
@@ -354,7 +351,6 @@ struct DictionaryFilterPanel: View {
             filters.commonOnly.toggle()
             state.filters = filters
         }
-        .opacity(disabled ? 0.4 : 1)
     }
 }
 
