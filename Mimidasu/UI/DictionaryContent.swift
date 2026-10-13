@@ -149,6 +149,25 @@ enum DictionaryContent {
         return badges
     }
 
+    /// Raw stored `pos` columns → POS groups present (any-sense union), for a
+    /// host that has the tags rather than a whole entry. Word-side tags only;
+    /// name entity types map to nothing. The single home of the POS
+    /// token-split — `DictionarySearchFilters.admitsPOS` delegates here — so
+    /// the engine and any future badge UI read one mapping.
+    static func posGroupsPresent(posTokens: [String?]) -> Set<DictionarySearchFilters.POSGroup> {
+        var groups = Set<DictionarySearchFilters.POSGroup>()
+        for column in posTokens {
+            for token in column?.components(separatedBy: ",") ?? [] {
+                let tag = token.trimmingCharacters(in: .whitespaces)
+                guard !tag.isEmpty else { continue }
+                for group in DictionarySearchFilters.POSGroup.allCases where group.contains(tag: tag) {
+                    groups.insert(group)
+                }
+            }
+        }
+        return groups
+    }
+
     /// A name entry's glosses minus the romanization echo: JMnedict stores
     /// the name itself as the English gloss ("Doku" under どく), which the
     /// romaji line already renders — the case-insensitive match drops, real

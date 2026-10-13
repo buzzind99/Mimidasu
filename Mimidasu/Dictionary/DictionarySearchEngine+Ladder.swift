@@ -184,7 +184,7 @@ extension DictionarySearchEngine {
     /// saturated. The gate reads the pre-join scope predicate rather than the
     /// raw accumulator: rows that will all be filtered out of scope must not
     /// block the retry. Entry-level filters (`requiresExactCount`:
-    /// common-only, JLPT, name types) are invisible pre-join, so a filtered
+    /// common-only, JLPT, name types, POS) are invisible pre-join, so a filtered
     /// search always runs the retry — mirroring `capSaturated`'s refusal.
     /// Romaji input lemmatizes through its converted kana: `tabetai`
     /// converts to たべたい, whose base たべる the headword probes never
@@ -332,8 +332,9 @@ extension DictionarySearchEngine {
     /// `limit`, a wider window re-measures the same rows and saturates
     /// identically, so paging could not un-skip it. A common-only search runs
     /// the remaining stage instead, and publishes no floor it cannot honour.
-    /// The JLPT and name-type filters refuse for the same reason: their levels
-    /// and badges need the `entries`/`senses` joins this probe cannot see.
+    /// The JLPT, name-type, and POS filters refuse for the same reason: their
+    /// levels, badges, and POS groups need the `entries`/`senses` joins this
+    /// probe cannot see.
     static func capSaturated(
         _ rows: [CandidateRow], filters: DictionarySearchFilters, limit: Int, remaining: [Int]
     ) -> Bool {

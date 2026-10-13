@@ -44,6 +44,11 @@ struct DictionarySearchFilters: Equatable, Sendable {
     /// means no filtering; non-names and badgeless names fail while effective.
     /// Mutually exclusive with `jlptLevels` under `.all` — see above.
     var nameTypes: Set<String> = []
+    /// POS groups an entry must carry on at least one sense. Empty means no
+    /// filtering. Word-side: mutually exclusive with `nameTypes` under `.all`
+    /// (the filter panel clears one when the other is set there); coexists
+    /// with `jlptLevels`.
+    var posGroups: Set<POSGroup> = []
 
     /// Which match tier a hit belongs to, for the filter row. Three groups
     /// cover the six tiers: lemma folds into `.exact` because the retry only
@@ -60,6 +65,61 @@ struct DictionarySearchFilters: Equatable, Sendable {
             case .gloss: "Gloss"
             }
         }
+    }
+
+    /// Coarse part-of-speech group. Rule-based over raw JMDict tags, so a
+    /// future upstream tag classifies without a map bump.
+    enum POSGroup: String, Equatable, Hashable, Sendable, CaseIterable {
+        case verb, adjective, noun, adverb, expression
+        case particle, conjunction, interjection, affix
+        case auxiliary, unclassified
+
+        var label: String {
+            switch self {
+            case .verb: "VERB"
+            case .adjective: "ADJECTIVE"
+            case .noun: "NOUN"
+            case .adverb: "ADVERB"
+            case .expression: "EXPRESSION"
+            case .particle: "PARTICLE"
+            case .conjunction: "CONJUNCTION"
+            case .interjection: "INTERJECTION"
+            case .affix: "AFFIX"
+            case .auxiliary: "AUXILIARY"
+            case .unclassified: "UNCLASSIFIED"
+            }
+        }
+
+        /// Whether a raw stored tag belongs to this group. Expects a single
+        /// trimmed lowercase tag (the caller splits the stored comma-joined
+        /// column). Rule-based over the open-ended families (`v*`, `adj*`,
+        /// `adv*`), so a future upstream verb, adjective, or adverb tag
+        /// classifies without a map bump; the closed vocabularies read off
+        /// the exact table below.
+        func contains(tag: String) -> Bool {
+            if let group = Self.exactGroups[tag] {
+                return self == group
+            }
+            return switch self {
+            case .verb: tag.hasPrefix("v")
+            case .adjective: tag.hasPrefix("adj")
+            case .adverb: tag.hasPrefix("adv")
+            case .noun, .expression, .particle, .conjunction, .interjection, .affix, .auxiliary, .unclassified: false
+            }
+        }
+
+        /// The closed-vocabulary tags and the group each belongs to. The
+        /// open-ended families never appear here — no `v*`/`adj*`/`adv*` tag
+        /// has a fixed group (`aux-v`/`aux-adj` start with `aux`, so only the
+        /// exact table claims them) — so the prefix rules above stay the
+        /// single home of future-tag classification.
+        private static let exactGroups: [String: POSGroup] = [
+            "aux-v": .verb, "aux-adj": .adjective,
+            "n": .noun, "n-pref": .noun, "n-suf": .noun, "num": .noun, "pn": .noun,
+            "exp": .expression, "prt": .particle, "conj": .conjunction, "int": .interjection,
+            "pref": .affix, "suf": .affix, "ctr": .affix,
+            "aux": .auxiliary, "cop": .auxiliary, "unc": .unclassified
+        ]
     }
 
     /// Whether `entSeq` falls in this scope. The boundary is the JMnedict
@@ -94,14 +154,21 @@ struct DictionarySearchFilters: Equatable, Sendable {
         !nameTypes.isEmpty && scope != .words
     }
 
-    /// Whether this filter set needs an exact total. The common, JLPT, and
-    /// name-type filters are the ones the pre-join scan cannot see — `common`
-    /// needs the `entries` pre-fetch and levels/badges need the
+    /// Whether the POS selection filters anything. POS describes word entries,
+    /// so the row is moot under Names and the UI disables it there (same as
+    /// JLPT).
+    var filtersPOS: Bool {
+        !posGroups.isEmpty && scope != .names
+    }
+
+    /// Whether this filter set needs an exact total. The common, JLPT,
+    /// name-type, and POS filters are the ones the pre-join scan cannot see —
+    /// `common` needs the `entries` pre-fetch and levels/badges/POS need the
     /// `entries`/`senses` joins — so a search carrying any of them must see
     /// every candidate row to count exactly, and the ladder scans unbounded
     /// while they hold.
     var requiresExactCount: Bool {
-        commonOnly || filtersJLPT || filtersNameTypes
+        commonOnly || filtersJLPT || filtersNameTypes || filtersPOS
     }
 
     /// Whether a JLPT level passes. True when the filter is not effective;
@@ -120,6 +187,85 @@ struct DictionarySearchFilters: Equatable, Sendable {
         guard filtersNameTypes else { return true }
         guard isName else { return false }
         return badges.contains { badge in nameTypes.contains(badge) }
+    }
+
+    /// Whether an entry passes the POS selection (any-sense): true while
+    /// ineffective; while effective at least one sense's token set must
+    /// intersect the selection. Nil/empty token sets fail — names carry name
+    /// types, not word POS, so an active POS selection drops them (same as
+    /// JLPT nil-fails).
+    func admitsPOS(tokens: [String?]) -> Bool {
+        guard filtersPOS else { return true }
+        return !DictionaryContent.posGroupsPresent(posTokens: tokens).isDisjoint(with: posGroups)
+    }
+
+    /// Toggles one JLPT level. Selecting under `.all` clears `nameTypes` —
+    /// JLPT and name types are mutually exclusive there since their
+    /// conjunction can only answer zero rows. POS coexists with JLPT (both
+    /// word-side) and stays untouched. Under `.words`/`.names` the other
+    /// row's selection is merely kept-but-ignored, and stays untouched.
+    mutating func toggleJLPTLevel(_ level: Int) {
+        if jlptLevels.contains(level) {
+            jlptLevels.remove(level)
+        } else {
+            jlptLevels.insert(level)
+            if scope == .all {
+                nameTypes = []
+            }
+        }
+    }
+
+    /// Toggles one name-type badge. Selecting under `.all` clears
+    /// `jlptLevels` and `posGroups` — both word-side, both mutually exclusive
+    /// with name types there. Under `.words`/`.names` the other selections
+    /// stay untouched.
+    mutating func toggleNameType(_ badge: String) {
+        if nameTypes.contains(badge) {
+            nameTypes.remove(badge)
+        } else {
+            nameTypes.insert(badge)
+            if scope == .all {
+                jlptLevels = []
+                posGroups = []
+            }
+        }
+    }
+
+    /// Toggles one POS group. Selecting under `.all` clears `nameTypes` —
+    /// POS and name types are mutually exclusive there. JLPT coexists with
+    /// POS (both word-side) and stays untouched. Under `.words`/`.names`
+    /// the other selection stays untouched.
+    mutating func togglePOS(_ group: POSGroup) {
+        if posGroups.contains(group) {
+            posGroups.remove(group)
+        } else {
+            posGroups.insert(group)
+            if scope == .all {
+                nameTypes = []
+            }
+        }
+    }
+
+    /// Moves to a new scope, clearing the side that was kept-but-ignored
+    /// when entering `.all`: from `.words` the name types clear (POS/JLPT
+    /// stay); from `.names` JLPT and POS clear (name types win); from `.all`
+    /// nothing clears. Leaving `.all` or moving between `.words` and
+    /// `.names` clears nothing — the kept selection restores on return, and
+    /// a single-scope predicate cannot form the empty conjunction.
+    mutating func setScope(_ newScope: Scope) {
+        let leaving = scope
+        scope = newScope
+        if newScope == .all {
+            switch leaving {
+            case .words:
+                nameTypes = []
+            case .names:
+                jlptLevels = []
+                posGroups = []
+            case .all:
+                break
+            }
+        }
     }
 }
 
@@ -230,10 +376,10 @@ struct DictionarySearchOutcome: Equatable, Sendable {
     /// window *can* be measured pre-join — but it is still refused, because
     /// `capSaturated` measures tiers only and cannot see `common` at all, so
     /// a window full of uncommon rows would read as full and hide the common
-    /// ones behind it. The JLPT and name-type filters refuse for the same
-    /// reason (their levels and badges need joins the probe cannot see). Such
-    /// a search runs every stage and this is `false` — its total is exact,
-    /// not a floor.
+    /// ones behind it. The JLPT, name-type, and POS filters refuse for the
+    /// same reason (their levels, badges, and POS groups need joins the
+    /// probe cannot see). Such a search runs every stage and this is `false`
+    /// — its total is exact, not a floor.
     let saturated: Bool
 
     /// A headword scan hit one of its own bounds — `prefixScanCeiling`, which

@@ -46,10 +46,11 @@ extension DictionarySearchEngine {
     /// filters on the pre-fetched flag, and the window is cut *before* the
     /// `headwords` join — every input to the ranking decision is available
     /// pre-join, so cutting there is lossless and skips the join for every row
-    /// that will not be shown. The JLPT and name-type filters run after the
-    /// common filter over the full survivor set instead: their levels and
-    /// badges need the `entries`/`senses` joins, so the window is cut only once
-    /// they have run and the fetched metadata is reused for the rows on screen.
+    /// that will not be shown. The JLPT, name-type, and POS filters run after
+    /// the common filter over the full survivor set instead: their levels,
+    /// badges, and POS groups need the `entries`/`senses` joins, so the window
+    /// is cut only once they have run and the fetched metadata is reused for
+    /// the rows on screen.
     ///
     /// Note what is *not* here: the caller's window. Every row the stages
     /// found is ranked and counted, up to `maxRows` built — the window is the
@@ -75,7 +76,7 @@ extension DictionarySearchEngine {
         let commonKept = filters.commonOnly
             ? scored.filter { candidate in candidate.common }
             : scored
-        guard filters.filtersJLPT || filters.filtersNameTypes else {
+        guard filters.filtersJLPT || filters.filtersNameTypes || filters.filtersPOS else {
             let kept = rank(dropSpuriousUnwrap(commonKept))
             // Every ranking key is decided above, so the window is cut here and the
             // `headwords` join runs for these rows alone.
@@ -94,7 +95,9 @@ extension DictionarySearchEngine {
         // count below is the post-filter count, and the window build reuses
         // what was fetched here instead of reading it twice.
         let fullMetadata = try entryMetadata(for: commonKept.map(\.entryID), db: db)
-        let fullNameTokens = try namePosTokens(forEntryIDs: commonKept.map(\.entryID), db: db)
+        let tokens = try filterTokens(for: commonKept, filters: filters, db: db)
+        let fullPosTokens = tokens.pos
+        let fullNameTokens = tokens.name
         let filtered = commonKept.filter { candidate in
             guard let meta = fullMetadata[candidate.entryID] else { return false }
             guard filters.admits(jlpt: candidate.row.jlpt ?? meta.jlpt) else { return false }
@@ -104,6 +107,7 @@ extension DictionarySearchEngine {
                     posTokens: fullNameTokens[candidate.entryID] ?? []
                 )
             ) else { return false }
+            guard filters.admitsPOS(tokens: fullPosTokens[candidate.entryID] ?? []) else { return false }
             return true
         }
         let kept = rank(dropSpuriousUnwrap(filtered))
@@ -116,6 +120,38 @@ extension DictionarySearchEngine {
             ),
             matchedCount: kept.count, saturated: saturated, truncated: truncated
         )
+    }
+
+    /// The post-join `pos` columns for the POS and name-type predicates.
+    /// Words carry no name tokens, so the two fetches differ while POS stands
+    /// alone — and the POS fetch is skipped entirely unless the selection is
+    /// effective, so JLPT/name-only searches pay no extra join.
+    static func filterTokens(
+        for candidates: [ScoredRow], filters: DictionarySearchFilters, db: SQLiteDatabase
+    ) throws -> (pos: [Int: [String?]], name: [Int: [String?]]) {
+        if filters.filtersPOS, filters.filtersNameTypes {
+            // Both effective (the panel prevents this under All, but the model
+            // allows it): one join over all survivors, split for the two
+            // predicates — a second scan of the same name rows would buy
+            // nothing.
+            let all = try sensePosTokens(forEntryIDs: candidates.map(\.entryID), db: db)
+            return (all, all.filter { pair in pair.key >= DictionaryContent.nameSeqOffset })
+        } else if filters.filtersPOS {
+            // Names carry entity types, never word POS, so they fail the POS
+            // predicate through the missing key and need no fetch — this skips
+            // the name block of `senses`. Name badges are unneeded too: with
+            // name types ineffective `admitsName` passes, and no name survives
+            // POS, so hits carry no name tokens.
+            let pos = try sensePosTokens(
+                forEntryIDs: candidates.map(\.entryID).filter { entryID in
+                    entryID < DictionaryContent.nameSeqOffset
+                },
+                db: db
+            )
+            return (pos, [:])
+        } else {
+            return try ([:], namePosTokens(forEntryIDs: candidates.map(\.entryID), db: db))
+        }
     }
 
     /// Builds the window's hits from already-joined metadata: the preview join
@@ -295,12 +331,26 @@ extension DictionarySearchEngine {
     static func namePosTokens(
         forEntryIDs entryIDs: [Int], db: SQLiteDatabase
     ) throws -> [Int: [String?]] {
-        let nameIDs = entryIDs.filter { entryID in
-            entryID >= DictionaryContent.nameSeqOffset
-        }
-        guard !nameIDs.isEmpty else { return [:] }
+        try sensePosTokens(
+            forEntryIDs: entryIDs.filter { entryID in
+                entryID >= DictionaryContent.nameSeqOffset
+            },
+            db: db
+        )
+    }
+
+    /// Every sense's raw `pos` column per entry, in sense order, over any id
+    /// set — the POS filter's input. Split from `namePosTokens(forEntryIDs:)`,
+    /// which stays names-only for badge display: this covers word entries too,
+    /// but feeds the post-join predicate alone, never a hit, so the hit's
+    /// word-entries-carry-no-tokens contract stands. Same statement as the
+    /// name fetch (`namePosSQL`), a wider id set — no new SQL.
+    static func sensePosTokens(
+        forEntryIDs entryIDs: [Int], db: SQLiteDatabase
+    ) throws -> [Int: [String?]] {
+        guard !entryIDs.isEmpty else { return [:] }
         var out: [Int: [String?]] = [:]
-        for chunk in chunks(nameIDs, size: entryChunkSize) {
+        for chunk in chunks(entryIDs, size: entryChunkSize) {
             try checkCancellation()
             let statement = try db.statement(namePosSQL(count: chunk.count))
             bind(chunk, to: statement)
