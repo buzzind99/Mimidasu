@@ -55,6 +55,25 @@ struct DictionarySearchFilterStateTests {
         #expect(fixture.state.filters.nameTypes == ["SURNAME"])
     }
 
+    @Test("scope change keeps the POS selection but disables its effect under Names")
+    func scopeChangeKeepsPOS() throws {
+        let fixture = try makeState()
+        fixture.state.filters = DictionarySearchFilters(posGroups: [.verb])
+
+        fixture.state.filters.scope = .names
+
+        #expect(fixture.state.filters.posGroups == [.verb])
+        #expect(fixture.state.filters.filtersPOS == false)
+    }
+
+    @Test("a POS selection filters under Words")
+    func posFiltersUnderWords() throws {
+        let fixture = try makeState()
+        fixture.state.filters = DictionarySearchFilters(scope: .words, posGroups: [.noun])
+
+        #expect(fixture.state.filters.filtersPOS)
+    }
+
     @Test("entering Names clears COMMON on scope change")
     func enteringNamesClearsCommonOnScopeChange() throws {
         let fixture = try makeState()
