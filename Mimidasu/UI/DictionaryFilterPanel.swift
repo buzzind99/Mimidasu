@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The collapsible filter panel behind the dictionary search field's funnel
-/// button: scope + reset, then the match, JLPT (+ COMMON), and name-type
+/// button: scope + reset, then the match, JLPT (+ COMMON), POS, and name-type
 /// rows. Gone entirely while `filtersExpanded` is false, so the
 /// list keeps the room.
 ///
@@ -11,15 +11,19 @@ import SwiftUI
 struct DictionaryFilterPanel: View {
     let state: DictionarySearchState
     /// The Names row's disclosure. Local chrome state, not a search filter:
-    /// the panel itself is torn down with the close, so this always returns
-    /// to collapsed — which is the specified default.
+    /// the panel is torn down whenever `filtersExpanded` flips false (and
+    /// with the close), so this always returns to collapsed — which is the
+    /// specified default.
     @State private var namesExpanded = false
+    /// The POS row's disclosure. Same chrome-state contract as above.
+    @State private var posExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             scopeRow
             matchRow
             jlptRow
+            posRow
             nameTypeRow
         }
     }
@@ -38,7 +42,7 @@ struct DictionaryFilterPanel: View {
     /// disabled it wears neither the hover wash nor the link cursor.
     private var resetButton: some View {
         // Raw equality is the right read here: a kept-but-ignored selection
-        // (JLPT under Names, name types under Words) only exists alongside a
+        // (JLPT/POS under Names, name types under Words) only exists alongside a
         // non-default scope, which narrows on its own — so Reset is never
         // enabled over a search identical to the defaults.
         let isDefault = state.filters == DictionarySearchFilters()
@@ -135,7 +139,9 @@ struct DictionaryFilterPanel: View {
     private var nameTypeRow: some View {
         let disabled = state.filters.scope == .words
         return HStack(alignment: .top, spacing: 6) {
-            caption("Names")
+            // Same vertical padding as the POS caption below: the box matches
+            // a chip's height so the text centers on the first chip line.
+            caption("Names").padding(.vertical, 3)
             FlowLayout(
                 spacing: 6, lineSpacing: 6,
                 fingerprint: nameFingerprint
@@ -168,6 +174,102 @@ struct DictionaryFilterPanel: View {
         }
         .opacity(disabled ? 0.4 : 1)
         .help("Name types apply to name entries")
+    }
+
+    /// POS groups an entry must carry. Disabled under Names — POS describes
+    /// word entries — with the selection kept, mirroring the JLPT row.
+    /// Collapsible: eleven groups never fit one line, so the collapsed row
+    /// shows only the pinned VERB / ADJECTIVE / NOUN / ADVERB chips (plus any
+    /// active selection the pins would hide, plus All), with a chevron flowing
+    /// right after the last badge toggling the full list.
+    private var posRow: some View {
+        let disabled = state.filters.scope == .names
+        return HStack(alignment: .top, spacing: 6) {
+            // The caption wears the badge chips' own vertical padding, so its
+            // box matches a chip's height and the text centers inside it — on
+            // the first chip line in both states, like the Match/JLPT rows.
+            // A conditional HStack alignment instead visibly jumps the caption
+            // on expand; top alignment never moves it, the list only grows
+            // downward.
+            caption("POS").padding(.vertical, 3)
+            FlowLayout(spacing: 6, lineSpacing: 6, fingerprint: posFingerprint) {
+                ForEach(visiblePOSGroups, id: \.self) { group in
+                    FilterBadgeButton(
+                        text: group.label,
+                        selected: state.filters.posGroups.contains(group),
+                        selectedColor: Theme.brandViolet,
+                        disabled: disabled,
+                        help: "Only \(group.label) entries",
+                        accessibility: "\(group.label) only"
+                    ) {
+                        togglePOS(group)
+                    }
+                }
+                FilterBadgeButton(
+                    text: "All",
+                    selected: state.filters.posGroups.isEmpty,
+                    selectedColor: Theme.brandViolet,
+                    disabled: disabled,
+                    help: "All parts of speech",
+                    accessibility: "All parts of speech"
+                ) {
+                    clearPOS()
+                }
+                posDisclosureButton
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .opacity(disabled ? 0.4 : 1)
+        .help("POS groups apply to word entries")
+    }
+
+    /// The pinned chips the collapsed POS row keeps, in display order:
+    /// verb, adjective, noun, adverb.
+    private static let pinnedPOSGroups: [DictionarySearchFilters.POSGroup] = [.verb, .adjective, .noun, .adverb]
+
+    /// The group chips on screen now. Collapsed: the pins in pinned order,
+    /// plus any selected group the pins would otherwise hide — a live filter
+    /// must never vanish behind the disclosure — in `POSGroup.allCases`
+    /// order. Expanded: all.
+    private var visiblePOSGroups: [DictionarySearchFilters.POSGroup] {
+        guard !posExpanded else { return DictionarySearchFilters.POSGroup.allCases }
+        let selected = state.filters.posGroups
+        let extras = DictionarySearchFilters.POSGroup.allCases.filter { group in
+            selected.contains(group) && !Self.pinnedPOSGroups.contains(group)
+        }
+        return Self.pinnedPOSGroups + extras
+    }
+
+    /// Keys the `FlowLayout` cache on what it lays out: the disclosure state,
+    /// the chips on screen, and the selection (which recolors them).
+    private var posFingerprint: String {
+        let expanded = posExpanded ? "open" : "shut"
+        let visible = visiblePOSGroups.map(\.label).joined(separator: "\n")
+        let selected = state.filters.posGroups.map(\.label).sorted().joined(separator: "\n")
+        return "\(expanded)\n\(visible)\n\(selected)"
+    }
+
+    /// The chevron toggling the POS row. A child of the flow, so it sits
+    /// right after the last badge rather than pinned to the window's
+    /// trailing edge. Chrome, not a filter, so it stays enabled while the
+    /// chips themselves are disabled under Names.
+    private var posDisclosureButton: some View {
+        Button {
+            posExpanded.toggle()
+        } label: {
+            Image(systemName: posExpanded ? "chevron.up" : "chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Theme.secondaryText)
+                .frame(width: 20, height: 20)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
+        .hoverHighlight(Circle())
+        .help(posExpanded ? "Collapse parts of speech" : "Show all parts of speech")
+        // No expanded trait exists in SwiftUI — the label itself carries the
+        // state, the same pattern the row chevrons use.
+        .accessibilityLabel(posExpanded ? "Collapse parts of speech" : "Show all parts of speech")
     }
 
     /// The pinned chips the collapsed Names row keeps, in display order:
@@ -258,18 +360,9 @@ struct DictionaryFilterPanel: View {
 
     private func toggleJLPTLevel(_ level: Int) {
         var filters = state.filters
-        if filters.jlptLevels.contains(level) {
-            filters.jlptLevels.remove(level)
-        } else {
-            filters.jlptLevels.insert(level)
-            // JLPT and name types are mutually exclusive under All — their
-            // conjunction answers zero rows — so setting one clears the
-            // other. Under Words/Names the other row's selection is merely
-            // kept-but-ignored, and stays untouched.
-            if filters.scope == .all {
-                filters.nameTypes = []
-            }
-        }
+        // JLPT coexists with POS (both word-side); only name types clear.
+        // See `DictionarySearchFilters.toggleJLPTLevel`.
+        filters.toggleJLPTLevel(level)
         state.filters = filters
     }
 
@@ -281,15 +374,9 @@ struct DictionaryFilterPanel: View {
 
     private func toggleNameType(_ badge: String) {
         var filters = state.filters
-        if filters.nameTypes.contains(badge) {
-            filters.nameTypes.remove(badge)
-        } else {
-            filters.nameTypes.insert(badge)
-            // Mirror of the JLPT toggle above: mutually exclusive under All.
-            if filters.scope == .all {
-                filters.jlptLevels = []
-            }
-        }
+        // See `DictionarySearchFilters.toggleNameType` for the mutual
+        // clearing under All.
+        filters.toggleNameType(badge)
         state.filters = filters
     }
 
@@ -299,30 +386,36 @@ struct DictionaryFilterPanel: View {
         state.filters = filters
     }
 
+    private func togglePOS(_ group: DictionarySearchFilters.POSGroup) {
+        var filters = state.filters
+        // See `DictionarySearchFilters.togglePOS` for the mutual clearing
+        // under All (name types clear; JLPT coexists and stays).
+        filters.togglePOS(group)
+        state.filters = filters
+    }
+
+    private func clearPOS() {
+        var filters = state.filters
+        filters.posGroups = []
+        state.filters = filters
+    }
+
     private var scope: Binding<DictionarySearchFilters.Scope> {
         Binding(
             get: { state.filters.scope },
             set: { newValue in
                 var filters = state.filters
-                let leaving = filters.scope
-                filters.scope = newValue
                 // Nothing to clear here: `DictionarySearchState.filters`
                 // normalizes COMMON away under Names on the way in, for every
                 // writer, so the chip below can never be left reading live
                 // over a scope that can never satisfy it.
                 //
                 // Entering All can reunite two selections the scoped rows kept
-                // apart: JLPT picked under Words plus name types kept under
-                // Words (or vice versa under Names). The side that was live in
-                // the scope being left wins; the kept-but-ignored side clears,
-                // so All never lands in the provably-empty conjunction.
-                if newValue == .all {
-                    switch leaving {
-                    case .words: filters.nameTypes = []
-                    case .names: filters.jlptLevels = []
-                    case .all: break
-                    }
-                }
+                // apart — see `DictionarySearchFilters.setScope`: the side that
+                // was live in the scope being left wins; the kept-but-ignored
+                // side clears, so All never lands in the provably-empty
+                // conjunction.
+                filters.setScope(newValue)
                 state.filters = filters
             }
         )
@@ -357,10 +450,12 @@ struct DictionaryFilterPanel: View {
 /// One toggle chip in the search filter panel: the shared
 /// `DictionaryBadgeView` reading unselected in grey and selected in the
 /// row's semantic color — pink for match tiers, green for COMMON, purple
-/// for JLPT and name types — so a live filter wears exactly the color its
-/// result badges wear. Offers the link cursor while enabled, like every
-/// other control in the panel. File-level rather than nested so the panel's
-/// rows stay out of the type-body budget.
+/// for JLPT, POS, and name types — so a live filter wears the row color its
+/// result badges wear (POS has no search-row badge; its sense pills wear
+/// pink, while the violet chip marks it word-side like JLPT). Offers the
+/// link cursor while enabled, like every other control in the panel.
+/// File-level rather than nested so the panel's rows stay out of the
+/// type-body budget.
 private struct FilterBadgeButton: View {
     let text: String
     let selected: Bool
