@@ -5,6 +5,7 @@ import SwiftUI
 /// navigation chrome. Buttons highlight pink on hover; appearance segments use
 /// a neutral wash.
 struct SettingsView: View {
+    private static let writeReviewURLString = "https://apps.apple.com/app/id6813053867?action=write-review"
     @Bindable private var model: AppModel
     @Bindable private var settings: TranslationSettings
     @AppearanceSetting private var appearance
@@ -142,6 +143,24 @@ struct SettingsView: View {
             appearanceCard
             modelCard
             sessionCard
+            HStack {
+                Spacer()
+                if let writeReviewURL = URL(string: Self.writeReviewURLString) {
+                    Link("Rate Mimidasu on the App Store", destination: writeReviewURL)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.secondaryText)
+                        .multilineTextAlignment(.center)
+                        .accessibilityHint("Opens the App Store review page for Mimidasu")
+                        .help("Opens the App Store review page for Mimidasu")
+                        // pointerStyle needs a hover-tracking view; the no-op
+                        // onHover activates it (same as ToastStackView).
+                        .onHover { _ in }
+                        .pointerStyle(.link)
+                        .padding(.vertical, 4)
+                }
+                Spacer()
+            }
+            .padding(.top, 4)
         }
         .frame(maxWidth: 480)
         .frame(maxWidth: .infinity)
