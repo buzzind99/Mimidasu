@@ -30,13 +30,14 @@ final class DictionarySearchFixture {
         limit: Int = DictionarySearchEngine.pageSize,
         matchGroups: Set<DictionarySearchFilters.MatchGroup> = Set(DictionarySearchFilters.MatchGroup.allCases),
         jlptLevels: Set<Int> = [],
-        nameTypes: Set<String> = []
+        nameTypes: Set<String> = [],
+        posGroups: Set<DictionarySearchFilters.POSGroup> = []
     ) throws -> DictionarySearchOutcome {
         try engine.search(
             query,
             filters: DictionarySearchFilters(
                 scope: scope, commonOnly: commonOnly, matchGroups: matchGroups,
-                jlptLevels: jlptLevels, nameTypes: nameTypes
+                jlptLevels: jlptLevels, nameTypes: nameTypes, posGroups: posGroups
             ),
             limit: limit
         )

@@ -183,6 +183,115 @@ final class DictionarySearchFilterTests {
         #expect(filtered.isFloor == false)
     }
 
+    @Test("labels every POS group")
+    func posGroupLabels() {
+        #expect(DictionarySearchFilters.POSGroup.allCases.map(\.label) == [
+            "VERB", "ADJECTIVE", "NOUN", "ADVERB", "EXPRESSION",
+            "PARTICLE", "CONJUNCTION", "INTERJECTION", "AFFIX",
+            "AUXILIARY", "UNCLASSIFIED"
+        ])
+        #expect(Set(DictionarySearchFilters.POSGroup.allCases.map(\.label)).count == 11)
+    }
+
+    @Test("maps raw tags to POS groups", arguments: zip(
+        ["v5s", "adj-i", "n", "pn", "exp", "prt", "conj", "int", "ctr", "cop", "unc", "adv-to", "aux-v"],
+        [
+            DictionarySearchFilters.POSGroup.verb, .adjective, .noun, .noun, .expression,
+            .particle, .conjunction, .interjection, .affix, .auxiliary, .unclassified,
+            .adverb, .verb
+        ]
+    ))
+    func posGroupMapping(tag: String, group: DictionarySearchFilters.POSGroup) {
+        #expect(DictionaryContent.posGroupsPresent(posTokens: [tag]) == [group])
+    }
+
+    @Test("maps no name entity type to any POS group", arguments: ["surname", "given", "place"])
+    func posGroupMappingIgnoresNameTypes(tag: String) {
+        #expect(DictionaryContent.posGroupsPresent(posTokens: [tag]).isEmpty)
+    }
+
+    @Test("admitsPOS matches any sense and fails empty token sets while effective")
+    func admitsPOSAnySense() {
+        var verb = DictionarySearchFilters()
+        verb.posGroups = [.verb]
+        var noun = DictionarySearchFilters()
+        noun.posGroups = [.noun]
+        var adverb = DictionarySearchFilters()
+        adverb.posGroups = [.adverb]
+
+        #expect(verb.admitsPOS(tokens: ["n,vs,vt"]))
+        #expect(noun.admitsPOS(tokens: ["n,vs,vt"]))
+        #expect(!adverb.admitsPOS(tokens: ["n,vs,vt"]))
+        #expect(!verb.admitsPOS(tokens: []))
+        #expect(!verb.admitsPOS(tokens: [nil]))
+        #expect(DictionarySearchFilters().admitsPOS(tokens: []))
+        #expect(DictionarySearchFilters().admitsPOS(tokens: [nil]))
+    }
+
+    @Test("a POS selection is ignored under Names")
+    func posIgnoredUnderNames() throws {
+        let unfiltered = try fixture.outcome("あめ", scope: .names)
+        let filtered = try fixture.outcome("あめ", scope: .names, posGroups: [.verb])
+
+        #expect(filtered.hits.map(\.entSeq) == unfiltered.hits.map(\.entSeq))
+        #expect(filtered.matchedCount == unfiltered.matchedCount)
+        #expect(filtered.isFloor == false)
+        #expect(DictionarySearchFilters(scope: .names, posGroups: [.verb]).filtersPOS == false)
+    }
+
+    @Test("a POS selection drops names under All")
+    func posFilterDropsNames() throws {
+        let unfiltered = try fixture.outcome("あめむら")
+
+        #expect(unfiltered.hits.map(\.entSeq) == [9_990_100, 15_668_307])
+
+        let filtered = try fixture.outcome("あめむら", posGroups: [.noun])
+
+        #expect(filtered.hits.map(\.entSeq) == [9_990_100])
+        #expect(filtered.matchedCount == 1)
+        #expect(filtered.isFloor == false)
+    }
+
+    @Test("a verb-only search keeps the verb homograph and drops the noun one")
+    func posFilterNarrowsHomographs() throws {
+        let posFixture = try DictionarySearchFixture(extraWords: Self.posHomographs)
+        let unfiltered = try posFixture.outcome("ぽすも")
+
+        #expect(unfiltered.hits.map(\.entSeq) == [9_990_185, 9_990_186])
+        #expect(unfiltered.matchedCount == 2)
+        #expect(unfiltered.isFloor == false)
+
+        // The verb assertion below pins on the stored tag, not just the
+        // fixture definition above: word hits carry no `pos` tokens.
+        let database = try SQLiteDatabase(path: posFixture.url.path)
+        defer { database.close() }
+        let statement = try database.statement("SELECT pos FROM senses WHERE entry_id = ? ORDER BY ord")
+        DictionarySearchEngine.bind([9_990_185], to: statement)
+        var verbColumns: [String?] = []
+        while try statement.step() {
+            verbColumns.append(statement.optionalText(0))
+        }
+        #expect(!DictionaryContent.posGroupsPresent(posTokens: verbColumns).isDisjoint(with: [.verb]))
+
+        let verbs = try posFixture.outcome("ぽすも", posGroups: [.verb])
+
+        #expect(verbs.hits.map(\.entSeq) == [9_990_185])
+        #expect(verbs.matchedCount == 1)
+        #expect(verbs.isFloor == false)
+
+        let nouns = try posFixture.outcome("ぽすも", posGroups: [.noun])
+
+        #expect(nouns.hits.map(\.entSeq) == [9_990_186])
+        #expect(nouns.matchedCount == 1)
+        #expect(nouns.isFloor == false)
+
+        let either = try posFixture.outcome("ぽすも", posGroups: [.verb, .noun])
+
+        #expect(either.hits.map(\.entSeq) == [9_990_185, 9_990_186])
+        #expect(either.matchedCount == 2)
+        #expect(either.isFloor == false)
+    }
+
     @Test("names the searches that need an exact total")
     func requiresExactCount() {
         #expect(DictionarySearchFilters().requiresExactCount == false)
@@ -194,6 +303,9 @@ final class DictionarySearchFilterTests {
         #expect(DictionarySearchFilters(scope: .names, nameTypes: ["SURNAME"]).requiresExactCount)
         #expect(DictionarySearchFilters(scope: .words, nameTypes: ["SURNAME"]).requiresExactCount == false)
         #expect(DictionarySearchFilters(matchGroups: []).requiresExactCount == false)
+        #expect(DictionarySearchFilters(posGroups: [.verb]).requiresExactCount)
+        #expect(DictionarySearchFilters(scope: .words, posGroups: [.noun]).requiresExactCount)
+        #expect(DictionarySearchFilters(scope: .names, posGroups: [.verb]).requiresExactCount == false)
     }
 
     @Test("saturation counts only the entries an enabled tier will render")
@@ -231,9 +343,41 @@ final class DictionarySearchFilterTests {
         let explicit = try fixture.outcome(
             "あめ",
             matchGroups: Set(DictionarySearchFilters.MatchGroup.allCases),
-            jlptLevels: [], nameTypes: []
+            jlptLevels: [], nameTypes: [], posGroups: []
         )
 
         #expect(plain == explicit)
     }
+
+    /// Two kana-only homographs sharing the reading ぽすも: a verb
+    /// (`v1,vt`) and a noun (`n`), so the POS engine tests can pin
+    /// narrowing on entries the suite itself owns.
+    private static let posHomographs: [JMDictFixtureDatabase.FixtureWord] = [
+        JMDictFixtureDatabase.FixtureWord(
+            id: "9990185",
+            kanji: nil,
+            kana: [JMDictFixtureDatabase.FixtureKana(
+                text: "ぽすも", common: false, appliesToKanji: nil,
+                jlptLevel: nil, pitchAccent: nil
+            )],
+            sense: [JMDictFixtureDatabase.FixtureSense(
+                partOfSpeech: ["v1", "vt"], appliesToKanji: nil, appliesToKana: nil,
+                misc: nil,
+                gloss: [JMDictFixtureDatabase.FixtureGloss(lang: "eng", text: "to posmo")]
+            )]
+        ),
+        JMDictFixtureDatabase.FixtureWord(
+            id: "9990186",
+            kanji: nil,
+            kana: [JMDictFixtureDatabase.FixtureKana(
+                text: "ぽすも", common: false, appliesToKanji: nil,
+                jlptLevel: nil, pitchAccent: nil
+            )],
+            sense: [JMDictFixtureDatabase.FixtureSense(
+                partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil,
+                misc: nil,
+                gloss: [JMDictFixtureDatabase.FixtureGloss(lang: "eng", text: "a posmo")]
+            )]
+        )
+    ]
 }
