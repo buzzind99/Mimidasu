@@ -10,9 +10,11 @@ framework — or Apple Intelligence's high-fidelity strategy where installed —
 or an optional cloud provider (Google Translate, DeepL, OpenRouter) behind
 the same engine seam. Ruby
 annotations (romaji/furigana) and tap-to-lookup dictionary entries come
-from a bundled IPADIC tokenizer plus a pinned JMDict/JMnedict SQLite DB.
-Starred words persist to a searchable favorites list and render highlighted
-wherever Japanese text is shown.
+from a bundled IPADIC tokenizer plus a pinned JMDict/JMnedict SQLite DB,
+which also powers a full-dictionary search (Japanese / romaji / English
+gloss) in a two-mode reference window. Starred words persist to a
+searchable favorites list and render highlighted wherever Japanese text is
+shown.
 
 ## System overview
 
@@ -53,9 +55,16 @@ Sidecars off the main flow:
   verify, and download the chosen GGUF.
 - **ReadingAnnotator + DictionaryStore + JMDictLookup** — ruby annotation
   and tap-to-lookup over the tokenizer and dictionary DBs.
+- **DictionarySearchEngine (+ FTS5 gloss index)** — full-dictionary search
+  behind the reference window's Dictionary mode: a staged candidate ladder
+  over the same prepared DB (exact / prefix / lemma-retry / gloss), with
+  scope, match-tier, JLPT, POS, and name-type filters.
 - **FavoritesStore / FavoritesDatabase / FavoritesPromotion** — starred
   words: SQLite persistence, transcript highlight matching, favorite-first
   lookup ranking.
+- **RetranslateEngine + AppModel re-translate lane** — manual per-row
+  re-translate of a finalized sentence through a user-selected engine
+  (dedicated Apple sessions, serialized lane, provenance stamps).
 - **SessionExporter** — TXT / SRT / VTT / JSON.
 - **ToastCenter / NoticeCenter** — every error/status surface.
 
@@ -80,30 +89,44 @@ packaged apps in `Contents/Frameworks/`.
   System Settings.
 - Failure: device death / tap removal listeners emit `.captureLost`
   (Restart toast); unreadable formats emit `.formatUnavailable`; output
-  rate changes rebuild the converter live.
+  rate changes rebuild the converter live. `AudioCaptureHAL` owns the tap /
+  aggregate / IOProc IDs and property listeners behind single-claim
+  teardown (so `stop`, `deinit`, and dead-device paths can't
+  double-destroy); `ProcessTapFactory` builds the tap + aggregate pair;
+  `AudioLevels` shares the RMS math and the −60 dBFS silence floor used by
+  the no-audio watchdog and the ASR backstop.
 
 ### CrispASREngine (`ASR/`)
 - Swift wrapper over dlopen'd `libcrispasr.dylib` (stable C session ABI;
   vendored headers in `native/include/crispasr/`). The backend
   (`sensevoice` / `funasr`) is detected from the GGUF header — a property
-  of the chosen model, not the build.
+  of the chosen model, not the build — with a filename fallback when the
+  detection symbol is missing or unparsable.
 - The backends have no cache-aware streaming, so the sliding window lives
   in Swift: a rolling utterance buffer (12 s forced-final cap) plus a 10 s
   window for partial decodes.
 - **FireRedVAD** runs every 500 ms on its own queue and is the
-  authoritative speech signal: it gates partial decodes, finalizes an
-  utterance after ~800 ms of confirmed silence, and speechless buffers are
-  discarded without decoding. A cheap per-chunk RMS check is only a
-  backstop (and covers degraded mode when the VAD model is unavailable).
+  authoritative speech signal: it gates partial decodes, and 1.0 s of
+  analyzed audio past the last VAD speech span end finalizes the utterance
+  (the VAD's own internal span-closing silence is 800 ms; speechless
+  buffers are discarded without decoding). A cheap per-chunk RMS check is
+  only a backstop (and covers degraded mode when the VAD model is
+  unavailable).
 - 1 s-step window decodes post `.partial` (HUD draft); the endpoint
   redecodes the buffered utterance PCM and posts one clean `.final`.
-- Lifecycle: `prepare` (dlsym + GPU backend + session open) → `openStream`
-  → `push` per chunk → `poll` from a 60 ms timer → `finish` (drain + final
-  flush) → session close. Decodes run on a dedicated serial queue so
-  `poll` never blocks behind a multi-second decode; teardown is strictly
-  ordered (capture stop → finish/drain → close).
+- Lifecycle: symbol binding happens once at engine init (`CrispASRLibrary`);
+  `prepare` reuses a warm open session and skips the GGUF reload →
+  `openStream` → `push` per chunk → `poll` from a 60 ms timer → `finish`
+  (drain + final flush; the session **stays warm**). `close()` runs only
+  when the factory retires the engine (model swap or quit). Decodes run on
+  a dedicated serial queue so `poll` never blocks behind a multi-second
+  decode; teardown is strictly ordered (capture stop → finish/drain →
+  close).
 - `ASREngine` protocol + factory: CrispASR when the runtime and model
-  resolve, otherwise the labeled mock transcriber.
+  resolve, otherwise the labeled mock transcriber (finals only, RMS-gated,
+  randomized speech cadence). The factory holds a path-keyed warm-engine
+  cache, a `retired` latch, and a runtime-poison latch for a leaked
+  `close()`; a quit-time shutdown frees the VAD cache.
 
 ### SentenceBuffer (`Session/`)
 - Streaming ja ASR routinely drops punctuation, so boundaries are 3-tier:
@@ -126,49 +149,85 @@ packaged apps in `Contents/Frameworks/`.
 
 ### Translation (`Translation/`)
 - **Seam:** `TranslationEngine` — ordered batch `translate`, `preferredBatchSize`,
-  optional `onRetry`, typed error taxonomy. `TranslationQueue.run(with:)`
+  optional `onRetry`, a `transientBadResponse` flag (do malformed replies
+  deserve a retry?), typed error taxonomy. `TranslationQueue.run(with:)`
   accepts any engine; `Translation/Providers/` holds the cloud adapters.
 - **Engines:** Apple on-device (`AppleSessionEngine` fed by SwiftUI's
   `.translationTask`, hosted in a process-lifetime 1×1 panel
   (`TranslationSessionPanelController`) so closing the main window can't
-  cancel the task and strand the queue's pending sentences; the default; OS
-  prompts a one-time language pack) and Google Translate, DeepL, OpenRouter
-  (chat completions with a strict JSON array prompt, parsed leniently).
-  Source is fixed `ja`; the target follows the selection. On macOS 26.4+ a
-  per-activation probe checks whether the high-fidelity (Apple
-  Intelligence) strategy is installed for ja→target — only an installed
-  pair counts — and the ENGINES card labels it "Apple Intelligence (high
-  fidelity)". A configured external provider becomes active at the next
-  session start.
+  cancel the task and strand the queue's pending sentences; the default;
+  OS prompts a one-time language pack), and Google Translate, DeepL,
+  OpenRouter. On macOS 26.4+ the live session config requests the
+  high-fidelity (Apple Intelligence) strategy, with silent framework
+  fallback to the fast model; a per-activation probe checks whether the
+  strategy is actually installed for ja→target — only an installed pair
+  counts — and the ENGINES card labels it "Apple Intelligence". The same
+  panel hosts two more lazily-armed `.translationTask` hosts dedicated to
+  the re-translate lane (fast + high-fidelity), stacked in one view tree
+  because multiple modifiers on one view are unreliable.
+- **Cloud adapters:** Google Translate (batch REST), DeepL (batch REST,
+  `:fx` free-tier host), OpenRouter (chat completions, **one sentence per
+  request** with a plain-text prompt parsed leniently — no JSON contract —
+  and a default model when Settings leaves the field empty). Source is
+  fixed `ja`; the target follows the selection. Provider switching is
+  live: a verified selection re-attaches the engine mid-session (pending
+  sentences replay via the queue's generation token; the Apple-fallback
+  latch resets — an explicit change is user intent to re-engage), and a
+  key save's connection test activates the provider once it verifies.
 - **Target language:** `TargetLanguage` carries a BCP-47 entry code plus
   per-engine mappings (Google/DeepL API codes; OpenRouter prompts name the
   language); the selection persists as `translation.targetLanguage` and is
   restart-only — the picker disables while a session is live. The picker's
-  catalog is discovered at runtime: `AppleTranslationAvailability` probes
-  `LanguageAvailability.supportedLanguages`, drops the fixed `ja` source,
-  collapses regional variants, and keeps only entries with metadata — no
-  static language list ships. A non-English pick confirms
-  `DictionaryEnglishNoticeSheet` first (word lookups stay English-glossed;
-  re-raised on every non-English pick).
+  catalog is `LanguageAvailability.supportedLanguages` intersected with a
+  static metadata table (per-engine codes + display names); Apple-
+  discovered codes missing from the table don't ship in the picker, and a
+  persisted code with no entry falls back to English on load. A
+  non-English pick confirms `DictionaryEnglishNoticeSheet` first (word
+  lookups stay English-glossed; re-raised on every non-English pick).
 - **Queue:** strictly serialized `@MainActor` worker; untranslated
   sentences live in a plain array that survives cancellation; a generation
-  token retires cancelled runs; repeats are served from a cache; empty
-  finals dropped at enqueue. On stop the queue drains with a 5 s bound so
-  the session stays exportable.
+  token plus a session-epoch token retire cancelled runs and batches
+  airborne across a session boundary; repeats are served from an
+  app-run-scoped NSCache (200 entries); empty finals dropped at enqueue;
+  in-flight IDs guard against double translation. On stop the queue drains
+  with a 5 s bound so the session stays exportable.
 - **Retry ladder:** transient failures (429 / 5xx / network) retry twice
   with backoff, honoring a capped `Retry-After`; invalid key, quota, and
-  malformed output fail fast. Settings' Test probes run zero-retry.
+  malformed output fail fast — except chat-completions engines, which
+  retry malformed output (nondeterministic LLM replies) while fixed-
+  contract Google/DeepL never do. Settings' Test probes run zero-retry
+  (Google/DeepL translate a probe sentence; OpenRouter validates the key
+  via a key endpoint so no tokens are spent), and the outcome persists per
+  provider.
 - **Failure ladder:** exhausted external errors latch Apple on-device for
   the rest of the session (one-way per session; `.degraded` published; the
-  footer's manual Reconnect re-attempts the external engine). An
-  unconfigured provider falls back to Apple with a status note.
+  footer's manual Reconnect re-attempts the external engine and resets the
+  latch). Apple itself failing publishes `.unavailable` with **no** engine
+  swap — Reconnect is the only way back. An unconfigured provider falls
+  back to Apple with a status note.
 - **Keys:** `KeychainStore` (`Security/`, device-only accessibility);
   key material never reaches UserDefaults, logs, error strings, or export
-  files — the settings store persists non-secrets only.
-- **Disclosure:** activating any cloud provider requires confirming
-  `CloudDisclosureSheet` ("sentences will be sent to \<provider\>"), raised
-  on every switch to an external provider; audio itself never leaves the
-  machine.
+  files — the settings store persists non-secrets only (provider
+  selection, key-presence flags + hints, test outcomes, the OpenRouter
+  model, DeepL free-tier). Dev builds pin the key store to a no-op, so
+  development always runs Apple on-device.
+- **Disclosure:** activating any cloud provider — for the live session or
+  the re-translate lane — requires confirming `CloudDisclosureSheet`
+  ("sentences will be sent to \<provider\>"), raised on every switch to an
+  external engine; audio itself never leaves the machine.
+- **Re-translate lane:** a finalized row can be re-translated through a
+  user-selected engine (`session` / `appleFast` / `appleHighFidelity` /
+  `google` / `deepl` / `openrouter`, persisted as
+  `translation.retranslateEngine`). Selections naming the live session
+  engine route through the queue unstamped; anything else runs through a
+  serialized lane of chained tasks with dedicated, lazily-armed Apple
+  sessions (explicit `preferredStrategy`, so a lane can't silently
+  duplicate the live model), Apple lanes deferring behind the
+  availability probe's landing. Landings stamp the row's `engine`
+  provenance, drop the queued copy, and seed the repeat cache (unstamped).
+  High-fidelity picks degrade to fast where the strategy is known
+  unavailable; delivery is session-epoch-guarded so a stale lane can't
+  write into a new session; failures post yellow toasts.
 - **Status surface:** `TranslationPill.map(status:activeEngine:)` derives
   the pill/card dot tone; the sidebar detail line mirrors state
   ("On-device (fallback)", "Unavailable", provider name); retry/fallback/
@@ -177,26 +236,27 @@ packaged apps in `Contents/Frameworks/`.
 ### Reading annotation & dictionary lookup (`Text/`, `Dictionary/`)
 - **Annotator:** `ReadingAnnotator` tokenizes via `DictionaryEngine`
   (dlopen'd `libdictionary.dylib`, bundled IPADIC) and emits segments
-  `{surface, romaji, furigana, lemma, pos, bound}` — one segmentation feeds
-  both annotation modes and the favorite matcher. The tokenizer payload
-  carries `{surface, span, reading, base, pos, bound}`; the runtime
-  auto-detects the lexicon's feature scheme (bundled IPADIC; UniDic rows
-  read with their pronunciation-style `ー` expanded), and `bound` marks
-  non-self-standing words — 助動詞 outright, the 非自立 detail rows, and
-  形容詞 rows lemmatizing to ない. Before segmentation, a run the tokenizer
-  collapsed into one unknown node is re-decoded in short windows to recover
-  the word boundaries inside it. Romaji derives from kana readings (Hepburn
-  consonants, wapuro long vowels) with particle overrides (は/へ/を →
-  wa/e/o), lexical spellings, numeral→counter fusion (`600回` →
-  "roppyakkai"), and sokuon-span merging (`言って` → one segment). Furigana
-  covers only kanji, aligned by walking the kana reading through the
-  surface; tokens carry a curated reading per inflected surface, so
-  conjugated forms annotate without re-inflection. A final pass fragments
-  entry-less segments (long enough, Japanese, whole surface missing from
-  the dictionary) into dictionary-backed pieces via the headword gate —
-  sokuon-merged segments cut at their original token seams; probes that
-  failed on infrastructure answer "has entry" and the pass's decisions are
-  never cached.
+  `{surface, romaji, furigana, lemma, pos, isBound}` — one segmentation
+  feeds both annotation modes and the favorite matcher. The tokenizer
+  payload carries `{surface, span, reading, base, pos, bound}`; the
+  runtime auto-detects the lexicon's feature scheme (bundled IPADIC;
+  UniDic rows read with their pronunciation-style `ー` expanded), and
+  `bound` marks non-self-standing words — 助動詞 outright, the 非自立
+  detail rows, and 形容詞 rows lemmatizing to ない. Before segmentation,
+  a run the tokenizer collapsed into one unknown node is re-decoded in
+  short windows to recover the word boundaries inside it. Romaji derives
+  from kana readings (Hepburn consonants, wapuro long vowels) with
+  particle overrides (は/へ/を → wa/e/o), lexical spellings,
+  numeral→counter fusion (`600回` → "roppyakkai"), and sokuon-span
+  merging (`言って` → one segment). Furigana covers only kanji, aligned by
+  walking the kana reading through the surface; tokens carry a curated
+  reading per inflected surface, so conjugated forms annotate without
+  re-inflection. A token-repair pass then a final fragmentation pass
+  (threshold 8 chars: long enough, Japanese, whole surface missing from
+  the dictionary) recover dictionary-backed pieces — sokuon-merged
+  segments cut at their original token seams; the repair pass never
+  consults the headword gate, probes that failed on infrastructure answer
+  "has entry", and the passes' decisions are never cached.
 - **Reading fallback:** kanji surfaces the tokenizer leaves reading-less
   consult JMDict's reading index, behind a miss-caching NSCache. Surfaces
   that survive both (names, rare ideographs, bare Latin) render
@@ -204,32 +264,83 @@ packaged apps in `Contents/Frameworks/`.
 - **Fail-soft:** a missing dylib or model means plain runs that still
   concatenate back to the original; preparation retries next launch.
 - **Lookup data:** pinned JMDict_Extended (`1.4.1-auto-release-2026-09-01`)
-  + JMnedict (`3.6.2+20260914172325`). The pins live in
+  + JMnedict (`3.6.2+20260914172325`), build revision 7. The pins live in
   `Dictionary/JMDictPin.swift` and are asserted by
   `scripts/build_dictionary.sh`, whose format probe hard-fails on upstream
   drift. Both sources build into one `jmdict-<tag>.<rev>.sqlite`
-  (entries/senses/headwords/meta — no FTS, exact `headwords.text` hits);
-  JMnedict names ride `ent_seq + 10M` in the same tables. The DB bundles
-  as `jmdict-<tag>.<rev>.sqlite.zst` — the tag + build revision is the
-  staleness key, stale prepared artifacts are swept. Both DBs decompress
-  once to Application Support on first launch (offline, smoke-checked).
-- **Lookup engine:** `JMDictLookup` — typed errors (no-hit ≠ infrastructure
-  failure), all homograph entries returned ranked common-first, sense
-  restriction filters honored. `JMDictExpansion` builds ≤9 ranked
-  candidates per tap — the tapped surface, its lemma (potential forms
-  unwrap to their dictionary form), forward joins of up to 6 segments,
-  then ≤3-char kanji-run splits (the tapped surface's first, then
-  boundary-crossing ones) — resolved in that order, validated against the
-  sentence's render text (drift fails closed; the tapped segment still
-  queries).
+  (entries/senses/headwords/meta); JMnedict names ride `ent_seq + 10M` in
+  the same tables. Sense glosses are stored joined with `U+001F` so
+  display-side splitting can't shred glosses containing `"; "`, and the
+  artifact bundles a partial case-headword index (`headwords` rows whose
+  text isn't all-lowercase — the case-spelling rescue for search). The DB
+  bundles as `jmdict-<tag>.<rev>.sqlite.zst` — the tag + build revision is
+  the staleness key, stale prepared artifacts are swept. Both DBs
+  decompress once to Application Support on first launch (offline,
+  smoke-checked), where preparation additionally derives a contentless
+  **FTS5 trigram index over glosses** (rowid-packed by entry, promoted
+  only after a smoke probe) — derived, never bundled; a debug-only
+  `.dev.sqlite` variant skips the sweep for development.
+- **Tap-lookup engine:** `JMDictLookup` — typed errors (no-hit ≠
+  infrastructure failure), homograph entries ranked by four keys (tapped
+  writing match, segment-reading match, common, `ent_seq`), sense
+  restriction filters honored, NFKC folding at every SQL boundary.
+  `JMDictExpansion` builds ≤9 ranked candidates per tap — the tapped
+  surface, its lemma, a potential/passive unwrap (`作れる`/`作られる` → 作る,
+  `される` → する), forward joins of up to 6 segments, then ≤3-char
+  kanji-run splits run twice (over the tapped surface and over the joined
+  expansion text, so boundary-crossing words like 風呂+敷 → 呂敷 resolve) —
+  resolved in that order, validated against the sentence's render text
+  (drift fails closed; the tapped segment still queries). A join hit may
+  lead the card (JOINED MATCH badge); a split-only tap resolves not-found
+  with the split hits demoted to related pills — a split never presents
+  itself as the tapped word.
 - **Tap surface:** cursor modes None / Dictionary / Copy. A tap resolves
   through the pipeline and pins the sidebar DICTIONARY card plus a popover
   anchored at the word; homograph entries walk via the `◀ i/N ▶` pager,
   fallback hits surface as capped "also:" pills (JOINED MATCH badge for
-  forward-join leads), a bare miss posts the amber notice pill, and an
-  infrastructure failure posts a toast. Name entries render type badges
-  (SURNAME / GIVEN NAME / PLACE NAME / …) and drop the romanization-echo
-  gloss.
+  forward-join leads; split-only taps show "related:" pills), pills are
+  selectable and re-promote their lead entry, a bare miss posts the amber
+  notice pill, and an infrastructure failure posts a toast. Name entries
+  render type badges (SURNAME / GIVEN NAME / PLACE NAME / …) and drop the
+  romanization-echo gloss. Favorite entries lead every pager via
+  `FavoritesPromotion` (below).
+
+### Dictionary search (`Dictionary/`, reference window)
+- **Engine:** `DictionarySearchEngine` — a second read-only handle over
+  the same prepared DB. Each query climbs a staged ladder, stopping when
+  the result window saturates: exact PK seeks → bounded prefix B-tree
+  range scans (50-row pages, 1,000-row ceiling, cancel-checked) → a
+  **lemma retry** (only when those come back empty: probe the base form
+  first, then the potential unwrap, exact hits only — with a **romaji
+  bridge**, so `tabetai` folds to たべたい and resolves たべる) → a
+  **gloss stage** over the FTS5 trigram index (Latin queries ≥3 chars,
+  scope-filtered in SQL via rowid bounds). Candidate construction covers
+  kana/katakana mirrors, fully-consumed romaji conversions plus
+  trailing-onset expansion (`mak` → まか…まこ), literal digit/Latin
+  spellings, script-switch prefixes, and the bundled case index
+  (`activex` → ActiveX). Gloss hits grade into word-boundary / prefix /
+  substring tiers with the matched sense leading the preview. Window
+  saturation skips stages that couldn't surface; exact totals re-run
+  unbounded when a filter needs them. Ranking: tier → common →
+  base-before-unwrap → matched length → `ent_seq`; unwrap rows drop when
+  their base survives.
+- **Filters:** scope (All / Words / Names), COMMON-only, match tiers
+  (exact / prefix / gloss — the last enabled can't be switched off), JLPT
+  N1–N5, 11 rule-based POS groups, and 22 name-type badges. JLPT and POS
+  are mutually exclusive with name types under All; every filter press
+  re-runs the search and re-pages to page 1.
+- **Reference window:** one fixed 460×775.6 window (`Window("Dictionary")`)
+  with two persisted modes — **Dictionary** (default) and **Favorites** —
+  flipped by a header button, one shared 150 ms search debounce, focus
+  hand-off between the modes' fields, a `displayed / matched(+)` count,
+  and close-time state reset for both modes. Opened from the floating
+  book opener over the transcript or the sidebar DICTIONARY card's kicker.
+  Results render as favorites-shaped cards (match badge first, then
+  COMMON / JLPT / name-type badges, scalar-offset match highlight, 2-line
+  gloss preview, copy → star → chevron) that expand into the shared entry
+  view with a per-row pager; Load-more reveals pages up to the 1,000-row
+  ceiling ("Showing top N — refine your search"). The window stays up
+  until explicitly closed — it does not dismiss on outside clicks.
 
 ### Favorite words (`Favorites/`)
 - **Star surface:** the dictionary popover and the sidebar DICTIONARY card
@@ -267,16 +378,19 @@ packaged apps in `Contents/Frameworks/`.
   the live strip, and the HUD — wherever `RubyTextView` renders per-segment
   units, in every annotation mode, favorite segments staying their own
   units even where nothing else is annotated.
-- **Favorites window:** opened by a floating star over the transcript
-  (top-trailing, sharing the toast stack's column), a fixed 460×608
-  `Window("favorites")` on the main window's Space that dismisses on any
-  click outside, like Settings. An explainer card, a debounced search
-  against the SQLite list (LIKE with escaped wildcards across headword /
-  reading / romaji), and dictionary-card rows (copy → star → chevron) that
-  expand into the shared entry view via live `JMDictLookup` queries
-  (`FavoritesLookupState` — per-headword phases behind generation tokens;
-  deliberately never the app-wide popover/card pipeline). Search, expansion
-  set, and the pending removal question reset when the window closes.
+- **Favorites mode (reference window):** the star surface lives in the
+  reference window's Favorites mode (see Dictionary search above) — one
+  460×775.6 two-mode window, so favorites and dictionary search share one
+  footprint, one debounce, and one close-time reset. An explainer card, a
+  debounced search against the SQLite list (LIKE with escaped wildcards
+  across headword / reading / romaji), and dictionary-card rows
+  (copy → star → chevron) that expand into the shared entry view via live
+  `JMDictLookup` queries (`FavoritesLookupState` — per-headword phases
+  behind generation tokens; deliberately never the app-wide popover/card
+  pipeline). Opened by the floating star over the transcript (top-trailing,
+  sharing the toast stack's column beside the book opener); search,
+  expansion set, and the pending removal question reset when the window
+  closes.
 - **Favorite-first lookup:** `FavoritesPromotion` reorders an
   already-resolved lookup once so a favorited entry leads the display
   result's pager and every `also:` hit's pager — a fallback pill labels
@@ -288,86 +402,143 @@ packaged apps in `Contents/Frameworks/`.
 
 ### Model choice (`Model/`)
 - `ASRModelChoice` — `.lite` / `.full`, each carrying its metadata (GGUF
-  name, HF repo, pinned SHA-256, size, tradeoff copy): Lite =
-  `sensevoice-small-q8_0.gguf` (~250 MB, default), Full =
+  name, HF repo + pinned revision, pinned SHA-256, size, tradeoff copy):
+  Lite = `sensevoice-small-q8_0.gguf` (~250 MB, default), Full =
   `funasr-nano-2512-q8_0.gguf` (~1.2 GB). Selection persists to
-  UserDefaults key `"asr.model"`.
+  UserDefaults key `"asr.model"`; both GGUFs live side-by-side in the
+  shared models directory, and the choice's repo id doubles as the session
+  file's `model` metadata.
 - Resolution per choice: `Bundle.main` →
-  `~/Library/Application Support/Mimidasu/models/` → dev checkout.
-  `ModelVerifier` checks the pinned SHA-256 (path+size verdict cache, so
-  switching never re-hashes the other model); `ModelDownloader` handles
-  resume / cancel / verify-and-replace.
+  `~/Library/Application Support/Mimidasu/models/` → dev checkout
+  (DEBUG builds only) — every candidate, bundled included, must pass
+  SHA-256 verification. `ModelVerifier` checks the pinned SHA-256 behind a
+  two-tier positive-verdict cache keyed (path, size, mtime) — an in-process
+  hot set plus a persisted `verification-cache.json`, so switching never
+  re-hashes the other model; `ModelDownloader` handles resume / cancel /
+  verify-and-replace, verifying at the temp location so a bad download
+  never reaches the model path.
 - A model must be downloaded **and verified** before selection; a
   mid-session switch applies at next session start; completing a Settings
-  download auto-selects (the path-keyed engine cache retires the old
-  engine). No resolvable model → the labeled mock transcriber.
+  download auto-selects (engines are built per session; the path-keyed
+  warm-up re-arms on the new model so the next start loads it hot). No
+  resolvable model → the labeled mock transcriber.
+
+### Onboarding
+- First launch with no verified model swaps the main shell for
+  `OnboardingView` (compact window footprint, restored on completion): a
+  permission/privacy explainer (system-audio TCC, local processing) and a
+  SPEECH MODEL card with one row per choice — pick + download with
+  progress / retry / cancel; completion auto-advances into the main UI.
+  The model can be swapped later in Settings.
 
 ### AppModel + SessionController (`State/`, `Session/`)
-- `AppModel` (@MainActor `@Observable`): session phase, transcript
-  entries, translation status, HUD pin, toast/notice stacks, audio level +
-  latency, ASR model state, lookup state (popover + pinned card), the
-  favorites store (star outcomes + the segment matcher), and the
-  `TranslationSession.Configuration` driving `.translationTask`. Split
-  into extensions (`AppModelTranslation` / `CaptureWarnings` / `Export` /
-  `Dictionary` / `Favorites` / `Lookup` / `ModelSelection` / `Overlay` /
-  `Termination`).
-  Injectable test seams: a scripted `SessionController`, a stubbed model
-  resolver, the terminate-notification center, and the HTTP translation
-  transport.
+- `AppModel` (@MainActor `@Observable`): session phase (including
+  `.sourceLost`), transcript entries, translation status, HUD pin,
+  toast/notice stacks, audio level + latency, ASR model state, lookup
+  state (popover + pinned card), the favorites store (star outcomes + the
+  segment matcher), session clock/loss anchors, and **three**
+  `TranslationSession.Configuration`s — the live session's plus the
+  re-translate lane's dedicated fast / high-fidelity pair. Split into
+  extensions (`AppModelTranslation` / `CaptureWarnings` / `Dictionary` /
+  `Export` / `Favorites` / `Lookup` / `ModelSelection` / `Overlay` /
+  `Retranslate` / `RetranslateSessions` / `SessionControl` /
+  `Termination`) — `SessionControl` owns the start surface (guards,
+  failure freeze, the phase-race guard where a `stop` during `begin`
+  tears down whatever `begin` brought up). Injectable test seams: a
+  scripted `SessionController` (engine / capture / warm-up / watchdog-
+  grace factories), a stubbed model resolver, the terminate-notification
+  center, the HTTP translation transport, the high-fidelity probe, and
+  the dictionary engines.
 - `SessionController`: engine creation via `ASREngineFactory` + background
-  warm-up, capture wiring, the sentence buffer, the 60 ms poll / 200 ms
-  tick timers, ASR event → sentence handling, mid-session capture restart
-  (no model reload), and strictly ordered teardown (capture stop → engine
-  finish/drain → timers → buffer flush → bounded translation drain). A
-  one-shot silence watchdog surfaces a no-audio warning when a fresh
-  capture stays below the silence floor; the first audible signal retires
-  it.
+  warm-up (path-keyed; a model switch re-arms it), capture wiring, the
+  sentence buffer, the 60 ms poll / 200 ms tick timers, ASR event →
+  sentence handling, mid-session capture restart (no model reload), and
+  strictly ordered teardown (capture stop → watchdog disarm → engine
+  finish/drain off-main with drained events replayed → timers → buffer
+  flush → bounded translation drain). The 60 ms poll tick also publishes
+  latency (pushed − processed samples) and drains chunk RMS into the
+  audio meter plus a one-shot audio-detected flag through `Mutex`-guarded
+  handoffs. A one-shot silence watchdog surfaces a no-audio warning when
+  a fresh capture stays below the silence floor (8 s grace, armed at the
+  `.running` flip so the TCC prompt doesn't mis-warn); the first audible
+  signal retires it. Capture death flips the phase to `.sourceLost`,
+  latches the loss anchor, and posts the Restart card; the restart
+  rebuilds only the capture — engine, timers, buffer, session clock, and
+  the fallback latch all survive.
 
 ### UI (`UI/`, SwiftUI `@MainActor`)
-- **Main window:** fixed sidebar (session capsule, READING AIDS + CURSOR
-  pickers, ENGINES / AUDIO / SESSION / DICTIONARY cards, toolbar) beside a
-  virtualized transcript (gutter timestamps, `RubyTextView` JP, teal
-  target-language translation, circular jump buttons) with the live partial
-  strip pinned under it. The toast stack and the floating Favorites opener
-  share one top-trailing column (toasts push the star down by layout; a
-  500 ms close debounce keeps the star's click from reopening the window it
-  just closed).
+- **Main window:** fixed 282 pt sidebar — brand header (耳 mark, Mimidasu,
+  "Japanese → \<target\>" subtitle), session capsule, ANNOTATION + CURSOR
+  MODE pickers, card stack, toolbar — beside a virtualized transcript
+  (gutter timestamps, `RubyTextView` JP, teal target-language translation,
+  circular jump buttons) with the live partial strip pinned under it. The
+  card stack is cursor-mode-driven: ENGINES + AUDIO show together in
+  None/Copy modes and are swapped for the DICTIONARY card in Dictionary
+  mode; SESSION shows in every mode (Sentences / Duration / Characters /
+  Lag). The toolbar holds the export menu (copy + TXT/SRT/VTT/JSON), the
+  overlay master toggle, a UI-scale stepper, and the settings gear (a
+  500 ms debounce guards the gear's close-and-toggle).
+- **Top-trailing column:** the toast stack shares one column with two
+  floating openers — book (reference window, Dictionary mode) and star
+  (Favorites mode) — laid out below the toasts.
+- **Transcript rows:** hover reveals a circular re-translate button beside
+  the translation (row dims while it runs; a landed lane result shows a
+  "· via \<engine\>" provenance suffix when the marker toggle is on); the
+  list uses a manual bottom-pin scroll model so follow-mode survives
+  virtualization.
 - **State split:** high-frequency partials (`LivePartialState`), the audio
   level ring (`AudioLevelState`), and latency (`LatencyState`) are small
   standalone observables, so partial-rate updates never re-render the
   transcript.
-- **Floating HUD:** always-on-top, semi-transparent, click-through,
-  resizable; single chevrons step its pin through translated entries
+- **Floating HUD:** always-on-top, semi-transparent; padlock-locked it is
+  click-through except its button cluster, unlocked it drags/resizes and
+  its height auto-fits content (offscreen measurement host, top edge
+  anchored). Header cluster: padlock, close, and the translation-overlay
+  toggle. Single chevrons step its pin through translated entries
   (stepping to the newest clears the pin and re-follows), double chevrons
   jump to the ends — oldest pins the first entry, newest re-follows
-  (`HUDHistory` holds the pure semantics). A header button toggles the
-  translation-only overlay.
+  (`HUDHistory` holds the pure semantics).
 - **Translation-only overlay:** an independently shown/hidden sibling of
-  the HUD (`TranslationOverlayWindow`) — an always-on-top, resizable panel
-  listing every finalized translation in a bottom-pinned scroll view with
-  its own jump buttons; padlock-locked it is click-through except for its
-  button cluster, unlocked it drags/resizes. The sidebar's overlay master
-  switch closes both overlays when any is open and reopens the HUD when
-  none are (`toggleOverlays`).
-- **Favorites window:** the list surface of the Favorite words section —
-  searchable card rows, expandable into live definitions, opened by the
-  floating star and reset on close.
-- **Toasts & notices:** `ToastCenter` — deduped, capped stack of warning/
-  error cards (persistent red cards carry a fix action: Restart,
-  Reconnect); cleared on session teardown. `NoticeCenter` — a single
-  transient pill (teal confirmations like "Text copied", amber dictionary
-  no-hit), 2 s auto-dismiss.
-- **Theming:** `Theme.swift` centralizes tokens (dark values from the
-  mock, derived light variant); `AppearanceSetting` (system/light/dark)
-  applies via `.preferredColorScheme`; reading-annotation and cursor
-  settings are `DynamicProperty` wrappers. `RubyTextView` renders inline
-  romaji or furigana; in dictionary mode with a host lookup handler it
-  renders one tappable unit per segment.
+  the HUD (`TranslationOverlayWindow`) — an always-on-top panel listing
+  every finalized translation in a bottom-pinned scroll view with its own
+  jump buttons and a subtitle toggle; padlock-locked it is click-through
+  except for its button cluster, unlocked it drags/resizes. The sidebar's
+  overlay master switch closes both overlays when any is open and reopens
+  the HUD when none are (`toggleOverlays`).
+- **Reference window:** the two-mode Dictionary/Favorites surface described
+  under Dictionary search and Favorite words.
+- **Settings:** its own window that auto-closes on resign-key (click
+  outside) and hides its title chrome; card stack: privacy/external-
+  processing notice, provider card (probe-then-select key verification),
+  conditional key card, RE-TRANSLATE card (engine dropdown listing only
+  non-duplicate, available options + the provenance-marker toggle), TARGET
+  LANGUAGE card (runtime-discovered catalog, disabled while a session is
+  live), appearance card, SPEECH MODEL card with a Re-check action, SESSION
+  diagnostics (Entries / Engine / Translation), and an App Store
+  write-review link in the footer.
+- **Onboarding:** the main shell's pre-model state (see Onboarding above).
+- **Toasts & notices:** `ToastCenter` — deduped, capped (3 visible) stack
+  in three styles: auto-dismissing yellow, persistent yellow, persistent
+  red; persistent red cards carry a fix action (Restart, Reconnect, or
+  Open System Settings for the no-audio case); cleared on session
+  teardown. `NoticeCenter` — a single transient pill (teal confirmations
+  like "Text copied", amber dictionary no-hit), 2 s auto-dismiss, rendered
+  only while its window is key (mounted in the main and reference
+  windows).
+- **Theming & scale:** `Theme.swift` centralizes tokens (dark values from
+  the mock, derived light variant); `AppearanceSetting` (system/light/dark,
+  a `DynamicProperty` wrapper with a system-scheme observer) applies via
+  `.preferredColorScheme`; reading-annotation and cursor modes are plain
+  `@AppStorage` enums read per-view. `UIScale` (75–200 %) scales
+  transcript, live-strip, and HUD text together from one persisted value.
+  `RubyTextView` renders inline romaji or furigana; in dictionary mode
+  with a host lookup handler it renders one tappable unit per segment.
 
 ### SessionExporter (`Export/`)
 - Plain text (`HH:MM:SS  text`), SRT/VTT subtitles (comma vs dot ms
-  delimiter), and the JSON session file (below). Languages are read from
-  fields, never assumed; session metadata included.
+  delimiter; cues carry translations only — the JP transcript never
+  appears in a cue), and the JSON session file (below). Languages are read
+  from fields, never assumed; session metadata included.
 
 ## Threading model
 
@@ -435,9 +606,9 @@ sentence `index` is stable and keys JP↔translation alignment.
 A translation entry may carry an optional `engine` field — the engine that
 produced it via a manual row re-translate through an engine other than the
 session engine (`appleFast` / `appleHighFidelity` / `google` / `deepl` /
-`openrouter`; the Apple models only exist on macOS 26.4+, where `appleFast`
-is the traditional low-latency model and `appleHighFidelity` the Apple
-Intelligence model). Session-engine results never carry
+`openrouter`; only the high-fidelity model is gated to macOS 26.4+ — the
+fast-model lane exists on every supported OS, and is a genuine alternate
+while an external engine is live). Session-engine results never carry
 the field (absent = the session engine, never manually retried), so old
 documents and fresh live-captions-only sessions are byte-identical; the
 field is additive under schema v1. Whether retried rows also show the
