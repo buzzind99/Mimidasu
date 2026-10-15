@@ -44,7 +44,7 @@ final class FavoritesStore {
     /// Kana-folded readings of the same words — the kana spelling a favorited
     /// word can also be written as. Kept apart from `matchKeys` on purpose: a
     /// kana-written segment matches one of these, while star membership and
-    /// removal stay exact headword operations (D8/D23). One set for both would
+    /// removal stay exact headword operations. One set for both would
     /// let a spelling hit fill a star, and would let `remove(headword:)` delete
     /// a row nobody named.
     private var readingKeys: Set<String> = []
@@ -105,11 +105,11 @@ final class FavoritesStore {
         FavoriteWord.matches(segment, keys: matchKeys, readings: readingKeys)
     }
 
-    /// The lookup content with a favorited entry moved to the front of the
-    /// display result's pager. A thin forwarder so `AppModel` never reads
-    /// `matchKeys` itself.
-    func promotingFavorites(in content: LookupContent) -> LookupContent {
-        FavoritesPromotion.promotingFavorites(in: content, keys: matchKeys)
+    /// Normalized headword keys snapshot for the tap lookup display: favorites
+    /// cross the resolve/promote seam as a value captured on the main actor
+    /// before dispatch, so the module never reads the store.
+    var favoriteKeys: Set<String> {
+        matchKeys
     }
 
     /// The comparable readings of a row set. A set, so two favorites sharing a
