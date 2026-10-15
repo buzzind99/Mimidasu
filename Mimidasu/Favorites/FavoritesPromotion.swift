@@ -14,8 +14,8 @@ enum FavoritesPromotion {
     /// readable there — the pill relabels to the starred word and opens on
     /// it, instead of the homograph the dictionary ranked first. Everything
     /// else is untouched: the display result still leads, and a not-found pin
-    /// keeps its related splits as suggestions (a split hit must never
-    /// present itself as the tapped word, D9).
+    /// keeps its related splits as suggestions (a split hit never presents
+    /// as the tapped word).
     static func promotingFavorites(
         in content: LookupContent, keys: Set<String>
     ) -> LookupContent {

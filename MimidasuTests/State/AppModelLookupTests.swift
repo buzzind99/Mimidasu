@@ -2,17 +2,13 @@ import Foundation
 @testable import Mimidasu
 import Testing
 
-/// Tests the dictionary lookup UI state on `AppModel`: a hit selects and
-/// pins, a split-only resolution pins the not-found state with its related
-/// hits (a related-pill tap promotes it to found), the bare miss posts the
-/// warning pill while state persists, empty annotator segments and
-/// infrastructure errors post the toast instead (never the pill), the
-/// popover anchor is exclusive to its surface, fallback pills fully
-/// re-select, the entry pager pages popover and card together, and session
-/// clear resets everything. Lookups run over the committed JMDict fixture
-/// database; the async core (`runLookup`) is awaited directly with
-/// injected segments. One end-to-end tap test runs the real annotator and
-/// is gated on a prepared tokenizer.
+/// Thin host wiring for dictionary taps on `AppModel`: the tap entry point
+/// (live annotator, raw render-time index), popover anchor exclusivity and
+/// dismissal, engine-ranking preservation without favorites, and session
+/// clear. Tap-to-verdict outcomes (hit-pins, join-lead, split demotion,
+/// miss pill, faults, promotion, pager clamping) live behind the
+/// `LookupDisplay` seam and are proven there — this suite only proves the
+/// wiring around it, over the committed JMDict fixture database.
 @MainActor
 @Suite("AppModel dictionary lookup")
 final class AppModelLookupTests {
@@ -92,6 +88,7 @@ final class AppModelLookupTests {
 
         await runHit(model, source: .transcript(sentenceIndex: 0, tokenIndex: 0))
         let transcriptID = try #require(model.selectedLookup?.id)
+
         #expect(transcriptID.hasSuffix("-お"))
 
         await model.runLookup(
@@ -102,187 +99,74 @@ final class AppModelLookupTests {
         #expect(transcriptID != stripID)
     }
 
-    @Test(
-        "tap re-anchor keeps the stored index while segments agree, else re-anchors to the surface",
-        arguments: [
-            // Agreement: the stored index still points at the tapped
-            // surface — kept verbatim.
-            (stored: 1, surface: "土産", expected: 1),
-            // Skew: the stored index drifted onto a different segment; the
-            // tapped surface re-anchors to its first occurrence.
-            (stored: 1, surface: "お", expected: 0),
-            // The tapped surface is gone (fragmentation flipped across a
-            // dictionary-state transition): one past the end, so the
-            // expansion's bounds guard fails the tap closed.
-            (stored: 0, surface: "xyz", expected: 2),
-            // Out-of-bounds stored index with a surface match elsewhere.
-            (stored: 9, surface: "土産", expected: 1)
-        ]
-    )
-    func reAnchoredTapIndex(stored: Int, surface: String, expected: Int) {
-        let segments: [LookupSegment]? = [
-            LookupSegment(surface: "お"), LookupSegment(surface: "土産", lemma: "土産")
-        ]
-
-        #expect(AppModel.reAnchoredTapIndex(
-            stored: stored, surface: surface, in: segments
-        ) == expected)
-    }
-
-    @Test("tap re-anchor fails closed over nil and empty segments")
-    func reAnchoredTapIndexNilSegments() {
-        #expect(AppModel.reAnchoredTapIndex(stored: 3, surface: "お", in: nil) == 3)
-        #expect(AppModel.reAnchoredTapIndex(stored: 3, surface: "お", in: []) == 3)
-    }
-
-    @Test("tap re-anchor breaks duplicate-surface ties on the first occurrence")
-    func reAnchoredTapIndexDuplicateSurfaces() {
-        let segments: [LookupSegment]? = [
-            LookupSegment(surface: "お"), LookupSegment(surface: "お", lemma: "尾")
-        ]
-
-        #expect(AppModel.reAnchoredTapIndex(
-            stored: 9, surface: "お", in: segments
-        ) == 0)
-    }
-
-    // MARK: - Hit: select + pin
-
-    @Test("a hit selects the popover and pins the card with the retained expansion hits")
-    func hitSelectsAndPins() async throws {
-        let model = makeModel()
-
-        await runHit(model, source: .liveStrip)
-
-        let selected = model.selectedLookup
-        #expect(selected?.source == .liveStrip)
-        #expect(selected?.content.displayResult?.matched == "お")
-        #expect(selected?.entryIndex == 0)
-
-        let pinned = try #require(model.pinnedLookup)
-        #expect(pinned.content.displayResult?.matched == "お")
-        #expect(pinned.entryIndex == 0)
-        // The tapped surface お displays; the join お土産 hits new entries
-        // and is retained as the "also:" hit (the 土産 lemma candidate only
-        // re-hits the compound's entries, so it is skipped).
-        #expect(pinned.content.fallbackResults.map(\.matched) == ["お土産"])
-        // A tapped-surface lead is never labeled a fallback match.
-        guard case let .found(_, _, origin) = pinned.content else {
-            Issue.record("expected found content")
-            return
-        }
-        #expect(origin == .tappedSurface)
-    }
-
-    // MARK: - Not found: related fallback hits
-
-    @Test("a split-only resolution pins the not-found state with related hits, not the pill")
-    func notFoundPinsRelatedHits() async {
-        let model = makeModel()
-
-        // 雨尾 is no fixture headword; only its kanji-split fallbacks hit.
-        await model.runLookup(
-            segments: [LookupSegment(surface: "雨尾")], tappedAt: 0,
-            sentenceText: "雨尾", surface: "雨尾", source: .liveStrip
+    @Test("sequential taps land latest-wins; each tap bumps the generation")
+    func sequentialTapsLandLatestWins() async throws {
+        // The token is internal, so the bump reads directly; it runs on a
+        // throwaway model so the tap's spawned Task never races the model below.
+        let bumpModel = makeModel()
+        let before = bumpModel.lookupGeneration
+        bumpModel.handleLookupTap(
+            LookupToken(surface: "お", reading: nil, lemma: nil, tokenIndex: 0, sentenceText: "お土産"),
+            source: .liveStrip
         )
+        #expect(bumpModel.lookupGeneration == before + 1)
 
-        #expect(model.notices.message == nil, "related hits suppress the miss pill")
-        #expect(model.selectedLookup?.source == .liveStrip)
-        guard case let .notFound(surface, related)? = model.selectedLookup?.content else {
-            Issue.record("expected not-found selection, got \(String(describing: model.selectedLookup))")
-            return
-        }
-        #expect(surface == "雨尾")
-        #expect(related.map(\.matched) == ["雨", "尾"])
-
-        guard case let .notFound(pinnedSurface, pinnedRelated)? = model.pinnedLookup?.content
-        else {
-            Issue.record("expected not-found pin")
-            return
-        }
-        #expect(pinnedSurface == "雨尾")
-        #expect(pinnedRelated.map(\.matched) == ["雨", "尾"])
-    }
-
-    @Test("a related-pill tap promotes the hit: card and popover switch to found")
-    func relatedPillPromotes() async throws {
+        // Concurrent rapid taps would race detached SQLite lookups with no
+        // engineered latency — flaky — so latest-wins lands sequentially
+        // here; the stale-generation drops themselves are proven by the
+        // generation-parameter drops in the effect tests.
         let model = makeModel()
         await model.runLookup(
-            segments: [LookupSegment(surface: "雨尾")], tappedAt: 0,
-            sentenceText: "雨尾", surface: "雨尾", source: .liveStrip
+            segments: lookupO(), tappedAt: 0, sentenceText: "お土産", surface: "お", source: .liveStrip
+        )
+        await model.runLookup(
+            segments: [LookupSegment(surface: "あめ")], tappedAt: 0,
+            sentenceText: "あめ", surface: "あめ", source: .liveStrip
         )
 
-        let rain = try #require(model.pinnedLookup?.content.fallbackResults.first)
-        model.selectAlsoPill(rain)
-
-        #expect(model.selectedLookup?.content.displayResult?.matched == "雨")
-        #expect(model.selectedLookup?.source == .liveStrip, "the anchor follows the re-select")
-        let pinned = try #require(model.pinnedLookup)
-        #expect(pinned.content.displayResult?.matched == "雨")
-        #expect(pinned.content.fallbackResults.map(\.matched) == ["尾"])
-        // An explicitly chosen hit is never labeled a fallback lead.
-        guard case let .found(_, _, origin) = pinned.content else {
-            Issue.record("expected found content")
-            return
-        }
-        #expect(origin == .tappedSurface)
+        let selected = try #require(model.selectedLookup)
+        #expect(selected.content.displayResult?.matched == "あめ")
     }
 
-    // MARK: - Miss: warning pill, state persists
+    @Test("nil segments warn while empty segments fault, with no cross-talk")
+    func nilVersusEmptySegmentsRouting() async throws {
+        // Nil segments warn with the tapped surface — host routing, no tokenizer gate.
+        let warned = makeModel()
+        await warned.runLookup(
+            segments: nil, tappedAt: 0, sentenceText: "お土産", surface: "お", source: .liveStrip
+        )
 
-    @Test("a miss posts the warning pill with the tapped surface and leaves state untouched")
-    func missPostsWarningPill() async {
+        #expect(warned.notices.message == "No dictionary entry for \"お\"")
+        #expect(warned.notices.tone == .warning)
+        #expect(warned.toasts.toasts.isEmpty, "a miss never toasts")
+        #expect(warned.selectedLookup == nil)
+        #expect(warned.pinnedLookup == nil)
+
+        // Empty segments fault as annotator-unavailable — a toast, never the pill.
+        let faulted = makeModel()
+        await faulted.runLookup(
+            segments: [], tappedAt: 0, sentenceText: "お土産", surface: "お", source: .liveStrip
+        )
+
+        let toast = try #require(faulted.toasts.toasts.first)
+        #expect(toast.key == ToastKey.dictionaryLookup)
+        #expect(toast.body == TapLookupFault.annotatorUnavailable.localizedDescription)
+        #expect(faulted.notices.message == nil, "a fault never posts the pill")
+        #expect(faulted.selectedLookup == nil)
+        #expect(faulted.pinnedLookup == nil)
+    }
+
+    @Test("an unfavorited lookup still leads with the entry the dictionary ranked first")
+    func unfavoritedLookupKeepsItsRanking() async throws {
         let model = makeModel()
-        await runHit(model, source: .liveStrip)
-        let pinnedBefore = model.pinnedLookup
-
         await model.runLookup(
-            segments: [LookupSegment(surface: "無語")], tappedAt: 0,
-            sentenceText: "無語", surface: "無語", source: .liveStrip
+            segments: [LookupSegment(surface: "あめ")], tappedAt: 0,
+            sentenceText: "あめ", surface: "あめ",
+            source: .transcript(sentenceIndex: 0, tokenIndex: 0)
         )
 
-        #expect(model.selectedLookup?.content.displayResult?.matched == "お", "the popover stays up")
-        #expect(model.pinnedLookup == pinnedBefore)
-        #expect(model.notices.message == "No dictionary entry for \"無語\"")
-        #expect(model.notices.tone == .warning)
-    }
-
-    // MARK: - Error: toast, no pill
-
-    @Test("an infrastructure error posts the dictionaryLookup toast and never the pill")
-    func errorPostsToast() async {
-        let engine = JMDictLookup(resolveDatabase: { [url = self.fixture.url] in url })
-        engine.close()
-        let model = makeModel(jmDictLookup: engine)
-
-        await model.runLookup(
-            segments: lookupO(), tappedAt: 0, sentenceText: "お土産",
-            surface: "お", source: .liveStrip
-        )
-
-        #expect(model.toasts.toasts.first?.key == ToastKey.dictionaryLookup)
-        #expect(model.toasts.toasts.first?.style == .yellowAuto)
-        #expect(model.selectedLookup == nil, "no popover on error")
-        #expect(model.pinnedLookup == nil, "pinned unchanged")
-        #expect(model.notices.message == nil, "the pill is reserved for no-hit")
-    }
-
-    @Test("empty annotator segments post the error toast and never the no-hit pill")
-    func emptySegmentsToast() async {
-        let model = makeModel()
-
-        // Empty segments are the annotator refusing to run (its tokenizer
-        // dictionary missing) — an error path, not a genuine no-hit.
-        await model.runLookup(
-            segments: [], tappedAt: 0, sentenceText: "お土産",
-            surface: "お", source: .liveStrip
-        )
-
-        #expect(model.toasts.toasts.first?.key == ToastKey.dictionaryLookup)
-        #expect(model.toasts.toasts.first?.style == .yellowAuto)
-        #expect(model.selectedLookup == nil, "no popover on error")
-        #expect(model.pinnedLookup == nil, "pinned unchanged")
-        #expect(model.notices.message == nil, "the pill is reserved for no-hit")
+        let leading = try #require(model.selectedLookup?.content.displayResult?.entries.first)
+        #expect(leading.keb == "飴")
     }
 
     // MARK: - Popover anchor exclusivity
@@ -366,81 +250,6 @@ final class AppModelLookupTests {
         model.dismissLookupPopover(source: .liveStrip)
         #expect(model.selectedLookup == nil)
         #expect(model.pinnedLookup == pinnedBefore)
-    }
-
-    // MARK: - "also:" pills
-
-    @Test("an also-pill tap fully re-selects: popover and pinned update, the row recomputes")
-    func alsoPillReselects() async throws {
-        let model = makeModel()
-        await runHit(model, source: .liveStrip)
-
-        let expansion = try #require(model.pinnedLookup?.content.fallbackResults.first)
-        model.selectAlsoPill(expansion)
-
-        #expect(model.selectedLookup?.content.displayResult?.matched == "お土産")
-        #expect(model.selectedLookup?.source == .liveStrip, "the anchor follows the re-select")
-        #expect(model.selectedLookup?.entryIndex == 0)
-
-        // The pill row recomputes from the results relative to お土産: the
-        // previous selection (お) becomes its "also:".
-        let pinned = try #require(model.pinnedLookup)
-        #expect(pinned.content.displayResult?.matched == "お土産")
-        #expect(pinned.content.fallbackResults.map(\.matched) == ["お"])
-    }
-
-    // MARK: - Entry pager
-
-    @Test("the pager pages popover and pinned card together, clamped to the entry count")
-    func pagerPagesBoth() async throws {
-        let model = makeModel()
-        // あめ matches two fixture entries (雨 candy + 雨 rain homograph).
-        await model.runLookup(
-            segments: [LookupSegment(surface: "あめ")], tappedAt: 0,
-            sentenceText: "あめ", surface: "あめ",
-            source: .transcript(sentenceIndex: 0, tokenIndex: 0)
-        )
-
-        let count = try #require(model.selectedLookup?.content.displayResult?.entries.count)
-        #expect(count == 2)
-
-        model.stepLookupEntry(to: 1)
-        #expect(model.selectedLookup?.entryIndex == 1)
-        #expect(model.pinnedLookup?.entryIndex == 1)
-
-        model.stepLookupEntry(to: 99)
-        #expect(model.selectedLookup?.entryIndex == 1, "clamped to the last entry")
-        model.stepLookupEntry(to: -5)
-        #expect(model.selectedLookup?.entryIndex == 0, "clamped to the first entry")
-    }
-
-    @Test("a favorited entry leads the pager, so tapping あめ opens 雨 rather than 飴")
-    func favoritedEntryLeadsPager() async throws {
-        let model = makeModel()
-        model.favorites.toggle(
-            FavoriteWord(headword: "雨", reading: "あめ", romaji: "ame", addedAt: 1)
-        )
-        await model.runLookup(
-            segments: [LookupSegment(surface: "あめ")], tappedAt: 0,
-            sentenceText: "あめ", surface: "あめ",
-            source: .transcript(sentenceIndex: 0, tokenIndex: 0)
-        )
-
-        let leading = try #require(model.selectedLookup?.content.displayResult?.entries.first)
-        #expect(leading.keb == "雨")
-    }
-
-    @Test("an unfavorited lookup still leads with the entry the dictionary ranked first")
-    func unfavoritedLookupKeepsItsRanking() async throws {
-        let model = makeModel()
-        await model.runLookup(
-            segments: [LookupSegment(surface: "あめ")], tappedAt: 0,
-            sentenceText: "あめ", surface: "あめ",
-            source: .transcript(sentenceIndex: 0, tokenIndex: 0)
-        )
-
-        let leading = try #require(model.selectedLookup?.content.displayResult?.entries.first)
-        #expect(leading.keb == "飴")
     }
 
     // MARK: - Lifecycle

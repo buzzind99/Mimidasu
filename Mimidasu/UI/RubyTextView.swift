@@ -210,8 +210,9 @@ struct RubyTextView: View, Equatable {
     /// The surface action for a dictionary-mode word unit: builds the
     /// payload from the segments this body render resolved — the units on
     /// screen — so the tapped surface survives a tap-time resolution that
-    /// drifted; the host's re-anchor then maps the stored index into the
-    /// fresh resolution or fails the tap closed.
+    /// drifted; the module's re-anchor (LookupDisplay.reAnchoredTapIndex)
+    /// then maps the stored index into the fresh resolution or fails the
+    /// tap closed.
     private func lookupAction(at index: Int, segments: [ReadingSegment]) -> (() -> Void)? {
         guard let onLookup else { return nil }
         let text = text
