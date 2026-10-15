@@ -40,9 +40,13 @@ final class FavoritesWindowState {
     private let favorites: FavoritesStore
     private var searchTask: Task<Void, Never>?
 
-    init(model: AppModel) {
+    init(model: AppModel, lookup: JMDictLookup? = nil) {
         favorites = model.favorites
-        lookupState = FavoritesLookupState(lookup: model.jmDictLookup)
+        // Own handle so a slow tap cannot stall starred-row expansion (and
+        // vice versa): AppModel gave dictionarySearch the same treatment so
+        // a long prefix scan cannot stall a tap. Same resolve seam, separate
+        // Mutex — a passed-in handle is test-only; production takes a fresh one.
+        lookupState = FavoritesLookupState(lookup: lookup ?? JMDictLookup())
         results = model.favorites.words
     }
 

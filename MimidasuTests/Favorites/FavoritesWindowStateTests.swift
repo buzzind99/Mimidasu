@@ -19,22 +19,32 @@ struct FavoritesWindowStateTests {
         headword: "おい", reading: "おい", romaji: "oi", addedAt: 1002
     )
 
-    /// A model over a private favorites file and a lookup pointed at a database
-    /// that is not there — expanding a row is then observable without a fixture,
-    /// because `FavoritesLookupState` moves the row to `.loading` synchronously
+    /// A lookup pointed at a database file that is not there — expanding a
+    /// row is then observable without a fixture, because
+    /// `FavoritesLookupState` moves the row to `.loading` synchronously
     /// before the query runs.
-    private func makeModel() -> AppModel {
+    private func makeMissingLookup() -> JMDictLookup {
         let missing = FileManager.default.temporaryDirectory
             .appendingPathComponent("mimidasu-window-state-missing-\(UUID().uuidString).sqlite")
-        return AppModel(
+        return JMDictLookup(resolveDatabase: { missing })
+    }
+
+    /// A model over a private favorites file and the missing-database lookup.
+    private func makeModel() -> AppModel {
+        AppModel(
             favorites: isolatedFavorites(),
-            jmDictLookup: JMDictLookup(resolveDatabase: { missing })
+            jmDictLookup: makeMissingLookup()
         )
     }
 
+    /// The window state receives the same missing-database lookup the model
+    /// holds: the injectable parameter is the fixture seam, and the default
+    /// would build a production resolver — reading the developer's real
+    /// dictionary from a unit test.
     private func makeState() -> (FavoritesWindowState, AppModel) {
-        let model = makeModel()
-        return (FavoritesWindowState(model: model), model)
+        let lookup = makeMissingLookup()
+        let model = AppModel(favorites: isolatedFavorites(), jmDictLookup: lookup)
+        return (FavoritesWindowState(model: model, lookup: lookup), model)
     }
 
     @Test("starts on the store's words, with an empty query and a count")

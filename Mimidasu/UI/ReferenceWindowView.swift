@@ -40,7 +40,7 @@ extension ReferenceWindow {
 }
 
 /// The two surfaces the reference window shows. One window rather than two
-/// scenes (D1): they are two views of the same data — the dictionary everything
+/// scenes: they are two views of the same data — the dictionary everything
 /// else looks words up in, and the words this user starred out of it — and a
 /// second window would mean a second place to look for either.
 enum ReferenceMode: String {
@@ -138,7 +138,7 @@ struct ReferenceWindowView: View {
         { headword in pendingRemoval = headword }
     }
 
-    /// Each mode's state, created once and kept alive across switches (D11).
+    /// Each mode's state, created once and kept alive across switches.
     @State private var favoritesState: FavoritesWindowState
     @State private var dictionaryState: DictionarySearchState
 
@@ -265,7 +265,7 @@ struct ReferenceWindowView: View {
     /// The trailing count, following the active mode. Favorites keeps its
     /// capacity/filtered phrasing; Dictionary reads `displayed / matched`, the
     /// one number that says both "this is what you got" and "this is all there
-    /// is" (D12). Its total carries a `+` when the search stopped short, so
+    /// is". Its total carries a `+` when the search stopped short, so
     /// the two halves do not read as equal claims. Empty while the query is
     /// empty — `0 / 0` on an untouched field is noise — while a search is in
     /// flight, when the outcome still belongs to the previous query, and

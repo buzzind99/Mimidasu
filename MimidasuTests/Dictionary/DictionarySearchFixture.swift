@@ -75,7 +75,7 @@ final class DictionarySearchStateFixture {
             jmDictLookup: lookup,
             dictionarySearch: searchEngine
         )
-        state = DictionarySearchState(model: model)
+        state = DictionarySearchState(model: model, lookup: lookup)
     }
 
     deinit {

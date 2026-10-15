@@ -103,9 +103,11 @@ final class DictionarySearchState {
     private var debounceTask: Task<Void, Never>?
     private var search: Task<DictionarySearchResponse, Never>?
 
-    init(model: AppModel) {
+    init(model: AppModel, lookup: JMDictLookup? = nil) {
         engine = model.dictionarySearch
-        lookupState = FavoritesLookupState(lookup: model.jmDictLookup)
+        // Own handle, not the shared tap engine — see FavoritesWindowState.
+        // A passed-in handle is test-only; production takes a fresh one.
+        lookupState = FavoritesLookupState(lookup: lookup ?? JMDictLookup())
         prepareDictionary = { model.prepareDictionaries() }
     }
 
