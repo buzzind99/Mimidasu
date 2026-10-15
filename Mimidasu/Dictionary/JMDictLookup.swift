@@ -93,7 +93,13 @@ final class JMDictLookup: Sendable {
     /// related list (same redundancy rule — a hit only re-resolving known
     /// entries is skipped), longest match first. Every candidate missing →
     /// `.notFound(related: [])`; any infrastructure error aborts the whole
-    /// lookup as a throw (never downgraded to a miss).
+    /// lookup as a throw (never downgraded to a miss). Each candidate
+    /// checks for cancellation before its indexed query, and each row
+    /// drain checks per row — defensive today, since no caller cancels the
+    /// detached tasks that run the engine, but a future caller that retains
+    /// a task handle gets a prompt abort instead of a run to completion.
+    /// Stale landings drop via the host generation guard; a cancelled query
+    /// drops silently at its landing site.
     func lookup(_ candidates: [ExpansionCandidate]) throws -> LookupResolution {
         var display: LookupResult?
         var displayOrigin: ExpansionOrigin?
@@ -101,6 +107,7 @@ final class JMDictLookup: Sendable {
         var related: [LookupResult] = []
         var seenEntryIDs: Set<Int> = []
         for expansion in candidates {
+            try Task.checkCancellation()
             guard let result = try lookupResult(for: expansion.candidate) else { continue }
             let entryIDs = Set(result.entries.map(\.entSeq))
             if display == nil, expansion.origin == .split {
@@ -286,6 +293,7 @@ final class JMDictLookup: Sendable {
         statement.bind(text, at: 1)
         var rows: [HeadwordRow] = []
         while try statement.step() {
+            try Task.checkCancellation()
             rows.append(HeadwordRow(
                 entryID: statement.requiredInt(0),
                 jlpt: statement.optionalInt(1),
@@ -304,8 +312,10 @@ final class JMDictLookup: Sendable {
         entryStatement.bind(entSeq, at: 1)
         guard try entryStatement.step() else {
             // A headword row always references an existing entry; a missing
-            // parent is a corrupt database, not a miss.
-            throw JMDictLookupError(db.lastError())
+            // parent is a corrupt database, not a miss — and never a
+            // code-0 sqliteError (a clean SQLITE_DONE leaves "not an error"
+            // in lastError, which mislabels the toast).
+            throw JMDictLookupError.databaseCorrupt
         }
         let keb = entryStatement.optionalText(0)
         let reb = entryStatement.optionalText(1)
@@ -335,6 +345,7 @@ final class JMDictLookup: Sendable {
         statement.bind(entSeq, at: 1)
         var senses: [JMDictSense] = []
         while try statement.step() {
+            try Task.checkCancellation()
             let pos = statement.optionalText(0)
             let glossText = statement.optionalText(1) ?? ""
             let misc = statement.optionalText(2)
@@ -374,8 +385,13 @@ final class JMDictLookup: Sendable {
         let database: SQLiteDatabase
         do {
             database = try SQLiteDatabase(path: url.path)
-        } catch {
-            throw JMDictLookupError(error)
+        } catch let error as SQLiteDatabase.Error {
+            switch error {
+            case .unavailable:
+                throw JMDictLookupError.sqliteError(code: -1, message: "failed to open JMDict database")
+            case .sqlite:
+                throw JMDictLookupError(error)
+            }
         }
         current = .open(database)
         return database
@@ -423,6 +439,11 @@ final class JMDictLookup: Sendable {
 
 extension JMDictLookupError {
     /// Maps a generic SQLite failure onto the lookup's typed error surface.
+    /// The open path never routes an unopenable handle through here: a file
+    /// that exists but fails to open reports `.sqliteError(code: -1, ...)`
+    /// there, never `.databaseMissing` — missing stays reserved for a nil
+    /// URL or an absent file. This mapping stays as-is for the reading and
+    /// headword-probe paths, where `.unavailable` still reads as missing.
     init(_ error: SQLiteDatabase.Error) {
         switch error {
         case .unavailable:

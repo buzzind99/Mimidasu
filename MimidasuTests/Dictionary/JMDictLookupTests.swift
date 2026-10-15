@@ -297,6 +297,10 @@ final class JMDictLookupTests {
                 == "JMDict database has been closed."
         )
         #expect(
+            JMDictLookupError.databaseCorrupt.errorDescription
+                == "JMDict database is corrupt."
+        )
+        #expect(
             JMDictLookupError.sqliteError(code: 11, message: "corrupt").errorDescription
                 == "JMDict database error 11: corrupt."
         )
@@ -377,7 +381,7 @@ final class JMDictLookupTests {
 
     /// A headword row whose entry row is gone is a corrupt database, not a
     /// miss — the lookup throws instead of returning nil.
-    @Test("a headword row without its entry throws a sqlite error")
+    @Test("a headword row without its entry throws database-corrupt")
     func orphanHeadwordRowThrows() throws {
         let built = try makeOrphanHeadwordDatabase()
         let sut = JMDictLookup(resolveDatabase: { [url = built.url] in url })
@@ -392,8 +396,8 @@ final class JMDictLookupTests {
             }
         )
 
-        guard case .sqliteError = thrown else {
-            Issue.record("expected .sqliteError, got \(thrown)")
+        guard case .databaseCorrupt = thrown else {
+            Issue.record("expected .databaseCorrupt, got \(thrown)")
             return
         }
     }

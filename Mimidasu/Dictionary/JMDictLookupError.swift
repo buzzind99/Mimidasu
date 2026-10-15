@@ -6,6 +6,7 @@ import Foundation
 enum JMDictLookupError: LocalizedError, Equatable {
     case databaseMissing
     case databaseClosed
+    case databaseCorrupt
     case sqliteError(code: Int32, message: String)
 
     var errorDescription: String? {
@@ -14,6 +15,8 @@ enum JMDictLookupError: LocalizedError, Equatable {
             "JMDict database not found; the dictionary may still be preparing."
         case .databaseClosed:
             "JMDict database has been closed."
+        case .databaseCorrupt:
+            "JMDict database is corrupt."
         case let .sqliteError(code, message):
             "JMDict database error \(code): \(message)."
         }
