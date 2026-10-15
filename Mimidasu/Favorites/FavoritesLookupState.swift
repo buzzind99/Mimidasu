@@ -94,7 +94,7 @@ final class FavoritesLookupState {
         phases[word.headword] = .loading
         let engine = lookup
         let candidate = LookupCandidate(text: word.headword, reading: word.reading)
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             let result: Result<LookupResult?, Error> = await Task.detached(
                 priority: .userInitiated
             ) {
@@ -113,7 +113,11 @@ final class FavoritesLookupState {
             case let .success(resolved):
                 phases[word.headword] = resolved.map(Phase.resolved) ?? .notFound
             case let .failure(error):
-                phases[word.headword] = .failed(error.localizedDescription)
+                // A cancelled query drops silently — never a fault row.
+                guard !(error is CancellationError) else { return }
+                phases[word.headword] = .failed(
+                    TapLookupFault(error).errorDescription ?? error.localizedDescription
+                )
             }
         }
     }
