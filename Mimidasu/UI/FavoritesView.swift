@@ -28,12 +28,6 @@ struct FavoritesView: View {
     /// two can hold the caret — see `ReferenceWindowView`.
     let searchFocus: FocusState<Bool>.Binding
 
-    /// How far a row's trailing controls drop onto the headword's line: they
-    /// are top-aligned to the row, and the 26pt headword is what sets the
-    /// first line, so their 22pt boxes need half the difference. The row's
-    /// type is fixed, so this does not drift with the UI scale.
-    private static let trailingLineDrop: CGFloat = 4
-
     var body: some View {
         windowContent(state.results)
             // Reconcile on activation. The `onChange` below is dead while this
@@ -189,7 +183,8 @@ struct FavoritesView: View {
     /// are siblings rather than part of that button, so the chevron can read
     /// last.
     private func favoriteHeader(_ word: FavoriteWord) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        let helpText = expansionHelp(state.lookupState.isExpanded(word))
+        return HStack(alignment: .top, spacing: 8) {
             Button {
                 state.lookupState.toggle(word)
             } label: {
@@ -208,7 +203,8 @@ struct FavoritesView: View {
             }
             .buttonStyle(.plain)
             .pointerStyle(.link)
-            .help(state.lookupState.isExpanded(word) ? "Hide definition" : "Show definition")
+            .help(helpText)
+            .accessibilityLabel("\(word.headword), \(helpText)")
             trailingControls(word)
         }
     }
@@ -272,11 +268,12 @@ struct FavoritesView: View {
             unstarButton(word)
             chevronButton(word)
         }
-        .padding(.top, Self.trailingLineDrop)
+        .padding(.top, Theme.dictionaryTrailingLineDrop)
     }
 
     private func chevronButton(_ word: FavoriteWord) -> some View {
         let expanded = state.lookupState.isExpanded(word)
+        let helpText = expansionHelp(expanded)
         return Button {
             state.lookupState.toggle(word)
         } label: {
@@ -287,8 +284,8 @@ struct FavoritesView: View {
         }
         .buttonStyle(.plain)
         .pointerStyle(.link)
-        .help(expanded ? "Hide definition" : "Show definition")
-        .accessibilityLabel(expanded ? "Hide definition" : "Show definition")
+        .help(helpText)
+        .accessibilityLabel(helpText)
     }
 
     /// Expanded definition block: 1pt divider over the shared entry view, so
@@ -305,7 +302,13 @@ struct FavoritesView: View {
                 ProgressView()
                     .controlSize(.small)
             case let .resolved(result):
-                if let entry = result.entries.first {
+                // Favorite-first: a starred entry leads, so the row opens on
+                // the word the user kept. Entry order only — the pager stays
+                // off and the "also:" pills stay empty, as below.
+                let promoted = FavoritesPromotion.promotingFavorites(
+                    in: result, identity: model.favorites.identity
+                )
+                if let entry = promoted.entries.first {
                     // No favorite or copy arguments: `showsHeadword: false`
                     // drops the header row, which is the only place either is
                     // rendered, so passing them would assert a control the
@@ -317,7 +320,7 @@ struct FavoritesView: View {
                     // nothing.
                     DictionaryEntryContentView(
                         entry: entry,
-                        entryCount: result.entries.count,
+                        entryCount: promoted.entries.count,
                         entryIndex: 0,
                         also: [],
                         senseLimit: nil,
@@ -346,21 +349,22 @@ struct FavoritesView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Unboxed star: 18pt glyph in a 22×22 frame, no tile. Asks first — the
-    /// shared alert commits the removal. Same action string as the dictionary
-    /// header's starred state, so the two never drift.
+    /// Unstar control: the shared favorite star, always filled here — every
+    /// row in this list is starred by construction. Asks first — the shared
+    /// alert commits the removal.
     private func unstarButton(_ word: FavoriteWord) -> some View {
-        Button {
-            onFavoriteRemoval(word.headword)
-        } label: {
-            Image(systemName: "star.fill")
-                .font(.system(size: 18))
-                .foregroundStyle(Theme.favoriteStarYellow)
-                .frame(width: 22, height: 22)
-        }
-        .buttonStyle(.plain)
-        .pointerStyle(.link)
-        .help("Remove “\(word.headword)” from favorites")
-        .accessibilityLabel("Remove “\(word.headword)” from favorites")
+        DictionaryFavoriteButton(
+            isFavorite: true,
+            subject: word.headword,
+            style: .popover,
+            action: {
+                // A filled star asserts membership; re-check so a row that vanished cannot be re-added by the removal press.
+                guard model.favorites.isFavorite(headword: word.headword) else { return }
+                forwardRemovalRequest(
+                    model.toggleFavorite(headword: word.headword, reading: word.reading),
+                    to: onFavoriteRemoval
+                )
+            }
+        )
     }
 }

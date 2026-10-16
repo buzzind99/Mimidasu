@@ -79,7 +79,7 @@ struct FavoritesWindowStateTests {
         // Nothing runs yet: the rows still describe the previous query.
         #expect(state.results.count == 2)
         #expect(state.debouncedQuery.isEmpty)
-        #expect(await pollUntil { state.debouncedQuery == "見る" })
+        #expect(await pollUntil(timeout: 5) { state.debouncedQuery == "見る" }, "the debounced query lands")
         #expect(state.results.map(\.headword) == ["見る"])
         #expect(state.countText() == "1 entry")
     }
@@ -92,14 +92,14 @@ struct FavoritesWindowStateTests {
 
         state.favoritesChanged()
         state.query = "見る"
-        #expect(await pollUntil { state.debouncedQuery == "見る" })
+        #expect(await pollUntil(timeout: 5) { state.debouncedQuery == "見る" }, "the first query lands")
 
         // A keystroke inside the debounce window replaces the pending query
         // rather than queueing a second one.
         state.query = "食べ"
         state.query = "食べる"
         #expect(state.debouncedQuery == "見る")
-        #expect(await pollUntil { state.results.map(\.headword) == ["食べる"] })
+        #expect(await pollUntil(timeout: 5) { state.results.map(\.headword) == ["食べる"] }, "the replacement query lands")
         #expect(state.debouncedQuery == "食べる")
     }
 
@@ -112,7 +112,7 @@ struct FavoritesWindowStateTests {
         state.favoritesChanged()
         state.query = "   "
 
-        #expect(await pollUntil { state.debouncedQuery == "   " })
+        #expect(await pollUntil(timeout: 5) { state.debouncedQuery == "   " }, "the whitespace query lands without filtering")
         #expect(state.results.count == 2)
         #expect(state.countText() == "2 / \(FavoritesStore.limit)")
     }
@@ -127,7 +127,7 @@ struct FavoritesWindowStateTests {
         state.favoritesChanged()
         state.query = "おい"
 
-        #expect(await pollUntil { state.debouncedQuery == "おい" })
+        #expect(await pollUntil(timeout: 5) { state.debouncedQuery == "おい" }, "the filtered query lands")
         #expect(state.results.map(\.headword) == ["おい"])
         #expect(state.countText() == "1 entry")
     }
@@ -141,7 +141,7 @@ struct FavoritesWindowStateTests {
 
         state.favoritesChanged()
         state.query = "おい"
-        #expect(await pollUntil { state.debouncedQuery == "おい" })
+        #expect(await pollUntil(timeout: 5) { state.debouncedQuery == "おい" }, "the live query lands before the mutation")
 
         model.favorites.toggle(FavoriteWord(
             headword: "追い", reading: "おい", romaji: "oi", addedAt: 1003
@@ -188,7 +188,7 @@ struct FavoritesWindowStateTests {
         #expect(state.lookupState.expanded.isEmpty)
         // Once the pending query lands over the mutated store, the filter runs
         // against what is actually left.
-        #expect(await pollUntil { state.debouncedQuery == "食べ" })
+        #expect(await pollUntil(timeout: 5) { state.debouncedQuery == "食べ" }, "the pending query lands over the mutated store")
         #expect(state.results.isEmpty)
     }
 
@@ -222,12 +222,13 @@ struct FavoritesWindowStateTests {
         state.query = "食べ"
         // Let the debounce land first, so `debouncedQuery` and `query` agree
         // with each other and the reset hits the equality guard.
-        #expect(await pollUntil { state.debouncedQuery == "食べ" })
+        #expect(await pollUntil(timeout: 5) { state.debouncedQuery == "食べ" }, "the debounce lands before the reset")
 
         state.resetForClose()
         // The task the reset would have spawned would fire ~150ms later and
         // write an empty query's rows. Sleeping past the debounce is the only
-        // way to see it.
+        // way to see it: a poll cannot observe an absence, so this sleep is
+        // the sanctioned exception rather than a wait to convert.
         try await Task.sleep(for: FavoritesWindowState.searchDebounce * 3)
         #expect(state.debouncedQuery.isEmpty)
         #expect(state.results.count == 2)
@@ -251,7 +252,7 @@ struct FavoritesWindowStateTests {
         #expect(state.results.map(\.headword) == ["おい", "食べる"])
 
         // The pending query lands over the mutated store.
-        #expect(await pollUntil { state.debouncedQuery == "おい" })
+        #expect(await pollUntil(timeout: 5) { state.debouncedQuery == "おい" }, "the pending query lands over the mutated store")
         #expect(state.results.map(\.headword) == ["おい"])
     }
 }
