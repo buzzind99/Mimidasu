@@ -34,7 +34,7 @@ extension AppModel {
     /// one that owns the outcomes.
     @discardableResult
     func toggleFavorite(_ entry: JMDictEntry) -> FavoriteToggle {
-        toggleFavorite(headword: DictionaryContent.headword(of: entry), reading: entry.reb)
+        toggleFavorite(headword: FavoriteIdentity.headword(of: entry), reading: entry.reb)
     }
 
     /// Stars `headword`, read in `reading`. The one star press, and the only
@@ -49,14 +49,16 @@ extension AppModel {
     /// cannot both present.
     ///
     /// Identity is the headword alone, and every caller derives it the same
-    /// way (`keb ?? reb` on both sides), so homographs sharing a `keb` share
-    /// one row and one star state: they are the same word.
+    /// way (kanji writing when present, else the reading — an empty spelling
+    /// counts as absent), so homographs sharing a `keb` share one row and one
+    /// star state: they are the same word.
     @discardableResult
     func toggleFavorite(headword: String?, reading: String?) -> FavoriteToggle {
-        // Every JMDict row carries at least one `reb`, so a nil headword only
-        // arrives from a hand-built entry; it stays silent rather than blaming a
-        // store that is fine, and names nothing the user could act on.
-        guard let headword else { return .failed }
+        // Every JMDict row carries at least one `reb`, so a nil or empty
+        // headword only arrives from a hand-built entry; it stays silent
+        // rather than blaming a store that is fine, and names nothing the
+        // user could act on.
+        guard let headword, !headword.isEmpty else { return .failed }
         if favorites.isFavorite(headword: headword) {
             return .pendingRemoval(headword: headword)
         }
@@ -89,7 +91,7 @@ extension AppModel {
     /// promotion repins both hosts, and a cached value would show the
     /// pre-promotion entry's membership for as long as it survived.
     func isFavorite(_ entry: JMDictEntry) -> Bool {
-        favorites.isFavorite(headword: DictionaryContent.headword(of: entry))
+        favorites.identity.isFavorite(entry)
     }
 
     /// Whether a fallback pill leads with a favorited entry — the pill
@@ -97,9 +99,7 @@ extension AppModel {
     /// one) to the front, so the lead is the only entry that can read
     /// starred.
     func isFavoriteLead(_ result: LookupResult) -> Bool {
-        favorites.isFavorite(
-            headword: result.entries.first.flatMap(DictionaryContent.headword(of:))
-        )
+        favorites.identity.leads(result)
     }
 
     /// The per-segment probe the transcript, live strip, and HUD pass down.

@@ -16,8 +16,11 @@ enum DictionaryContent {
     static let maxAlsoPills = 9
 
     /// Headword row: the kanji writing when present, else the reading.
+    /// Owned by `FavoriteIdentity` — the identity starred, matched, and
+    /// removed on — kept here so both hosts keep reading it from the content
+    /// assembly they already share.
     static func headword(of entry: JMDictEntry) -> String? {
-        entry.keb ?? entry.reb
+        FavoriteIdentity.headword(of: entry)
     }
 
     /// Probe-fixed JLPT display: `≈N{value}` (5 → ≈N5 … 1 → ≈N1); nil

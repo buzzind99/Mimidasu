@@ -3,8 +3,12 @@ import Foundation
 import Testing
 
 /// The Lookup Display module's fault map, driven over the fixture database:
-/// every infrastructure failure — missing, dangling, closed, corrupt — plus
-/// the nil/empty segments and empty-surface gates, lands on its typed fault.
+/// the infrastructure failures — missing, dangling, closed, corrupt — plus
+/// the empty-segments and empty-surface gates land on their typed faults;
+/// nil segments warn instead.
+/// A generic internal error stays covered at the pure map in
+/// `TapLookupFaultTests`: the engine is concrete, so no throwing stub seam
+/// exists for it here and none is introduced.
 @Suite("LookupDisplay faults")
 final class LookupDisplayFaultTests {
     private let harness: LookupDisplayHarness
@@ -20,7 +24,7 @@ final class LookupDisplayFaultTests {
             segments: nil, tappedAt: 0, sentenceText: "", surface: "お"
         )
 
-        let effect = await display.resolve(request, favorites: [])
+        let effect = await display.resolve(request, favorites: .empty)
 
         #expect(effect == .warnNoHit(surface: "お"))
     }
@@ -28,7 +32,7 @@ final class LookupDisplayFaultTests {
     @Test("nil segments with an empty surface fault as annotator-unavailable")
     func nilSegmentsEmptySurfaceFaults() async {
         let request = TapLookupRequest(segments: nil, tappedAt: 0, sentenceText: "", surface: "")
-        let effect = await harness.makeDisplay().resolve(request, favorites: [])
+        let effect = await harness.makeDisplay().resolve(request, favorites: .empty)
         #expect(effect == .fault(.annotatorUnavailable))
     }
 
@@ -39,7 +43,7 @@ final class LookupDisplayFaultTests {
             segments: [], tappedAt: 0, sentenceText: "お土産", surface: "お"
         )
 
-        let effect = await display.resolve(request, favorites: [])
+        let effect = await display.resolve(request, favorites: .empty)
 
         #expect(effect == .fault(.annotatorUnavailable))
     }
@@ -52,7 +56,7 @@ final class LookupDisplayFaultTests {
             sentenceText: "あめ", surface: ""
         )
 
-        let effect = await display.resolve(request, favorites: [])
+        let effect = await display.resolve(request, favorites: .empty)
 
         #expect(effect == .fault(.annotatorUnavailable))
     }
@@ -61,7 +65,7 @@ final class LookupDisplayFaultTests {
     func missingDatabaseFaults() async {
         let display = harness.makeDisplay(resolveDatabase: { nil })
 
-        let effect = await display.resolve(harness.requestO(), favorites: [])
+        let effect = await display.resolve(harness.requestO(), favorites: .empty)
 
         #expect(effect == .fault(.databaseMissing))
     }
@@ -73,7 +77,7 @@ final class LookupDisplayFaultTests {
         engine.close()
         let display = LookupDisplay(lookup: engine)
 
-        let effect = await display.resolve(harness.requestO(), favorites: [])
+        let effect = await display.resolve(harness.requestO(), favorites: .empty)
 
         #expect(effect == .fault(.databaseClosed))
     }
@@ -83,14 +87,14 @@ final class LookupDisplayFaultTests {
         let url = harness.fixture.url
         let engine = JMDictLookup(resolveDatabase: { [url] in url })
         let display = LookupDisplay(lookup: engine)
-        let first = await display.resolve(harness.requestO(), favorites: [])
+        let first = await display.resolve(harness.requestO(), favorites: .empty)
         guard case .show = first else {
             Issue.record("expected show, got \(first)")
             return
         }
         engine.close()
 
-        let effect = await display.resolve(harness.requestO(), favorites: [])
+        let effect = await display.resolve(harness.requestO(), favorites: .empty)
 
         #expect(effect == .fault(.databaseClosed))
     }
@@ -101,7 +105,7 @@ final class LookupDisplayFaultTests {
             .appendingPathComponent("mimidasu-missing-\(UUID().uuidString).sqlite")
         let display = harness.makeDisplay(resolveDatabase: { [missing] in missing })
 
-        let effect = await display.resolve(harness.requestO(), favorites: [])
+        let effect = await display.resolve(harness.requestO(), favorites: .empty)
 
         #expect(effect == .fault(.databaseMissing))
     }
@@ -114,7 +118,7 @@ final class LookupDisplayFaultTests {
         defer { try? FileManager.default.removeItem(at: garbage) }
         let display = harness.makeDisplay(resolveDatabase: { [garbage] in garbage })
 
-        let effect = await display.resolve(harness.requestO(), favorites: [])
+        let effect = await display.resolve(harness.requestO(), favorites: .empty)
 
         guard case let .fault(fault) = effect else {
             Issue.record("expected fault, got \(effect)")
@@ -126,5 +130,29 @@ final class LookupDisplayFaultTests {
         }
         #expect(code != 0)
         #expect(!message.isEmpty)
+    }
+
+    /// Built over the shared orphan-headword fixture, which carries just the
+    /// three-table shape this path needs.
+    @Test("an orphan headword row faults as database-corrupt")
+    func orphanHeadwordRowFaultsCorrupt() async throws {
+        let built = try JMDictFixtureDatabase.orphanHeadword()
+        let url = built.url
+        let engine = JMDictLookup(resolveDatabase: { [url] in url })
+        defer {
+            engine.close()
+            built.remove()
+        }
+        let display = LookupDisplay(lookup: engine)
+        let request = TapLookupRequest(
+            segments: [LookupSegment(surface: "孤語")],
+            tappedAt: 0,
+            sentenceText: "孤語",
+            surface: "孤語"
+        )
+
+        let effect = await display.resolve(request, favorites: .empty)
+
+        #expect(effect == .fault(.databaseCorrupt))
     }
 }

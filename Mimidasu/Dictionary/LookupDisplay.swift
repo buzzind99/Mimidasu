@@ -13,8 +13,8 @@ import Foundation
 /// demotion the engine already performs.
 ///
 /// Stateless by design: stale-generation drops stay caller-side (each host
-/// scope keeps its own guard), and favorites cross as a snapshot of
-/// normalized headword keys taken before dispatch — the engine receives no
+/// scope keeps its own guard), and favorites cross as one Favorite identity
+/// snapshot taken before dispatch — the engine receives no
 /// favorites parameter, so it cannot learn favorites exist. Queries run off
 /// the main actor on a detached task; hosts apply outcomes back on the main
 /// actor.
@@ -40,7 +40,7 @@ final class LookupDisplay: Sendable {
     /// non-empty (a bare miss warns instead), promoting each related hit's
     /// pager in place while the pin itself stays not-found with no display
     /// result; any throw faults.
-    func resolve(_ request: TapLookupRequest, favorites: Set<String>) async -> TapLookupEffect {
+    func resolve(_ request: TapLookupRequest, favorites: FavoriteIdentity) async -> TapLookupEffect {
         guard !request.surface.isEmpty else {
             return .fault(.annotatorUnavailable)
         }
@@ -98,7 +98,7 @@ final class LookupDisplay: Sendable {
     /// preserves origin. Promoting a foreign result — one the tap never
     /// resolved — fails closed by returning the content unchanged.
     func promote(
-        _ choice: LookupResult, in content: LookupContent, favorites: Set<String>
+        _ choice: LookupResult, in content: LookupContent, favorites: FavoriteIdentity
     ) -> LookupContent {
         guard content.allResults.contains(choice) else { return content }
         if let display = content.displayResult, choice == display,
@@ -110,13 +110,13 @@ final class LookupDisplay: Sendable {
                     also: content.allResults.filter { candidate in candidate != choice },
                     origin: origin
                 ),
-                keys: favorites
+                identity: favorites
             )
         }
         let others = content.allResults.filter { candidate in candidate != choice }
         return FavoritesPromotion.promotingFavorites(
             in: .found(result: choice, also: others, origin: .tappedSurface),
-            keys: favorites
+            identity: favorites
         )
     }
 
@@ -166,7 +166,7 @@ final class LookupDisplay: Sendable {
     /// related suggestion is promoted the same way, so a buried favorite
     /// leads its pill before any re-select.
     private static func content(
-        for resolved: LookupResolution, surface: String, favorites: Set<String>
+        for resolved: LookupResolution, surface: String, favorites: FavoriteIdentity
     ) -> LookupContent? {
         switch resolved {
         case let .found(outcome):
@@ -175,11 +175,11 @@ final class LookupDisplay: Sendable {
                     result: outcome.display, also: outcome.also,
                     origin: outcome.displayOrigin
                 ),
-                keys: favorites
+                identity: favorites
             )
         case let .notFound(related):
             related.isEmpty ? nil : .notFound(surface: surface, related: related.map { result in
-                FavoritesPromotion.promotingFavorites(in: result, keys: favorites)
+                FavoritesPromotion.promotingFavorites(in: result, identity: favorites)
             })
         }
     }

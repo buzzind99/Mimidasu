@@ -8,9 +8,11 @@ import Testing
 /// clamping, and the fault map. Every test asserts observable outcomes
 /// through the module interface — pinned Display, Also/Related ordering,
 /// warning surface, fault — over the fixture database, without constructing
-/// app state. Three suites share this harness — this file holds the
-/// tap-to-verdict one; the fault map and the pills/pager live in their own
-/// files — so no suite body or file trips the length gates.
+/// app state. Three suites share this harness — this file holds the core
+/// tap-to-verdict one (the out-of-bounds and duplicate-surface tap
+/// resolutions live in the pills/pager file); the fault map and the
+/// pills/pager live in their own files — so no suite body or file trips
+/// the length gates.
 struct ResolutionMismatch: Error {}
 
 final class LookupDisplayHarness {
@@ -50,7 +52,7 @@ final class LookupDisplayHarness {
     }
 
     func shownContent(
-        for request: TapLookupRequest, favorites: Set<String> = []
+        for request: TapLookupRequest, favorites: FavoriteIdentity = .empty
     ) async throws -> LookupContent {
         let effect = await makeDisplay().resolve(request, favorites: favorites)
         guard case let .show(content, _) = effect else {
@@ -101,7 +103,7 @@ final class LookupDisplayTests {
     func foundTapShowsDisplayWithAlso() async {
         let display = harness.makeDisplay()
 
-        let effect = await display.resolve(harness.requestO(), favorites: [])
+        let effect = await display.resolve(harness.requestO(), favorites: .empty)
 
         guard case let .show(content, entryIndex) = effect else {
             Issue.record("expected show, got \(effect)")
@@ -130,7 +132,7 @@ final class LookupDisplayTests {
             surface: "お土"
         )
 
-        let effect = await display.resolve(request, favorites: [])
+        let effect = await display.resolve(request, favorites: .empty)
 
         guard case let .show(content, entryIndex) = effect else {
             Issue.record("expected show, got \(effect)")
@@ -155,7 +157,7 @@ final class LookupDisplayTests {
             surface: "食べた"
         )
 
-        let effect = await display.resolve(request, favorites: [])
+        let effect = await display.resolve(request, favorites: .empty)
 
         guard case let .show(content, entryIndex) = effect else {
             Issue.record("expected show, got \(effect)")
@@ -180,7 +182,7 @@ final class LookupDisplayTests {
             surface: "雨尾"
         )
 
-        let effect = await display.resolve(request, favorites: [])
+        let effect = await display.resolve(request, favorites: .empty)
 
         guard case let .show(content, entryIndex) = effect else {
             Issue.record("expected show, got \(effect)")
@@ -205,9 +207,9 @@ final class LookupDisplayTests {
             surface: "雨尾"
         )
 
-        let plain = await display.resolve(request, favorites: [])
+        let plain = await display.resolve(request, favorites: .empty)
         let favorited = await display.resolve(
-            request, favorites: [FavoriteWord.normalize("雨")]
+            request, favorites: FavoriteIdentity(keys: [FavoriteIdentity.normalize("雨")])
         )
 
         guard case let .show(plainContent, _) = plain,
@@ -230,7 +232,7 @@ final class LookupDisplayTests {
     @Test("a buried favorite leads its related pill before any re-select")
     func notFoundRelatedPromotesBuriedFavorite() async {
         let request = TapLookupRequest(segments: [LookupSegment(surface: "前无")], tappedAt: 0, sentenceText: "前无", surface: "前无")
-        let effect = await harness.makeDisplay().resolve(request, favorites: [FavoriteWord.normalize("先")])
+        let effect = await harness.makeDisplay().resolve(request, favorites: FavoriteIdentity(keys: [FavoriteIdentity.normalize("先")]))
         guard case let .show(content, _) = effect,
               case let .notFound(surface, related) = content
         else {
@@ -253,7 +255,7 @@ final class LookupDisplayTests {
             surface: "xyz"
         )
 
-        let effect = await display.resolve(request, favorites: [])
+        let effect = await display.resolve(request, favorites: .empty)
 
         #expect(effect == .warnNoHit(surface: "xyz"))
     }
@@ -271,7 +273,7 @@ final class LookupDisplayTests {
             surface: "xyz"
         )
 
-        let effect = await display.resolve(request, favorites: [])
+        let effect = await display.resolve(request, favorites: .empty)
 
         #expect(effect == .warnNoHit(surface: "xyz"))
     }
@@ -289,7 +291,7 @@ final class LookupDisplayTests {
             surface: "お"
         )
 
-        let effect = await display.resolve(request, favorites: [])
+        let effect = await display.resolve(request, favorites: .empty)
 
         guard case let .show(content, _) = effect else {
             Issue.record("expected show, got \(effect)")
@@ -305,7 +307,7 @@ final class LookupDisplayTests {
         let request = harness.requestAme()
 
         let effect = await display.resolve(
-            request, favorites: [FavoriteWord.normalize("雨")]
+            request, favorites: FavoriteIdentity(keys: [FavoriteIdentity.normalize("雨")])
         )
 
         guard case let .show(content, entryIndex) = effect else {

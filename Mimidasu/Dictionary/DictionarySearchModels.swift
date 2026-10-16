@@ -337,10 +337,11 @@ struct DictionarySearchHit: Identifiable, Equatable, Sendable {
         entSeq
     }
 
-    /// The row's headword — the same `keb ?? reb` the favorite star keys on,
-    /// so a search hit and a lookup of the same entry are one favorite.
+    /// The row's headword — the same identity the favorite star keys on, so
+    /// a search hit and a lookup of the same entry are one favorite. Owned
+    /// by `FavoriteIdentity`.
     var headword: String? {
-        keb ?? reb
+        FavoriteIdentity.headword(keb: keb, reb: reb)
     }
 }
 

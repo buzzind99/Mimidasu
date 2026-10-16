@@ -16,13 +16,13 @@ struct FavoriteWordBoundLemmaLiveTests {
         LiveDictionaryRuntime.engine?.tokenize(text)
     })
 
-    private static let naiKeys: Set<String> = [FavoriteWord.normalize("ない")]
-    private static let miruKeys: Set<String> = [FavoriteWord.normalize("見る")]
+    private static let naiKeys: Set<String> = [FavoriteIdentity.normalize("ない")]
+    private static let miruKeys: Set<String> = [FavoriteIdentity.normalize("見る")]
 
     /// The comparable readings of stored rows, as the store builds them: one
     /// carrying no kana never arrives, since no kana surface could equal it.
     private func storedReadings(_ stored: String?...) -> Set<String> {
-        Set(stored.compactMap { candidate in FavoriteWord.readingKey(candidate) })
+        Set(stored.compactMap { candidate in FavoriteIdentity.readingKey(candidate) })
     }
 
     private func litSurfaces(
@@ -30,7 +30,7 @@ struct FavoriteWordBoundLemmaLiveTests {
     ) throws -> [String] {
         let segments = try #require(Self.annotator.segments(for: text))
         return segments.filter { segment in
-            FavoriteWord.matches(segment, keys: keys, readings: readings)
+            FavoriteIdentity(keys: keys, readings: readings).matches(segment)
         }
         .map(\.surface)
     }
@@ -62,7 +62,7 @@ struct FavoriteWordBoundLemmaLiveTests {
     func naiConjugatesStayDark(sentence: String) throws {
         let segments = try expectConjugates(sentence)
         let lit = segments
-            .filter { segment in FavoriteWord.matches(segment, keys: Self.naiKeys, readings: []) }
+            .filter { segment in FavoriteIdentity(keys: Self.naiKeys).matches(segment) }
             .map(\.surface)
 
         #expect(lit.allSatisfy { surface in surface == "ない" }, "unexpectedly lit: \(lit)")
@@ -85,7 +85,7 @@ struct FavoriteWordBoundLemmaLiveTests {
     @Test("a 勝つ favorite lights the context-potential 勝て")
     func katsuLightsContextPotentialKate() throws {
         let lit = try litSurfaces(
-            "チームに勝て なければ今度こそ", keys: [FavoriteWord.normalize("勝つ")]
+            "チームに勝て なければ今度こそ", keys: [FavoriteIdentity.normalize("勝つ")]
         )
 
         #expect(lit == ["勝て"])
@@ -115,7 +115,7 @@ struct FavoriteWordBoundLemmaLiveTests {
 
         let lit = try litSurfaces(
             "ガジでもらってます。",
-            keys: [FavoriteWord.normalize("貰う")],
+            keys: [FavoriteIdentity.normalize("貰う")],
             readings: storedReadings("もらう")
         )
 

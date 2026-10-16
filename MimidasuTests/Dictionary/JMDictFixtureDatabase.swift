@@ -157,6 +157,38 @@ enum JMDictFixtureDatabase {
         return Built(url: url)
     }
 
+    /// Minimal three-table database: one headwords row whose entry_id has no
+    /// matching entries row. Serves the orphan-shape paths the full fixture
+    /// is unnecessary for.
+    static func orphanHeadword() throws -> Built {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimidasu-jmdict-orphan-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("jmdict-orphan.sqlite")
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(
+            url.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil
+        ) == SQLITE_OK, let db else {
+            let message = db.map { handle in String(cString: sqlite3_errmsg(handle)) } ?? "open failed"
+            sqlite3_close_v2(db)
+            throw FixtureError.sqlite(message)
+        }
+        defer { sqlite3_close_v2(db) }
+        // The schema deliberately drops the build's WITHOUT ROWID primary
+        // keys and REFERENCES clauses: the engine's queries depend only on
+        // column names and order, which match the build's exactly.
+        try exec(db, """
+        CREATE TABLE entries(ent_seq INTEGER PRIMARY KEY, keb TEXT, reb TEXT, common INTEGER NOT NULL);
+        CREATE TABLE senses(entry_id INTEGER NOT NULL, ord INTEGER NOT NULL, pos TEXT,
+          gloss TEXT NOT NULL, misc TEXT, skeb TEXT, sreb TEXT);
+        CREATE TABLE headwords(entry_id INTEGER NOT NULL, text TEXT NOT NULL, kind TEXT NOT NULL,
+          jlpt INTEGER, hatsuon TEXT, acc TEXT, zo TEXT);
+        INSERT INTO headwords VALUES (777, '孤語', 'keb', NULL, NULL, NULL, NULL);
+        """)
+        return Built(url: url)
+    }
+
     private static func locateFixture() throws -> URL {
         let bundle = Bundle(for: BundleAnchor.self)
         guard let url = bundle.url(

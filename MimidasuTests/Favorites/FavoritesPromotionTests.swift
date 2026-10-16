@@ -26,6 +26,21 @@ struct FavoritesPromotionTests {
         )
     }
 
+    private func entry(keb: String?, reb: String?, seq: Int = 1) -> JMDictEntry {
+        JMDictEntry(
+            entSeq: seq,
+            keb: keb,
+            reb: reb,
+            common: false,
+            jlpt: nil,
+            hatsuon: nil,
+            accPatts: nil,
+            zoPatts: nil,
+            senses: [JMDictSense(pos: nil, glosses: ["gloss"], misc: nil,
+                                 restrictedKanji: nil, restrictedKana: nil)]
+        )
+    }
+
     private func result(_ headwords: [String]) -> LookupResult {
         LookupResult(
             matched: headwords[0],
@@ -36,13 +51,13 @@ struct FavoritesPromotionTests {
     }
 
     private var keys: Set<String> {
-        [FavoriteWord.normalize("見る")]
+        [FavoriteIdentity.normalize("見る")]
     }
 
     @Test("a favorite later in the list leads the pager")
     func promotesFavoriteEntry() {
         let promoted = FavoritesPromotion.promotingFavorites(
-            in: result(["箸", "匙", "見る"]), keys: keys
+            in: result(["箸", "匙", "見る"]), identity: FavoriteIdentity(keys: keys)
         )
 
         #expect(promoted.entries.map { entry in entry.keb } == ["見る", "箸", "匙"])
@@ -51,7 +66,7 @@ struct FavoritesPromotionTests {
     @Test("the other entries keep the order the dictionary ranked them in")
     func promotionKeepsSurroundingOrder() {
         let promoted = FavoritesPromotion.promotingFavorites(
-            in: result(["箸", "見る", "匙"]), keys: keys
+            in: result(["箸", "見る", "匙"]), identity: FavoriteIdentity(keys: keys)
         )
 
         #expect(promoted.entries.map(\.entSeq) == [2, 1, 3])
@@ -61,7 +76,7 @@ struct FavoritesPromotionTests {
     func leavesUnfavoritedResultAlone() {
         let original = result(["箸", "匙"])
 
-        let promoted = FavoritesPromotion.promotingFavorites(in: original, keys: keys)
+        let promoted = FavoritesPromotion.promotingFavorites(in: original, identity: FavoriteIdentity(keys: keys))
 
         #expect(promoted == original)
     }
@@ -70,7 +85,7 @@ struct FavoritesPromotionTests {
     func leavesLeadingFavoriteAlone() {
         let original = result(["見る", "箸"])
 
-        let promoted = FavoritesPromotion.promotingFavorites(in: original, keys: keys)
+        let promoted = FavoritesPromotion.promotingFavorites(in: original, identity: FavoriteIdentity(keys: keys))
 
         #expect(promoted == original)
     }
@@ -78,7 +93,7 @@ struct FavoritesPromotionTests {
     @Test("the matched text the tap resolved survives the promotion")
     func keepsMatchedText() {
         let promoted = FavoritesPromotion.promotingFavorites(
-            in: result(["箸", "見る"]), keys: keys
+            in: result(["箸", "見る"]), identity: FavoriteIdentity(keys: keys)
         )
 
         #expect(promoted.matched == "箸")
@@ -92,7 +107,7 @@ struct FavoritesPromotionTests {
             origin: .tappedSurface
         )
 
-        let promoted = FavoritesPromotion.promotingFavorites(in: content, keys: keys)
+        let promoted = FavoritesPromotion.promotingFavorites(in: content, identity: FavoriteIdentity(keys: keys))
 
         guard case let .found(display, also, _) = promoted else {
             Issue.record("a found content stopped being found")
@@ -117,7 +132,7 @@ struct FavoritesPromotionTests {
             origin: .tappedSurface
         )
 
-        let promoted = FavoritesPromotion.promotingFavorites(in: content, keys: keys)
+        let promoted = FavoritesPromotion.promotingFavorites(in: content, identity: FavoriteIdentity(keys: keys))
 
         #expect(promoted == content)
     }
@@ -128,7 +143,7 @@ struct FavoritesPromotionTests {
             result: result(["箸", "見る"]), also: [], origin: .join
         )
 
-        let promoted = FavoritesPromotion.promotingFavorites(in: content, keys: keys)
+        let promoted = FavoritesPromotion.promotingFavorites(in: content, identity: FavoriteIdentity(keys: keys))
 
         guard case let .found(_, _, origin) = promoted else {
             Issue.record("a found content stopped being found")
@@ -137,14 +152,35 @@ struct FavoritesPromotionTests {
         #expect(origin == .join)
     }
 
-    @Test("a not-found pin keeps its related splits as suggestions")
-    func leavesNotFoundAlone() {
+    @Test("a not-found pin stays not-found while its related pills promote")
+    func promotesRelatedPillsWhilePinStaysNotFound() {
         let content = LookupContent.notFound(
             surface: "雨尾", related: [result(["雨", "見る"])]
         )
 
-        let promoted = FavoritesPromotion.promotingFavorites(in: content, keys: keys)
+        let promoted = FavoritesPromotion.promotingFavorites(in: content, identity: FavoriteIdentity(keys: keys))
 
-        #expect(promoted == content)
+        guard case let .notFound(surface, related) = promoted else {
+            Issue.record("a not-found pin stopped being not-found")
+            return
+        }
+        #expect(surface == "雨尾")
+        #expect(related.map(\.matched) == ["雨"])
+        #expect(related.map { row in row.entries.map { entry in entry.keb } } == [["見る", "雨"]])
+        #expect(related.map { row in row.entries.map(\.entSeq) } == [[2, 1]])
+    }
+
+    @Test("a kana-only entry promotes on its reading")
+    func promotesKanaOnlyEntryOnReading() {
+        let kana = entry(keb: nil, reb: "みる", seq: 2)
+        let original = LookupResult(matched: "みる", entries: [entry("箸"), kana])
+        let identity = FavoriteIdentity(words: [
+            FavoriteWord.starred(headword: "みる", reading: "みる")
+        ])
+
+        let promoted = FavoritesPromotion.promotingFavorites(in: original, identity: identity)
+
+        #expect(promoted.entries.map(\.entSeq) == [2, 1])
+        #expect(promoted.entries.first?.reb == "みる")
     }
 }

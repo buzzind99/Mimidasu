@@ -312,6 +312,19 @@ struct FavoritesStoreTests {
         #expect(store.words.map(\.headword) == ["あめ", "そら"])
     }
 
+    @Test("same-timestamp kana words read back in the order shown")
+    func sameTimestampKanaMatchesReopenedOrder() {
+        let (location, cleanup) = makeLocation()
+        defer { cleanup() }
+        let store = FavoritesStore(location: location)
+        store.toggle(FavoriteWord(headword: "そら", reading: nil, romaji: nil, addedAt: 500))
+        store.toggle(FavoriteWord(headword: "あめ", reading: nil, romaji: nil, addedAt: 500))
+
+        let reopened = FavoritesStore(location: location)
+
+        #expect(store.words.map(\.headword) == reopened.words.map(\.headword))
+    }
+
     // MARK: - Degraded store
 
     @Test("a store whose file cannot open reports degraded, not merely empty")
@@ -328,6 +341,43 @@ struct FavoritesStoreTests {
         #expect(store.isDegraded)
         #expect(store.words.isEmpty)
         #expect(store.toggle(Self.miru) == .failed)
+    }
+
+    // MARK: - Ghost rows
+
+    @Test("a legacy empty-headword row in the file is deleted at load, not merely hidden")
+    func loadDeletesGhostRowsFromTheFile() throws {
+        let (location, cleanup) = makeLocation()
+        defer { cleanup() }
+        // Seeded straight into the file: a ghost row carrying a real reading —
+        // the shape an older writer leaves — next to one healthy row.
+        let seeder = FavoritesDatabase(location: location)
+        try seeder.insert(FavoriteWord(headword: "", reading: "みる", romaji: "miru", addedAt: 999))
+        try seeder.insert(Self.miru)
+
+        let store = FavoritesStore(location: location)
+
+        #expect(store.words == [Self.miru])
+        // The reopen is the assertion that matters: a raw handle reads the
+        // file without the store's in-memory filter, so a ghost still on disk
+        // would show up here — the deletion persisted, not a load-time hiding.
+        #expect(FavoritesStore(location: location).words == [Self.miru])
+        #expect(try FavoritesDatabase(location: location).all() == [Self.miru])
+    }
+
+    @Test("a ghost row written underneath the open store never answers a search")
+    func searchDropsGhostRowsWrittenUnderneath() throws {
+        let (location, cleanup) = makeLocation()
+        defer { cleanup() }
+        let store = FavoritesStore(location: location)
+        store.toggle(Self.miru)
+        // A second handle on the same file plays the older or parallel
+        // writer: the load-time sweep already ran, so only the search filter
+        // stands between this row and the list.
+        let seeder = FavoritesDatabase(location: location)
+        try seeder.insert(FavoriteWord(headword: "", reading: "みる", romaji: "miru", addedAt: 999))
+
+        #expect(store.search("みる") == [Self.miru])
     }
 
     // MARK: - Search
@@ -416,6 +466,7 @@ struct FavoritesStoreTests {
         )
 
         #expect(outcome == .limitReached)
+        #expect(!store.identity.isFavorite(headword: "overflow"))
     }
 
     @Test("a refused add leaves the list at the cap and nothing evicted")
@@ -433,6 +484,95 @@ struct FavoritesStoreTests {
             FavoriteWord(headword: "overflow", reading: nil, romaji: nil, addedAt: 99999)
         )
 
-        #expect(store.count == FavoritesStore.limit && store.revision == before)
+        #expect(store.count == FavoritesStore.limit)
+        #expect(store.revision == before)
+    }
+}
+
+/// Split out of `FavoritesStoreTests` to keep the suite body small; shares
+/// the parent's location helpers.
+extension FavoritesStoreTests {
+    /// A store whose file cannot open, so every file-backed answer is a stub.
+    /// Shares the blocked-regular-file shape with `failedLoadReportsDegraded`.
+    private func makeDegradedStore() -> (FavoritesStore, () -> Void) {
+        let blocked = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimidasu-favorites-degraded-\(UUID().uuidString)")
+        #expect(FileManager.default.createFile(atPath: blocked.path, contents: nil))
+        let store = FavoritesStore(location: blocked.appendingPathComponent("favorites.sqlite"))
+        return (store, { try? FileManager.default.removeItem(at: blocked) })
+    }
+
+    @Test("toggling an empty headword changes nothing")
+    func toggleEmptyHeadwordIsNoOp() {
+        let (location, cleanup) = makeLocation()
+        defer { cleanup() }
+        let store = FavoritesStore(location: location)
+
+        let outcome = store.toggle(
+            FavoriteWord(headword: "", reading: nil, romaji: nil, addedAt: 0)
+        )
+
+        #expect(outcome == .failed)
+        #expect(store.count == 0)
+        #expect(store.words.isEmpty)
+        #expect(!store.identity.isFavorite(headword: ""))
+        #expect(FavoritesStore(location: location).words.isEmpty)
+    }
+
+    @Test("same-timestamp words order by UTF-8 bytes, as the file does, where canonical order disagrees")
+    func sameTimestampOrdersByUtf8Bytes() throws {
+        // A + combining ring sorts after A-umlaut under Swift's canonical
+        // comparison (the ring composes to A-ring, which is greater than
+        // A-umlaut) but before it byte-wise (0x41 < 0xC3) -- and NFKC keeps
+        // the two on distinct keys (A-ring vs A-umlaut), so both rows star.
+        // The file's BINARY collation is a byte comparison, so only the
+        // UTF-8 tiebreak reads back in the order shown. Code points stay
+        // ASCII so no precomposed literal can collapse the pair in transit.
+        let decomposedRing = try "A" + String(#require(UnicodeScalar(0x30A)))
+        let umlaut = try String(#require(UnicodeScalar(0xC4)))
+        let (location, cleanup) = makeLocation()
+        defer { cleanup() }
+        let store = FavoritesStore(location: location)
+        store.toggle(FavoriteWord(headword: decomposedRing, reading: nil, romaji: nil, addedAt: 500))
+        store.toggle(FavoriteWord(headword: umlaut, reading: nil, romaji: nil, addedAt: 500))
+
+        #expect(umlaut < decomposedRing)
+        #expect(store.words.map(\.headword) == [decomposedRing, umlaut])
+        #expect(FavoritesStore(location: location).words.map(\.headword) == [decomposedRing, umlaut])
+    }
+
+    @Test("a degraded store searches nothing")
+    func degradedSearchIsEmpty() {
+        let (store, cleanup) = makeDegradedStore()
+        defer { cleanup() }
+
+        #expect(store.isDegraded)
+        #expect(store.search("見る").isEmpty)
+    }
+
+    @Test("a degraded store matches nothing")
+    func degradedMatchesNothing() {
+        let (store, cleanup) = makeDegradedStore()
+        defer { cleanup() }
+
+        #expect(store.isDegraded)
+        #expect(!store.matches(segment: segment("見た", lemma: "見る")))
+    }
+
+    @Test("a removal at the cap still removes")
+    func removeAtCapRemoves() {
+        let (store, cleanup) = makeStore()
+        defer { cleanup() }
+        for index in 0 ..< FavoritesStore.limit {
+            store.toggle(FavoriteWord(
+                headword: "語\(index)", reading: nil, romaji: nil, addedAt: index
+            ))
+        }
+
+        let outcome = store.remove(headword: "語0")
+
+        #expect(outcome == .removed)
+        #expect(store.count == FavoritesStore.limit - 1)
+        #expect(!store.identity.isFavorite(headword: "語0"))
     }
 }

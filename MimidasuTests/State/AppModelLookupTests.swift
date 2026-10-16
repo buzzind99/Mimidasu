@@ -52,10 +52,14 @@ final class AppModelLookupTests {
     // MARK: - Tap entry point
 
     @Test(
-        "handleLookupTap resolves segments at tap time and lands the miss pill",
+        "live tokenizer: handleLookupTap resolves segments at tap time and lands the miss pill",
         .enabled(if: DictionaryStore.resolve() != nil)
     )
     func handleLookupTapLandsOutcome() async {
+        // Live-tokenizer coverage only: the gate above skips — visibly, as a
+        // skipped test rather than a silent pass — when no prepared
+        // tokenizer is on disk. The deterministic routing below proves the
+        // same pill without the tokenizer.
         let model = makeModel()
 
         // "xyz" misses the fixture whichever way the real annotator
@@ -82,25 +86,71 @@ final class AppModelLookupTests {
         #expect(model.selectedLookup == nil)
     }
 
+    @Test("runLookup with injected segments lands the miss pill without the tokenizer")
+    func injectedSegmentsLandMissPill() async {
+        let model = makeModel()
+
+        await model.runLookup(
+            segments: [LookupSegment(surface: "xyz")], tappedAt: 0,
+            sentenceText: "xyz", surface: "xyz",
+            source: .transcript(sentenceIndex: 0, tokenIndex: 0)
+        )
+
+        #expect(model.notices.message == "No dictionary entry for \"xyz\"")
+        #expect(model.notices.tone == .warning)
+        #expect(model.selectedLookup == nil)
+    }
+
     @Test("lookup identity distinguishes sources and travels with the matched headword")
     func lookupIdentity() async throws {
+        let model = makeModel()
+
+        await runHit(model, source: .transcript(sentenceIndex: 0, tokenIndex: 0))
+        #expect(model.selectedLookup?.source == .transcript(sentenceIndex: 0, tokenIndex: 0))
+        #expect(model.selectedLookup?.content.displayResult?.matched == "お")
+        let transcriptID = try #require(model.selectedLookup?.id)
+
+        await model.runLookup(
+            segments: lookupO(), tappedAt: 0, sentenceText: "お土産",
+            surface: "お", source: .liveStrip
+        )
+        #expect(model.selectedLookup?.source == .liveStrip)
+        #expect(model.selectedLookup?.content.displayResult?.matched == "お")
+        let stripID = try #require(model.selectedLookup?.id)
+        #expect(transcriptID != stripID)
+    }
+
+    @Test("lookup identity format joins source and token (debug-id contract)")
+    func lookupIdentityFormat() async throws {
         let model = makeModel()
 
         await runHit(model, source: .transcript(sentenceIndex: 0, tokenIndex: 0))
         let transcriptID = try #require(model.selectedLookup?.id)
 
         #expect(transcriptID.hasSuffix("-お"))
+    }
+
+    @Test(
+        "a lookup selection carries its source and matched headword",
+        arguments: [
+            SelectedLookup.Source.transcript(sentenceIndex: 0, tokenIndex: 0),
+            SelectedLookup.Source.liveStrip
+        ]
+    )
+    func lookupCarriesSourceAndMatch(source: SelectedLookup.Source) async {
+        let model = makeModel()
 
         await model.runLookup(
             segments: lookupO(), tappedAt: 0, sentenceText: "お土産",
-            surface: "お", source: .liveStrip
+            surface: "お", source: source
         )
-        let stripID = try #require(model.selectedLookup?.id)
-        #expect(transcriptID != stripID)
+
+        #expect(model.selectedLookup?.source == source)
+        #expect(model.selectedLookup?.content.displayResult?.matched == "お")
     }
 
-    @Test("sequential taps land latest-wins; each tap bumps the generation")
-    func sequentialTapsLandLatestWins() async throws {
+    @Test("sequential taps land in order; each tap bumps the generation")
+    func sequentialTapsLandInOrder() async throws {
         // The token is internal, so the bump reads directly; it runs on a
         // throwaway model so the tap's spawned Task never races the model below.
         let bumpModel = makeModel()
@@ -112,9 +162,11 @@ final class AppModelLookupTests {
         #expect(bumpModel.lookupGeneration == before + 1)
 
         // Concurrent rapid taps would race detached SQLite lookups with no
-        // engineered latency — flaky — so latest-wins lands sequentially
-        // here; the stale-generation drops themselves are proven by the
-        // generation-parameter drops in the effect tests.
+        // engineered latency — flaky — so ordering lands sequentially here;
+        // the stale-generation drops themselves are proven by the
+        // generation-parameter drops in the effect tests. No gated-continuation
+        // race is pinned here: the engine is concrete with no stub seam, so
+        // none is introduced.
         let model = makeModel()
         await model.runLookup(
             segments: lookupO(), tappedAt: 0, sentenceText: "お土産", surface: "お", source: .liveStrip

@@ -5,11 +5,11 @@ import Observation
 /// favorite?".
 ///
 /// Two read paths on purpose. `words` and `search` are durable — the file is
-/// the record and the SQL owns ordering and filtering. `matchKeys` is an
-/// in-memory `Set` of *normalized* headwords probed by the transcript twice
-/// per segment per re-diff; it must never touch SQLite. Every mutation keeps
-/// the set and `words` consistent, which is otherwise invisible: a stale key
-/// means a word simply never lights up.
+/// the record and the SQL owns ordering and filtering. `identity` is the
+/// in-memory Favorite identity probed by the transcript twice per segment per
+/// re-diff; it must never touch SQLite. Load and removal rebuild it from
+/// `words` while each add folds one row in, which is otherwise invisible: a
+/// stale identity means a word simply never lights up.
 @Observable
 @MainActor
 final class FavoritesStore {
@@ -28,7 +28,7 @@ final class FavoritesStore {
     /// read it — `TranscriptView`, `ContentView`, `HUDView` — and discard the
     /// number: it registers an `@Observable` dependency at the surface that
     /// hands the matcher down. `RubyTextView` would repaint without it (its
-    /// body invokes the matcher, so it observes `matchKeys` itself), which
+    /// body invokes the matcher, so it observes `identity` itself), which
     /// makes these reads redundant rather than wrong — they keep the
     /// dependence on favorite state visible where the matcher is supplied.
     private(set) var revision = 0
@@ -39,15 +39,10 @@ final class FavoritesStore {
     /// hold.
     private(set) var isDegraded = false
 
-    /// Normalized headwords — the hot path. Raw spellings live in `words`.
-    private var matchKeys: Set<String> = []
-    /// Kana-folded readings of the same words — the kana spelling a favorited
-    /// word can also be written as. Kept apart from `matchKeys` on purpose: a
-    /// kana-written segment matches one of these, while star membership and
-    /// removal stay exact headword operations. One set for both would
-    /// let a spelling hit fill a star, and would let `remove(headword:)` delete
-    /// a row nobody named.
-    private var readingKeys: Set<String> = []
+    /// One Favorite identity, kept current with `words` on every mutation
+    /// that changed what is on screen. Star, Highlight, and Promotion read
+    /// this value instead of re-deriving the headword rule each.
+    private(set) var identity = FavoriteIdentity.empty
 
     /// Favorites are authored user data that must survive a clean, so they
     /// live in Application Support in **both** configurations — unlike the
@@ -61,11 +56,15 @@ final class FavoritesStore {
 
     private let database: FavoritesDatabase
 
-    /// Opens the database and loads the match set synchronously: ~`limit`
-    /// short rows parse well under a millisecond. `location` is the whole
-    /// test-isolation seam — the default is the real production file, so a
-    /// test that forgets to inject one writes to the developer's own
-    /// vocabulary.
+    /// Opens the database, deletes the legacy empty-headword rows out of the
+    /// file, and loads the word rows synchronously, building the identity
+    /// snapshot from them: ~`limit` short rows parse well under a millisecond.
+    /// The load still drops empty headwords from memory — belt-and-braces for
+    /// a row an older or parallel process writes underneath the store after
+    /// the sweep.
+    /// `location` is the whole test-isolation seam — the default is the real
+    /// production file, so a test that forgets to inject one writes to the
+    /// developer's own vocabulary.
     ///
     /// A failed load degrades the database terminally. The store's contract is
     /// that memory mirrors the file, and a transient fault on the very first
@@ -74,15 +73,22 @@ final class FavoritesStore {
     /// see. Degraded, every mutation that reaches the file fails into the
     /// `.failed` paths instead; `remove` answers `.removed` at its membership
     /// guard first, because a degraded store holds no favorites to remove.
+    /// The sweep is best-effort by contrast: a failed sweep only logs,
+    /// because the load filter and the search filter still drop empty
+    /// headwords from memory.
     init(location: URL = FavoritesStore.defaultLocation) {
         let database = FavoritesDatabase(location: location)
         self.database = database
         do {
-            let loaded = try database.all()
+            try database.deleteEmptyHeadwords()
+        } catch {
+            print("favorites: ghost-row sweep skipped: \(error)")
+        }
+        do {
+            let loaded = try database.all().filter { word in !word.headword.isEmpty }
             words = loaded
             count = loaded.count
-            matchKeys = Set(loaded.map { word in FavoriteWord.normalize(word.headword) })
-            readingKeys = Self.readingKeys(for: loaded)
+            identity = FavoriteIdentity(words: loaded)
         } catch {
             print("favorites: load failed, degrading: \(error)")
             isDegraded = true
@@ -95,27 +101,12 @@ final class FavoritesStore {
     }
 
     func isFavorite(headword: String?) -> Bool {
-        guard let headword else { return false }
-        return matchKeys.contains(FavoriteWord.normalize(headword))
+        identity.isFavorite(headword: headword)
     }
 
-    /// The render-path probe. Static so it is directly unit-testable without
-    /// a store or a database.
+    /// The render-path probe over the current identity.
     func matches(segment: ReadingSegment) -> Bool {
-        FavoriteWord.matches(segment, keys: matchKeys, readings: readingKeys)
-    }
-
-    /// Normalized headword keys snapshot for the tap lookup display: favorites
-    /// cross the resolve/promote seam as a value captured on the main actor
-    /// before dispatch, so the module never reads the store.
-    var favoriteKeys: Set<String> {
-        matchKeys
-    }
-
-    /// The comparable readings of a row set. A set, so two favorites sharing a
-    /// reading collapse onto one key and neither is counted twice.
-    private static func readingKeys(for words: [FavoriteWord]) -> Set<String> {
-        Set(words.compactMap { word in FavoriteWord.readingKey(word.reading) })
+        identity.matches(segment)
     }
 
     /// Stars the word, or unstars it when already present. The cap is checked
@@ -123,8 +114,8 @@ final class FavoritesStore {
     /// without a transaction.
     @discardableResult
     func toggle(_ word: FavoriteWord) -> FavoriteToggle {
-        let key = FavoriteWord.normalize(word.headword)
-        if matchKeys.contains(key) {
+        guard !word.headword.isEmpty else { return .failed }
+        if identity.isFavorite(headword: word.headword) {
             return remove(headword: word.headword)
         }
         guard !isFull else { return .limitReached }
@@ -134,19 +125,18 @@ final class FavoritesStore {
             return .failed
         }
         // The position the file would give the row — `added_at DESC,
-        // headword ASC`. The window renders `words` directly, so an
-        // off-order insert would reshuffle under the user on the next
-        // launch's reload.
+        // headword ASC` under BINARY collation. The window renders `words`
+        // directly, so an off-order insert would reshuffle under the user on
+        // the next launch's reload. The tiebreak compares UTF-8 bytes, which
+        // is what BINARY means; Swift's canonical ordering can disagree.
         let index = words.firstIndex { element in
             element.addedAt < word.addedAt
-                || (element.addedAt == word.addedAt && element.headword > word.headword)
+                || (element.addedAt == word.addedAt
+                    && word.headword.utf8.lexicographicallyPrecedes(element.headword.utf8))
         } ?? words.count
         words.insert(word, at: index)
         count = words.count
-        matchKeys.insert(key)
-        if let reading = FavoriteWord.readingKey(word.reading) {
-            readingKeys.insert(reading)
-        }
+        identity.insert(word)
         revision += 1
         return .added
     }
@@ -160,11 +150,11 @@ final class FavoritesStore {
     /// launch.
     @discardableResult
     func remove(headword: String) -> FavoriteToggle {
-        let key = FavoriteWord.normalize(headword)
-        guard matchKeys.contains(key) else { return .removed }
-        // Non-empty: `matchKeys` holds a key only because a loaded row
+        let key = FavoriteIdentity.normalize(headword)
+        guard identity.keys.contains(key) else { return .removed }
+        // Non-empty: `identity` holds a key only because a loaded row
         // normalizes to it.
-        let doomed = words.filter { word in FavoriteWord.normalize(word.headword) == key }
+        let doomed = words.filter { word in FavoriteIdentity.normalize(word.headword) == key }
         do {
             // One delete per row rather than one statement: the spellings are
             // only known from memory. If a later delete fails the file has lost
@@ -179,20 +169,23 @@ final class FavoritesStore {
         } catch {
             return .failed
         }
-        matchKeys.remove(key)
-        words.removeAll { word in FavoriteWord.normalize(word.headword) == key }
+        words.removeAll { word in FavoriteIdentity.normalize(word.headword) == key }
         count = words.count
         // Rebuilt rather than key-by-key: two favorites can share a reading
         // (有難う and ありがとう both read the same), and dropping the removed
         // row's key alone would strand the survivor's highlight.
-        readingKeys = Self.readingKeys(for: words)
+        identity = FavoriteIdentity(words: words)
         revision += 1
         return .removed
     }
 
     /// Filtering and ordering stay the database's job, so they stay testable
-    /// against a real file.
+    /// against a real file. A transient fault reads as no match. Empty-headword
+    /// rows are dropped from the answer: the load deletes them from the file,
+    /// but a row an older or parallel process writes underneath the store
+    /// afterwards must not surface as an empty card.
     func search(_ query: String) -> [FavoriteWord] {
-        (try? database.search(query)) ?? []
+        let matches = (try? database.search(query)) ?? []
+        return matches.filter { word in !word.headword.isEmpty }
     }
 }

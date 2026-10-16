@@ -5,8 +5,8 @@ import Testing
 /// Pins the tap fault map: every lookup throw lands on one typed fault, and
 /// each fault carries the toast string the host surfaces. Pure unit tests —
 /// no database, no annotator — complementing the resolve-level fault tests
-/// in `LookupDisplayTests`, which prove the engine throws reach the same
-/// faults end to end.
+/// in `LookupDisplayFaultTests`, which drive the same faults through
+/// `resolve` over the fixture database.
 @Suite("TapLookupFault mapping")
 struct TapLookupFaultTests {
 

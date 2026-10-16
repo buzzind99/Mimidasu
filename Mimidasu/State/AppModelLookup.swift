@@ -67,7 +67,8 @@ extension AppModel {
     // MARK: - Tap entry point
 
     /// UI entry for a dictionary-mode tap: re-resolves the segments for the
-    /// tapped sentence at tap time (cached for unchanged text) and runs the
+    /// tapped sentence at tap time (cached for unchanged text) and captures
+    /// the favorites identity on the same synchronous hop, then runs the
     /// lookup on a background task. The payload's render-time index crosses
     /// raw — the module re-anchors it single-place at resolve time. UI
     /// state is only ever touched back on the main actor.
@@ -78,6 +79,7 @@ extension AppModel {
                 lemma: segment.lemma,
                 reading: segment.kanaReading
             ) }
+        let identity = favorites.identity
         lookupGeneration &+= 1
         let generation = lookupGeneration
         Task { @MainActor [weak self] in
@@ -88,7 +90,8 @@ extension AppModel {
                 sentenceText: token.sentenceText,
                 surface: token.surface,
                 source: source,
-                generation: generation
+                generation: generation,
+                favoritesSnapshot: identity
             )
         }
     }
@@ -97,18 +100,21 @@ extension AppModel {
     /// off-main, drops stale generations, and routes the effect. Internal
     /// and fully parameterized so tests await it directly over an injected
     /// fixture engine (`generation` nil skips the staleness check).
+    /// The favorites snapshot defaults to the current store so tests can
+    /// omit it; the tap entry point passes its tap-time capture.
     func runLookup(
         segments: [LookupSegment]?, tappedAt: Int, sentenceText: String,
-        surface: String, source: SelectedLookup.Source, generation: Int? = nil
+        surface: String, source: SelectedLookup.Source, generation: Int? = nil,
+        favoritesSnapshot: FavoriteIdentity? = nil
     ) async {
         let display = lookupDisplay
-        let keys = favorites.favoriteKeys
+        let identity = favoritesSnapshot ?? favorites.identity
         let effect = await display.resolve(
             TapLookupRequest(
                 segments: segments, tappedAt: tappedAt,
                 sentenceText: sentenceText, surface: surface
             ),
-            favorites: keys
+            favorites: identity
         )
         if let generation, generation != lookupGeneration {
             return
@@ -182,10 +188,11 @@ extension AppModel {
         guard let pinned = pinnedLookup else { return }
         let source = selectedLookup?.source
         let content = lookupDisplay.promote(
-            result, in: pinned.content, favorites: favorites.favoriteKeys
+            result, in: pinned.content, favorites: favorites.identity
         )
         // A foreign choice promotes to the content unchanged — presenting
-        // it would only reset the pager to the default entry.
+        // it would only reset the pager to the default entry, while a
+        // promoted move restarts the pager at the new display's first entry.
         guard content != pinned.content else { return }
         presentLookup(content: content, source: source)
     }

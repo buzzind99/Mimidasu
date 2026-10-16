@@ -100,6 +100,17 @@ final class FavoritesDatabase: Sendable {
         }
     }
 
+    /// Deletes the legacy rows whose headword is empty. Nothing else removes
+    /// them — stars and unstars always name a real spelling — so without this
+    /// sweep they sit in the file forever, answering every search through
+    /// their reading or romaji.
+    func deleteEmptyHeadwords() throws(Error) {
+        try locked { db in
+            let statement = try db.statement("DELETE FROM favorites WHERE headword = ''")
+            _ = try statement.step()
+        }
+    }
+
     // MARK: - Queries
 
     /// Every row, newest first.
@@ -148,6 +159,7 @@ final class FavoritesDatabase: Sendable {
             do {
                 return try .success(body(db))
             } catch {
+                print("favorites: database error: \(error)")
                 return .failure(.degraded)
             }
         }

@@ -12,22 +12,29 @@ enum FavoritesPromotion {
     /// A fallback pill labels itself with its result's lead entry, so
     /// promotion inside an `also:` result is what makes a buried favorite
     /// readable there — the pill relabels to the starred word and opens on
-    /// it, instead of the homograph the dictionary ranked first. Everything
-    /// else is untouched: the display result still leads, and a not-found pin
-    /// keeps its related splits as suggestions (a split hit never presents
-    /// as the tapped word).
+    /// it, instead of the homograph the dictionary ranked first. A not-found
+    /// pin stays not-found with no display result, but each related
+    /// suggestion is promoted the same way, so a buried favorite leads its
+    /// pill before any re-select. Everything else is untouched: the display
+    /// result still leads, and a not-found pin keeps its related splits as
+    /// suggestions (a split hit never presents as the tapped word).
     static func promotingFavorites(
-        in content: LookupContent, keys: Set<String>
+        in content: LookupContent, identity: FavoriteIdentity
     ) -> LookupContent {
         switch content {
         case let .found(result, also, origin):
             .found(
-                result: promotingFavorites(in: result, keys: keys),
-                also: also.map { fallback in promotingFavorites(in: fallback, keys: keys) },
+                result: promotingFavorites(in: result, identity: identity),
+                also: also.map { fallback in promotingFavorites(in: fallback, identity: identity) },
                 origin: origin
             )
-        case .notFound:
-            content
+        case let .notFound(surface, related):
+            .notFound(
+                surface: surface,
+                related: related.map { result in
+                    promotingFavorites(in: result, identity: identity)
+                }
+            )
         }
     }
 
@@ -36,20 +43,13 @@ enum FavoritesPromotion {
     /// first favorite wins a tie and every other entry keeps its order, so
     /// two taps on the same word land on the same entry.
     static func promotingFavorites(
-        in result: LookupResult, keys: Set<String>
+        in result: LookupResult, identity: FavoriteIdentity
     ) -> LookupResult {
         guard let index = result.entries.firstIndex(where: { entry in
-            isFavorite(entry, keys: keys)
+            identity.isFavorite(entry)
         }), index != 0 else { return result }
         var entries = result.entries
         entries.insert(entries.remove(at: index), at: 0)
         return LookupResult(matched: result.matched, entries: entries)
-    }
-
-    /// Headword identity, the same rule the star and the removal path use — so
-    /// the entry the pager leads with is the entry whose star reads filled.
-    private static func isFavorite(_ entry: JMDictEntry, keys: Set<String>) -> Bool {
-        guard let headword = DictionaryContent.headword(of: entry) else { return false }
-        return keys.contains(FavoriteWord.normalize(headword))
     }
 }
