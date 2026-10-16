@@ -5,7 +5,7 @@ import Testing
 // MARK: - Unstartable-opening peel fixtures
 
 /// The shape the real runtime produced for the second collapse in
-/// `debug/test.md`: a known `なき` (ない) followed by a run opening on the
+/// the debug recording: a known `なき` (ない) followed by a run opening on the
 /// stray `ゃ` of a sokuon the ASR dropped (書かなくちゃ → 書なきゃ). No window
 /// width and no amount of kana left context resolves it — measured across
 /// widths 2…12 and both left-context sizes, every one collapses again — but
@@ -61,7 +61,7 @@ private func foldableSpan(_ text: String) -> [DictionaryToken] {
     tokens([text], readings: [text], bases: [text])
 }
 
-/// The `debug/test.md` line exactly as the real tokenizer binds it: a
+/// The debug line exactly as the real tokenizer binds it: a
 /// well-tokenized head, then two grouped unknown nodes, each opening on the
 /// stray `ゃ` of a sokuon the ASR dropped (覚えなきゃ / 覚えなきゃ). Every other
 /// token is a resolved lexicon row, so the two runs are the whole of the
@@ -117,7 +117,7 @@ struct ReadingAnnotatorPeelTests {
 
     // MARK: the regression
 
-    /// The `debug/test.md` line as the real tokenizer binds it: a well-tokenized
+    /// The debug line as the real tokenizer binds it: a well-tokenized
     /// head, then two grouped unknown nodes, each opening on the stray `ゃ` of a
     /// sokuon the ASR dropped (書かなくちゃ → 書なきゃ). Every other token is a
     /// resolved lexicon row, so those two runs are the whole of the problem —

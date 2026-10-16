@@ -518,7 +518,7 @@ struct ReadingAnnotatorFallbackLiveTests {
 // MARK: - Live fragmentation corpus
 
 /// The fragmentation pass against the real tokenizer and the real JMDict
-/// gate: the debug/test.md garble strings (long unknown kana runs with no
+/// gate: the debug garble strings (long unknown kana runs with no
 /// lexicon coverage) split into tappable pieces, a name the dictionary
 /// covers whole stays whole, and surfaces still concatenate back.
 @Suite(

@@ -217,7 +217,7 @@ struct ReadingAnnotatorTokenRepairLiveTests {
 
     // MARK: - Unstartable openings
 
-    /// The `debug/test.md` line against the real tokenizer. Both its collapses
+    /// The debug line against the real tokenizer. Both its collapses
     /// open on the stray `ゃ` of a sokuon the ASR dropped, which is the one
     /// opening no window width and no kana left context can resolve — so before
     /// the peel these two runs were the sentence's only untappable content, cut

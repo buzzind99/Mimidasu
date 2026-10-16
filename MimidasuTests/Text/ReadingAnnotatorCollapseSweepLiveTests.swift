@@ -36,7 +36,7 @@ struct ReadingAnnotatorCollapseSweepLiveTests {
     /// thought to name is still covered. Sokuon deletions of these seeds are the
     /// shapes that produce a stranded opening in the first place — dropping the
     /// っ/ッ out of a conjugated verb and handing the rest to the lattice, which
-    /// is what `debug/test.md` is.
+    /// is the shape the debug corpus recorded.
     ///
     /// Scoped deliberately: the peeled sokuons themselves. The rest of the
     /// suite pins the window cap, the left-context budget and the exact repaired

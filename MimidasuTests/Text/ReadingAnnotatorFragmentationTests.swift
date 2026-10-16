@@ -37,7 +37,7 @@ struct ReadingAnnotatorFragmentationTests {
         return try #require(annotator.segments(for: surfaces.joined()))
     }
 
-    // MARK: §6 — the observed garble shapes
+    // MARK: - Observed garble shapes
 
     @Test("あいいいいいいいい: dictionary lead hit + period-1 tail chunks")
     func dictionaryLeadHitThenPeriodOneTail() throws {
