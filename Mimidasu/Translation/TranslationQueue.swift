@@ -201,7 +201,10 @@ final class TranslationQueue {
                     translatingIDs.remove(sentence.id)
                     deliver(sentence, pair)
                 }
-                if token == generation {
+                // A boundary-retired batch (results dropped above) must not
+                // publish readiness either: its session is gone, and the
+                // boundary already reset the status.
+                if token == generation, epoch == sessionEpoch {
                     setStatus(.ready)
                 }
             } catch {
