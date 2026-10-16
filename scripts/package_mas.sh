@@ -12,7 +12,7 @@
 # artifact is missing — a MAS build that falls back to the mock transcriber is
 # a Guideline 2.1 rejection, never a shippable artifact.
 #
-# One-time prerequisites (see APP_STORE.md §F):
+# One-time prerequisites:
 #   - App ID `mimidasu.app` with the App Sandbox capability
 #   - "Apple Distribution" certificate in the keychain
 #   - Mac App Store provisioning profile at
@@ -66,7 +66,7 @@ echo "==> Signing with ${MAS_IDENTITY}"
 # --- provisioning profile ---------------------------------------------------
 if [[ ! -f "${MAS_PROFILE}" ]]; then
   echo "ERROR: provisioning profile not found at ${MAS_PROFILE}" >&2
-  echo "  Download a Mac App Store profile for ${BUNDLE_ID} (see APP_STORE.md §F.3)" >&2
+  echo "  Download a Mac App Store profile for ${BUNDLE_ID} (developer.apple.com → Profiles)" >&2
   exit 1
 fi
 PROFILE_PLIST="$(mktemp -t mimidasu-profile)"

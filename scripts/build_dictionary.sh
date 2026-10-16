@@ -306,7 +306,7 @@ fi
 echo "    case.jmdict_build.py DDL: ok"
 
 # The produced artifact filename must match the Swift pin constants — the
-# versioned name is the staleness key (§0.1 item 4). preparedFileName is
+# versioned name is the staleness key. preparedFileName is
 # interpolated in Swift, so guard the derivation expressions themselves
 # (releaseTag is already cross-checked above, which pins the concrete name).
 if ! grep -Fq 'static let preparedFileName = "\(artifactPrefix)\(releaseTag).\(buildRevision).\(artifactExtension)"' "${PIN_SWIFT}"; then
