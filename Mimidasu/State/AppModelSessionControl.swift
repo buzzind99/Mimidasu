@@ -25,6 +25,11 @@ extension AppModel {
                 try await self.ensureDictionaryReady()
                 try await self.beginSession()
             } catch {
+                // A raced teardown (quit-time shutdown, or a stop during
+                // start) already moved the phase off `.starting` and cleared
+                // the toasts: a failure landing after it must not resurrect
+                // a failed phase or repost over the cleared stack.
+                guard self.phase == .starting else { return }
                 self.phase = .failed(error.localizedDescription)
                 // Freeze the SESSION duration at the failure: a capture that
                 // died mid-start would otherwise leave the endedAt anchor nil
