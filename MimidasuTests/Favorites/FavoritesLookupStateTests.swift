@@ -2,8 +2,8 @@ import Foundation
 @testable import Mimidasu
 import Testing
 
-/// Expansion bookkeeping for the Favorites window's rows, with the rules that
-/// decide whether a lookup's result is still wanted: the window closed
+/// Expansion bookkeeping for the dictionary windows' rows, with the rules
+/// that decide whether a lookup's result is still wanted: the window closed
 /// (`reset()`), the row collapsed, or the word left the list (`remove`) — and
 /// in each case a result landing afterwards is discarded rather than
 /// re-populating a row nobody is looking at.
@@ -122,9 +122,23 @@ struct FavoritesLookupStateTests {
         let sut = state()
         sut.toggle(word)
 
-        sut.remove(headword: word.headword)
+        sut.remove(key: word.headword)
 
         #expect(!sut.isExpanded(word) && sut.phase(for: word) == .idle)
+    }
+
+    @Test("two rows that share a lookup are still keyed apart")
+    func keysAreIndependent() {
+        let sut = state()
+        let candidate = LookupCandidate(text: "ポン", reading: "ポン")
+
+        sut.toggle(key: "9994901", candidate: candidate)
+
+        // The search window's shape: one candidate, two rows. The expansion
+        // belongs to the row that was toggled, never to its sibling.
+        #expect(sut.isExpanded(key: "9994901"))
+        #expect(!sut.isExpanded(key: "9994902"))
+        #expect(sut.phase(forKey: "9994902") == .idle)
     }
 
     @Test("a lookup that cannot run lands on the row as failed")

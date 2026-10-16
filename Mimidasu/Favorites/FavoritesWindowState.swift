@@ -74,8 +74,8 @@ final class FavoritesWindowState {
     /// ordering.
     func favoritesChanged() {
         let remaining = Set(favorites.words.map(\.headword))
-        for headword in lookupState.expanded where !remaining.contains(headword) {
-            lookupState.remove(headword: headword)
+        for key in lookupState.expanded where !remaining.contains(key) {
+            lookupState.remove(key: key)
         }
         results = rows(for: debouncedQuery)
     }

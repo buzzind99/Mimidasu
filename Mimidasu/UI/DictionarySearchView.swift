@@ -477,17 +477,17 @@ private extension DictionarySearchView {
     /// kana, its romaji, and its badges two lines above.
     @ViewBuilder
     private func expandedEntry(_ hit: DictionarySearchHit) -> some View {
-        // A hit with no headword at all cannot be expanded — nothing to key the
-        // shared expansion state on, and nothing to look up.
-        if let word = lookupWord(for: hit) {
+        // A hit with no headword has nothing to look up, so no expansion ever
+        // started for its key.
+        if lookupWord(for: hit) != nil {
             VStack(alignment: .leading, spacing: 8) {
                 Rectangle().fill(Theme.divider).frame(height: 1)
-                switch state.lookupState.phase(for: word) {
+                switch state.lookupState.phase(forKey: DictionarySearchState.lookupKey(for: hit)) {
                 case .idle, .loading:
                     ProgressView()
                         .controlSize(.small)
                 case let .resolved(result):
-                    entryBlock(hit, word: word, result: result)
+                    entryBlock(hit, result: result)
                 case .notFound:
                     DictionaryNotFoundView(
                         surface: hit.headword ?? "", related: [], copyPlacement: .icon,
@@ -502,14 +502,16 @@ private extension DictionarySearchView {
 
     @ViewBuilder
     private func entryBlock(
-        _ hit: DictionarySearchHit, word: FavoriteWord, result: LookupResult
+        _ hit: DictionarySearchHit, result: LookupResult
     ) -> some View {
-        // Favorite-first: a starred entry leads the pager, so landing opens
-        // on the word the user kept. Reorders only — the count is unchanged.
+        // Favorite-first: a starred entry leads the pager — reorders only,
+        // the count unchanged. An unstepped row lands on its own entry.
         let promoted = FavoritesPromotion.promotingFavorites(
             in: result, identity: model.favorites.identity
         )
-        let index = state.validatedIndex(for: word.headword, in: promoted)
+        let key = DictionarySearchState.lookupKey(for: hit)
+        let fallback = DictionarySearchState.rowEntryIndex(for: hit, in: promoted)
+        let index = state.validatedIndex(for: key, in: promoted, fallback: fallback)
         if let entry = promoted.entries[safe: index] {
             DictionaryEntryContentView(
                 entry: entry,
@@ -525,7 +527,7 @@ private extension DictionarySearchView {
                 // expanded block repeats none of them.
                 showsBadges: false,
                 onStepEntry: { step in
-                    state.stepEntry(word.headword, to: step, in: promoted)
+                    state.stepEntry(key, to: step, in: promoted)
                 }
             )
         } else {
@@ -543,12 +545,12 @@ private extension DictionarySearchView {
 
     // MARK: - Actions
 
-    /// The row key the shared expansion state uses. A search hit has no
-    /// `FavoriteWord` of its own and does not need one: that state is keyed by
-    /// headword, and the headword is exactly what `FavoritesView` keys its rows
-    /// by — so expanding 負ける here and starring it there are the same row as
-    /// far as the window is concerned. `addedAt` is never read by the lookup
-    /// path, so the transient value stays zero.
+    /// The lookup candidate for an expandable row — nil when the hit has no
+    /// headword, and there is nothing to look up. The expansion state is keyed
+    /// by entry (`DictionarySearchState.lookupKey(for:)`), since several rows
+    /// can share a headword; the star stays headword-keyed, so expanding
+    /// 負ける here and starring it there are still the same word. `addedAt` is
+    /// never read by the lookup path, so the transient value stays zero.
     private func lookupWord(for hit: DictionarySearchHit) -> FavoriteWord? {
         hit.headword.map { headword in
             FavoriteWord(headword: headword, reading: hit.reb, romaji: nil, addedAt: 0)
@@ -556,13 +558,14 @@ private extension DictionarySearchView {
     }
 
     private func isExpanded(_ hit: DictionarySearchHit) -> Bool {
-        guard let word = lookupWord(for: hit) else { return false }
-        return state.lookupState.isExpanded(word)
+        guard lookupWord(for: hit) != nil else { return false }
+        return state.lookupState.isExpanded(key: DictionarySearchState.lookupKey(for: hit))
     }
 
     private func toggle(_ hit: DictionarySearchHit) {
         guard let word = lookupWord(for: hit) else { return }
-        state.lookupState.toggle(word)
+        let candidate = LookupCandidate(text: word.headword, reading: word.reading)
+        state.lookupState.toggle(key: DictionarySearchState.lookupKey(for: hit), candidate: candidate)
     }
 
     /// Stars the way every other star in the app does: the model decides, the

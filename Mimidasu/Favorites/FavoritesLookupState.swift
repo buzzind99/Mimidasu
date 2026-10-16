@@ -1,15 +1,18 @@
 import Foundation
 import Observation
 
-/// Per-row expansion state for the Favorites window: which cards are open and
-/// what each one's live JMDict lookup resolved to.
+/// Per-row expansion state for the dictionary windows' rows: which cards are
+/// open and what each one's live JMDict lookup resolved to.
 ///
-/// State is keyed by headword, not held once for the window, because the list
-/// expands any number of rows at once. A single phase plus a single
-/// generation token would let one row's collapse drop a sibling's in-flight
-/// result; keying by headword scopes the staleness check to the row that owns
-/// it — a slow query landing after its own row collapsed (or after the word
-/// left favorites) is dropped, and no neighbor is affected.
+/// State is keyed by a row key the host derives. The Favorites window keys its
+/// rows by headword — the store keeps one row per word — while the search
+/// window keys by entry id, because two of its rows can share a headword (two
+/// kana-only entries spelled ポン, say) and the headword cannot tell them
+/// apart. A single phase plus a single generation token would let one row's
+/// collapse drop a sibling's in-flight result; keying by row scopes the
+/// staleness check to the row that owns it — a slow query landing after its
+/// own row collapsed (or after the word left favorites) is dropped, and no
+/// neighbor is affected.
 ///
 /// Deliberately *above* the store and off `AppModel`: an expansion must not
 /// re-pin the sidebar card or re-anchor the popover, so it reaches
@@ -25,12 +28,12 @@ final class FavoritesLookupState {
         case failed(String)
     }
 
-    /// Open headwords, newest first; each row toggles only its own key.
+    /// Open rows, newest first; each row toggles only its own key.
     private(set) var expanded: [String] = []
-    /// Per-headword phase. Absent means never expanded this session.
+    /// Per-row phase. Absent means never expanded this session.
     private(set) var phases: [String: Phase] = [:]
 
-    /// Monotonic per headword: each expand bumps its token, so a result that
+    /// Monotonic per row: each expand bumps its token, so a result that
     /// lands after a collapse (or a second expand) is discarded.
     private var generations: [String: Int] = [:]
 
@@ -54,25 +57,55 @@ final class FavoritesLookupState {
         self.lookupRow = lookupRow
     }
 
-    func isExpanded(_ word: FavoriteWord) -> Bool {
-        expanded.contains(word.headword)
+    // MARK: - Row keys
+
+    func isExpanded(key: String) -> Bool {
+        expanded.contains(key)
     }
 
-    func phase(for word: FavoriteWord) -> Phase {
-        phases[word.headword] ?? .idle
+    func phase(forKey key: String) -> Phase {
+        phases[key] ?? .idle
     }
 
     /// Expands (and looks up) or collapses the row. Collapsing drops the
     /// row's state entirely so a reopen starts from a fresh query.
-    func toggle(_ word: FavoriteWord) {
-        if isExpanded(word) {
-            expanded.removeAll { headword in headword == word.headword }
-            phases[word.headword] = nil
-            generations[word.headword, default: 0] += 1
+    func toggle(key: String, candidate: LookupCandidate) {
+        if isExpanded(key: key) {
+            expanded.removeAll { open in open == key }
+            phases[key] = nil
+            generations[key, default: 0] += 1
             return
         }
-        expanded.insert(word.headword, at: 0)
-        expand(word)
+        expanded.insert(key, at: 0)
+        expand(key: key, candidate: candidate)
+    }
+
+    /// Drops a deleted row's phase and in-flight token.
+    func remove(key: String) {
+        expanded.removeAll { open in open == key }
+        phases[key] = nil
+        generations[key, default: 0] += 1
+    }
+
+    // MARK: - Favorite rows
+
+    /// The Favorites window's spelling of the key API: its rows are its words
+    /// — the store keeps one row per headword — so the headword is the row
+    /// key. The search window derives its own keys (entry ids) and calls the
+    /// key methods directly.
+    func isExpanded(_ word: FavoriteWord) -> Bool {
+        isExpanded(key: word.headword)
+    }
+
+    func phase(for word: FavoriteWord) -> Phase {
+        phase(forKey: word.headword)
+    }
+
+    func toggle(_ word: FavoriteWord) {
+        toggle(
+            key: word.headword,
+            candidate: LookupCandidate(text: word.headword, reading: word.reading)
+        )
     }
 
     /// Drops every expanded row and its phase, wholesale rather than per row:
@@ -81,26 +114,18 @@ final class FavoritesLookupState {
     /// flight across the close is discarded instead of re-populating a row the
     /// user is no longer looking at.
     func reset() {
-        for headword in expanded {
-            generations[headword, default: 0] += 1
+        for key in expanded {
+            generations[key, default: 0] += 1
         }
         expanded.removeAll()
         phases.removeAll()
     }
 
-    /// Drops a deleted row's phase and in-flight token.
-    func remove(headword: String) {
-        expanded.removeAll { open in open == headword }
-        phases[headword] = nil
-        generations[headword, default: 0] += 1
-    }
-
-    private func expand(_ word: FavoriteWord) {
-        let generation = (generations[word.headword] ?? 0) + 1
-        generations[word.headword] = generation
-        phases[word.headword] = .loading
+    private func expand(key: String, candidate: LookupCandidate) {
+        let generation = (generations[key] ?? 0) + 1
+        generations[key] = generation
+        phases[key] = .loading
         let row = lookupRow
-        let candidate = LookupCandidate(text: word.headword, reading: word.reading)
         Task { @MainActor [weak self] in
             // Detached by design, inheriting no cancellation: collapse, reset,
             // and remove bump the generation instead of cancelling, so rapid
@@ -116,23 +141,23 @@ final class FavoritesLookupState {
                 }
             }.value
             guard let self else { return }
-            guard generations[word.headword] == generation else {
+            guard generations[key] == generation else {
                 discardedLandings += 1
                 return
             }
             switch result {
             case let .success(resolved):
-                phases[word.headword] = resolved.map(Phase.resolved) ?? .notFound
+                phases[key] = resolved.map(Phase.resolved) ?? .notFound
             case let .failure(error):
                 if error is CancellationError {
                     // A cancelled query means the lookup was torn down, not
                     // that it failed: collapse the row so it reads as never
                     // opened rather than as failed. Writes no counter — the
                     // generation guard above is its only writer.
-                    expanded.removeAll { open in open == word.headword }
-                    phases[word.headword] = nil
+                    expanded.removeAll { open in open == key }
+                    phases[key] = nil
                 } else {
-                    phases[word.headword] = .failed(
+                    phases[key] = .failed(
                         TapLookupFault(error).errorDescription ?? error.localizedDescription
                     )
                 }

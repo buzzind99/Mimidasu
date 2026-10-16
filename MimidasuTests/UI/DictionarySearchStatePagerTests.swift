@@ -55,15 +55,17 @@ extension DictionarySearchStateTests {
 
         state.query = "あめ"
         #expect(await pollUntil(timeout: 2) { state.outcome.hits.count == 4 }, "the あめ rows land")
-        state.stepEntry("飴", to: 1, in: result(entries: 2))
-        #expect(state.entryIndex(for: "飴") == 1)
+        let ame = try #require(state.outcome.hits.first { hit in hit.headword == "飴" })
+        let ameKey = DictionarySearchState.lookupKey(for: ame)
+        state.stepEntry(ameKey, to: 1, in: result(entries: 2))
+        #expect(state.entryIndex(for: ameKey) == 1)
 
         // A lead change to the Names scope drops 飴 from the rows; the
-        // landing prunes the stored pager alongside the expansion, so the
-        // next open starts at the first entry instead of a stale page.
+        // landing prunes the stored pager alongside the expansion, so a
+        // stale page cannot outlive the row that stored it.
         state.apply(.setScope(.names))
         #expect(await pollUntil(timeout: 2) { state.outcome.hits.map(\.entSeq) == [15_668_307] }, "the names landing lands")
-        #expect(state.entryIndex(for: "飴") == 0)
+        #expect(state.entryIndex(for: ameKey) == 0)
     }
 
     @Test("the promoted pager resets when the lead entry changes")
@@ -77,7 +79,8 @@ extension DictionarySearchStateTests {
         #expect(state.validatedIndex(for: "飴", in: baseline) == 1)
 
         // A promotion reorder moves another entry to the front; the stored
-        // page belonged to the old order, so the display restarts at the lead
+        // page belonged to the old order, so the display restarts at the
+        // fallback — the row's own entry in the search window, 0 here —
         // instead of silently retargeting. Storage lags until the next press
         // overwrites it — the view only ever reads `validatedIndex`.
         let identity = FavoriteIdentity(keys: ["語2"])

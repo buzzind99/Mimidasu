@@ -151,10 +151,12 @@ struct DictionarySearchStateFaultTests {
 
         state.query = "あめ"
         #expect(await pollUntil { state.outcome.hits.count == 4 })
-        state.lookupState.toggle(FavoriteWord(
-            headword: "飴", reading: "あめ", romaji: "ame", addedAt: 0
-        ))
-        #expect(state.lookupState.expanded == ["飴"])
+        let ame = try #require(state.outcome.hits.first { hit in hit.headword == "飴" })
+        let ameKey = DictionarySearchState.lookupKey(for: ame)
+        state.lookupState.toggle(
+            key: ameKey, candidate: LookupCandidate(text: "飴", reading: "あめ")
+        )
+        #expect(state.lookupState.expanded == [ameKey])
 
         // A new query, no filter press: nothing prunes until the landing,
         // which drops 飴 — its row is not in 食べる's result. Without the

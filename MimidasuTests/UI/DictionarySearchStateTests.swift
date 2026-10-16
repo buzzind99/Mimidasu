@@ -148,20 +148,25 @@ struct DictionarySearchStateTests {
 
         state.query = "あめ"
         #expect(await pollUntil { state.outcome.hits.count == 4 })
-        // One row on the current screen, one that is not: the prune runs on the
-        // filter press, against the rows on screen *now*.
-        state.lookupState.toggle(FavoriteWord(
-            headword: "飴", reading: "あめ", romaji: "ame", addedAt: 0
-        ))
-        state.lookupState.toggle(FavoriteWord(
-            headword: "食べる", reading: "たべる", romaji: "taberu", addedAt: 0
-        ))
-        #expect(state.lookupState.expanded == ["食べる", "飴"])
+        // One row on the current screen, one that is not: the prune runs on
+        // the filter press, against the rows on screen *now*. 飴 is a row of
+        // the あめ result; 食べる's key stands for a row that result does not
+        // hold.
+        let ame = try #require(state.outcome.hits.first { hit in hit.headword == "飴" })
+        let ameKey = DictionarySearchState.lookupKey(for: ame)
+        let goneKey = "1358280"
+        state.lookupState.toggle(
+            key: ameKey, candidate: LookupCandidate(text: "飴", reading: "あめ")
+        )
+        state.lookupState.toggle(
+            key: goneKey, candidate: LookupCandidate(text: "食べる", reading: "たべる")
+        )
+        #expect(state.lookupState.expanded == [goneKey, ameKey])
 
         state.apply(.setScope(.names))
         // 食べる is gone from the rows; 飴 is still on screen (under All), so
         // its expansion survives this press even though Names will drop it.
-        #expect(state.lookupState.expanded == ["飴"])
+        #expect(state.lookupState.expanded == [ameKey])
         #expect(await pollUntil { state.outcome.hits.map(\.entSeq) == [15_668_307] })
         // The Names landing is what drops it: no row of the new result holds
         // 飴, so the expansion cannot outlive the rows that made it.
@@ -182,10 +187,12 @@ struct DictionarySearchStateTests {
         // prunes against the Names rows still on screen, so it dies at the
         // press — before the All landing can land at all. (The landing pass
         // cannot be what drops it: for the same query the Names rows are a
-        // subset of the All rows, so a way-back landing never prunes.)
-        state.lookupState.toggle(FavoriteWord(
-            headword: "飴", reading: "あめ", romaji: "ame", addedAt: 0
-        ))
+        // subset of the All rows, so a way-back landing never prunes.) 飴's
+        // entry key is one of the All rows, none of which the Names screen
+        // holds.
+        state.lookupState.toggle(
+            key: "1153520", candidate: LookupCandidate(text: "飴", reading: "あめ")
+        )
         state.apply(.setScope(.all))
         #expect(state.lookupState.expanded.isEmpty)
         #expect(await pollUntil { state.outcome.hits.count == 4 })
@@ -251,10 +258,12 @@ struct DictionarySearchStateTests {
 
         state.query = "たべる"
         #expect(await pollUntil { state.outcome.hits.isEmpty == false })
-        state.lookupState.toggle(FavoriteWord(
-            headword: "食べる", reading: "たべる", romaji: "taberu", addedAt: 0
-        ))
-        state.stepEntry("食べる", to: 3, in: result(entries: 2))
+        let taberu = try #require(state.outcome.hits.first { hit in hit.headword == "食べる" })
+        let taberuKey = DictionarySearchState.lookupKey(for: taberu)
+        state.lookupState.toggle(
+            key: taberuKey, candidate: LookupCandidate(text: "食べる", reading: "たべる")
+        )
+        state.stepEntry(taberuKey, to: 3, in: result(entries: 2))
         state.resetForClose()
 
         #expect(state.query.isEmpty)
@@ -263,7 +272,7 @@ struct DictionarySearchStateTests {
         #expect(state.isSearching == false)
         #expect(state.unavailable == false)
         #expect(state.lookupState.expanded.isEmpty)
-        #expect(state.entryIndex(for: "食べる") == 0)
+        #expect(state.entryIndex(for: taberuKey) == 0)
         // The reset's own `query = ""` write must not leave a pending task that
         // fires 150ms later.
         try await Task.sleep(for: DictionarySearchState.searchDebounce * 3)
