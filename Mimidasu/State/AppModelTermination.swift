@@ -76,6 +76,12 @@ extension AppModel {
     /// in all paths, including an idle model (the warm engine can exist with
     /// no session ever started), latching `isTerminating` first.
     func shutdownForTermination() async {
+        // Re-entrancy latch: a second notification while the first teardown
+        // is suspended must not run a concurrent second `performStop` (it is
+        // not config-idempotent). The first call's completion notification is
+        // a broadcast, so any second waiter is served by it; `isTerminating`
+        // also keeps `start()` refused for good.
+        guard !isTerminating else { return }
         isTerminating = true
         if let stopTask {
             await stopTask.value
