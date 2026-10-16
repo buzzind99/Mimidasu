@@ -34,17 +34,24 @@ final class FavoritesLookupState {
     /// lands after a collapse (or a second expand) is discarded.
     private var generations: [String: Int] = [:]
 
-    /// Results dropped by the generation guard — the guard's observable half.
-    /// A discarded landing writes nothing, so this counter is the only trace
-    /// one leaves: a test can wait for it deterministically instead of
-    /// guessing when a dropped write would have arrived, and a deleted guard
-    /// turns that wait into a failure.
+    /// Results dropped by the generation guard — the guard's observable half
+    /// and its only writer. A discarded landing writes nothing, so this
+    /// counter is the only trace one leaves: a test can wait for it
+    /// deterministically instead of guessing when a dropped write would have
+    /// arrived, and a deleted guard turns that wait into a failure.
     private(set) var discardedLandings = 0
 
-    private let lookup: JMDictLookup
+    private let lookupRow: @Sendable (LookupCandidate) throws -> LookupResult?
 
     init(lookup: JMDictLookup) {
-        self.lookup = lookup
+        let engine = lookup
+        lookupRow = { candidate in try engine.lookup(candidate) }
+    }
+
+    /// Test seam: the row query without a database, so a fault (including
+    /// cancellation) is reachable without one. Production uses `init(lookup:)`.
+    init(lookupRow: @escaping @Sendable (LookupCandidate) throws -> LookupResult?) {
+        self.lookupRow = lookupRow
     }
 
     func isExpanded(_ word: FavoriteWord) -> Bool {
@@ -92,14 +99,18 @@ final class FavoritesLookupState {
         let generation = (generations[word.headword] ?? 0) + 1
         generations[word.headword] = generation
         phases[word.headword] = .loading
-        let engine = lookup
+        let row = lookupRow
         let candidate = LookupCandidate(text: word.headword, reading: word.reading)
         Task { @MainActor [weak self] in
+            // Detached by design, inheriting no cancellation: collapse, reset,
+            // and remove bump the generation instead of cancelling, so rapid
+            // cycles pile serial work behind the engine while only the latest
+            // lands.
             let result: Result<LookupResult?, Error> = await Task.detached(
                 priority: .userInitiated
             ) {
                 do {
-                    return try .success(engine.lookup(candidate))
+                    return try .success(row(candidate))
                 } catch {
                     return .failure(error)
                 }
@@ -113,11 +124,18 @@ final class FavoritesLookupState {
             case let .success(resolved):
                 phases[word.headword] = resolved.map(Phase.resolved) ?? .notFound
             case let .failure(error):
-                // A cancelled query drops silently — never a fault row.
-                guard !(error is CancellationError) else { return }
-                phases[word.headword] = .failed(
-                    TapLookupFault(error).errorDescription ?? error.localizedDescription
-                )
+                if error is CancellationError {
+                    // A cancelled query means the lookup was torn down, not
+                    // that it failed: collapse the row so it reads as never
+                    // opened rather than as failed. Writes no counter — the
+                    // generation guard above is its only writer.
+                    expanded.removeAll { open in open == word.headword }
+                    phases[word.headword] = nil
+                } else {
+                    phases[word.headword] = .failed(
+                        TapLookupFault(error).errorDescription ?? error.localizedDescription
+                    )
+                }
             }
         }
     }

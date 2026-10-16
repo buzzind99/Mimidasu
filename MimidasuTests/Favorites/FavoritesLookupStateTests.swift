@@ -134,10 +134,13 @@ struct FavoritesLookupStateTests {
 
         sut.toggle(subject)
 
-        #expect(await pollUntil { sut.phase(for: subject) != .loading })
+        #expect(await pollUntil(timeout: 5) { sut.phase(for: subject) != .loading }, "the failed lookup lands")
         if case .failed = sut.phase(for: subject) {} else {
             Issue.record("a failed open did not land as failed: \(sut.phase(for: subject))")
         }
+        // A non-cancelled failure lands as a fault, never through the
+        // discard hook: only a dropped or cancelled landing counts.
+        #expect(sut.discardedLandings == 0)
     }
 
     @Test("a landed lookup resolves the row's phase")
@@ -152,7 +155,7 @@ struct FavoritesLookupStateTests {
 
         sut.toggle(word)
 
-        #expect(await pollUntil { sut.phase(for: word) != .loading })
+        #expect(await pollUntil(timeout: 5) { sut.phase(for: word) != .loading }, "the fixture hit lands")
         if case .resolved = sut.phase(for: word) {} else {
             Issue.record("a fixture hit did not resolve: \(sut.phase(for: word))")
         }
@@ -170,7 +173,7 @@ struct FavoritesLookupStateTests {
 
         sut.toggle(word)
 
-        #expect(await pollUntil { sut.phase(for: word) != .loading })
+        #expect(await pollUntil(timeout: 5) { sut.phase(for: word) != .loading }, "the miss lands")
         #expect(sut.phase(for: word) == .notFound)
     }
 
@@ -185,10 +188,10 @@ struct FavoritesLookupStateTests {
     private func releaseAndAwaitDiscard(
         _ release: DispatchSemaphore, gate: Gate, sut: FavoritesLookupState
     ) async {
-        #expect(await pollUntil { gate.hasEntered })
+        #expect(await pollUntil(timeout: 5) { gate.hasEntered }, "the gated query starts")
         release.signal()
-        #expect(await pollUntil { gate.hasLeft })
-        #expect(await pollUntil { sut.discardedLandings == 1 })
+        #expect(await pollUntil(timeout: 5) { gate.hasLeft }, "the gated query leaves")
+        #expect(await pollUntil(timeout: 5) { sut.discardedLandings == 1 }, "the stale landing counts as discarded")
     }
 
     @Test("a lookup that lands after its row collapsed is discarded")
@@ -217,5 +220,19 @@ struct FavoritesLookupStateTests {
         await releaseAndAwaitDiscard(release, gate: gate, sut: sut)
 
         #expect(sut.phase(for: word) == .idle)
+    }
+
+    @Test("a cancelled landing collapses the row and leaves the discard hook untouched")
+    func cancelledLandingCollapsesRow() async {
+        let sut = FavoritesLookupState(lookupRow: { _ in throw CancellationError() })
+        sut.toggle(word)
+        #expect(sut.isExpanded(word))
+
+        #expect(
+            await pollUntil(timeout: 5) { !sut.isExpanded(word) },
+            "the cancelled landing collapses the row"
+        )
+        #expect(sut.phase(for: word) == .idle)
+        #expect(sut.discardedLandings == 0)
     }
 }
