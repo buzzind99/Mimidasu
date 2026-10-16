@@ -61,17 +61,24 @@ enum DictionaryContent {
         entry.reb.flatMap { reb in KanaRomaji.romaji(fromKana: reb) }
     }
 
-    /// First tag of the stored comma-joined POS string, rendered through the
-    /// JMnedict name-type labels; JMDict POS tags and unknown values render
-    /// verbatim, and multi-tag senses take the first token. Serves word sense
-    /// rows only — name entries never reach the sense row, their entity
-    /// types render in full via `nameTypeBadges(for:)`.
-    static func posLabel(_ pos: String?) -> String? {
-        guard let pos, !pos.isEmpty else { return nil }
-        let tag = pos.components(separatedBy: ",").first?
-            .trimmingCharacters(in: .whitespaces)
-        guard let tag, !tag.isEmpty else { return nil }
-        return nameTypeLabels[tag] ?? tag
+    /// Every tag of the stored comma-joined POS string, in stored order,
+    /// rendered through the JMnedict name-type labels; JMDict POS tags and
+    /// unknown values render verbatim, and tags rendering to the same label
+    /// collapse to one badge. Serves word sense rows only — name entries
+    /// never reach the sense row, their entity types render in full via
+    /// `nameTypeBadges(for:)`.
+    static func posLabels(_ pos: String?) -> [String] {
+        guard let pos, !pos.isEmpty else { return [] }
+        var seen: Set<String> = []
+        var labels: [String] = []
+        for token in pos.components(separatedBy: ",") {
+            let tag = token.trimmingCharacters(in: .whitespaces)
+            guard !tag.isEmpty else { continue }
+            let label = nameTypeLabels[tag] ?? tag
+            guard seen.insert(label).inserted else { continue }
+            labels.append(label)
+        }
+        return labels
     }
 
     /// JMnedict name type → badge label. The rows cover the pinned corpus's

@@ -59,52 +59,62 @@ struct DictionaryContentTests {
         #expect(DictionaryContent.romaji(for: entry(reb: "漢字")) == nil)
     }
 
-    @Test("the POS label is the first stored tag")
-    func posLabel() {
-        #expect(DictionaryContent.posLabel("n,vs") == "n")
-        #expect(DictionaryContent.posLabel("n") == "n")
-        #expect(DictionaryContent.posLabel(nil) == nil)
-        #expect(DictionaryContent.posLabel("") == nil)
+    @Test("POS labels are every stored tag, in stored order")
+    func posLabels() {
+        #expect(DictionaryContent.posLabels("n,vs") == ["n", "vs"])
+        // The ポンチ entry's last sense, the investigation's live case.
+        #expect(DictionaryContent.posLabels("n,adj-na") == ["n", "adj-na"])
+        #expect(DictionaryContent.posLabels("n") == ["n"])
+        #expect(DictionaryContent.posLabels(nil) == [])
+        #expect(DictionaryContent.posLabels("") == [])
+        // Later tokens are trimmed, a blank one is skipped rather than
+        // fatal, and an identical repeat collapses to one badge.
+        #expect(DictionaryContent.posLabels("n, vs") == ["n", "vs"])
+        #expect(DictionaryContent.posLabels("n ,vs") == ["n", "vs"])
+        #expect(DictionaryContent.posLabels(",n") == ["n"])
+        #expect(DictionaryContent.posLabels("n,n") == ["n"])
     }
 
     @Test("JMnedict name types render friendly badges")
-    func posLabelNameTypes() {
-        #expect(DictionaryContent.posLabel("surname") == "SURNAME")
-        #expect(DictionaryContent.posLabel("given") == "GIVEN NAME")
-        #expect(DictionaryContent.posLabel("fem") == "GIVEN NAME")
-        #expect(DictionaryContent.posLabel("masc") == "GIVEN NAME")
-        #expect(DictionaryContent.posLabel("person") == "NAME")
-        #expect(DictionaryContent.posLabel("place") == "PLACE NAME")
-        #expect(DictionaryContent.posLabel("organization") == "ORGANIZATION")
-        #expect(DictionaryContent.posLabel("company") == "COMPANY NAME")
-        #expect(DictionaryContent.posLabel("station") == "STATION")
-        #expect(DictionaryContent.posLabel("product") == "PRODUCT")
-        #expect(DictionaryContent.posLabel("work") == "WORK")
-        #expect(DictionaryContent.posLabel("unclass") == "NAME")
+    func posLabelsNameTypes() {
+        #expect(DictionaryContent.posLabels("surname") == ["SURNAME"])
+        #expect(DictionaryContent.posLabels("given") == ["GIVEN NAME"])
+        #expect(DictionaryContent.posLabels("fem") == ["GIVEN NAME"])
+        #expect(DictionaryContent.posLabels("masc") == ["GIVEN NAME"])
+        #expect(DictionaryContent.posLabels("person") == ["NAME"])
+        #expect(DictionaryContent.posLabels("place") == ["PLACE NAME"])
+        #expect(DictionaryContent.posLabels("organization") == ["ORGANIZATION"])
+        #expect(DictionaryContent.posLabels("company") == ["COMPANY NAME"])
+        #expect(DictionaryContent.posLabels("station") == ["STATION"])
+        #expect(DictionaryContent.posLabels("product") == ["PRODUCT"])
+        #expect(DictionaryContent.posLabels("work") == ["WORK"])
+        #expect(DictionaryContent.posLabels("unclass") == ["NAME"])
         // The rare types the pinned corpus carries (三田線 is a `serv`).
-        #expect(DictionaryContent.posLabel("serv") == "SERVICE")
-        #expect(DictionaryContent.posLabel("char") == "CHARACTER")
-        #expect(DictionaryContent.posLabel("fict") == "FICTION")
-        #expect(DictionaryContent.posLabel("ev") == "EVENT")
-        #expect(DictionaryContent.posLabel("group") == "GROUP")
-        #expect(DictionaryContent.posLabel("dei") == "DEITY")
-        #expect(DictionaryContent.posLabel("obj") == "OBJECT")
-        #expect(DictionaryContent.posLabel("myth") == "MYTHOLOGY")
-        #expect(DictionaryContent.posLabel("doc") == "DOCUMENT")
-        #expect(DictionaryContent.posLabel("creat") == "CREATURE")
-        #expect(DictionaryContent.posLabel("ship") == "SHIP")
-        #expect(DictionaryContent.posLabel("leg") == "LEGEND")
-        #expect(DictionaryContent.posLabel("relig") == "RELIGION")
+        #expect(DictionaryContent.posLabels("serv") == ["SERVICE"])
+        #expect(DictionaryContent.posLabels("char") == ["CHARACTER"])
+        #expect(DictionaryContent.posLabels("fict") == ["FICTION"])
+        #expect(DictionaryContent.posLabels("ev") == ["EVENT"])
+        #expect(DictionaryContent.posLabels("group") == ["GROUP"])
+        #expect(DictionaryContent.posLabels("dei") == ["DEITY"])
+        #expect(DictionaryContent.posLabels("obj") == ["OBJECT"])
+        #expect(DictionaryContent.posLabels("myth") == ["MYTHOLOGY"])
+        #expect(DictionaryContent.posLabels("doc") == ["DOCUMENT"])
+        #expect(DictionaryContent.posLabels("creat") == ["CREATURE"])
+        #expect(DictionaryContent.posLabels("ship") == ["SHIP"])
+        #expect(DictionaryContent.posLabels("leg") == ["LEGEND"])
+        #expect(DictionaryContent.posLabels("relig") == ["RELIGION"])
     }
 
-    @Test("multi-type name senses take the first token; unknown types pass through verbatim")
-    func nameBadgeFirstTokenAndPassthrough() {
-        #expect(DictionaryContent.posLabel("place,surname") == "PLACE NAME")
-        #expect(DictionaryContent.posLabel("serv,station") == "SERVICE")
+    @Test("multi-type name senses render every token; unknown types pass through verbatim")
+    func nameBadgeAllTokensAndPassthrough() {
+        #expect(DictionaryContent.posLabels("place,surname") == ["PLACE NAME", "SURNAME"])
+        #expect(DictionaryContent.posLabels("serv,station") == ["SERVICE", "STATION"])
+        // Two tags rendering to the same label collapse to a single badge.
+        #expect(DictionaryContent.posLabels("fem,masc") == ["GIVEN NAME"])
         // A tag the map lacks (a retired upstream type here) and JMDict POS
         // tags never map.
-        #expect(DictionaryContent.posLabel("plant") == "plant")
-        #expect(DictionaryContent.posLabel("v1,vt") == "v1")
+        #expect(DictionaryContent.posLabels("plant") == ["plant"])
+        #expect(DictionaryContent.posLabels("v1,vt") == ["v1", "vt"])
     }
 
     // MARK: - Name entries (JMnedict offset range)

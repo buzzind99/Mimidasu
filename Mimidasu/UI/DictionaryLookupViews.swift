@@ -3,7 +3,8 @@ import SwiftUI
 // The pure content assembly (`DictionaryContent`) lives in
 // `DictionaryContent.swift`; this file holds the view types both dictionary
 // hosts render through. The favorite star lives in
-// `DictionaryFavoriteButton.swift`.
+// `DictionaryFavoriteButton.swift`, the pager and badge chip in
+// `DictionaryChromeViews.swift`.
 
 /// One row of tappable result pills under a mono label — the entry view's
 /// "also:" fallback hits and the not-found view's "related:" suggestions
@@ -164,9 +165,11 @@ struct DictionaryCopyButton: View {
 
 /// The full dictionary entry composition — headword (+ reading), romaji,
 /// badge row, pitch pill, numbered POS-labeled senses, "also:" pills, entry
-/// pager — rendered identically by the popover and the sidebar card. The
-/// card host scrolls only the sense rows (see `sensesViewportHeight`);
-/// everything above them and the "also:" row below stay fixed.
+/// pager — rendered by the popover, the sidebar card, and the two list
+/// hosts; `wrapsSensePOS` is the card's one divergence, stacking a
+/// multi-tag sense's tags above its gloss. The card host scrolls only the
+/// sense rows (see `sensesViewportHeight`); everything above them and the
+/// "also:" row below stay fixed.
 struct DictionaryEntryContentView: View {
     let entry: JMDictEntry
     let entryCount: Int
@@ -181,6 +184,14 @@ struct DictionaryEntryContentView: View {
     var senseLimit: Int? = DictionaryContent.maxSenses
     /// Glosses per sense (nil = every gloss); same host story as `senseLimit`.
     var glossLimit: Int? = DictionaryContent.maxGlossesPerSense
+    /// When true, a sense carrying more than one POS tag puts its tags on a
+    /// line of their own and the gloss spans the row beneath them; with a
+    /// single tag — or false — the number, tags, and gloss share a baseline.
+    /// The sidebar card opts in: its 254pt of content is the narrowest a
+    /// sense row is ever drawn, and three tags beside a gloss leave the
+    /// gloss a column too thin to read. The popover and the two list hosts
+    /// are wide enough for both on one line, so the tags stay inline.
+    var wrapsSensePOS = false
     /// When set, the sense rows render inside a vertical ScrollView framed
     /// to exactly this height — they scroll only when taller than it. The
     /// host derives it from the free sidebar space minus the fixed chrome.
@@ -450,9 +461,7 @@ struct DictionaryEntryContentView: View {
             VStack(alignment: .leading, spacing: 5) {
                 ForEach(Array(truncated.visible.enumerated()), id: \.offset) { index, gloss in
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("\(index + 1).")
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(Theme.secondaryText)
+                        senseNumber(index + 1)
                         Text(verbatim: gloss)
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.primaryText)
@@ -468,24 +477,57 @@ struct DictionaryEntryContentView: View {
         }
     }
 
+    @ViewBuilder
     private func senseRow(number: Int, sense: JMDictSense) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text("\(number).")
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(Theme.secondaryText)
-            if let pos = DictionaryContent.posLabel(sense.pos) {
-                DictionaryBadgeView(text: pos, color: Theme.accentPink, compact: true)
+        let labels = DictionaryContent.posLabels(sense.pos)
+        let glosses = DictionaryContent.truncated(sense.glosses, limit: glossLimit)
+        // Visible glosses join into one wrapping line; a hidden tail
+        // closes with an ellipsis.
+        let gloss = Text(
+            glosses.visible.joined(separator: "; ")
+                + (glosses.hidden > 0 ? "; …" : "")
+        )
+        .font(.system(size: 12))
+        .foregroundStyle(Theme.primaryText)
+        .textSelection(.disabled)
+        if wrapsSensePOS, labels.count > 1 {
+            // The number leads the tag line only; the gloss starts at the
+            // tags' leading edge — after the number column, not back under
+            // the number — and keeps that inset on every wrapped line.
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                senseNumber(number)
+                VStack(alignment: .leading, spacing: 3) {
+                    // FlowLayout for the reason the badge row uses it: a
+                    // long tag set wraps inside the card instead of
+                    // clipping at its trailing edge.
+                    FlowLayout(
+                        spacing: 6, lineSpacing: 4,
+                        fingerprint: labels.joined(separator: "\n")
+                    ) {
+                        posBadges(labels)
+                    }
+                    gloss
+                }
             }
-            let glosses = DictionaryContent.truncated(sense.glosses, limit: glossLimit)
-            // Visible glosses join into one wrapping line; a hidden tail
-            // closes with an ellipsis.
-            Text(
-                glosses.visible.joined(separator: "; ")
-                    + (glosses.hidden > 0 ? "; …" : "")
-            )
-            .font(.system(size: 12))
-            .foregroundStyle(Theme.primaryText)
-            .textSelection(.disabled)
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                senseNumber(number)
+                posBadges(labels)
+                gloss
+            }
+        }
+    }
+
+    /// The leading "1." column every numbered row shares.
+    private func senseNumber(_ number: Int) -> some View {
+        Text("\(number).")
+            .font(.system(size: 12, design: .monospaced))
+            .foregroundStyle(Theme.secondaryText)
+    }
+
+    private func posBadges(_ labels: [String]) -> some View {
+        ForEach(labels, id: \.self) { label in
+            DictionaryBadgeView(text: label, color: Theme.accentPink, compact: true)
         }
     }
 
@@ -500,84 +542,6 @@ struct DictionaryEntryContentView: View {
             )
         }
         .onHeightChange { height in onAlsoHeightChange(height) }
-    }
-}
-
-/// `◀ i/N ▶` walker over the entries a homograph candidate matched — shared
-/// by the popover header row and the sidebar card's DICTIONARY label row.
-struct DictionaryEntryPager: View {
-    /// Row height the pager always occupies (the button circles); hosts
-    /// reserve it so their header rows keep a constant height with and
-    /// without the pager.
-    static let height: CGFloat = 18
-
-    let entryIndex: Int
-    let entryCount: Int
-    var onStep: (Int) -> Void
-
-    var body: some View {
-        HStack(spacing: 4) {
-            pagerButton("chevron.left", enabled: entryIndex > 0) {
-                onStep(entryIndex - 1)
-            }
-            Text("\(entryIndex + 1)/\(entryCount)")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(Theme.secondaryText)
-                .monospacedDigit()
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-            pagerButton("chevron.right", enabled: entryIndex < entryCount - 1) {
-                onStep(entryIndex + 1)
-            }
-        }
-        .fixedSize(horizontal: true, vertical: false)
-    }
-
-    private func pagerButton(_ icon: String, enabled: Bool, action: @escaping () -> Void)
-        -> some View
-    {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(enabled ? Theme.primaryText : Theme.secondaryText.opacity(0.4))
-                .frame(width: Self.height, height: Self.height)
-                .background(Theme.tileFill.clipShape(Circle()))
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .pointerStyle(enabled ? .link : nil)
-    }
-}
-
-/// One badge chip (COMMON, ≈N5, POS): outlined capsule with a tinted fill,
-/// optionally led by a glyph. The icon marks the chips that say *why this row
-/// is here* rather than *what this word is* — the dictionary search's
-/// EXACT/PREFIX/GLOSS/LEMMA match badges — so the two kinds never read as the
-/// same claim.
-struct DictionaryBadgeView: View {
-    let text: String
-    let color: Color
-    var compact = false
-    var icon: String?
-
-    var body: some View {
-        HStack(spacing: 3) {
-            if let icon {
-                Image(systemName: icon)
-                    .font(.system(size: compact ? 8 : 9, weight: .semibold))
-                    .accessibilityHidden(true)
-            }
-            Text(text)
-                .font(.system(size: compact ? 9 : 10, weight: .semibold))
-        }
-        .fixedSize()
-        .padding(.horizontal, compact ? 5 : 7)
-        .padding(.vertical, compact ? 2 : 3)
-        .background(
-            Capsule().fill(color.opacity(0.14))
-                .overlay(Capsule().stroke(color.opacity(0.55)))
-        )
-        .foregroundStyle(color)
     }
 }
 
