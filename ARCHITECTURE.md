@@ -59,10 +59,11 @@ Sidecars off the main flow:
   behind the reference window's Dictionary mode: a staged candidate ladder
   over the same prepared DB (exact / prefix / lemma-retry / gloss), with
   scope, match-tier, JLPT, POS, and name-type filters.
-- **FavoritesStore / FavoritesDatabase / FavoritesPromotion** — starred
-  words: SQLite persistence, transcript highlight matching, favorite-first
-  lookup ranking.
-- **RetranslateEngine + AppModel re-translate lane** — manual per-row
+- **FavoritesStore / FavoritesDatabase / FavoriteIdentity /
+  FavoritesPromotion** — starred words: SQLite persistence, one identity
+  value behind star/highlight/promotion, transcript highlight matching,
+  favorite-first lookup ranking.
+- **RetranslateCoordinator + the re-translate lane** — manual per-row
   re-translate of a finalized sentence through a user-selected engine
   (dedicated Apple sessions, serialized lane, provenance stamps).
 - **SessionExporter** — TXT / SRT / VTT / JSON.
@@ -94,7 +95,8 @@ packaged apps in `Contents/Frameworks/`.
   teardown (so `stop`, `deinit`, and dead-device paths can't
   double-destroy); `ProcessTapFactory` builds the tap + aggregate pair;
   `AudioLevels` shares the RMS math and the −60 dBFS silence floor used by
-  the no-audio watchdog and the ASR backstop.
+  the no-audio watchdog (the engine's RMS backstop carries its own
+  equal-valued constant).
 
 ### CrispASREngine (`ASR/`)
 - Swift wrapper over dlopen'd `libcrispasr.dylib` (stable C session ABI;
@@ -132,8 +134,9 @@ packaged apps in `Contents/Frameworks/`.
 - Streaming ja ASR routinely drops punctuation, so boundaries are 3-tier:
   1. Terminal punctuation (`。！？` plus ASCII `!`/`?`) closes immediately.
   2. No new finals for ~1 s finalizes the buffer.
-  3. 42-char cap, split at the nearest clause boundary at/after 18 chars
-     (`、` or `,`, or `けど` / `から` / `ので` / `って`).
+  3. 42-char cap, split at the first clause boundary found at/after 18
+     chars, scanning the fixed priority `けど` / `から` / `ので` / `って` /
+     `、` / `,`.
   Symbol-only finals (e.g. `...`) never start a sentence.
 - **Final gate:** only Japanese-script finals become sentences —
   `KanaClassification.containsJapanese`, kana included, because the final
@@ -144,14 +147,20 @@ packaged apps in `Contents/Frameworks/`.
 - Timestamps from the session sample clock (chunk offsets ÷ 16 kHz): each
   sentence records `start_s`/`end_s`, ±160 ms granularity. Partials are
   never stamped.
-- Output: immutable `Sentence` `{index, start_s, end_s, lang, transcript}`
-  published to UI state and queued for translation.
+- Output: immutable `Sentence` `{index, startS, endS, lang, text}` (JSON
+  keys `start_s` / `end_s` / `transcript`) published to UI state and queued
+  for translation.
 
 ### Translation (`Translation/`)
 - **Seam:** `TranslationEngine` — ordered batch `translate`, `preferredBatchSize`,
   optional `onRetry`, a `transientBadResponse` flag (do malformed replies
   deserve a retry?), typed error taxonomy. `TranslationQueue.run(with:)`
   accepts any engine; `Translation/Providers/` holds the cloud adapters.
+- **Coordination:** `TranslationSessionCoordinator` owns the live
+  attach/retry/fallback/probe/provider machinery and
+  `RetranslateCoordinator` owns the lane; `AppModel` keeps phase, entries,
+  and toasts and forwards through façade extensions over
+  `TranslationSessionPort` (`phase` · `toasts` · `applyTranslation`).
 - **Engines:** Apple on-device (`AppleSessionEngine` fed by SwiftUI's
   `.translationTask`, hosted in a process-lifetime 1×1 panel
   (`TranslationSessionPanelController`) so closing the main window can't
@@ -173,7 +182,9 @@ packaged apps in `Contents/Frameworks/`.
   live: a verified selection re-attaches the engine mid-session (pending
   sentences replay via the queue's generation token; the Apple-fallback
   latch resets — an explicit change is user intent to re-engage), and a
-  key save's connection test activates the provider once it verifies.
+  key save's connection test re-attaches an already-selected provider once
+  it verifies (a fresh switch still completes through the disclosure
+  sheet).
 - **Target language:** `TargetLanguage` carries a BCP-47 entry code plus
   per-engine mappings (Google/DeepL API codes; OpenRouter prompts name the
   language); the selection persists as `translation.targetLanguage` and is
@@ -189,8 +200,9 @@ packaged apps in `Contents/Frameworks/`.
   token plus a session-epoch token retire cancelled runs and batches
   airborne across a session boundary; repeats are served from an
   app-run-scoped NSCache (200 entries); empty finals dropped at enqueue;
-  in-flight IDs guard against double translation. On stop the queue drains
-  with a 5 s bound so the session stays exportable.
+  in-flight IDs guard against double translation; a batch retired at the
+  session boundary drops its results and publishes no `.ready`. On stop
+  the queue drains with a 5 s bound so the session stays exportable.
 - **Retry ladder:** transient failures (429 / 5xx / network) retry twice
   with backoff, honoring a capped `Retry-After`; invalid key, quota, and
   malformed output fail fast — except chat-completions engines, which
@@ -203,8 +215,9 @@ packaged apps in `Contents/Frameworks/`.
   the rest of the session (one-way per session; `.degraded` published; the
   footer's manual Reconnect re-attempts the external engine and resets the
   latch). Apple itself failing publishes `.unavailable` with **no** engine
-  swap — Reconnect is the only way back. An unconfigured provider falls
-  back to Apple with a status note.
+  swap — Reconnect is the only way back. A selected-but-unconfigured
+  provider (key deleted) degrades to Apple at activation — no toast; the
+  footer and ENGINES card surface the state.
 - **Keys:** `KeychainStore` (`Security/`, device-only accessibility);
   key material never reaches UserDefaults, logs, error strings, or export
   files — the settings store persists non-secrets only (provider
@@ -212,9 +225,11 @@ packaged apps in `Contents/Frameworks/`.
   model, DeepL free-tier). Dev builds pin the key store to a no-op, so
   development always runs Apple on-device.
 - **Disclosure:** activating any cloud provider — for the live session or
-  the re-translate lane — requires confirming `CloudDisclosureSheet`
-  ("sentences will be sent to \<provider\>"), raised on every switch to an
-  external engine; audio itself never leaves the machine.
+  the re-translate lane — requires confirming `CloudDisclosureSheet` with
+  intent-aware copy ("sentences transcribed from your Mac's audio will be
+  sent to \<provider\>" for a switch; only explicitly retried lines for the
+  lane), raised on every switch to an external engine; audio itself never
+  leaves the machine.
 - **Re-translate lane:** a finalized row can be re-translated through a
   user-selected engine (`session` / `appleFast` / `appleHighFidelity` /
   `google` / `deepl` / `openrouter`, persisted as
@@ -223,22 +238,27 @@ packaged apps in `Contents/Frameworks/`.
   serialized lane of chained tasks with dedicated, lazily-armed Apple
   sessions (explicit `preferredStrategy`, so a lane can't silently
   duplicate the live model), Apple lanes deferring behind the
-  availability probe's landing. Landings stamp the row's `engine`
-  provenance, drop the queued copy, and seed the repeat cache (unstamped).
+  availability probe's landing. Dispatching drops any queued copy;
+  landings stamp the row's `engine` provenance and seed the repeat cache
+  (unstamped).
   High-fidelity picks degrade to fast where the strategy is known
   unavailable; delivery is session-epoch-guarded so a stale lane can't
   write into a new session; failures post yellow toasts.
-- **Status surface:** `TranslationPill.map(status:activeEngine:)` derives
-  the pill/card dot tone; the sidebar detail line mirrors state
-  ("On-device (fallback)", "Unavailable", provider name); retry/fallback/
-  unavailable states surface as toasts.
+- **Status surface:** `TranslationPill.map(status:activeEngine:fallbackActive:)`
+  derives the pill/card dot tone (a latched `.ready` reads yellow; every
+  label is "On-device" or "External"); the sidebar titles the attached
+  engine (`SidebarStatus.translationEngineName` — "Apple Intelligence"
+  when the high-fidelity pair is installed, else "Apple", or the provider)
+  over a detail line mirroring state ("On-device (fallback)",
+  "Unavailable", "External"); retry/fallback/unavailable states surface
+  as toasts.
 
 ### Reading annotation & dictionary lookup (`Text/`, `Dictionary/`)
 - **Annotator:** `ReadingAnnotator` tokenizes via `DictionaryEngine`
   (dlopen'd `libdictionary.dylib`, bundled IPADIC) and emits segments
   `{surface, romaji, furigana, lemma, pos, isBound}` — one segmentation
   feeds both annotation modes and the favorite matcher. The tokenizer
-  payload carries `{surface, span, reading, base, pos, bound}`; the
+  payload carries `{text, start, end, reading, base, pos, bound}`; the
   runtime auto-detects the lexicon's feature scheme (bundled IPADIC;
   UniDic rows read with their pronunciation-style `ー` expanded), and
   `bound` marks non-self-standing words — 助動詞 outright, the 非自立
@@ -256,7 +276,8 @@ packaged apps in `Contents/Frameworks/`.
   the dictionary) recover dictionary-backed pieces — sokuon-merged
   segments cut at their original token seams; the repair pass never
   consults the headword gate, probes that failed on infrastructure answer
-  "has entry", and the passes' decisions are never cached.
+  "has entry", and a pass that ran with the gate unreachable is not pinned
+  in the segment cache (normal renders are).
 - **Reading fallback:** kanji surfaces the tokenizer leaves reading-less
   consult JMDict's reading index, behind a miss-caching NSCache. Surfaces
   that survive both (names, rare ideographs, bare Latin) render
@@ -279,9 +300,12 @@ packaged apps in `Contents/Frameworks/`.
   smoke-checked), where preparation additionally derives a contentless
   **FTS5 trigram index over glosses** (rowid-packed by entry, promoted
   only after a smoke probe) — derived, never bundled; a debug-only
-  `.dev.sqlite` variant skips the sweep for development.
+  `jmdict-<tag>.<rev>.dev.sqlite` (the build script's index-carrying
+  intermediate in `build/`, which debug checkouts and the live tests
+  resolve) sits outside the prepared directory and so is never swept.
 - **Tap-lookup engine:** `JMDictLookup` — typed errors (no-hit ≠
-  infrastructure failure), homograph entries ranked by four keys (tapped
+  infrastructure failure; a headword row whose entry is missing reports
+  `databaseCorrupt`), homograph entries ranked by four keys (tapped
   writing match, segment-reading match, common, `ent_seq`), sense
   restriction filters honored, NFKC folding at every SQL boundary.
   `JMDictExpansion` builds ≤9 ranked candidates per tap — the tapped
@@ -294,12 +318,20 @@ packaged apps in `Contents/Frameworks/`.
   lead the card (JOINED MATCH badge); a split-only tap resolves not-found
   with the split hits demoted to related pills — a split never presents
   itself as the tapped word.
+- **Display module:** `LookupDisplay` (resolve → promote → pager math)
+  is pure value logic beside `TapLookupRequest` / `TapLookupEffect` /
+  `TapLookupFault`; `AppModelLookup` only wires effects to state, toasts,
+  and notices. Sense rows render every stored POS tag as its own badge
+  (stored order), and the sidebar card stacks a multi-tag sense's tags
+  above its gloss.
 - **Tap surface:** cursor modes None / Dictionary / Copy. A tap resolves
   through the pipeline and pins the sidebar DICTIONARY card plus a popover
   anchored at the word; homograph entries walk via the `◀ i/N ▶` pager,
-  fallback hits surface as capped "also:" pills (JOINED MATCH badge for
-  forward-join leads; split-only taps show "related:" pills), pills are
-  selectable and re-promote their lead entry, a bare miss posts the amber
+  fallback hits surface as capped (9) "also:" pills (a forward-join
+  *display* lead wears the JOINED MATCH badge; split-only taps show
+  "related:" pills), pills are selectable and re-pin their chosen result
+  as the display (origin reset to the tapped surface, favorites promotion
+  re-applied), a bare miss posts the amber
   notice pill, and an infrastructure failure posts a toast. Name entries
   render type badges (SURNAME / GIVEN NAME / PLACE NAME / …) and drop the
   romanization-echo gloss. Favorite entries lead every pager via
@@ -309,17 +341,21 @@ packaged apps in `Contents/Frameworks/`.
 - **Engine:** `DictionarySearchEngine` — a second read-only handle over
   the same prepared DB. Each query climbs a staged ladder, stopping when
   the result window saturates: exact PK seeks → bounded prefix B-tree
-  range scans (50-row pages, 1,000-row ceiling, cancel-checked) → a
-  **lemma retry** (only when those come back empty: probe the base form
-  first, then the potential unwrap, exact hits only — with a **romaji
-  bridge**, so `tabetai` folds to たべたい and resolves たべる) → a
+  range scans (20,000-row scan ceiling, 8,000 survivors kept for ranking,
+  cancel-checked; the window itself pages 50 at a time to a 1,000-row
+  ceiling) → a **lemma retry** (an unfiltered search runs it only when the
+  headword stages came back empty; entry-level filters run it regardless,
+  since pre-join emptiness proves nothing: probe the base form first, then
+  the potential unwrap, exact hits only — with a **romaji bridge** that
+  converts a fully-consumed spelling (`tabetai`) to たべたい and
+  lemmatizes the result) → a
   **gloss stage** over the FTS5 trigram index (Latin queries ≥3 chars,
   scope-filtered in SQL via rowid bounds). Candidate construction covers
   kana/katakana mirrors, fully-consumed romaji conversions plus
   trailing-onset expansion (`mak` → まか…まこ), literal digit/Latin
   spellings, script-switch prefixes, and the bundled case index
   (`activex` → ActiveX). Gloss hits grade into word-boundary / prefix /
-  substring tiers with the matched sense leading the preview. Window
+  substring tiers with the matched gloss leading the preview. Window
   saturation skips stages that couldn't surface; exact totals re-run
   unbounded when a filter needs them. Ranking: tier → common →
   base-before-unwrap → matched length → `ent_seq`; unwrap rows drop when
@@ -327,8 +363,13 @@ packaged apps in `Contents/Frameworks/`.
 - **Filters:** scope (All / Words / Names), COMMON-only, match tiers
   (exact / prefix / gloss — the last enabled can't be switched off), JLPT
   N1–N5, 11 rule-based POS groups, and 22 name-type badges. JLPT and POS
-  are mutually exclusive with name types under All; every filter press
-  re-runs the search and re-pages to page 1.
+  are mutually exclusive with name types under All; every effective
+  filter press re-runs the search against the debounced query and
+  re-pages to page 1 (a no-op press writes nothing and re-runs nothing).
+  All filter writes go through the pure `DictionaryFilterTransition` —
+  `DictionarySearchState.apply(_:)` is the single funnel, and the
+  transition owns the scope carry-over, the All-scope exclusions, the
+  match-group floor, and the COMMON-under-Names canonicalization.
 - **Reference window:** one fixed 460×775.6 window (`Window("Dictionary")`)
   with two persisted modes — **Dictionary** (default) and **Favorites** —
   flipped by a header button, one shared 150 ms search debounce, focus
@@ -337,20 +378,29 @@ packaged apps in `Contents/Frameworks/`.
   book opener over the transcript or the sidebar DICTIONARY card's kicker.
   Results render as favorites-shaped cards (match badge first, then
   COMMON / JLPT / name-type badges, scalar-offset match highlight, 2-line
-  gloss preview, copy → star → chevron) that expand into the shared entry
-  view with a per-row pager; Load-more reveals pages up to the 1,000-row
-  ceiling ("Showing top N — refine your search"). The window stays up
-  until explicitly closed — it does not dismiss on outside clicks.
+  gloss preview, copy → star → chevron) that expand in place into the
+  shared entry view with a per-row pager; expansion is keyed by entry
+  (`String(entSeq)`), so homograph rows sharing a headword expand
+  independently, and an untouched row opens on its own entry rather than
+  the lookup's ranked first. A starred entry is promoted to lead the
+  expanded pager (`FavoritesPromotion` — reorder only, count unchanged),
+  and the pager steps to absolute entry indexes. Each mode runs its own
+  lookup handle, so a slow row expansion can't stall a tap or the other
+  mode. Load-more reveals pages up to the 1,000-row ceiling ("Showing top
+  N — refine your search"). The window stays up until explicitly closed —
+  it does not dismiss on outside clicks.
 
 ### Favorite words (`Favorites/`)
-- **Star surface:** the dictionary popover and the sidebar DICTIONARY card
-  share one `DictionaryFavoriteButton`, keyed by the displayed entry's
-  headword (`keb ?? reb`) — homographs share one star and one list row.
-  Starring twice is idempotent; un-starring never happens silently — the
-  press raises `FavoriteRemovalConfirmation`, one alert per window (the
-  main window owns the question for both dictionary hosts, which are
-  mounted simultaneously; a `.popover` is its own window and must never
-  present the alert). The not-found state carries no star; an `also:` pill
+- **Star surface:** the dictionary popover, the sidebar DICTIONARY card,
+  the search list, and the Favorites list all mount one
+  `DictionaryFavoriteButton` (the pill star is the separate lead probe),
+  keyed by the displayed entry's headword (non-empty `keb`, else `reb`) —
+  homographs share one star and one list row. Starring twice is
+  idempotent; un-starring never happens silently — the press raises
+  `FavoriteRemovalConfirmation`, one alert per window: the main window
+  owns the question for the popover + sidebar card, the reference window
+  owns one for its search and favorites rows, and a `.popover` never
+  presents the alert. The not-found state carries no star; an `also:` pill
   stars only through its promoted lead entry (the not-found host passes no
   favorites probe).
 - **Model + persistence:** `FavoriteWord`
@@ -360,45 +410,58 @@ packaged apps in `Contents/Frameworks/`.
   key (`INSERT OR IGNORE`, so re-starring is a no-op; un-starring deletes
   every stored spelling whose normalized form matches — membership is
   probed normalized, rows are deleted as stored); rows order by
-  epoch-millisecond `addedAt`, newest first. A hard cap of 8,192 rows
-  refuses the next star with a visible notice — nothing is ever silently
-  evicted. A store that cannot open or load degrades terminally: every
-  operation reports failure through one persistent red toast.
+  epoch-millisecond `addedAt`, newest first (headword breaks ties). A hard
+  cap of 8,192 rows refuses the next star with a visible notice — nothing
+  is ever silently evicted. One `FavoriteIdentity` value stays current
+  with the list — normalized headword keys + kana-folded reading keys —
+  and star, highlight matching, and promotion all read it. A store that
+  cannot open or load degrades terminally for that instance: every
+  mutation fails into one keyed persistent red toast, reads answer empty
+  stubs, and the window shows an unavailable card (a relaunch builds a
+  fresh store; deleting `favorites.sqlite` starts over).
 - **Matching (render path):** a rendered segment matches when its surface
-  or lemma equals a stored headword (NFKC-folded), or when an all-kana
-  surface equals a stored reading (kana-folded) — favoring 見る lights up
-  見た / 見ます / 見ている, favoring 有難う lights up ありがとう; a kanji
-  surface is never a reading match. The lemma arm skips bound tokens
-  (`isBound`) — they lemmatize away from what is on screen, so favoring
-  ない must not light ねえ / なきゃ / なし; a bound token still matches on
-  its exact surface. The hot path probes two in-memory sets
-  (`matchKeys` / `readingKeys`) per rendered segment and never touches
-  SQLite; `FavoritesStore.revision` is the observation transcript rows read
-  to repaint. Favorites render in `Theme.favoriteAccent` in the transcript,
-  the live strip, and the HUD — wherever `RubyTextView` renders per-segment
-  units, in every annotation mode, favorite segments staying their own
-  units even where nothing else is annotated.
-- **Favorites mode (reference window):** the star surface lives in the
+  equals a stored headword (NFKC-folded); or, for a non-bound lemma, when
+  the lemma equals a stored headword, is an all-kana form whose kana fold
+  equals a stored reading (もらって → もらう), or unwraps from a
+  potential/passive shape to one (勝て → 勝てる → 勝つ, spelling or
+  reading); or when an all-kana surface kana-folds onto a stored reading —
+  favoring 見る lights up 見た / 見ます / 見ている, favoring 有難う lights
+  up ありがとう; a kanji surface is never a reading match. The lemma arms
+  skip bound tokens (`isBound`) — they lemmatize away from what is on
+  screen, so favoring ない must not light ねえ / なきゃ / なし; a bound
+  token still matches on its exact surface. The hot path probes the
+  identity's in-memory sets (`FavoriteIdentity.keys` / `.readings`) per
+  rendered segment and never touches SQLite; `FavoritesStore.revision` is
+  the observation transcript rows read to repaint. Favorites render in
+  `Theme.favoriteAccent` in the transcript, the live strip, and the HUD —
+  wherever `RubyTextView` renders per-segment units: the dictionary path
+  in every annotation mode (favorite segments staying their own units even
+  where nothing else is annotated) and Romaji/Furigana on the legacy path;
+  None on the legacy path renders one plain uncolored surface.
+- **Favorites mode (reference window):** the starred list lives in the
   reference window's Favorites mode (see Dictionary search above) — one
   460×775.6 two-mode window, so favorites and dictionary search share one
   footprint, one debounce, and one close-time reset. An explainer card, a
   debounced search against the SQLite list (LIKE with escaped wildcards
   across headword / reading / romaji), and dictionary-card rows
   (copy → star → chevron) that expand into the shared entry view via live
-  `JMDictLookup` queries (`FavoritesLookupState` — per-headword phases
-  behind generation tokens; deliberately never the app-wide popover/card
-  pipeline). Opened by the floating star over the transcript (top-trailing,
+  `JMDictLookup` queries (`FavoritesLookupState` — row-keyed phases behind
+  generation tokens: headword here, entry id in search; deliberately never
+  the app-wide popover/card pipeline). Opened by the floating star over
+  the transcript (top-trailing,
   sharing the toast stack's column beside the book opener); search,
   expansion set, and the pending removal question reset when the window
   closes.
 - **Favorite-first lookup:** `FavoritesPromotion` reorders an
   already-resolved lookup once so a favorited entry leads the display
-  result's pager and every `also:` hit's pager — a fallback pill labels
-  itself with its lead entry, so the promotion is what makes the pill
-  readable and starred, and `selectAlsoPill` re-promotes the content it
-  rebuilds. Not-found pins are untouched (a split hit must never present
-  itself as the tapped word), and the dictionary engine itself never learns
-  favorites exist.
+  result's pager, every `also:` hit's pager, and each expanded search
+  row's pager — a fallback pill labels itself with its lead entry, so the
+  promotion is what makes the pill readable and starred, and
+  `selectAlsoPill` re-promotes the content it rebuilds. Not-found pins
+  stay not-found with no display result (a split hit must never present
+  itself as the tapped word), though each related suggestion is promoted,
+  so a buried favorite leads its pill before any re-select. The dictionary
+  engine itself never learns favorites exist.
 
 ### Model choice (`Model/`)
 - `ASRModelChoice` — `.lite` / `.full`, each carrying its metadata (GGUF
@@ -433,22 +496,29 @@ packaged apps in `Contents/Frameworks/`.
 
 ### AppModel + SessionController (`State/`, `Session/`)
 - `AppModel` (@MainActor `@Observable`): session phase (including
-  `.sourceLost`), transcript entries, translation status, HUD pin,
-  toast/notice stacks, audio level + latency, ASR model state, lookup
-  state (popover + pinned card), the favorites store (star outcomes + the
-  segment matcher), session clock/loss anchors, and **three**
-  `TranslationSession.Configuration`s — the live session's plus the
-  re-translate lane's dedicated fast / high-fidelity pair. Split into
-  extensions (`AppModelTranslation` / `CaptureWarnings` / `Dictionary` /
-  `Export` / `Favorites` / `Lookup` / `ModelSelection` / `Overlay` /
-  `Retranslate` / `RetranslateSessions` / `SessionControl` /
-  `Termination`) — `SessionControl` owns the start surface (guards,
-  failure freeze, the phase-race guard where a `stop` during `begin`
-  tears down whatever `begin` brought up). Injectable test seams: a
-  scripted `SessionController` (engine / capture / warm-up / watchdog-
-  grace factories), a stubbed model resolver, the terminate-notification
-  center, the HTTP translation transport, the high-fidelity probe, and
-  the dictionary engines.
+  `.sourceLost`), transcript entries, translation status (forwarded from
+  the live-session coordinator), HUD pin, toast/notice stacks, audio level
+  + latency, ASR model state, lookup state (popover + pinned card), the
+  favorites store (star outcomes + the segment matcher), session
+  clock/loss anchors, and the two translation coordinators —
+  `translationSession` / `retranslate` — which own the engine attach /
+  fallback latch / probe machinery and the **three**
+  `TranslationSession.Configuration`s (the live session's plus the
+  re-translate lane's dedicated fast / high-fidelity pair), exposed
+  through computed façade pass-throughs. Split into extensions
+  (`AppModelTranslation` / `CaptureWarnings` / `Dictionary` / `Export` /
+  `Favorites` / `Lookup` / `ModelSelection` / `Overlay` / `Retranslate` /
+  `SessionControl` / `Termination`) — `SessionControl` owns the start
+  surface (guards, failure freeze, the phase-race guard where a `stop`
+  during `begin` tears down whatever `begin` brought up, and the guard
+  that drops a start failure landing after a raced teardown so it can't
+  resurrect `.failed`), and `Termination` latches `isTerminating` so a
+  second quit-time shutdown notification can't run a concurrent teardown.
+  Injectable test seams: a scripted `SessionController` (engine / capture
+  / warm-up / watchdog-grace factories), a stubbed model resolver, the
+  terminate-notification center, the HTTP translation transport, the
+  high-fidelity probe, the translation/adapter settings, the favorites
+  store, and the dictionary engines.
 - `SessionController`: engine creation via `ASREngineFactory` + background
   warm-up (path-keyed; a model switch re-arms it), capture wiring, the
   sentence buffer, the 60 ms poll / 200 ms tick timers, ASR event →
@@ -525,8 +595,9 @@ packaged apps in `Contents/Frameworks/`.
   like "Text copied", amber dictionary no-hit), 2 s auto-dismiss, rendered
   only while its window is key (mounted in the main and reference
   windows).
-- **Theming & scale:** `Theme.swift` centralizes tokens (dark values from
-  the mock, derived light variant); `AppearanceSetting` (system/light/dark,
+- **Theming & scale:** `Theme.swift` centralizes tokens (`SharedTokens`
+  primitives shared with Settings; light warm-paper and dark sakura values
+  resolved per appearance); `AppearanceSetting` (system/light/dark,
   a `DynamicProperty` wrapper with a system-scheme observer) applies via
   `.preferredColorScheme`; reading-annotation and cursor modes are plain
   `@AppStorage` enums read per-view. `UIScale` (75–200 %) scales
@@ -535,10 +606,10 @@ packaged apps in `Contents/Frameworks/`.
   with a host lookup handler it renders one tappable unit per segment.
 
 ### SessionExporter (`Export/`)
-- Plain text (`HH:MM:SS  text`), SRT/VTT subtitles (comma vs dot ms
-  delimiter; cues carry translations only — the JP transcript never
-  appears in a cue), and the JSON session file (below). Languages are read
-  from fields, never assumed; session metadata included.
+- Plain text (`HH:MM:SS  text`, `MM:SS` under 1 h), SRT/VTT subtitles
+  (comma vs dot ms delimiter; cues carry translations only — the JP
+  transcript never appears in a cue), and the JSON session file (below).
+  Languages are read from fields, never assumed; session metadata included.
 
 ## Threading model
 
@@ -575,13 +646,14 @@ lock; cross-thread handoff uses value types only.
   "schema_version": 1,
   "session": {
     "started_at": "2026-08-27T14:32:05+09:00",
-    "source_lang": "ja",           // null if ASR auto-detect
+    "source_lang": "ja",           // fixed ja today (nullable in the schema
+                                   // for a future ASR auto-detect)
     "target_lang": "en",           // the session's selected target (BCP-47;
                                    // English is the default)
     "model": "sensevoice-small-GGUF",   // the active choice's modelID
-                                        // ("funasr-nano-GGUF" for full)
-    "chunk_ms": 160,
-    "stream_offset": null          // future player writes user-settable offset
+                                        // ("funasr-nano-GGUF" for full;
+                                        // "mock" for the mock transcriber)
+    "chunk_ms": 160
   },
   "sentences": [
     {
@@ -591,17 +663,20 @@ lock; cross-thread handoff uses value types only.
       "lang": "ja",                // per-sentence
       "transcript": "今日はいい天気ですね。",
       "translations": [
-        { "lang": "en", "text": "Nice weather today, isn't it?" },
-        { "lang": "en", "text": "Lovely day, isn't it?", "engine": "deepl" }
+        { "lang": "en", "text": "Nice weather today, isn't it?" }
+        // a manual re-translate replaces the entry in place (one per
+        // language), stamped with its lane engine:
+        // { "lang": "en", "text": "…", "engine": "deepl" }
       ]
     }
   ]
 }
 ```
 
-Invariants: consumers read languages from fields (never assume);
-`translations` is append-only; `schema_version` governs evolution;
-sentence `index` is stable and keys JP↔translation alignment.
+Invariants: consumers read languages from fields (never assume); a row
+carries at most one translation per language — a re-translate replaces
+its language's entry in place, it never appends; `schema_version` governs
+evolution; sentence `index` is stable and keys JP↔translation alignment.
 
 A translation entry may carry an optional `engine` field — the engine that
 produced it via a manual row re-translate through an engine other than the
@@ -630,7 +705,7 @@ Mimidasu.app/
                                         # decompressed once on first launch
       jmdict-<tag>.<rev>.sqlite.zst     # JMDict + JMnedict lookup DB,
                                         # versioned by pin tag + build revision
-      (assets, README, THIRD_PARTY_NOTICES)
+      (Assets.car, README.txt, THIRD_PARTY_NOTICES.txt, LICENSE.txt)
 ```
 
 Distribution: `scripts/package.sh` builds the release DMG (ULMO-compressed;
