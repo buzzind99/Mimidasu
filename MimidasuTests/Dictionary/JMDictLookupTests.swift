@@ -434,7 +434,7 @@ final class JMDictLookupTests {
     /// no catch for it, so the error surfaces to the caller untouched.
     @Test("a cancelled lookup throws instead of finishing")
     func cancellation() async throws {
-        let engine = self.engine
+        let engine = engine
         let task = Task {
             _ = try engine.lookup(LookupCandidate(text: "食べる"))
         }
