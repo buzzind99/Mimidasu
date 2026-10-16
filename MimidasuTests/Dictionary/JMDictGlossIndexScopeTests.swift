@@ -2,21 +2,19 @@ import Foundation
 @testable import Mimidasu
 import Testing
 
-/// Gate 4 of the FTS5 plan: finding F6a falsified.
+/// Regression: the capped `.all` scan structurally excluded names. On `to`
+/// the scope matched 85,364 sense rows, of which **38,571 are names** — none
+/// of which the capped scan returned. The cause was mechanical: the cap's
+/// `LIMIT` had no `ORDER BY`, and `senses` is keyed `(entry_id, ord)` with
+/// every name entry at `ent_seq >= 10M`, so a truncated scan simply stopped
+/// inside the word block and never reached them.
 ///
-/// `SEARCH_FINDINGS.md` F6a recorded that the `.all` scope structurally
-/// excluded names, and measured `to` at 85,364 matching sense rows of which
-/// **38,571 are names** — none of which the capped `.all` scan returned. The
-/// cause was mechanical: the cap's `LIMIT` had no `ORDER BY`, and `senses` is
-/// keyed `(entry_id, ord)` with every name entry at `ent_seq >= 10M`, so a
-/// truncated scan simply stopped inside the word block and never reached them.
+/// The originally proposed repair was to run a second `.names` scan and merge.
+/// That is unnecessary here: deleting the cap removes the truncation and the
+/// missing names together, so the question is only whether the merged screen
+/// comes out the same.
 ///
-/// F6a's own proposed repair was to run a second `.names` scan and merge. That
-/// is unnecessary here: deleting the cap removes the truncation and the missing
-/// names together, so the question is only whether the merged screen comes out
-/// the same.
-///
-/// **The finding's own probe cannot be re-run.** `to` is two characters, and the
+/// **The original probe cannot be re-run.** `to` is two characters, and the
 /// trigram tokenizer cannot express a two-character phrase — FTS5 answers it
 /// with zero rows and no error, on every scope. Measured here it returns 0 for
 /// `.all`, `.words` and `.names` alike, which is indistinguishable from "no
@@ -66,7 +64,7 @@ struct JMDictGlossIndexScopeTests {
         #expect(all.isSuperset(of: words))
         #expect(all.isSuperset(of: names))
 
-        // Names are the entire point of F6a: they used to be unreachable
+        // Names are the entire point of the uncapped scan: they used to be unreachable
         // through `.all`, and now they are not.
         let offset = DictionaryContent.nameSeqOffset
         #expect(names.allSatisfy { entryID in entryID >= offset })
@@ -79,7 +77,7 @@ struct JMDictGlossIndexScopeTests {
         let db = try database()
         defer { db.close() }
 
-        // The shape F6a described in miniature: more names than words, so a
+        // The miniature shape: more names than words, so a
         // scan that stopped at the ceiling would return almost nothing useful.
         let words = try entries("oto", scope: .words, db: db)
         let names = try entries("oto", scope: .names, db: db)
