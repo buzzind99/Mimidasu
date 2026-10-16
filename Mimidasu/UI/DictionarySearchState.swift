@@ -38,23 +38,14 @@ final class DictionarySearchState {
 
     /// The query the rows were built from; trails `query` by the debounce.
     private(set) var debouncedQuery = ""
-    /// A filter change re-runs the search immediately against the debounced
-    /// query — there is nothing to debounce, the input is a button press, and
-    /// a filter that visibly did nothing reads as broken.
-    var filters = DictionarySearchFilters() {
+    /// The filter selection the rows were built from. Every external write
+    /// goes through `apply(_:)`, which funnels the transition's normalized
+    /// result in, so a raw impossible pair (Common under Names) cannot be
+    /// parked here. A filter change re-runs the search immediately against
+    /// the debounced query — there is nothing to debounce, the input is a
+    /// button press, and a filter that visibly did nothing reads as broken.
+    private(set) var filters = DictionarySearchFilters() {
         didSet {
-            guard filters != oldValue else { return }
-            // Names are never marked common, so a filter set carrying COMMON
-            // into the Names scope can only answer zero rows — and the chip
-            // greys out there, so the user cannot undo it from the chrome that
-            // shows it. Normalized here rather than at the scope picker, so
-            // every writer gets the same state and the search below runs on the
-            // corrected filters. An in-place member write does not re-enter
-            // this observer, so the prune and the re-run happen once; a write
-            // that only normalizes *to* what is already set returns above.
-            if filters.scope == .names, filters.commonOnly {
-                filters.commonOnly = false
-            }
             guard filters != oldValue else { return }
             // A new filter set starts one page deep, like a new query: the
             // depth belonged to the previous answer, and without the reset a
@@ -64,6 +55,20 @@ final class DictionarySearchState {
             pruneLookupState()
             run(trimmed: debouncedQuery, filters: filters)
         }
+    }
+
+    /// The window's single external write path for the Filter set: the panel
+    /// and the tests dispatch events, and the pure transition owns every
+    /// exclusion, carry-over, and floor rule. A no-op event (a floor-blocked
+    /// match toggle, Common under Names, a clear of an empty set) returns a
+    /// value equal to the stored one and returns here before the write — no
+    /// observation notification, no re-page, no prune, no search. The direct
+    /// write stays private to the type (`resetForClose`, whose defaults are
+    /// already normalized), so no external caller can bypass normalization.
+    func apply(_ event: DictionarySearchFilters.FilterEvent) {
+        let next = filters.apply(event)
+        guard next != filters else { return }
+        filters = next
     }
 
     /// Whether the filter panel is open. Chrome only: flipping it re-runs

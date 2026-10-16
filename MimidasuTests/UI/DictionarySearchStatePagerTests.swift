@@ -61,7 +61,7 @@ extension DictionarySearchStateTests {
         // A lead change to the Names scope drops 飴 from the rows; the
         // landing prunes the stored pager alongside the expansion, so the
         // next open starts at the first entry instead of a stale page.
-        state.filters = DictionarySearchFilters(scope: .names)
+        state.apply(.setScope(.names))
         #expect(await pollUntil(timeout: 2) { state.outcome.hits.map(\.entSeq) == [15_668_307] }, "the names landing lands")
         #expect(state.entryIndex(for: "飴") == 0)
     }

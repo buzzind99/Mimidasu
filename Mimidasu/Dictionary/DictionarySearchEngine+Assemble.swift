@@ -130,10 +130,10 @@ extension DictionarySearchEngine {
         for candidates: [ScoredRow], filters: DictionarySearchFilters, db: SQLiteDatabase
     ) throws -> (pos: [Int: [String?]], name: [Int: [String?]]) {
         if filters.filtersPOS, filters.filtersNameTypes {
-            // Both effective (the panel prevents this under All, but the model
-            // allows it): one join over all survivors, split for the two
-            // predicates — a second scan of the same name rows would buy
-            // nothing.
+            // Both effective (the Filter transition prevents this under All;
+            // the model still allows a raw pair): one join over all survivors,
+            // split for the two predicates — a second scan of the same name
+            // rows would buy nothing.
             let all = try sensePosTokens(forEntryIDs: candidates.map(\.entryID), db: db)
             return (all, all.filter { pair in pair.key >= DictionaryContent.nameSeqOffset })
         } else if filters.filtersPOS {

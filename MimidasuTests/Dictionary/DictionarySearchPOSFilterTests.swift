@@ -3,8 +3,7 @@ import Foundation
 import Testing
 
 /// The POS filter's second suite: tag-mapping boundaries, token splitting,
-/// multi-select union, coexistence with the other filters, and the
-/// toggle/scope normalization helpers. Split from
+/// multi-select union, and coexistence with the other filters. Split from
 /// `DictionarySearchFilterTests` so both types stay inside the body budget.
 /// Everything here runs offline.
 @Suite("DictionarySearchPOSFilters")
@@ -118,9 +117,10 @@ struct DictionarySearchPOSFilterTests {
 
     @Test("POS and name types conjoin to nothing under All")
     func posAndNameTypesConjunctionIsEmpty() throws {
-        // The panel prevents this pairing, but the model allows it: the word
-        // fails the badge check, the name fails POS, and the shared single
-        // fetch still answers exactly. Covers the both-effective engine path.
+        // The transition prevents this pairing; the model still allows raw
+        // construction: the word fails the badge check, the name fails POS,
+        // and the shared single fetch still answers exactly. Covers the
+        // both-effective engine path.
         let fixture = try DictionarySearchFixture()
 
         let verbs = try fixture.outcome("あめむら", nameTypes: ["SURNAME"], posGroups: [.verb])
@@ -134,139 +134,6 @@ struct DictionarySearchPOSFilterTests {
         #expect(nouns.isEmpty)
         #expect(nouns.matchedCount == 0)
         #expect(nouns.isFloor == false)
-    }
-
-    @Test("toggling POS under All clears name types and keeps JLPT")
-    func togglePOSClearsNameTypesUnderAll() {
-        var filters = DictionarySearchFilters(jlptLevels: [5], nameTypes: ["SURNAME"])
-
-        filters.togglePOS(.verb)
-
-        #expect(filters.posGroups == [.verb])
-        #expect(filters.nameTypes.isEmpty)
-        #expect(filters.jlptLevels == [5])
-    }
-
-    @Test("toggling POS under Words keeps the name-type selection")
-    func togglePOSKeepsNameTypesUnderWords() {
-        var filters = DictionarySearchFilters(scope: .words, nameTypes: ["SURNAME"])
-
-        filters.togglePOS(.verb)
-
-        #expect(filters.posGroups == [.verb])
-        #expect(filters.nameTypes == ["SURNAME"])
-    }
-
-    @Test("toggling POS off clears nothing else")
-    func togglePOSRemovalClearsNothing() {
-        var filters = DictionarySearchFilters(nameTypes: ["SURNAME"], posGroups: [.verb])
-
-        filters.togglePOS(.verb)
-
-        #expect(filters.posGroups.isEmpty)
-        #expect(filters.nameTypes == ["SURNAME"])
-    }
-
-    @Test("toggling a name type under All clears JLPT and POS")
-    func toggleNameTypeClearsWordFiltersUnderAll() {
-        var filters = DictionarySearchFilters(jlptLevels: [5], posGroups: [.verb])
-
-        filters.toggleNameType("SURNAME")
-
-        #expect(filters.nameTypes == ["SURNAME"])
-        #expect(filters.jlptLevels.isEmpty)
-        #expect(filters.posGroups.isEmpty)
-    }
-
-    @Test("toggling a name type under Words keeps the word selections")
-    func toggleNameTypeKeepsWordFiltersUnderWords() {
-        var filters = DictionarySearchFilters(scope: .words, jlptLevels: [5], posGroups: [.verb])
-
-        filters.toggleNameType("SURNAME")
-
-        #expect(filters.nameTypes == ["SURNAME"])
-        #expect(filters.jlptLevels == [5])
-        #expect(filters.posGroups == [.verb])
-    }
-
-    @Test("toggling JLPT under All clears name types and keeps POS")
-    func toggleJLPTKeepsPOSUnderAll() {
-        var filters = DictionarySearchFilters(nameTypes: ["SURNAME"], posGroups: [.verb])
-
-        filters.toggleJLPTLevel(5)
-
-        #expect(filters.jlptLevels == [5])
-        #expect(filters.nameTypes.isEmpty)
-        #expect(filters.posGroups == [.verb])
-    }
-
-    @Test("toggling JLPT off clears nothing else")
-    func toggleJLPTLevelRemovalClearsNothing() {
-        var filters = DictionarySearchFilters(jlptLevels: [5], nameTypes: ["SURNAME"])
-
-        filters.toggleJLPTLevel(5)
-
-        #expect(filters.jlptLevels.isEmpty)
-        #expect(filters.nameTypes == ["SURNAME"])
-    }
-
-    @Test("toggling a name type off clears nothing else")
-    func toggleNameTypeRemovalClearsNothing() {
-        var filters = DictionarySearchFilters(jlptLevels: [5], nameTypes: ["SURNAME"])
-
-        filters.toggleNameType("SURNAME")
-
-        #expect(filters.nameTypes.isEmpty)
-        #expect(filters.jlptLevels == [5])
-    }
-
-    @Test("entering All from Words clears name types and keeps POS and JLPT")
-    func setScopeFromWordsToAll() {
-        var filters = DictionarySearchFilters(
-            scope: .words, jlptLevels: [5], nameTypes: ["SURNAME"], posGroups: [.verb]
-        )
-
-        filters.setScope(.all)
-
-        #expect(filters.scope == .all)
-        #expect(filters.nameTypes.isEmpty)
-        #expect(filters.jlptLevels == [5])
-        #expect(filters.posGroups == [.verb])
-    }
-
-    @Test("entering All from Names clears JLPT and POS and keeps name types")
-    func setScopeFromNamesToAll() {
-        var filters = DictionarySearchFilters(
-            scope: .names, jlptLevels: [5], nameTypes: ["SURNAME"], posGroups: [.verb]
-        )
-
-        filters.setScope(.all)
-
-        #expect(filters.scope == .all)
-        #expect(filters.nameTypes == ["SURNAME"])
-        #expect(filters.jlptLevels.isEmpty)
-        #expect(filters.posGroups.isEmpty)
-    }
-
-    @Test("entering All from All clears nothing")
-    func setScopeFromAllToAll() {
-        var filters = DictionarySearchFilters(nameTypes: ["SURNAME"], posGroups: [.verb])
-
-        filters.setScope(.all)
-
-        #expect(filters.nameTypes == ["SURNAME"])
-        #expect(filters.posGroups == [.verb])
-    }
-
-    @Test("leaving All clears nothing")
-    func setScopeLeavingAll() {
-        var filters = DictionarySearchFilters(nameTypes: ["SURNAME"], posGroups: [.verb])
-
-        filters.setScope(.words)
-
-        #expect(filters.scope == .words)
-        #expect(filters.nameTypes == ["SURNAME"])
-        #expect(filters.posGroups == [.verb])
     }
 
     /// Two kana-only homographs sharing the reading ぽすも: a verb

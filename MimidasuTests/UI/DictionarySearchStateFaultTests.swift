@@ -94,7 +94,7 @@ struct DictionarySearchStateFaultTests {
         // would empty the outcome here while `debouncedQuery` still reads
         // "あめ" — a "No matches for あめ" flash for a deleted query.
         state.query = ""
-        state.filters = DictionarySearchFilters(scope: .words)
+        state.apply(.setScope(.words))
         #expect(state.outcome.hits.count == 4)
         #expect(state.debouncedQuery == "あめ")
 
@@ -108,7 +108,7 @@ struct DictionarySearchStateFaultTests {
         let fixture = try makeState()
         let state = fixture.state
 
-        state.filters = DictionarySearchFilters(scope: .names)
+        state.apply(.setScope(.names))
         state.resetForClose()
 
         #expect(state.filters == DictionarySearchFilters())
@@ -121,7 +121,7 @@ struct DictionarySearchStateFaultTests {
 
         state.query = "あめ"
         #expect(await pollUntil { state.outcome.hits.count == 4 })
-        state.filters = DictionarySearchFilters(scope: .names)
+        state.apply(.setScope(.names))
         #expect(await pollUntil { state.outcome.hits.map(\.entSeq) == [15_668_307] })
 
         // Both halves of the hazard at once: a wiped query and a filter reset
@@ -178,7 +178,7 @@ struct DictionarySearchStateFaultTests {
         // `commonOnlyOverHeadroomIsExact` uses headroom + 2 rows instead, so
         // its hidden row is common and its count discriminates; here the
         // header shape is the point, not the margin.)
-        state.filters = DictionarySearchFilters(commonOnly: true)
+        state.apply(.toggleCommonOnly)
         state.query = "かん"
         #expect(
             await pollUntil { state.outcome.hits.isEmpty == false },

@@ -47,7 +47,7 @@ struct DictionaryFilterPanel: View {
         // enabled over a search identical to the defaults.
         let isDefault = state.filters == DictionarySearchFilters()
         return Button {
-            state.filters = DictionarySearchFilters()
+            state.apply(.reset)
         } label: {
             Text("Reset")
                 .font(.system(size: 11, weight: .medium))
@@ -93,7 +93,7 @@ struct DictionaryFilterPanel: View {
     /// a divider. Both describe word entries, so the row disables under
     /// Names with the selections kept, restoring on the way back.
     private var jlptRow: some View {
-        let disabled = state.filters.scope == .names
+        let disabled = !state.filters.scope.answersJLPT
         return HStack(spacing: 6) {
             caption("JLPT")
             ForEach(1 ... 5, id: \.self) { level in
@@ -137,7 +137,7 @@ struct DictionaryFilterPanel: View {
     /// chips (plus any active selection the pins would hide, plus All), with
     /// a chevron flowing right after the last badge toggling the full list.
     private var nameTypeRow: some View {
-        let disabled = state.filters.scope == .words
+        let disabled = !state.filters.scope.answersNameTypes
         return HStack(alignment: .top, spacing: 6) {
             // Same vertical padding as the POS caption below: the box matches
             // a chip's height so the text centers on the first chip line.
@@ -183,7 +183,7 @@ struct DictionaryFilterPanel: View {
     /// active selection the pins would hide, plus All), with a chevron flowing
     /// right after the last badge toggling the full list.
     private var posRow: some View {
-        let disabled = state.filters.scope == .names
+        let disabled = !state.filters.scope.answersPOS
         return HStack(alignment: .top, spacing: 6) {
             // The caption wears the badge chips' own vertical padding, so its
             // box matches a chip's height and the text centers inside it — on
@@ -342,97 +342,59 @@ struct DictionaryFilterPanel: View {
     }
 
     private func toggleMatchGroup(_ group: DictionarySearchFilters.MatchGroup) {
-        var filters = state.filters
-        if filters.matchGroups.contains(group) {
-            guard filters.matchGroups.count > 1 else { return }
-            filters.matchGroups.remove(group)
-        } else {
-            filters.matchGroups.insert(group)
-        }
-        state.filters = filters
+        state.apply(.toggleMatchGroup(group))
     }
 
     private func selectAllMatchGroups() {
-        var filters = state.filters
-        filters.matchGroups = Set(DictionarySearchFilters.MatchGroup.allCases)
-        state.filters = filters
+        state.apply(.selectAllMatchGroups)
     }
 
     private func toggleJLPTLevel(_ level: Int) {
-        var filters = state.filters
-        // JLPT coexists with POS (both word-side); only name types clear.
-        // See `DictionarySearchFilters.toggleJLPTLevel`.
-        filters.toggleJLPTLevel(level)
-        state.filters = filters
+        state.apply(.toggleJLPTLevel(level))
     }
 
     private func clearJLPTLevels() {
-        var filters = state.filters
-        filters.jlptLevels = []
-        state.filters = filters
+        state.apply(.clearJLPTLevels)
     }
 
     private func toggleNameType(_ badge: String) {
-        var filters = state.filters
-        // See `DictionarySearchFilters.toggleNameType` for the mutual
-        // clearing under All.
-        filters.toggleNameType(badge)
-        state.filters = filters
+        state.apply(.toggleNameType(badge))
     }
 
     private func clearNameTypes() {
-        var filters = state.filters
-        filters.nameTypes = []
-        state.filters = filters
+        state.apply(.clearNameTypes)
     }
 
     private func togglePOS(_ group: DictionarySearchFilters.POSGroup) {
-        var filters = state.filters
-        // See `DictionarySearchFilters.togglePOS` for the mutual clearing
-        // under All (name types clear; JLPT coexists and stays).
-        filters.togglePOS(group)
-        state.filters = filters
+        state.apply(.togglePOS(group))
     }
 
     private func clearPOS() {
-        var filters = state.filters
-        filters.posGroups = []
-        state.filters = filters
+        state.apply(.clearPOS)
     }
 
     private var scope: Binding<DictionarySearchFilters.Scope> {
         Binding(
             get: { state.filters.scope },
             set: { newValue in
-                var filters = state.filters
-                // Nothing to clear here: `DictionarySearchState.filters`
-                // normalizes COMMON away under Names on the way in, for every
-                // writer, so the chip below can never be left reading live
-                // over a scope that can never satisfy it.
-                //
-                // Entering All can reunite two selections the scoped rows kept
-                // apart — see `DictionarySearchFilters.setScope`: the side that
-                // was live in the scope being left wins; the kept-but-ignored
-                // side clears, so All never lands in the provably-empty
-                // conjunction.
-                filters.setScope(newValue)
-                state.filters = filters
+                // The Filter transition owns every carry-over and exclusion
+                // rule, entering All included.
+                state.apply(.setScope(newValue))
             }
         )
     }
 
     /// Names are never common in the source data, so "Common only" over Names
-    /// is structurally zero rows. `DictionarySearchState` clears the flag on the
-    /// way into that scope, so none is left behind reading as a live filter the
-    /// user could switch back off. Lives in the JLPT row past the divider, so
-    /// the row's own dimming covers the disabled state — no local opacity here,
-    /// or Names would double-dim the chip.
+    /// is structurally zero rows. The Filter transition canonicalizes the flag
+    /// away on the way into that scope, so none is left behind reading as a
+    /// live filter the user could switch back off. Lives in the JLPT row past
+    /// the divider, so the row's own dimming covers the disabled state — no
+    /// local opacity here, or Names would double-dim the chip.
     private var commonOnlyToggle: some View {
-        let disabled = state.filters.scope == .names
-        let selected = state.filters.commonOnly && !disabled
+        let disabled = !state.filters.scope.answersCommon
         return FilterBadgeButton(
             text: "COMMON",
-            selected: selected,
+            selected: state.filters.commonOnly,
             selectedColor: Theme.dotGreen,
             disabled: disabled,
             help: disabled
@@ -440,9 +402,7 @@ struct DictionaryFilterPanel: View {
                 : "Only entries the dictionary marks common",
             accessibility: "Common entries only"
         ) {
-            var filters = state.filters
-            filters.commonOnly.toggle()
-            state.filters = filters
+            state.apply(.toggleCommonOnly)
         }
     }
 }

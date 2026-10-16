@@ -119,7 +119,7 @@ struct DictionarySearchStateTests {
 
         // All → Words keeps both あめ entries and both あめむら entries, and
         // the debounced query is untouched by a filter press.
-        state.filters = DictionarySearchFilters(scope: .words)
+        state.apply(.setScope(.words))
         #expect(await pollUntil { state.outcome.hits.allSatisfy { hit in !hit.isName } })
         #expect(state.outcome.hits.map(\.entSeq) == [1_153_520, 9_990_030, 9_990_100])
         #expect(state.debouncedQuery == "あめ")
@@ -135,8 +135,8 @@ struct DictionarySearchStateTests {
 
         // Two presses inside one tick: the second is an equality no-op, so the
         // first press's search lands unsuperseded and no landing is discarded.
-        state.filters = DictionarySearchFilters(scope: .words)
-        state.filters = DictionarySearchFilters(scope: .words)
+        state.apply(.setScope(.words))
+        state.apply(.setScope(.words))
         #expect(await pollUntil { state.outcome.hits.allSatisfy { hit in !hit.isName } })
         #expect(state.discardedLandings == 0)
     }
@@ -158,7 +158,7 @@ struct DictionarySearchStateTests {
         ))
         #expect(state.lookupState.expanded == ["食べる", "飴"])
 
-        state.filters = DictionarySearchFilters(scope: .names)
+        state.apply(.setScope(.names))
         // 食べる is gone from the rows; 飴 is still on screen (under All), so
         // its expansion survives this press even though Names will drop it.
         #expect(state.lookupState.expanded == ["飴"])
@@ -175,7 +175,7 @@ struct DictionarySearchStateTests {
 
         state.query = "あめ"
         #expect(await pollUntil { state.outcome.hits.count == 4 })
-        state.filters = DictionarySearchFilters(scope: .names)
+        state.apply(.setScope(.names))
         #expect(await pollUntil { state.outcome.hits.map(\.entSeq) == [15_668_307] })
 
         // An expansion the Names screen never held: switching back to All
@@ -186,7 +186,7 @@ struct DictionarySearchStateTests {
         state.lookupState.toggle(FavoriteWord(
             headword: "飴", reading: "あめ", romaji: "ame", addedAt: 0
         ))
-        state.filters = DictionarySearchFilters(scope: .all)
+        state.apply(.setScope(.all))
         #expect(state.lookupState.expanded.isEmpty)
         #expect(await pollUntil { state.outcome.hits.count == 4 })
     }
@@ -411,7 +411,7 @@ struct DictionarySearchStateTests {
         // The depth belonged to the unfiltered answer: the filtered search
         // starts one page deep, like a new query, instead of running a
         // 100-row scan and showing 100 rows.
-        state.filters = DictionarySearchFilters(commonOnly: true)
+        state.apply(.toggleCommonOnly)
         #expect(state.visibleLimit == DictionarySearchEngine.pageSize)
         #expect(await pollUntil { state.outcome.hits.allSatisfy { hit in hit.common } && state.isSearching == false })
         #expect(state.outcome.hits.isEmpty == false)
@@ -447,7 +447,7 @@ struct DictionarySearchStateTests {
         let fixture = try makeCommonFilteredState()
         let state = fixture.state
 
-        state.filters = DictionarySearchFilters(commonOnly: true)
+        state.apply(.toggleCommonOnly)
         state.query = "kan"
         #expect(await pollUntil { state.outcome.hits.isEmpty == false })
         #expect(await pollUntil { state.isSearching == false })
@@ -459,12 +459,13 @@ struct DictionarySearchStateTests {
         #expect(state.canLoadMore == false)
     }
 
-    @Test("entering Names clears COMMON, whatever writer asked for it")
+    @Test("entering Names clears COMMON")
     func namesScopeDropsCommonOnly() throws {
         let fixture = try makeState()
         let state = fixture.state
 
-        state.filters = DictionarySearchFilters(scope: .names, commonOnly: true)
+        state.apply(.toggleCommonOnly)
+        state.apply(.setScope(.names))
 
         // The filter pair answers zero rows by construction (no JMnedict entry
         // is marked common) and the chip is disabled in that scope, so a state

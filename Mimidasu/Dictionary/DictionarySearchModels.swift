@@ -27,8 +27,9 @@ struct DictionarySearchFilters: Equatable, Sendable {
 
     var scope: Scope = .all
     /// Restrict to entries JMDict marks common. Name entries are never common,
-    /// so this and `.names` are structurally empty — the UI greys the toggle
-    /// out rather than showing a filter that can only answer zero.
+    /// so this and `.names` are structurally empty — the Filter transition
+    /// canonicalizes the pair away via `normalized`, and the UI greys the
+    /// toggle out rather than showing a filter that can only answer zero.
     var commonOnly = false
     /// Which match tiers may answer. Lemma folds into `.exact` — the lemma
     /// retry is skipped when `.exact` is off — so the three groups cover all
@@ -36,9 +37,10 @@ struct DictionarySearchFilters: Equatable, Sendable {
     var matchGroups: Set<MatchGroup> = Set(MatchGroup.allCases)
     /// JLPT levels an entry must carry. Empty means no filtering; a nil level
     /// fails while effective, because names carry no JLPT in the real database.
-    /// Mutually exclusive with `nameTypes` under `.all` — the filter panel
-    /// clears one when the other is set there, since their conjunction can
-    /// only answer zero rows (words fail the badge check, names fail this one).
+    /// Mutually exclusive with `nameTypes` under `.all` — the Filter
+    /// transition clears one when the other is set there (a toggle insert,
+    /// or entering `.all`), since their conjunction can only answer zero
+    /// rows (words fail the badge check, names fail this one).
     var jlptLevels: Set<Int> = []
     /// Name-type badge labels an entry must carry (e.g. "SURNAME"). Empty
     /// means no filtering; non-names and badgeless names fail while effective.
@@ -46,8 +48,8 @@ struct DictionarySearchFilters: Equatable, Sendable {
     var nameTypes: Set<String> = []
     /// POS groups an entry must carry on at least one sense. Empty means no
     /// filtering. Word-side: mutually exclusive with `nameTypes` under `.all`
-    /// (the filter panel clears one when the other is set there); coexists
-    /// with `jlptLevels`.
+    /// (the Filter transition clears one when the other is set there, a
+    /// toggle insert or entering `.all`); coexists with `jlptLevels`.
     var posGroups: Set<POSGroup> = []
 
     /// Which match tier a hit belongs to, for the filter row. Three groups
@@ -143,22 +145,22 @@ struct DictionarySearchFilters: Equatable, Sendable {
     }
 
     /// Whether the JLPT selection filters anything. Levels describe word
-    /// entries, so the row is moot under Names and the UI disables it there.
+    /// entries, so the row is moot under Names — the Scope capability table
+    /// owns that reading and the UI disables the row from it.
     var filtersJLPT: Bool {
-        !jlptLevels.isEmpty && scope != .names
+        !jlptLevels.isEmpty && scope.answersJLPT
     }
 
     /// Whether the name-type selection filters anything. Types describe name
-    /// entries, so the row is moot under Words and the UI disables it there.
+    /// entries, so the row is moot under Words — same capability-table read.
     var filtersNameTypes: Bool {
-        !nameTypes.isEmpty && scope != .words
+        !nameTypes.isEmpty && scope.answersNameTypes
     }
 
     /// Whether the POS selection filters anything. POS describes word entries,
-    /// so the row is moot under Names and the UI disables it there (same as
-    /// JLPT).
+    /// so the row is moot under Names (same as JLPT).
     var filtersPOS: Bool {
-        !posGroups.isEmpty && scope != .names
+        !posGroups.isEmpty && scope.answersPOS
     }
 
     /// Whether this filter set needs an exact total. The common, JLPT,
@@ -197,75 +199,6 @@ struct DictionarySearchFilters: Equatable, Sendable {
     func admitsPOS(tokens: [String?]) -> Bool {
         guard filtersPOS else { return true }
         return !DictionaryContent.posGroupsPresent(posTokens: tokens).isDisjoint(with: posGroups)
-    }
-
-    /// Toggles one JLPT level. Selecting under `.all` clears `nameTypes` —
-    /// JLPT and name types are mutually exclusive there since their
-    /// conjunction can only answer zero rows. POS coexists with JLPT (both
-    /// word-side) and stays untouched. Under `.words`/`.names` the other
-    /// row's selection is merely kept-but-ignored, and stays untouched.
-    mutating func toggleJLPTLevel(_ level: Int) {
-        if jlptLevels.contains(level) {
-            jlptLevels.remove(level)
-        } else {
-            jlptLevels.insert(level)
-            if scope == .all {
-                nameTypes = []
-            }
-        }
-    }
-
-    /// Toggles one name-type badge. Selecting under `.all` clears
-    /// `jlptLevels` and `posGroups` — both word-side, both mutually exclusive
-    /// with name types there. Under `.words`/`.names` the other selections
-    /// stay untouched.
-    mutating func toggleNameType(_ badge: String) {
-        if nameTypes.contains(badge) {
-            nameTypes.remove(badge)
-        } else {
-            nameTypes.insert(badge)
-            if scope == .all {
-                jlptLevels = []
-                posGroups = []
-            }
-        }
-    }
-
-    /// Toggles one POS group. Selecting under `.all` clears `nameTypes` —
-    /// POS and name types are mutually exclusive there. JLPT coexists with
-    /// POS (both word-side) and stays untouched. Under `.words`/`.names`
-    /// the other selection stays untouched.
-    mutating func togglePOS(_ group: POSGroup) {
-        if posGroups.contains(group) {
-            posGroups.remove(group)
-        } else {
-            posGroups.insert(group)
-            if scope == .all {
-                nameTypes = []
-            }
-        }
-    }
-
-    /// Moves to a new scope, clearing the side that was kept-but-ignored
-    /// when entering `.all`: from `.words` the name types clear (POS/JLPT
-    /// stay); from `.names` JLPT and POS clear (name types win); from `.all`
-    /// nothing clears. Leaving `.all` or moving between `.words` and
-    /// `.names` clears nothing — the kept selection restores on return, and
-    /// a single-scope predicate cannot form the empty conjunction.
-    mutating func setScope(_ newScope: Scope) {
-        let leaving = scope
-        scope = newScope
-        if newScope == .all {
-            switch leaving {
-            case .words:
-                nameTypes = []
-            case .names:
-                jlptLevels = []
-                posGroups = []
-            case .all:
-                break
-            }
-        }
     }
 }
 

@@ -3,10 +3,10 @@ import Foundation
 import Testing
 
 /// The filter panel's chrome state: collapsed by default, cleared on close,
-/// and never normalized by scope changes — the JLPT and name-type selections
-/// survive a scope excursion because the engine ignores them out-of-domain
-/// instead of dropping them. Split from the search-state suite so both types
-/// stay inside the body budget.
+/// and every change flows through `state.apply` — the transition's funnel.
+/// Kept-but-ignored selections survive a scope excursion, and Common clears
+/// entering Names. Split from the search-state suite so both types stay
+/// inside the body budget.
 @MainActor
 @Suite("DictionarySearchFilterState")
 struct DictionarySearchFilterStateTests {
@@ -38,9 +38,10 @@ struct DictionarySearchFilterStateTests {
     @Test("scope change keeps the JLPT selection")
     func scopeChangeKeepsJLPT() throws {
         let fixture = try makeState()
-        fixture.state.filters = DictionarySearchFilters(jlptLevels: [1, 2])
+        fixture.state.apply(.toggleJLPTLevel(1))
+        fixture.state.apply(.toggleJLPTLevel(2))
 
-        fixture.state.filters.scope = .names
+        fixture.state.apply(.setScope(.names))
 
         #expect(fixture.state.filters.jlptLevels == [1, 2])
     }
@@ -48,9 +49,9 @@ struct DictionarySearchFilterStateTests {
     @Test("scope change keeps the name-type selection")
     func scopeChangeKeepsNameTypes() throws {
         let fixture = try makeState()
-        fixture.state.filters = DictionarySearchFilters(nameTypes: ["SURNAME"])
+        fixture.state.apply(.toggleNameType("SURNAME"))
 
-        fixture.state.filters.scope = .words
+        fixture.state.apply(.setScope(.words))
 
         #expect(fixture.state.filters.nameTypes == ["SURNAME"])
     }
@@ -58,9 +59,9 @@ struct DictionarySearchFilterStateTests {
     @Test("scope change keeps the POS selection but disables its effect under Names")
     func scopeChangeKeepsPOS() throws {
         let fixture = try makeState()
-        fixture.state.filters = DictionarySearchFilters(posGroups: [.verb])
+        fixture.state.apply(.togglePOS(.verb))
 
-        fixture.state.filters.scope = .names
+        fixture.state.apply(.setScope(.names))
 
         #expect(fixture.state.filters.posGroups == [.verb])
         #expect(fixture.state.filters.filtersPOS == false)
@@ -69,7 +70,8 @@ struct DictionarySearchFilterStateTests {
     @Test("a POS selection filters under Words")
     func posFiltersUnderWords() throws {
         let fixture = try makeState()
-        fixture.state.filters = DictionarySearchFilters(scope: .words, posGroups: [.noun])
+        fixture.state.apply(.togglePOS(.noun))
+        fixture.state.apply(.setScope(.words))
 
         #expect(fixture.state.filters.filtersPOS)
     }
@@ -77,23 +79,10 @@ struct DictionarySearchFilterStateTests {
     @Test("entering Names clears COMMON on scope change")
     func enteringNamesClearsCommonOnScopeChange() throws {
         let fixture = try makeState()
-        fixture.state.filters = DictionarySearchFilters(commonOnly: true)
+        fixture.state.apply(.toggleCommonOnly)
 
-        fixture.state.filters.scope = .names
+        fixture.state.apply(.setScope(.names))
 
-        #expect(fixture.state.filters.commonOnly == false)
-    }
-
-    @Test("entering Names clears COMMON on direct assignment too")
-    func enteringNamesClearsCommonOnDirectAssignment() throws {
-        // The member-write above and the whole-struct write below funnel
-        // through the same `didSet`, but only the second exercises the
-        // normalize-then-early-return path — pin both shapes.
-        let fixture = try makeState()
-
-        fixture.state.filters = DictionarySearchFilters(scope: .names, commonOnly: true)
-
-        #expect(fixture.state.filters.scope == .names)
         #expect(fixture.state.filters.commonOnly == false)
     }
 
@@ -111,7 +100,7 @@ struct DictionarySearchFilterStateTests {
 
         // Without the reset this press runs a 100-row scan and shows 100
         // rows; with it the filtered answer starts one page deep.
-        state.filters = DictionarySearchFilters(commonOnly: true)
+        state.apply(.toggleCommonOnly)
 
         #expect(state.visibleLimit == DictionarySearchEngine.pageSize, "a filter press re-pages")
         #expect(
