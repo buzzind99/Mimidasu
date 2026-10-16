@@ -30,33 +30,30 @@ extension AppModel {
     /// the quit-time teardown below.
     func performStop() async {
         await sessionController.stop()
+        // End order is live-then-lane (begin order in `wireSessionController`
+        // is lane-then-live). The halves are independent — worker/sequence/
+        // status reset vs marker-clear/teardown-rebuild — so the swap is
+        // harmless. `sessionDidEnd` is not config-idempotent: `teardown`
+        // rebuilds armed configs on every call, but a double `performStop`
+        // is unreachable (`stop` guards on the live phases, and
+        // `shutdownForTermination` awaits the in-flight `stopTask` — or, for
+        // its own branch, is latched by `isTerminating`).
         // The external worker parks in the queue's wake loop after draining;
         // once `sessionController.stop()` has drained (translations intact),
-        // tear it down. Apple runs are owned by SwiftUI and stay parked.
-        translationWorker?.cancel()
-        translationWorker = nil
-        // Teardown supersedes any airborne high-fidelity probe: a landing
-        // must not mark a session that no longer exists.
-        highFidelitySequence += 1
-        translationStatus = .idle
+        // the live session tears the worker down (Apple runs are owned by
+        // SwiftUI and stay parked), supersedes any airborne high-fidelity
+        // probe (a landing must not mark a session that no longer exists),
+        // and resets the published status.
+        translationSession.sessionDidEnd()
         // The transcript stays on screen after a stop, so a row waiting on a
         // re-translation would sit dimmed with its button disabled. Nothing
-        // will deliver that result any more; drop the cue.
-        pendingRetranslations.removeAll()
-        // The lane task is cancelled (its post-await phase guard drops any
-        // late result), the armed lane sessions are invalidated + rebuilt in
-        // place — a nil → fresh-equal-config reassignment is the
-        // `.translationTask` path that does not reliably re-fire, so the
-        // teardown must not nil them (see `teardownRetranslateSession`) —
-        // and the lane-owned markers join the queue's clear. The teardown's
-        // epoch bump retires stragglers: cancelling reaches only the newest
-        // chained link, earlier lane tasks keep running to completion, and
-        // without it they would pass the phase guard in the NEXT session
-        // (indexes restart at 0) and swap an unrelated row's translation.
-        retranslateLaneTask?.cancel()
-        retranslateLaneTask = nil
-        lanePendingRetranslations.removeAll()
-        teardownRetranslateSession()
+        // will deliver that result any more; the lane drops every marker,
+        // cancels its task, invalidates stragglers through its epoch bump,
+        // and rebuilds the armed sessions in place — a nil → fresh-equal
+        // config reassignment is the `.translationTask` path that does not
+        // reliably re-fire, so the teardown must not nil them (see
+        // `RetranslateCoordinator.teardown`).
+        retranslate.sessionDidEnd()
         sessionEndedAt = .now
         // Stop/teardown clears all toasts and notices (phase → `.idle`).
         toasts.clearAll()

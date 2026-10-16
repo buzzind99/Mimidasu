@@ -1,26 +1,26 @@
 import Foundation
 import Translation
 
-// Dedicated re-translate sessions of `AppModel` (the per-kind arming, the
-// `.translationTask` hand-over hooks, and the teardown/rebuild lifecycle),
-// split from `AppModelRetranslate.swift` to stay under the 600-line lint
-// gate.
+// Dedicated re-translate sessions of `RetranslateCoordinator` — the
+// per-kind arming, the `.translationTask` hand-over hooks, the
+// teardown/rebuild lifecycle, and the session-boundary marker resets —
+// split from the main file to keep it under the lint file gate.
 
-extension AppModel {
+extension RetranslateCoordinator {
 
     // MARK: - Dedicated Apple sessions
 
     /// ja→target configuration for one of the dedicated re-translate
-    /// sessions. Mirrors `makeTranslationConfig` except the strategy, which
-    /// is set EXPLICITLY on 26.4+ — the property's default follows the SDK
-    /// the app was built against, which would hand both lanes the same
+    /// sessions. Mirrors the live session's config except the strategy,
+    /// which is set EXPLICITLY on 26.4+ — the property's default follows the
+    /// SDK the app was built against, which would hand both lanes the same
     /// model as the live session and return byte-identical text, defeating
     /// the feature. Below 26.4 the config stays plain (the session is the
     /// fast model by definition).
     func makeRetranslateConfig(highFidelity: Bool) -> TranslationSession.Configuration {
         var config = TranslationSession.Configuration(
             source: Locale.Language(identifier: "ja"),
-            target: Locale.Language(identifier: translationSettings.targetLanguage.code)
+            target: Locale.Language(identifier: settings.targetLanguage.code)
         )
         if #available(macOS 26.4, *) {
             config.preferredStrategy = highFidelity ? .highFidelity : .lowLatency
@@ -32,8 +32,7 @@ extension AppModel {
     /// waits on its own host's hand-over, never the other's. Named apart from
     /// the `retranslateSessionEngine` / `retranslateHifiSessionEngine`
     /// properties it reads so a call site is never mistaken for one.
-    /// (Internal, not private: the lane runner in `AppModelRetranslate.swift`
-    /// polls it.)
+    /// (Internal, not private: the lane runner polls it.)
     func laneEngineStorage(
         for kind: TranslationEngineKind
     ) -> (any TranslationEngine)? {
@@ -82,8 +81,10 @@ extension AppModel {
     }
 
     /// Drops both armed-session states (configs + stored engines) and
-    /// invalidates in-flight lane work with them. Called from every Apple
-    /// activation and from `performStop`. Within a session an armed config
+    /// invalidates in-flight lane work with them. Called from every explicit
+    /// Apple activation (`activate()`'s Apple branch) and from session end;
+    /// the latched fallback keeps the lane alive by design (an in-flight
+    /// lane result still has its deliverer). Within a session an armed config
     /// is always current — target changes are restart-only — so the reset
     /// covers the session boundary: a next session on an external provider
     /// never takes the Apple branch, and a config armed for a prior target
@@ -96,7 +97,7 @@ extension AppModel {
     /// — the session is still live — and fly a session that just died, or
     /// toast over the activation the user just made. Its captured epoch no
     /// longer matches, so every delivery guard retires it silently.
-    /// `performStop` cancels and bumps too; both are idempotent.
+    /// Session end cancels and bumps too; both are idempotent.
     ///
     /// Accepted loss: the cancellation reaches only the newest chained
     /// link, so a mid-air EXTERNAL flight (a paid round-trip) keeps running
@@ -115,19 +116,18 @@ extension AppModel {
     ///
     /// The configs are REBUILT, not nil-ed: a nil → fresh-equal-config
     /// transition is the path SwiftUI's `.translationTask` does not
-    /// reliably re-fire on (the same empirical finding `performStop`'s
-    /// main-config note records), and the next Apple-kind retry would arm
+    /// reliably re-fire on, and the next Apple-kind retry would arm
     /// onto it — the lane would sit in its arm wait out to the timeout
     /// toast while the host never fires. Invalidate + reassign is the
-    /// proven re-fire path (the one `refreshTranslationConfig` uses), and
+    /// proven re-fire path (the one `refreshConfig` uses), and
     /// the rebuild reads the current target, so a config armed for a prior
     /// target does not survive. A never-armed config stays nil (lazy
     /// arming preserved); a rebuilt one parks a fresh dedicated session —
-    /// the same kept-alive treatment the main config gets across a stop.
+    /// the same kept-alive treatment the live config gets across a stop.
     /// The stored engines go with the old configs: the next lane must wait
     /// for the rebuilt config's own hand-over, never fly an orphan of an
     /// invalidated session.
-    func teardownRetranslateSession() {
+    func teardown() {
         retranslateLaneTask?.cancel()
         retranslateLaneTask = nil
         retranslateSessionEpoch += 1
@@ -148,5 +148,52 @@ extension AppModel {
         guard var config else { return nil }
         config.invalidate()
         return makeRetranslateConfig(highFidelity: highFidelity)
+    }
+}
+
+// MARK: - Session lifecycle
+
+extension RetranslateCoordinator {
+    /// Session boundary: sentence indexes restart at 0 in every session, so
+    /// a backlog left by the last one has no row to land on — the markers
+    /// are dropped, and with them any re-translation still waiting on its
+    /// result. The epoch bump retires any lane task still in flight from the
+    /// previous session.
+    func sessionWillBegin() {
+        pendingRetranslations.removeAll()
+        lanePendingRetranslations.removeAll()
+        retranslateSessionEpoch += 1
+    }
+
+    /// Stop/teardown: the transcript stays on screen after a stop, so a row
+    /// waiting on a re-translation would sit dimmed with its button
+    /// disabled. Nothing will deliver that result any more, so every marker
+    /// goes (queue-owned ones included — the queue's own landing is the only
+    /// deliverer left, and stop has already drained it), and the lane
+    /// teardown invalidates stragglers: cancelling reaches only the newest
+    /// chained link, earlier lane tasks keep running to completion, and
+    /// without the epoch bump they would pass the phase guard in the NEXT
+    /// session (indexes restart at 0) and swap an unrelated row's
+    /// translation.
+    func sessionDidEnd() {
+        pendingRetranslations.removeAll()
+        teardown()
+    }
+
+    /// Retires the row's re-translation marker for a landed result. Cleared
+    /// before the row lookup by `applyTranslation`: a result whose row is
+    /// gone (the transcript cleared underneath it) must still retire its
+    /// marker, or the row stays dimmed with its retry button dead.
+    func clearMarkers(at index: Int) {
+        pendingRetranslations.remove(index)
+        lanePendingRetranslations.remove(index)
+    }
+
+    /// The queue's terminal-`.unavailable` clear: no engine swap follows the
+    /// failure, so queue-owned markers have lost their deliverer — but a
+    /// lane translation in flight still has its own, and dropping its marker
+    /// would re-open the double-click guard.
+    func dropQueueOwnedMarkers() {
+        pendingRetranslations.formIntersection(lanePendingRetranslations)
     }
 }

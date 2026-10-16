@@ -2,6 +2,7 @@ import Foundation
 @testable import Mimidasu
 import Synchronization
 import Testing
+import Translation
 
 /// Tests the re-translate lane's route resolution and settings surface:
 /// `alternateRetranslateEngineActive`, the Apple selections' de facto
@@ -88,6 +89,27 @@ struct AppModelRetranslateRouteTests {
         #expect(model.retranslateHifiSessionEngine == nil)
         #expect(model.lanePendingRetranslations.isEmpty)
         #expect(model.retranslateLaneTask == nil, "stop clears the stored lane task")
+    }
+
+    /// The explicit strategy is what keeps the dedicated lanes off the live
+    /// session's model: the property's default follows the build SDK and
+    /// would hand both lanes the same model, returning byte-identical text
+    /// and defeating the feature.
+    @Test("the dedicated lane configs pin their Apple strategies")
+    func retranslateConfigsPinStrategies() async throws {
+        guard #available(macOS 26.4, *) else {
+            try Test.cancel("preferredStrategy requires macOS 26.4")
+        }
+        let model = await makeSUT()
+
+        #expect(
+            model.makeRetranslateConfig(highFidelity: false).preferredStrategy == .lowLatency,
+            "the fast lane pins the fast model"
+        )
+        #expect(
+            model.makeRetranslateConfig(highFidelity: true).preferredStrategy == .highFidelity,
+            "the hifi lane pins the high-fidelity strategy"
+        )
     }
 
     // MARK: - Route resolution
@@ -270,6 +292,24 @@ struct AppModelRetranslateRouteTests {
             model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the row keeps its previous translation"
         )
+    }
+
+    @Test("a session-route retry with no attached worker reports instead of no-oping")
+    func sessionRouteRetryWithoutWorkerPostsUnavailableToast() async {
+        let model = await makeSUT()
+        // The default selection is `.session`; no worker is attached (the
+        // engine was released after a terminal failure).
+        model.phase = .running
+        let sentence = makeSentence(index: 4)
+        model.sessionController.onSentence?(sentence)
+        model.applyTranslation(index: 4, translation: SentenceTranslation(lang: "en", text: "Original"))
+
+        model.retranslateSentence(sentence)
+
+        let toast = model.toasts.toasts.first(where: { candidate in candidate.key == ToastKey.retranslate })
+        #expect(toast?.title == "Re-translate unavailable")
+        #expect(toast?.body == "No translation engine attached — try again in a moment.")
+        #expect(model.pendingRetranslations.isEmpty, "no marker is set — nothing dangles")
     }
 
     // MARK: - High-fidelity probe

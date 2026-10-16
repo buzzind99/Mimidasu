@@ -360,6 +360,19 @@ struct AppModelRetranslationTests {
         #expect(model.pendingRetranslations.isEmpty)
     }
 
+    /// The latch is per session: a fresh session re-attempts the configured
+    /// provider from scratch, so last session's fallback must not keep the
+    /// "Currently using" row on Apple.
+    @Test("a new session resets the Apple fallback latch")
+    func sessionBeginResetsFallbackLatch() async {
+        let model = await makeSUT()
+        model.translationFallbackActive = true
+
+        model.sessionController.onSessionBegin?()
+
+        #expect(!model.translationFallbackActive)
+    }
+
     /// A result whose row is gone — the transcript cleared underneath it —
     /// must still retire its marker, or the index stays locked as dimmed.
     @Test("a result for an unknown row still clears its marker")

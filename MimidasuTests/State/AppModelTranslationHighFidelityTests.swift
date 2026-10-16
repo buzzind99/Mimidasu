@@ -168,4 +168,53 @@ struct AppModelTranslationHighFidelityTests {
 
         await stopTranslation(model)
     }
+
+    /// A probe superseded before it landed must not mark the engine: every
+    /// activation resets the tuple and bumps the sequence, so the stale
+    /// landing is dropped and the fresh probe's answer stands.
+    @Test("a superseded probe landing is dropped by the sequence token")
+    func supersededProbeLandingIsDropped() async {
+        let (gateStream, gate) = AsyncStream<Void>.makeStream()
+        let probeCalls = Mutex(0)
+        let model = AppModel(
+            translationSettings: makeSettings(provider: .apple),
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelHighFidelity"),
+            favorites: isolatedFavorites(),
+            highFidelityProbe: { _ in
+                let call = probeCalls.withLock { calls in
+                    calls += 1
+                    return calls
+                }
+                guard call == 1 else { return true }
+                // The first probe parks until the test releases it, so the
+                // second activation supersedes it mid-flight.
+                var iterator = gateStream.makeAsyncIterator()
+                _ = await iterator.next()
+                return false
+            },
+            initialModelResolve: { _ in nil }
+        )
+
+        model.retryTranslation()
+        #expect(
+            await pollUntil { probeCalls.withLock { calls in calls >= 1 } },
+            "the first probe is airborne"
+        )
+
+        model.retryTranslation()
+        let targetCode = model.translationSettings.targetLanguage.code
+        #expect(
+            await pollUntil { model.appleHighFidelityProbe == (true, targetCode) },
+            "the fresh probe lands and marks the engine"
+        )
+
+        // Release the stale probe: its (negative) landing must be dropped.
+        // The negative poll gives the stale landing time to (incorrectly)
+        // arrive; `(false, targetCode)` cannot legitimately appear.
+        gate.yield(())
+        let staleOverwrote = await pollUntil(timeout: 0.5) {
+            model.appleHighFidelityProbe == (false, targetCode)
+        }
+        #expect(!staleOverwrote, "the superseded probe's landing must not re-mark the engine")
+    }
 }

@@ -309,6 +309,41 @@ struct AppModelRetranslateAppleLaneTests {
         )
     }
 
+    @Test("a cancelled probe deferral retires the markers without reporting")
+    func cancelledProbeDeferralRetiresMarkersSilently() async throws {
+        // Below 26.4 the Apple-kind click has no probe gate to defer on.
+        guard #available(macOS 26.4, *) else {
+            try Test.cancel("the probe-deferred fast lane requires macOS 26.4")
+        }
+        let model = await makeSUT()
+        // The probe stays unlanded: an Apple-kind retry has no live
+        // identity to route on, so it defers at the probe gate.
+        model.translationSettings.selectRetranslate(.appleFast)
+        model.phase = .running
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+        model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
+
+        model.retranslateSentence(sentence)
+        #expect(model.pendingRetranslations == [7], "the click marks the row")
+        model.retranslateLaneTask?.cancel()
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
+            },
+            "a cancelled deferral retires the markers"
+        )
+        #expect(
+            model.toasts.toasts.allSatisfy { candidate in candidate.key != ToastKey.retranslate },
+            "a cancellation is not a timeout — no report is posted"
+        )
+        #expect(
+            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            "the row keeps its previous translation"
+        )
+    }
+
     @Test("a timed-out wait that outlives the session posts nothing")
     func timedOutWaitOutlivingStopPostsNothing() async throws {
         guard #available(macOS 26.4, *) else {

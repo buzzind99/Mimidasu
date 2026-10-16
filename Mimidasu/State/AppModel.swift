@@ -27,9 +27,10 @@ final class AppModel {
     /// excluded), maintained incrementally on sentence append / session
     /// clear instead of re-summing the transcript per render.
     private(set) var sessionCharacterCount = 0
-    var translationStatus: TranslationStatus = .idle
     /// Observable mirror of `translationQueue.hasWorker` for the retry gate
-    /// (the queue is not `@Observable`); stays true across stop (parked Apple run).
+    /// (the queue is not `@Observable`). An Apple run stays parked across a
+    /// stop (true); an external run flips it false as its cancelled worker
+    /// unwinds.
     private(set) var translationWorkerActive = false
     var engineIsMock = false
     var modelURL: URL?
@@ -98,9 +99,6 @@ final class AppModel {
     /// SQLite's own file locking.
     let dictionarySearch: DictionarySearchEngine
 
-    /// Drives SwiftUI's `.translationTask` (session acquisition + pack prompt).
-    var translationConfig: TranslationSession.Configuration?
-
     /// Launch-time model discovery, spawned async in `init` (the verify is a
     /// multi-hundred-MB hash and must not stall the first frame). Internal so
     /// tests can await it before asserting on phase state.
@@ -147,133 +145,23 @@ final class AppModel {
     /// the availability refresh in `AppModelModelSelection.swift`.
     var modelAvailability: [ASRModelChoice: URL] = [:]
 
-    /// True once this session has latched onto Apple on-device after an
-    /// external engine failed (the Settings "Currently using" row surfaces it).
-    /// Reset by every manual retry (each retry re-arms the one-way fallback).
-    var translationFallbackActive = false
+    /// The live translation session — engine attach, manual retry, the
+    /// one-way Apple fallback latch, the high-fidelity probe, and the
+    /// provider-selection machinery — behind the forwarding façade in
+    /// `AppModelTranslation.swift`. Test seam: UI must use the facades,
+    /// never reach through to the coordinator.
+    let translationSession: TranslationSessionCoordinator
 
-    /// The engine currently attached to the queue — Apple's via the hidden
-    /// `.translationTask` host, an external one via `translationWorker`.
-    /// Internal: the translation-engine management lives in
-    /// `AppModelTranslation.swift` (file split for the lint gate).
-    var activeTranslationEngine: ActiveTranslationEngine = .apple
-
-    /// Which external provider is attached while `activeTranslationEngine`
-    /// is `.external` (nil on the Apple paths). Labels read this, never the
-    /// picker, so the ENGINES card and "Currently using" row can't describe
-    /// a provider that isn't actually attached. Internal: managed from
-    /// `AppModelTranslation.swift`.
-    var activeExternalProvider: TranslationProvider?
-
-    /// Outcome of the last high-fidelity (Apple Intelligence) probe: whether
-    /// the OS reports the strategy installed, and the ja→target code it was
-    /// probed for (nil until a probe lands). Internal: managed from
-    /// `AppModelTranslation.swift`.
-    var appleHighFidelityProbe: (installed: Bool, targetCode: String?) = (false, nil)
-
-    /// Monotonic token ruling which high-fidelity probe may land: every
-    /// engine attach and teardown bumps it, so a probe superseded before it
-    /// finished is dropped. Internal: managed from `AppModelTranslation.swift`.
-    var highFidelitySequence = 0
-
-    /// Session boundary token for the re-translate lane, in the same spirit as
-    /// `TranslationQueue.sessionEpoch`: bumped in `onSessionBegin`,
-    /// `performStop`, and `teardownRetranslateSession` (a mid-session Apple
-    /// activation is a lane-generation change, not a session one), captured
-    /// when a retry is clicked, and compared after the flight. A lane task
-    /// that outlives its session — `performStop` cancels only the newest
-    /// chained link, so earlier ones run to completion — would otherwise pass
-    /// the phase guard (the next session is `.running` again) and write the
-    /// *previous* session's translation onto an unrelated row, since
-    /// `Sentence.index` restarts at 0. Internal: managed from
-    /// `AppModelRetranslate.swift`.
-    var retranslateSessionEpoch = 0
-
-    /// How long the re-translate lane waits for an arming dedicated Apple
-    /// session before giving up on a click. Injectable so the timeout test can
-    /// exercise the real path in milliseconds instead of faking it with a
-    /// cancellation, which is a different outcome. Internal: driven from
-    /// `AppModelRetranslate.swift`.
-    var laneArmTimeout = Duration.seconds(5)
-
-    /// How long a high-fidelity re-translate lane waits for the activation
-    /// probe to land before routing on it: while the probe is unlanded the
-    /// live identity is unknown and the pair's hifi availability unproven,
-    /// so the lane defers (see `AppModelRetranslate.probeLanding`). The
-    /// probe is a fast async check; the bound only catches pathological
-    /// cases. Injectable for tests. Internal: driven from
-    /// `AppModelRetranslate.swift`.
-    var probeSettleTimeout = Duration.seconds(3)
-
-    /// The intent held behind the cloud disclosure sheet: completing a
-    /// provider switch (the live translation engine) or a re-translate
-    /// engine selection. Nil when no disclosure is pending. Internal:
-    /// managed from `AppModelTranslation.swift` and
-    /// `AppModelRetranslate.swift`; both confirm paths dispatch through
-    /// `confirmCloudDisclosure`.
-    var providerAwaitingDisclosure: PendingCloudDisclosure?
-
-    /// Sentence indexes with a manual re-translation in flight (the
-    /// transcript row's hover button). Membership is a dim cue and a
-    /// double-click guard only — `applyTranslation` routes on the row's
-    /// languages, so nothing about a result's *correctness* depends on it.
-    /// Internal: inserted in `AppModelRetranslate.retranslateSentence`, and
-    /// cleared by the landing result (`applyTranslation`), by any lane exit
-    /// that will not deliver (`retireLaneMarker`), by the queue's terminal
-    /// `.unavailable` that engages no replay (`handleTranslationStatus`), by
-    /// session stop (`performStop`), and by the next session's begin
-    /// (`onSessionBegin`). Read by views.
-    var pendingRetranslations: Set<Int> = []
-
-    /// Config for the dedicated low-latency (fast model) re-translate
-    /// session, armed by the first Apple-fast retry. Internal: managed from
-    /// `AppModelRetranslate.swift`.
-    var retranslateConfig: TranslationSession.Configuration?
-
-    /// The fast-model session handed out by the second `.translationTask`
-    /// host, stored as the queue-side engine adapter. Internal: managed from
-    /// `AppModelRetranslate.swift`.
-    var retranslateSessionEngine: (any TranslationEngine)?
-
-    /// Config for the dedicated high-fidelity (Apple Intelligence) re-translate
-    /// session, armed by the first Apple-Intelligence retry. Internal:
-    /// managed from `AppModelRetranslate.swift`.
-    var retranslateHifiConfig: TranslationSession.Configuration?
-
-    /// The high-fidelity session handed out by the third `.translationTask`
-    /// host, stored as the queue-side engine adapter. Internal: managed from
-    /// `AppModelRetranslate.swift`.
-    var retranslateHifiSessionEngine: (any TranslationEngine)?
-
-    /// Serialized one-at-a-time runner for alternate-engine retries: each
-    /// new lane task awaits the previous one, so a session-backed engine
-    /// never sees concurrent `translate` calls. Internal setter: driven from
-    /// `AppModelRetranslate.swift` (the lane lives there, file split for the
-    /// lint gate).
-    var retranslateLaneTask: Task<Void, Never>?
-
-    /// The lane-owned subset of `pendingRetranslations`: markers the
-    /// re-translate lane itself inserted. The queue engine's terminal
-    /// `.unavailable` clear drops queue-owned markers only — a lane
-    /// translation in flight still has its deliverer, and losing the marker
-    /// would re-open the double-click guard. Internal: managed from
-    /// `AppModelRetranslate.swift`.
-    var lanePendingRetranslations: Set<Int> = []
-
-    /// Injectable factory for the lane's external engines (tests); nil
-    /// drives `makeExternalEngine(for:)`. Internal: invoked from
-    /// `AppModelRetranslate.swift`.
-    var retranslateEngineFactory: (@Sendable (TranslationProvider) -> (any TranslationEngine)?)?
+    /// The re-translate lane — route resolution, dedicated Apple sessions,
+    /// marker sets, and the serialized runner — behind the forwarding
+    /// façade in `AppModelRetranslate.swift`. Test seam: UI must use the
+    /// facades, never reach through to the coordinator.
+    let retranslate: RetranslateCoordinator
 
     /// The refresh spawned by the most recent `selectModel` (tracked so
     /// `adoptDownloadedModel` can await it instead of stacking passes).
     /// Internal: managed from `AppModelModelSelection.swift`.
     var modelSelectionRefresh: Task<Void, Never>?
-
-    /// The spawned external-engine worker (`queue.run(with:)`). Apple runs
-    /// belong to SwiftUI's `.translationTask` instead. Torn down on stop.
-    /// Internal: managed from `AppModelTranslation.swift`.
-    var translationWorker: Task<Void, Never>?
 
     /// The in-flight teardown task from `stop()`. `shutdownForTermination`
     /// awaits it so quit never runs a second teardown concurrently with a
@@ -307,25 +195,22 @@ final class AppModel {
     /// Sentence index → position in `entries`. Entries are append-only within
     /// a session (positions never shift), so translations resolve in O(1)
     /// instead of scanning the transcript per arrival. Cleared with
-    /// `entries` on session begin. Internal setter: written from
-    /// `AppModelTranslation.swift` (`applyTranslation`).
+    /// `entries` on session begin. Written by `handleSentence` and the
+    /// session-begin clear (both in this file); `applyTranslation` only
+    /// reads it.
     var entryPositionBySentence: [Int: Int] = [:]
-
-    /// Injectable HTTP transport for the external engines (tests); nil drives
-    /// the real per-provider `URLSession` transports.
-    let translationTransport: HTTPTranslationTransport?
-
-    /// Injectable probe for the OS's high-fidelity (Apple Intelligence)
-    /// translation availability per target code (tests); the default drives
-    /// the real `LanguageAvailability` check. Internal: invoked from
-    /// `AppModelTranslation.swift`.
-    let highFidelityProbe: @Sendable (String) async -> Bool
 
     /// Injectable so the terminate-notification wiring can be tested
     /// hermetically — posting on the shared `.default` center from a parallel
     /// test would stop every other live `AppModel`. The default is the
-    /// app-wide center.
+    /// app-wide center. A `Sendable` constant, so `deinit` can read it.
     private let willTerminateNotifications: NotificationCenter
+
+    /// The terminate-notification subscription. Stored so `deinit` can
+    /// remove it — otherwise every `AppModel` built in tests leaks one
+    /// dead observer on its notification center. Non-isolated with the
+    /// center above; written once in `init`, read once in `deinit`.
+    @ObservationIgnored private nonisolated(unsafe) var willTerminateObserver: NSObjectProtocol?
 
     /// Internal (not private) so tests can drive the session callbacks.
     let sessionController: SessionController
@@ -361,10 +246,22 @@ final class AppModel {
         self.jmDictLookup = jmDictLookup ?? JMDictLookup()
         self.dictionarySearch = dictionarySearch ?? DictionarySearchEngine()
         modelResolve = initialModelResolve
-        self.translationTransport = translationTransport
-        self.highFidelityProbe = highFidelityProbe
         self.retireWarmEngine = retireWarmEngine
         self.willTerminateNotifications = willTerminateNotifications
+        let translationSession = TranslationSessionCoordinator(
+            queue: translationQueue,
+            settings: self.translationSettings,
+            transport: translationTransport,
+            probe: highFidelityProbe
+        )
+        let retranslate = RetranslateCoordinator(
+            live: translationSession,
+            queue: translationQueue,
+            settings: self.translationSettings
+        )
+        translationSession.retranslate = retranslate
+        self.translationSession = translationSession
+        self.retranslate = retranslate
         if let makeSessionController {
             sessionController = makeSessionController(live, latency, audioLevel, translationQueue)
         } else {
@@ -378,6 +275,7 @@ final class AppModel {
             result: { [weak self] index, translation in
                 self?.applyTranslation(index: index, translation: translation)
             },
+            // Through the facade so tests exercise the production path.
             status: { [weak self] status in
                 self?.handleTranslationStatus(status)
             },
@@ -385,13 +283,27 @@ final class AppModel {
                 self?.translationWorkerActive = active
             }
         )
+        // The coordinators captured only values (queue, settings) above, so
+        // no `self` escaped before full init. The host wiring below runs
+        // after every stored property is initialized: the coordinators reach
+        // phase, toasts, and the row landing through the host port.
+        translationSession.host = self
+        retranslate.host = self
+        // Extends the model's lifetime until the first availability pass
+        // completes (fast in tests, bounded in production) — intentional.
         initialModelCheck = Task { await refreshModelAvailability() }
         prepareDictionaries()
 
-        willTerminateNotifications.addObserver(
+        willTerminateObserver = willTerminateNotifications.addObserver(
             forName: .mimidasuAppWillTerminate, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in await self?.shutdownForTermination() }
+        }
+    }
+
+    deinit {
+        if let willTerminateObserver {
+            willTerminateNotifications.removeObserver(willTerminateObserver)
         }
     }
 
@@ -402,21 +314,21 @@ final class AppModel {
             entryPositionBySentence.removeAll()
             // Sentence indexes restart at 0 in every session, so a backlog
             // left by the last one has no row to land on — drop it, and with
-            // it any re-translation marker still waiting on its result.
+            // it any re-translation marker still waiting on its result and
+            // any lane task still in flight from the previous session.
             translationQueue.resetForNewSession()
-            pendingRetranslations.removeAll()
-            lanePendingRetranslations.removeAll()
-            // Retire any lane task still in flight from the previous session:
-            // its sentence indexes no longer mean anything here.
-            retranslateSessionEpoch += 1
+            // Begin order is lane-then-live; stop order in `performStop` is
+            // live-then-lane. The halves are independent (marker/epoch clear
+            // vs latch reset), so the swap is harmless — kept as moved.
+            retranslate.sessionWillBegin()
+            // The Apple-fallback latch is per session: a fresh session
+            // re-attempts the configured provider from scratch.
+            translationSession.sessionWillBegin()
             sessionCharacterCount = 0
             hudPinnedIndex = nil
             sessionStartedAt = .now
             sessionEndedAt = nil
             captureLostAt = nil
-            // The Apple-fallback latch is per session: a fresh session
-            // re-attempts the configured provider from scratch.
-            translationFallbackActive = false
             // Dictionary state is per session too: the popover anchor and
             // the pinned card reset, and any in-flight lookup is dropped.
             selectedLookup = nil

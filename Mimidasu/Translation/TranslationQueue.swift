@@ -279,7 +279,9 @@ final class TranslationQueue {
         setStatus(.idle)
     }
 
-    /// Session boundary: drops the untranslated backlog. `pending` outlives a
+    /// Session boundary — called at session begin (`AppModel.wireSessionController`)
+    /// and at session end (`TranslationSessionCoordinator.sessionDidEnd`):
+    /// drops the untranslated backlog. `pending` outlives a
     /// *run* by design — an engine swap (the latched Apple fallback, Reconnect)
     /// must replay onto the new engine — but it must not outlive a *session*:
     /// `Sentence.index` restarts at 0 in each one, and the transcript that
