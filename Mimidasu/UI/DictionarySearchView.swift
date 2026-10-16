@@ -19,11 +19,6 @@ struct DictionarySearchView: View {
     /// two can hold the caret — see `ReferenceWindowView`.
     let searchFocus: FocusState<Bool>.Binding
 
-    /// How far a row's trailing controls drop onto the headword's line — the
-    /// same 26pt headword the Favorites rows use, so the same offset. The
-    /// row's type is fixed, so this cannot drift with the UI scale.
-    private static let trailingLineDrop: CGFloat = 4
-
     /// The field card's measured height; the funnel circle frames to this.
     @State private var fieldHeight: CGFloat = 34
     /// One chip in a row's badge line. `isMatch` chips carry the leading
@@ -190,6 +185,7 @@ struct DictionarySearchView: View {
     /// keep it, where the count is the answer to a question the user asked.
     private var loadMoreButton: some View {
         let loading = state.isSearching
+        let helpText = "Load \(DictionarySearchEngine.pageSize) more results"
         return Button {
             state.loadMore()
         } label: {
@@ -204,8 +200,8 @@ struct DictionarySearchView: View {
         .hoverHighlight(Capsule(), isEnabled: !loading)
         .disabled(loading)
         .opacity(loading ? 0.45 : 1)
-        .help("Show \(DictionarySearchEngine.pageSize) more results")
-        .accessibilityLabel("Load \(DictionarySearchEngine.pageSize) more results")
+        .help(helpText)
+        .accessibilityLabel(helpText)
         .frame(maxWidth: .infinity)
         .padding(.vertical, 4)
     }
@@ -273,7 +269,8 @@ private extension DictionarySearchView {
     /// whole header width the expand button. The controls are siblings rather
     /// than part of that button, so the chevron can read last.
     private func hitHeader(_ hit: DictionarySearchHit) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        let helpText = expansionHelp(isExpanded(hit))
+        return HStack(alignment: .top, spacing: 8) {
             Button {
                 toggle(hit)
             } label: {
@@ -288,7 +285,8 @@ private extension DictionarySearchView {
             }
             .buttonStyle(.plain)
             .pointerStyle(.link)
-            .help(isExpanded(hit) ? "Hide definition" : "Show definition")
+            .help(helpText)
+            .accessibilityLabel("\(hit.headword ?? hit.reb ?? "—"), \(helpText)")
             trailingControls(hit)
         }
     }
@@ -431,39 +429,34 @@ private extension DictionarySearchView {
     /// other here, so a single offset puts them on the headword's line.
     private func trailingControls(_ hit: DictionarySearchHit) -> some View {
         HStack(alignment: .center, spacing: 4) {
-            DictionaryCopyButton(
-                placement: .icon, help: "Copy the headword",
-                action: { model.copySnippet(hit.headword ?? "") }
-            )
-            starButton(hit)
+            if let headword = hit.headword {
+                DictionaryCopyButton(
+                    placement: .icon, help: "Copy the headword",
+                    action: { model.copySnippet(headword) }
+                )
+                starButton(hit, headword: headword)
+            }
             chevronButton(hit)
         }
-        .padding(.top, Self.trailingLineDrop)
+        .padding(.top, Theme.dictionaryTrailingLineDrop)
     }
 
-    private func starButton(_ hit: DictionarySearchHit) -> some View {
-        let headword = hit.headword ?? ""
+    /// The star for a row that has a headword — the caller unwraps it once
+    /// for copy and star together, since a hit with no headword at all can
+    /// carry neither control: there is nothing to key the favorite on.
+    private func starButton(_ hit: DictionarySearchHit, headword: String) -> some View {
         let starred = model.favorites.isFavorite(headword: headword)
-        return Button {
-            toggleFavorite(hit)
-        } label: {
-            Image(systemName: starred ? "star.fill" : "star")
-                .font(.system(size: 18))
-                .foregroundStyle(starred ? Theme.favoriteStarYellow : Theme.secondaryText)
-                .frame(width: 22, height: 22)
-        }
-        .buttonStyle(.plain)
-        .pointerStyle(.link)
-        .help(starred
-            ? "Remove “\(headword)” from favorites"
-            : "Add “\(headword)” to favorites")
-        .accessibilityLabel(starred
-            ? "Remove “\(headword)” from favorites"
-            : "Add “\(headword)” to favorites")
+        return DictionaryFavoriteButton(
+            isFavorite: starred,
+            subject: headword,
+            style: .popover,
+            action: { toggleFavorite(hit) }
+        )
     }
 
     private func chevronButton(_ hit: DictionarySearchHit) -> some View {
         let isExpanded = isExpanded(hit)
+        let helpText = expansionHelp(isExpanded)
         return Button {
             toggle(hit)
         } label: {
@@ -474,8 +467,8 @@ private extension DictionarySearchView {
         }
         .buttonStyle(.plain)
         .pointerStyle(.link)
-        .help(isExpanded ? "Hide definition" : "Show definition")
-        .accessibilityLabel(isExpanded ? "Hide definition" : "Show definition")
+        .help(helpText)
+        .accessibilityLabel(helpText)
     }
 
     /// Expanded block: a divider over the shared entry view, so a row's full
@@ -511,11 +504,16 @@ private extension DictionarySearchView {
     private func entryBlock(
         _ hit: DictionarySearchHit, word: FavoriteWord, result: LookupResult
     ) -> some View {
-        let index = state.entryIndex(for: word.headword)
-        if let entry = result.entries[safe: index] {
+        // Favorite-first: a starred entry leads the pager, so landing opens
+        // on the word the user kept. Reorders only — the count is unchanged.
+        let promoted = FavoritesPromotion.promotingFavorites(
+            in: result, identity: model.favorites.identity
+        )
+        let index = state.validatedIndex(for: word.headword, in: promoted)
+        if let entry = promoted.entries[safe: index] {
             DictionaryEntryContentView(
                 entry: entry,
-                entryCount: result.entries.count,
+                entryCount: promoted.entries.count,
                 entryIndex: index,
                 also: [],
                 senseLimit: nil,
@@ -527,7 +525,7 @@ private extension DictionarySearchView {
                 // expanded block repeats none of them.
                 showsBadges: false,
                 onStepEntry: { step in
-                    state.stepEntry(word.headword, delta: step, count: result.entries.count)
+                    state.stepEntry(word.headword, to: step, in: promoted)
                 }
             )
         } else {

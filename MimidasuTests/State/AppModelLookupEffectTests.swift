@@ -5,9 +5,10 @@ import Testing
 /// Effect routing on `AppModel`: a show pins + selects, a no-hit posts the
 /// amber pill and leaves state, a fault posts the dictionary-lookup toast
 /// and never the pill, a cancellation applies nothing, and a stale
-/// generation drops every effect. Effects are canned values — no database,
-/// no annotator — so these tests prove the routing, while
-/// `LookupDisplayTests` proves the verdicts.
+/// generation drops every effect. Most effects are canned values with no
+/// database and no annotator, while the stale-generation drops and the
+/// starred also-pill run over the fixture database — these tests prove the
+/// routing, while `LookupDisplayTests` proves the verdicts.
 @MainActor
 @Suite("AppModel lookup effect routing")
 final class AppModelLookupEffectTests {
@@ -182,8 +183,8 @@ final class AppModelLookupEffectTests {
 
     // MARK: - Pager and pills over canned content
 
-    @Test("the pager pages popover and pinned card together, clamped to the entry count")
-    func pagerPagesBoth() {
+    @Test("the pager steps popover and pinned card together")
+    func pagerStepsBoth() {
         let model = makeModel()
         let content = LookupContent.found(
             result: result(["飴", "雨"]), also: [], origin: .tappedSurface
@@ -194,11 +195,34 @@ final class AppModelLookupEffectTests {
 
         #expect(model.selectedLookup?.entryIndex == 1)
         #expect(model.pinnedLookup?.entryIndex == 1)
+    }
+
+    @Test("the pager clamps past the last entry")
+    func pagerClampsPastEnd() {
+        let model = makeModel()
+        let content = LookupContent.found(
+            result: result(["飴", "雨"]), also: [], origin: .tappedSurface
+        )
+        model.applyEffect(.show(content: content, entryIndex: 0), source: .liveStrip)
 
         model.stepLookupEntry(to: 99)
+
         #expect(model.selectedLookup?.entryIndex == 1, "clamped to the last entry")
+        #expect(model.pinnedLookup?.entryIndex == 1, "clamped to the last entry")
+    }
+
+    @Test("the pager clamps before the first entry")
+    func pagerClampsBeforeStart() {
+        let model = makeModel()
+        let content = LookupContent.found(
+            result: result(["飴", "雨"]), also: [], origin: .tappedSurface
+        )
+        model.applyEffect(.show(content: content, entryIndex: 0), source: .liveStrip)
+
         model.stepLookupEntry(to: -5)
+
         #expect(model.selectedLookup?.entryIndex == 0, "clamped to the first entry")
+        #expect(model.pinnedLookup?.entryIndex == 0, "clamped to the first entry")
     }
 
     @Test("the pager is inert over not-found content")

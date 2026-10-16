@@ -52,6 +52,7 @@ struct DictionaryResultPillRow: View {
     private func pill(_ result: LookupResult) -> some View {
         let label = DictionaryContent.pillLabel(for: result)
         let starred = isFavoriteLead?(result) == true
+        let lookupA11yLabel = starred ? "Look up “\(label)”, favorited" : "Look up “\(label)”"
         return Button {
             onSelect(result)
         } label: {
@@ -72,7 +73,7 @@ struct DictionaryResultPillRow: View {
         }
         .buttonStyle(.plain)
         .pointerStyle(.link)
-        .accessibilityLabel(starred ? "Look up “\(label)”, favorited" : "Look up “\(label)”")
+        .accessibilityLabel(lookupA11yLabel)
         .help("Look up “\(label)”")
     }
 }
@@ -149,6 +150,7 @@ struct DictionaryCopyButton: View {
         .buttonStyle(.plain)
         .pointerStyle(.link)
         .help(help)
+        .accessibilityLabel(help)
     }
 
     private var iconLabel: some View {

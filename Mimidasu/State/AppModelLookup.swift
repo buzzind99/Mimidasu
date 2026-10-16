@@ -149,15 +149,17 @@ extension AppModel {
 
     /// Presents a resolved lookup: pins the sidebar card and, when a source
     /// is supplied (a popover is up), anchors the popover to the same content.
-    /// Both start at the effect's entry, keeping the two surfaces from
-    /// drifting apart.
+    /// Both start at the effect's entry, clamped through the module so a
+    /// future caller can never pin an out-of-bounds page, keeping the two
+    /// surfaces from drifting apart.
     private func presentLookup(
         content: LookupContent, source: SelectedLookup.Source?, entryIndex: Int = 0
     ) {
-        pinnedLookup = PinnedLookup(content: content, entryIndex: entryIndex)
+        let clamped = lookupDisplay.steppedEntry(in: content, to: entryIndex) ?? 0
+        pinnedLookup = PinnedLookup(content: content, entryIndex: clamped)
         if let source {
             selectedLookup = SelectedLookup(
-                content: content, source: source, entryIndex: entryIndex
+                content: content, source: source, entryIndex: clamped
             )
         }
     }

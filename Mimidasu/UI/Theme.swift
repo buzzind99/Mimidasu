@@ -233,6 +233,11 @@ enum Theme {
     /// HUD entry timestamps: white 60%, pinned for the same always-dark
     /// surface (tertiary reads too dim over the translucent black fill).
     static let hudTimestamp = Color(white: 1, opacity: 0.6)
+
+    /// Offset both dictionary rows drop trailing controls onto the headword
+    /// line: the controls are top-aligned to the row, the 26pt headword sets
+    /// the first line, and their 22pt boxes need half the difference.
+    static let dictionaryTrailingLineDrop: CGFloat = 4
 }
 
 /// The notice pill's color pair for one tone.

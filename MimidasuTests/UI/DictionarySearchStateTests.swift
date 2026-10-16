@@ -10,8 +10,9 @@ import Testing
 @Suite("DictionarySearchState")
 struct DictionarySearchStateTests {
     /// A state over the fixture database, so every landing in this suite is a
-    /// real result set rather than a fault.
-    private func makeState(
+    /// real result set rather than a fault. Internal so the split-out pager
+    /// file shares it.
+    func makeState(
         tokenize: @escaping @Sendable (String) -> [DictionaryToken]? = { _ in nil }
     ) throws -> DictionarySearchStateFixture {
         try DictionarySearchStateFixture(tokenize: tokenize)
@@ -253,7 +254,7 @@ struct DictionarySearchStateTests {
         state.lookupState.toggle(FavoriteWord(
             headword: "食べる", reading: "たべる", romaji: "taberu", addedAt: 0
         ))
-        state.stepEntry("食べる", delta: 3, count: 2)
+        state.stepEntry("食べる", to: 3, in: result(entries: 2))
         state.resetForClose()
 
         #expect(state.query.isEmpty)
@@ -487,28 +488,19 @@ struct DictionarySearchStateTests {
         #expect(state.canLoadMore == false)
         #expect(state.isAtCeiling == false)
     }
+}
 
-    @Test("an absent row's pager starts at the first entry")
-    func absentRowStartsAtZero() throws {
-        let fixture = try makeState()
+/// Stand-ins for pager results, where only the `entSeq` identity and the list
+/// position matter. File-scope (shared with the split-out pager file) so they
+/// grow no type body.
+func searchEntry(seq: Int) -> JMDictEntry {
+    JMDictEntry(
+        entSeq: seq, keb: "語\(seq)", reb: "ご\(seq)", common: false,
+        jlpt: nil, hatsuon: nil, accPatts: nil, zoPatts: nil,
+        senses: [JMDictSense(pos: nil, glosses: ["gloss"], misc: nil, restrictedKanji: nil, restrictedKana: nil)]
+    )
+}
 
-        #expect(fixture.state.entryIndex(for: "食べる") == 0)
-    }
-
-    @Test("the pager step is clamped to the entry list",
-          arguments: [
-              (2, 3, 2),
-              (5, 3, 2),
-              (-5, 3, 0),
-              (1, 1, 0),
-              (1, 0, 0)
-          ])
-    func pagerStepClamps(delta: Int, count: Int, expected: Int) throws {
-        let fixture = try makeState()
-
-        let state = fixture.state
-        state.stepEntry("食べる", delta: delta, count: count)
-
-        #expect(state.entryIndex(for: "食べる") == expected)
-    }
+func result(entries: Int) -> LookupResult {
+    LookupResult(matched: "あめ", entries: (0 ..< entries).map { index in searchEntry(seq: index + 1) })
 }

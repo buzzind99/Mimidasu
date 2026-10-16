@@ -21,6 +21,15 @@ extension AppModel {
     }
 }
 
+// MARK: - Shared row strings
+
+/// The disclosure help both row kinds carry — the collapsed header button and
+/// the chevron — shared so the search list and the favorites list name the
+/// same gesture with the same words.
+func expansionHelp(_ isExpanded: Bool) -> String {
+    isExpanded ? "Hide definition" : "Show definition"
+}
+
 // MARK: - Hosts
 
 /// The un-star step every star site runs: the model has already decided whether

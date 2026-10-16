@@ -96,6 +96,11 @@ final class DictionarySearchState {
     let lookupState: FavoritesLookupState
     /// Which entry an expanded row's pager is showing.
     private var entryIndices: [String: Int] = [:]
+    /// Lead entry identity per headword, so the pager does not retarget when
+    /// promotion reorders the entries: starring a word moves its entry to the
+    /// front, and without the lead check the stored index would point at a
+    /// different entry after the reorder.
+    private var entryLeads: [String: Int] = [:]
 
     private let engine: DictionarySearchEngine
     private let prepareDictionary: () -> Void
@@ -277,16 +282,45 @@ final class DictionarySearchState {
             lookupState.remove(headword: headword)
         }
         entryIndices = entryIndices.filter { headword, _ in headwords.contains(headword) }
+        entryLeads = entryLeads.filter { headword, _ in headwords.contains(headword) }
     }
 
+    /// The raw stored page, unvalidated: no lead check, so a promotion
+    /// reorder reads as a stale page here. Only tests read this — display
+    /// code must read `validatedIndex(for:in:)`, which restarts at the
+    /// front when the lead entry changed.
     func entryIndex(for headword: String) -> Int {
         entryIndices[headword] ?? 0
     }
 
-    /// The expanded row's pager step, clamped to the entry list it belongs to.
-    func stepEntry(_ headword: String, delta: Int, count: Int) {
-        let next = min(max(entryIndex(for: headword) + delta, 0), max(count - 1, 0))
-        entryIndices[headword] = next
+    /// Pager index against the promoted entry list. A pure read: the display
+    /// restarts at the front when the lead entry changed — a promotion
+    /// reorder, or a fresh lookup that leads with a different entry — and
+    /// otherwise clamps the stored index to the list bounds. A re-lookup
+    /// that leads with the same entry keeps the stored page. The same keep
+    /// can resurface a page: when a lead flips away and back — an unrelated
+    /// unstar elsewhere, then re-starring the same entry reproduces the
+    /// promoted ordering — the stored page returns on that star press
+    /// rather than a pager touch. That is the accepted trade of the
+    /// absolute-target pager, where storage deliberately lags a display
+    /// reset until the next press. Nothing is written here; `stepEntry`
+    /// persists the lead and index when the user presses, so body evaluation
+    /// never mutates the state it reads.
+    func validatedIndex(for headword: String, in promoted: LookupResult) -> Int {
+        guard entryLeads[headword] == promoted.entries.first?.entSeq else { return 0 }
+        let stored = entryIndices[headword] ?? 0
+        return min(max(stored, 0), max(promoted.entries.count - 1, 0))
+    }
+
+    /// The expanded row's pager step: the absolute target index the pager
+    /// hands over, clamped to the entry list it belongs to. Persists the
+    /// promoted lead alongside the index, so a later promotion reorder reads
+    /// as a lead change and restarts the display at the front.
+    func stepEntry(_ headword: String, to index: Int, in promoted: LookupResult) {
+        if let lead = promoted.entries.first?.entSeq {
+            entryLeads[headword] = lead
+        }
+        entryIndices[headword] = min(max(index, 0), max(promoted.entries.count - 1, 0))
     }
 
     /// Wipes the mode at the moment the window closes — see
@@ -316,6 +350,7 @@ final class DictionarySearchState {
             filtersExpanded = false
             visibleLimit = DictionarySearchEngine.pageSize
             entryIndices.removeAll()
+            entryLeads.removeAll()
             lookupState.reset()
         }
     }
