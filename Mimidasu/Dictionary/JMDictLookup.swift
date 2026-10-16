@@ -118,11 +118,18 @@ final class JMDictLookup: Sendable {
                     related.append(result)
                 }
             } else if display == nil {
-                // Expansion order guarantees every non-split candidate
-                // precedes the splits, so this branch can never strand
-                // collected related hits (they would be dropped by the
-                // found return below).
-                assert(related.isEmpty, "non-split hit after split hits: \(expansion)")
+                // Expansion order places every non-split candidate before
+                // the splits, but a caller that violates it must not
+                // silently drop the split hits already collected — fold them
+                // into also so they survive as fallback pills rather than
+                // vanishing. No redundancy rule on the fold, deliberately:
+                // defensive path only, unreachable in production —
+                // candidates emit surface/lemma/joins strictly before
+                // splits, so `seenEntryIDs` is empty at the first non-split.
+                if !related.isEmpty {
+                    also.append(contentsOf: related)
+                    related.removeAll()
+                }
                 display = result
                 displayOrigin = expansion.origin
             } else if !entryIDs.isSubset(of: seenEntryIDs) {

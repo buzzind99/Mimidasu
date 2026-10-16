@@ -1,6 +1,5 @@
 import Foundation
 @testable import Mimidasu
-import SQLite3
 import Testing
 
 @Suite("JMDictLookup")
@@ -226,6 +225,29 @@ final class JMDictLookupTests {
         #expect(outcome.also.map(\.matched) == ["飴", "雨"])
     }
 
+    @Test("an out-of-order non-split after splits folds the splits into also")
+    func outOfOrderNonSplitFoldsSplitsIntoAlso() throws {
+        // Defensive: expansion order places non-splits first, but a caller
+        // that violates it must not drop the split hits already collected.
+        // Lives here, not in the display suite: it drives the engine's typed
+        // candidate interface directly, which resolve never produces.
+        let resolution = try engine.lookup([
+            ExpansionCandidate(
+                candidate: LookupCandidate(text: "雨"), origin: .split
+            ),
+            ExpansionCandidate(
+                candidate: LookupCandidate(text: "お"), origin: .tappedSurface
+            )
+        ])
+
+        guard case let .found(outcome) = resolution else {
+            Issue.record("expected found, got \(resolution)")
+            return
+        }
+        #expect(outcome.display.matched == "お")
+        #expect(outcome.also.map(\.matched) == ["雨"])
+    }
+
     // MARK: Candidate kind
 
     @Test("derives the candidate kind from the script", arguments: [
@@ -380,10 +402,12 @@ final class JMDictLookupTests {
     }
 
     /// A headword row whose entry row is gone is a corrupt database, not a
-    /// miss — the lookup throws instead of returning nil.
+    /// miss — the lookup throws instead of returning nil. Built over the
+    /// shared orphan-headword fixture, which carries just the three-table
+    /// shape this path needs.
     @Test("a headword row without its entry throws database-corrupt")
     func orphanHeadwordRowThrows() throws {
-        let built = try makeOrphanHeadwordDatabase()
+        let built = try JMDictFixtureDatabase.orphanHeadword()
         let sut = JMDictLookup(resolveDatabase: { [url = built.url] in url })
         defer {
             sut.close()
@@ -402,37 +426,23 @@ final class JMDictLookupTests {
         }
     }
 
-    /// Minimal two-table database (the full fixture is unnecessary for this
-    /// path): one headwords row whose entry_id has no matching entries row.
-    private func makeOrphanHeadwordDatabase() throws -> JMDictFixtureDatabase.Built {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mimidasu-jmdict-orphan-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let url = directory.appendingPathComponent("jmdict-orphan.sqlite")
+    // MARK: Cancellation
 
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(
-            url.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil
-        ) == SQLITE_OK, let db else {
-            sqlite3_close_v2(db)
-            throw JMDictFixtureDatabase.FixtureError.sqlite("orphan fixture open failed")
+    /// The cancel lands before the task is awaited, so the flag is already
+    /// set when the candidate loop reaches its first checkpoint — the throw
+    /// never bets on how fast the fixture database answers. The engine has
+    /// no catch for it, so the error surfaces to the caller untouched.
+    @Test("a cancelled lookup throws instead of finishing")
+    func cancellation() async throws {
+        let engine = self.engine
+        let task = Task {
+            _ = try engine.lookup(LookupCandidate(text: "食べる"))
         }
-        defer { sqlite3_close_v2(db) }
-        guard sqlite3_exec(
-            db,
-            """
-            CREATE TABLE entries(ent_seq INTEGER PRIMARY KEY, keb TEXT, reb TEXT, common INTEGER NOT NULL);
-            CREATE TABLE senses(entry_id INTEGER NOT NULL, ord INTEGER NOT NULL, pos TEXT,
-              gloss TEXT NOT NULL, misc TEXT, skeb TEXT, sreb TEXT);
-            CREATE TABLE headwords(entry_id INTEGER NOT NULL, text TEXT NOT NULL, kind TEXT NOT NULL,
-              jlpt INTEGER, hatsuon TEXT, acc TEXT, zo TEXT);
-            INSERT INTO headwords VALUES (777, '孤語', 'keb', NULL, NULL, NULL, NULL);
-            """,
-            nil, nil, nil
-        ) == SQLITE_OK else {
-            throw JMDictFixtureDatabase.FixtureError.sqlite(String(cString: sqlite3_errmsg(db)))
+        task.cancel()
+
+        await #expect(throws: CancellationError.self) {
+            try await task.value
         }
-        return JMDictFixtureDatabase.Built(url: url)
     }
 }
 
