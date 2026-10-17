@@ -13,10 +13,6 @@ struct FavoriteIdentityTests {
         ReadingSegment(surface: surface, romaji: surface, lemma: lemma, isBound: isBound)
     }
 
-    private func entry(_ headword: String, seq: Int = 1) -> JMDictEntry {
-        entry(keb: headword, reb: headword, seq: seq)
-    }
-
     private func entry(keb: String?, reb: String?, seq: Int = 1) -> JMDictEntry {
         JMDictEntry(
             entSeq: seq, keb: keb, reb: reb, common: false, jlpt: nil,
@@ -25,16 +21,6 @@ struct FavoriteIdentityTests {
                 pos: nil, glosses: ["gloss"], misc: nil,
                 restrictedKanji: nil, restrictedKana: nil
             )]
-        )
-    }
-
-    private func result(_ headwords: [String]) -> LookupResult {
-        precondition(!headwords.isEmpty, "result needs at least one headword")
-        return LookupResult(
-            matched: headwords[0],
-            entries: headwords.enumerated().map { index, headword in
-                entry(headword, seq: index + 1)
-            }
         )
     }
 
@@ -164,11 +150,17 @@ struct FavoriteIdentityTests {
         #expect(identity.matches(segment("ない", lemma: "ない", isBound: true)))
     }
 
-    @Test("only the pill lead can read starred")
+    @Test("the pill-lead probe reads only the first entry")
     func leadReadsFirstEntryOnly() {
-        let identity = FavoriteIdentity(keys: [FavoriteIdentity.normalize("見る")])
-        #expect(identity.leads(result(["見る", "箸"])))
-        #expect(!identity.leads(result(["箸", "見る"])))
+        let identity = FavoriteIdentity(keys: [FavoriteIdentity.normalize("報")])
+        #expect(identity.leads(LookupResult(matched: "ほう", entries: [
+            entry(keb: "報", reb: "ほう", seq: 1),
+            entry(keb: "方", reb: "ほう", seq: 2)
+        ])))
+        #expect(!identity.leads(LookupResult(matched: "ほう", entries: [
+            entry(keb: "方", reb: "ほう", seq: 1),
+            entry(keb: "報", reb: "ほう", seq: 2)
+        ])))
     }
 
     @Test("star to highlight to lead display is one round trip")
@@ -177,10 +169,16 @@ struct FavoriteIdentityTests {
         let identity = FavoriteIdentity(words: [starred])
         #expect(identity.isFavorite(headword: starred.headword))
         #expect(identity.matches(segment("見ました", lemma: "見る")))
+        // A kana tap on the starred word's reading: the entry the star is
+        // written on carries the match through its reading and leads.
         let promoted = FavoritesPromotion.promotingFavorites(
-            in: result(["箸", "見る"]), identity: identity
+            in: LookupResult(matched: "みる", entries: [
+                entry(keb: "診る", reb: "みる", seq: 1),
+                entry(keb: "見る", reb: "みる", seq: 2)
+            ]),
+            identity: identity
         )
-        #expect(promoted.entries.map(\.keb) == ["見る", "箸"])
+        #expect(promoted.entries.map(\.keb) == ["見る", "診る"])
         #expect(identity.leads(promoted))
     }
 }

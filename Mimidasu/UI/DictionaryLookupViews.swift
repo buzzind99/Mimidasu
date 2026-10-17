@@ -17,10 +17,9 @@ struct DictionaryResultPillRow: View {
     let results: [LookupResult]
     var onSelect: (LookupResult) -> Void
     /// Favorites probe behind the pill star: true when the result leads with
-    /// a favorited entry. Promotion already moved a favorite (when the result
-    /// has one) to the front, so the lead is the only entry that can read
-    /// starred. nil keeps the pills starless — the not-found host passes
-    /// nothing.
+    /// a favorited entry. Promotion already moved an eligible favorite to the
+    /// front, so a favorited lead is the pill's starred word. nil keeps the
+    /// pills starless — the not-found host passes nothing.
     var isFavoriteLead: ((LookupResult) -> Bool)?
 
     var body: some View {

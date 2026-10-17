@@ -78,6 +78,26 @@ final class LookupDisplayHarness {
         )
     }
 
+    /// A kana-shared entry: a kanji writing paired with its reading, for
+    /// the pill suite's hand-built homograph results that exercise the
+    /// written-or-read promotion rule.
+    func entry(keb: String, reb: String, seq: Int) -> JMDictEntry {
+        JMDictEntry(
+            entSeq: seq,
+            keb: keb,
+            reb: reb,
+            common: false,
+            jlpt: nil,
+            hatsuon: nil,
+            accPatts: nil,
+            zoPatts: nil,
+            senses: [JMDictSense(
+                pos: nil, glosses: ["gloss"], misc: nil,
+                restrictedKanji: nil, restrictedKana: nil
+            )]
+        )
+    }
+
     /// A hand-built fallback hit: one entry per headword, dictionary-ranked
     /// as given (the fixture's multi-entry hits never relabel a fallback
     /// pill — they are display results or same-headword homographs).
@@ -172,6 +192,32 @@ final class LookupDisplayTests {
         #expect(origin == .tappedLemma)
     }
 
+    @Test("a lemma tap leads on the starred dictionary form")
+    func lemmaTapPromotesStarredDictionaryForm() async {
+        let display = harness.makeDisplay()
+        let request = TapLookupRequest(
+            segments: [LookupSegment(surface: "食べた", lemma: "食べる")],
+            tappedAt: 0,
+            sentenceText: "食べた",
+            surface: "食べた"
+        )
+        let favorites = FavoriteIdentity(keys: [FavoriteIdentity.normalize("食べる")])
+
+        let effect = await display.resolve(request, favorites: favorites)
+
+        guard case let .show(content, entryIndex) = effect,
+              case let .found(result, _, origin) = content
+        else {
+            Issue.record("expected found show, got \(effect)")
+            return
+        }
+        #expect(entryIndex == 0)
+        #expect(origin == .tappedLemma)
+        #expect(result.matched == "食べる")
+        #expect(result.entries.first?.keb == "食べる")
+        #expect(favorites.leads(result))
+    }
+
     @Test("a split-only tap shows not-found with the splits demoted to related")
     func splitOnlyDemotesToRelated() async {
         let display = harness.makeDisplay()
@@ -229,10 +275,24 @@ final class LookupDisplayTests {
         #expect(related == plainRelated)
     }
 
-    @Test("a buried favorite leads its related pill before any re-select")
-    func notFoundRelatedPromotesBuriedFavorite() async {
-        let request = TapLookupRequest(segments: [LookupSegment(surface: "前无")], tappedAt: 0, sentenceText: "前无", surface: "前无")
-        let effect = await harness.makeDisplay().resolve(request, favorites: FavoriteIdentity(keys: [FavoriteIdentity.normalize("先")]))
+    @Test("a related pill does not hoist a favorite matched through an alternate writing")
+    func notFoundRelatedDoesNotHoistAlternateWritingFavorite() async {
+        // 前无 misses, so its 前 split is demoted to related. The favorite 先
+        // entry 9990050 reaches that result only through its alternate
+        // writing 前 — not through the writing it is starred by — so
+        // promotion leaves the surface match 9990060 (前/まえ) leading and
+        // the starred entry present behind it. Related results are always
+        // kanji-split results, so this negative arm is the whole resolve-
+        // level story: every eligible favorite there already leads (uniform
+        // keys), and every buried favorite is ineligible by this rule.
+        let request = TapLookupRequest(
+            segments: [LookupSegment(surface: "前无")],
+            tappedAt: 0,
+            sentenceText: "前无",
+            surface: "前无"
+        )
+        let favorites = FavoriteIdentity(keys: [FavoriteIdentity.normalize("先")])
+        let effect = await harness.makeDisplay().resolve(request, favorites: favorites)
         guard case let .show(content, _) = effect,
               case let .notFound(surface, related) = content
         else {
@@ -241,7 +301,8 @@ final class LookupDisplayTests {
         }
         #expect(surface == "前无")
         #expect(related.first?.matched == "前")
-        #expect(related.first?.entries.first?.keb == "先")
+        #expect(related.first?.entries.first?.keb == "前")
+        #expect(related.first?.entries.map(\.entSeq) == [9_990_060, 9_990_050])
         #expect(content.displayResult == nil)
     }
 

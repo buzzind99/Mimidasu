@@ -113,12 +113,14 @@ struct FavoriteIdentity: Equatable, Sendable {
         isFavorite(headword: Self.headword(of: entry))
     }
 
-    /// Whether a fallback pill leads with a favorited entry — the pill star's
-    /// probe. Reads the promoted lead: promotion already moved a favorite
-    /// (when the result has one) to the front, so the lead is the only entry
-    /// that can read starred, and an unpromoted result correctly reads
-    /// unstarred. Pair with FavoritesPromotion.promotingFavorites, which owns
-    /// the move this probe reads.
+    /// Whether a fallback pill leads with a favorited entry — the pill
+    /// star's probe. Reads the first entry only: promotion has already moved
+    /// an eligible favorite (one written or read as the pill's matched word)
+    /// to the front, so a favorited lead is the pill's starred word. A
+    /// favorite the promotion skipped — matched through another spelling —
+    /// can sit behind the lead and keeps the pill unstarred. Pair with
+    /// `FavoritesPromotion.promotingFavorites`, which owns the move this
+    /// probe reads.
     func leads(_ result: LookupResult) -> Bool {
         guard let lead = result.entries.first else { return false }
         return isFavorite(lead)

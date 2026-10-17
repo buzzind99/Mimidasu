@@ -53,6 +53,25 @@ final class AppModelLookupEffectTests {
         )
     }
 
+    /// A hand-built entry whose writing and reading differ, so a test can tie
+    /// an entry to the matched text through its reading alone.
+    private func entry(keb: String?, reb: String?, seq: Int) -> JMDictEntry {
+        JMDictEntry(
+            entSeq: seq,
+            keb: keb,
+            reb: reb,
+            common: false,
+            jlpt: nil,
+            hatsuon: nil,
+            accPatts: nil,
+            zoPatts: nil,
+            senses: [JMDictSense(
+                pos: nil, glosses: ["gloss"], misc: nil,
+                restrictedKanji: nil, restrictedKana: nil
+            )]
+        )
+    }
+
     /// A hand-built lookup hit: one entry per headword, ranked as given.
     private func result(_ headwords: [String]) -> LookupResult {
         LookupResult(
@@ -315,13 +334,20 @@ final class AppModelLookupEffectTests {
     func relatedPillAppliesFavoritesSnapshot() throws {
         let model = makeModel()
         model.favorites.toggle(
-            FavoriteWord(headword: "見る", reading: "みる", romaji: "miru", addedAt: 1)
+            FavoriteWord(headword: "雨", reading: "あめ", romaji: "ame", addedAt: 1)
         )
-        // A not-found pin never promotes (a split hit must not present
-        // itself as the tapped word), so its related results arrive
-        // dictionary-ranked — the favorite sits second in both.
-        let tapped = result(["雨", "見る"])
-        let sibling = result(["尾", "見る"])
+        // Hand-built in engine order — a real pin arrives with each related
+        // result already promoted — so the favorite sits second in both,
+        // tied to the match through its shared あめ reading alone; the
+        // re-select path's re-promotion is what moves it front.
+        let tapped = LookupResult(matched: "あめ", entries: [
+            entry(keb: "飴", reb: "あめ", seq: 1),
+            entry(keb: "雨", reb: "あめ", seq: 2)
+        ])
+        let sibling = LookupResult(matched: "あめ", entries: [
+            entry(keb: "別", reb: "あめ", seq: 3),
+            entry(keb: "雨", reb: "あめ", seq: 4)
+        ])
         let content = LookupContent.notFound(surface: "雨尾", related: [tapped, sibling])
         model.pinnedLookup = PinnedLookup(content: content, entryIndex: 0)
         model.selectedLookup = SelectedLookup(
@@ -336,11 +362,12 @@ final class AppModelLookupEffectTests {
             return
         }
         #expect(origin == .tappedSurface, "an explicitly chosen hit is never a fallback lead")
-        #expect(display.entries.map { entry in entry.keb } == ["見る", "雨"])
-        #expect(also.map(\.matched) == ["尾"], "the sibling pill survives the re-selection")
+        #expect(display.entries.map { entry in entry.keb } == ["雨", "飴"])
+        #expect(also.map(\.matched) == ["あめ"], "the sibling pill survives the re-selection")
         let promotedSibling = try #require(also.first)
-        #expect(promotedSibling.entries.first?.keb == "見る", "the sibling pill re-promotes too")
-        #expect(model.selectedLookup?.content.displayResult?.entries.first?.keb == "見る")
+        #expect(promotedSibling.entries.map(\.entSeq) == [4, 3], "the sibling pill re-promotes too")
+        #expect(promotedSibling.entries.first?.keb == "雨")
+        #expect(model.selectedLookup?.content.displayResult?.entries.first?.keb == "雨")
         #expect(model.selectedLookup?.entryIndex == 0)
         #expect(model.selectedLookup?.source == .liveStrip, "the anchor follows the re-select")
         #expect(model.isFavoriteLead(display) == true)
@@ -350,23 +377,32 @@ final class AppModelLookupEffectTests {
     func pillStarProbeReadsLead() throws {
         let model = makeModel()
         model.favorites.toggle(
-            FavoriteWord(headword: "見る", reading: "みる", romaji: "miru", addedAt: 1)
+            FavoriteWord(headword: "雨", reading: "あめ", romaji: "ame", addedAt: 1)
         )
 
-        #expect(model.isFavoriteLead(result(["雨", "見る"])) == false)
-        #expect(model.isFavoriteLead(result(["見る", "雨"])) == true)
+        // Both entries share the matched あめ reading; only the lead differs.
+        let unpromoted = LookupResult(matched: "あめ", entries: [
+            entry(keb: "飴", reb: "あめ", seq: 1),
+            entry(keb: "雨", reb: "あめ", seq: 2)
+        ])
+        let promoted = LookupResult(matched: "あめ", entries: [
+            entry(keb: "雨", reb: "あめ", seq: 2),
+            entry(keb: "飴", reb: "あめ", seq: 1)
+        ])
+        #expect(model.isFavoriteLead(unpromoted) == false)
+        #expect(model.isFavoriteLead(promoted) == true)
 
         // Promotion and the probe agree: re-selecting the unpromoted display
         // moves the favorite front, and the probe flips with it.
         let content = LookupContent.found(
-            result: result(["雨", "見る"]), also: [], origin: .tappedSurface
+            result: unpromoted, also: [], origin: .tappedSurface
         )
         model.applyEffect(.show(content: content, entryIndex: 0), source: .liveStrip)
         let displayBefore = try #require(model.pinnedLookup?.content.displayResult)
         #expect(model.isFavoriteLead(displayBefore) == false)
         model.selectAlsoPill(displayBefore)
         let displayAfter = try #require(model.pinnedLookup?.content.displayResult)
-        #expect(displayAfter.entries.first?.keb == "見る")
+        #expect(displayAfter.entries.first?.keb == "雨")
         #expect(model.isFavoriteLead(displayAfter) == true)
     }
 }

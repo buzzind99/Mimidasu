@@ -72,7 +72,21 @@ extension DictionarySearchStateTests {
     func promotedPagerResetsOnLeadChange() throws {
         let fixture = try makeState()
         let state = fixture.state
-        let baseline = result(entries: 2)
+        // The entries share the matched reading, so starring 語2 can promote it.
+        let baseline = LookupResult(matched: "あめ", entries: [
+            JMDictEntry(
+                entSeq: 1, keb: "語1", reb: "あめ", common: false,
+                jlpt: nil, hatsuon: nil, accPatts: nil, zoPatts: nil,
+                senses: [JMDictSense(pos: nil, glosses: ["gloss"], misc: nil,
+                                     restrictedKanji: nil, restrictedKana: nil)]
+            ),
+            JMDictEntry(
+                entSeq: 2, keb: "語2", reb: "あめ", common: false,
+                jlpt: nil, hatsuon: nil, accPatts: nil, zoPatts: nil,
+                senses: [JMDictSense(pos: nil, glosses: ["gloss"], misc: nil,
+                                     restrictedKanji: nil, restrictedKana: nil)]
+            )
+        ])
 
         #expect(state.validatedIndex(for: "飴", in: baseline) == 0)
         state.stepEntry("飴", to: 1, in: baseline)
@@ -83,15 +97,15 @@ extension DictionarySearchStateTests {
         // fallback — the row's own entry in the search window, 0 here —
         // instead of silently retargeting. Storage lags until the next press
         // overwrites it — the view only ever reads `validatedIndex`.
-        let identity = FavoriteIdentity(keys: ["語2"])
+        let identity = FavoriteIdentity(keys: [FavoriteIdentity.normalize("語2")])
         let reordered = FavoritesPromotion.promotingFavorites(in: baseline, identity: identity)
         #expect(reordered.entries.map(\.entSeq) == [2, 1])
         #expect(state.validatedIndex(for: "飴", in: reordered) == 0)
         #expect(state.entryIndex(for: "飴") == 1)
     }
 
-    @Test("the promoted pager clamps when the lead is unchanged")
-    func promotedPagerClampsWithoutLeadChange() throws {
+    @Test("the pager clamps when the lead is unchanged")
+    func pagerClampsWithoutLeadChange() throws {
         let fixture = try makeState()
         let state = fixture.state
         let promoted = result(entries: 3)

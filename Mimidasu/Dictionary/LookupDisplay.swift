@@ -91,7 +91,8 @@ final class LookupDisplay: Sendable {
     /// chosen hit is never labeled a fallback lead. The rebuilt content
     /// runs through the same favorites promotion a fresh tap gets, so a
     /// "related:" selection — which left its pin unpromoted — still opens
-    /// on a favorited entry and hands out starred, relabeled pills.
+    /// on a favorited entry, when the favorite is written or read as the
+    /// selection's word, and hands out starred, relabeled pills.
     /// A re-selected fallback opens as the tapped word; a compound formed
     /// with following words loses its joined-match badge on a cross-pill
     /// move and regains nothing on the way back. Same-display re-select
@@ -160,11 +161,11 @@ final class LookupDisplay: Sendable {
     /// The content a resolved tap pins, or nil when nothing resolved at all —
     /// a not-found resolution without related hits is a bare miss, and warns
     /// instead of pinning an empty card. A found content also leads on a
-    /// favorited entry where its pager has one, so tapping a word the user
-    /// has studied opens the study instead of the homograph above it. A
-    /// not-found pin stays not-found with no display result, but each
-    /// related suggestion is promoted the same way, so a buried favorite
-    /// leads its pill before any re-select.
+    /// favorited entry written or read as the tapped word where one exists,
+    /// so tapping a word the user has studied opens the study instead of the
+    /// homograph above it. A not-found pin stays not-found with no display
+    /// result, but each related suggestion is promoted the same way, so a
+    /// buried eligible favorite leads its pill before any re-select.
     private static func content(
         for resolved: LookupResolution, surface: String, favorites: FavoriteIdentity
     ) -> LookupContent? {

@@ -234,10 +234,25 @@ final class LookupDisplayPillTests {
     @Test("a related-pill promotion opens on the favorite and sibling pills re-promote")
     func promoteRelatedPillOpensOnFavorite() {
         let display = harness.makeDisplay()
-        let tapped = harness.result(["雨", "見る"])
-        let sibling = harness.result(["尾", "見る"])
+        // Both related hits match the shared reading あめ, so the favorite 雨
+        // is eligible in each; the two results carry different entries, and
+        // the re-selected choice itself is filtered out of the pill row.
+        let tapped = LookupResult(
+            matched: "あめ",
+            entries: [
+                harness.entry(keb: "飴", reb: "あめ", seq: 1),
+                harness.entry(keb: "雨", reb: "あめ", seq: 2)
+            ]
+        )
+        let sibling = LookupResult(
+            matched: "あめ",
+            entries: [
+                harness.entry(keb: "別", reb: "あめ", seq: 3),
+                harness.entry(keb: "雨", reb: "あめ", seq: 4)
+            ]
+        )
         let content = LookupContent.notFound(surface: "雨尾", related: [tapped, sibling])
-        let favorites = FavoriteIdentity(keys: [FavoriteIdentity.normalize("見る")])
+        let favorites = FavoriteIdentity(keys: [FavoriteIdentity.normalize("雨")])
 
         let promoted = display.promote(tapped, in: content, favorites: favorites)
 
@@ -246,9 +261,13 @@ final class LookupDisplayPillTests {
             return
         }
         #expect(origin == .tappedSurface)
-        #expect(displayed.entries.map(\.keb) == ["見る", "雨"])
-        #expect(also.map(\.matched) == ["尾"])
-        #expect(also.first?.entries.first?.keb == "見る")
+        #expect(displayed.matched == "あめ")
+        #expect(displayed.entries.map(\.entSeq) == [2, 1])
+        #expect(displayed.entries.map(\.keb) == ["雨", "飴"])
+        #expect(also.count == 1)
+        #expect(also.first?.matched == "あめ")
+        #expect(also.first?.entries.map(\.entSeq) == [4, 3])
+        #expect(also.first?.entries.first?.keb == "雨")
     }
 
     @Test("promoting a foreign choice fails closed to the content unchanged")

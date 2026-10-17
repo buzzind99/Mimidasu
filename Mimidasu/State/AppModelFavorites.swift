@@ -95,9 +95,9 @@ extension AppModel {
     }
 
     /// Whether a fallback pill leads with a favorited entry — the pill
-    /// star's probe. Promotion already moved a favorite (when the result has
-    /// one) to the front, so the lead is the only entry that can read
-    /// starred.
+    /// star's probe. Promotion already moved an eligible favorite to the
+    /// front, so a favorited lead is the pill's starred word; a favorite
+    /// matched through another spelling stays behind the lead.
     func isFavoriteLead(_ result: LookupResult) -> Bool {
         favorites.identity.leads(result)
     }
