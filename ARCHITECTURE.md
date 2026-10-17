@@ -382,9 +382,10 @@ packaged apps in `Contents/Frameworks/`.
   shared entry view with a per-row pager; expansion is keyed by entry
   (`String(entSeq)`), so homograph rows sharing a headword expand
   independently, and an untouched row opens on its own entry rather than
-  the lookup's ranked first. A starred entry is promoted to lead the
-  expanded pager (`FavoritesPromotion` — reorder only, count unchanged),
-  and the pager steps to absolute entry indexes. Each mode runs its own
+  the lookup's ranked first. A starred entry written or read as the row's
+  word is promoted to lead the expanded pager (`FavoritesPromotion` —
+  reorder only, count unchanged), and the pager steps to absolute entry
+  indexes. Each mode runs its own
   lookup handle, so a slow row expansion can't stall a tap or the other
   mode. Load-more reveals pages up to the 1,000-row ceiling ("Showing top
   N — refine your search"). The window stays up until explicitly closed —
@@ -453,15 +454,17 @@ packaged apps in `Contents/Frameworks/`.
   expansion set, and the pending removal question reset when the window
   closes.
 - **Favorite-first lookup:** `FavoritesPromotion` reorders an
-  already-resolved lookup once so a favorited entry leads the display
-  result's pager, every `also:` hit's pager, and each expanded search
-  row's pager — a fallback pill labels itself with its lead entry, so the
-  promotion is what makes the pill readable and starred, and
-  `selectAlsoPill` re-promotes the content it rebuilds. Not-found pins
-  stay not-found with no display result (a split hit must never present
-  itself as the tapped word), though each related suggestion is promoted,
-  so a buried favorite leads its pill before any re-select. The dictionary
-  engine itself never learns favorites exist.
+  already-resolved lookup once so a favorited entry written or read as the
+  looked-up word leads the display result's pager, every `also:` hit's
+  pager, and each expanded search row's pager — a fallback pill labels
+  itself with its lead entry, so the promotion is what makes an eligible
+  pill readable and starred, and `selectAlsoPill` re-promotes the content
+  it rebuilds. A starred sibling spelling — matched through another
+  writing — stays where the engine ranked it. Not-found pins stay
+  not-found with no display result (a split hit must never present itself
+  as the tapped word), though each related suggestion is promoted the
+  same way, so a buried eligible favorite leads its pill before any
+  re-select. The dictionary engine itself never learns favorites exist.
 
 ### Model choice (`Model/`)
 - `ASRModelChoice` — `.lite` / `.full`, each carrying its metadata (GGUF
