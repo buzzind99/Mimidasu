@@ -33,6 +33,7 @@ struct AppModelRetranslateRouteTests {
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelRetranslateRoute"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelRetranslateRoute"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             translationTransport: transport,
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }

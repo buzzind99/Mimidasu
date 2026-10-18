@@ -27,7 +27,7 @@ struct SettingsModelRow: View {
     /// A selection change applies at the next session start; mid-session
     /// (.running/.starting) it is disabled.
     private var selectionDisabled: Bool {
-        resolvedURL == nil || model.phase == .running || model.phase == .starting
+        resolvedURL == nil || model.phase == .running || model.phase == .paused || model.phase == .starting
     }
 
     /// The whole card is the selection button; download affordances float on

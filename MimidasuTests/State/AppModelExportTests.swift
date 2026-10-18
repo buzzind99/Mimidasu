@@ -25,6 +25,7 @@ struct AppModelExportTests {
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelExport"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelExport"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
@@ -53,6 +54,10 @@ struct AppModelExportTests {
         func finish() -> [ASREvent] {
             []
         }
+
+        func flushUtterance() -> [ASREvent] {
+            []
+        }
     }
 
     /// Minimal capture double: `begin()` starts it once and export never
@@ -62,6 +67,8 @@ struct AppModelExportTests {
         var onIOError: ((CaptureError) -> Void)?
         func start() async throws {}
         func stop() {}
+        func pause() async {}
+        func resume() async throws {}
     }
 
     /// A model whose session has begun (injected engine/capture
@@ -82,6 +89,7 @@ struct AppModelExportTests {
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelExport"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelExport"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
@@ -260,5 +268,99 @@ struct AppModelExportTests {
         #expect(doc.sentences[1].translations == [
             SentenceTranslation(lang: "en", text: "Second")
         ])
+    }
+
+    // MARK: - Archive mode
+
+    /// A model with a finalized one-sentence archive (stored target `fr`)
+    /// open in the pane — the live metadata source must not leak into the
+    /// export.
+    private struct ArchiveSUT {
+        let model: AppModel
+        let id: Int64
+    }
+
+    private func makeArchiveModel() async -> ArchiveSUT {
+        let store = isolatedArchive()
+        let metadata = SessionMetadata(
+            startedAt: Date(timeIntervalSince1970: 1_000_000),
+            sourceLang: "ja", targetLang: "fr", model: "test-model", chunkMS: 160
+        )
+        let id = store.append(
+            sentence: makeSentence(), sessionID: nil, metadata: metadata
+        )
+        store.finalize(session: id ?? -1, durationMS: 30000, saved: false)
+        let model = AppModel(
+            translationSettings: isolatedTranslationSettings(suite: "test.AppModelExportArchive"),
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelExportArchive"),
+            favorites: isolatedFavorites(),
+            archive: store,
+            highFidelityProbe: { _ in false },
+            initialModelResolve: { _ in nil }
+        )
+        await model.initialModelCheck?.value
+        model.openArchiveSession(id: id ?? -1)
+        return ArchiveSUT(model: model, id: id ?? -1)
+    }
+
+    @Test("json export in archive mode stamps the archive's stored metadata")
+    func exportJsonUsesArchiveMetadata() async throws {
+        let sut = await makeArchiveModel()
+        #expect(sut.model.openArchive?.id == sut.id)
+
+        let data = try sut.model.export(format: .json)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let doc = try decoder.decode(JSONSessionDocument.self, from: data)
+        #expect(doc.session.sourceLang == "ja")
+        #expect(doc.session.targetLang == "fr")
+        #expect(doc.session.model == "test-model")
+        #expect(doc.session.chunkMS == 160)
+        #expect(
+            abs(doc.session.startedAt.timeIntervalSince1970 - 1_000_000) < 1
+        )
+        #expect(doc.sentences.count == 1)
+    }
+
+    @Test("the export filename base prefers the archive's name, sanitized")
+    func exportFilenamePrefersArchiveName() async {
+        let sut = await makeArchiveModel()
+
+        // Unnamed: the shared default.
+        #expect(sut.model.exportFilenameBase == "mimidasu-session")
+
+        sut.model.renameArchive(id: sut.id, name: "Lecture 3")
+        #expect(sut.model.exportFilenameBase == "Lecture 3")
+
+        sut.model.renameArchive(id: sut.id, name: "a/b:c")
+        #expect(sut.model.exportFilenameBase == "a-b-c")
+
+        sut.model.renameArchive(id: sut.id, name: " .. ")
+        #expect(sut.model.exportFilenameBase == "mimidasu-session")
+    }
+
+    @Test("the filename sanitizer maps separators and rejects empty stems")
+    func filenameSanitizer() {
+        #expect(SessionExporter.sanitizedFilenameStem("Lecture 3") == "Lecture 3")
+        #expect(SessionExporter.sanitizedFilenameStem("a/b:c\\d") == "a-b-c-d")
+        #expect(SessionExporter.sanitizedFilenameStem("  spaced  ") == "spaced")
+        #expect(SessionExporter.sanitizedFilenameStem("...hidden") == "hidden")
+        #expect(SessionExporter.sanitizedFilenameStem("..") == nil)
+        #expect(SessionExporter.sanitizedFilenameStem("   ") == nil)
+    }
+
+    @Test("live mode keeps the shared default filename and the live metadata")
+    func liveExportUnchanged() async throws {
+        let model = await makeSUT()
+        model.sessionController.onSentence?(makeSentence())
+
+        #expect(model.exportFilenameBase == "mimidasu-session")
+
+        let data = try model.export(format: .json)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let doc = try decoder.decode(JSONSessionDocument.self, from: data)
+        #expect(doc.session.targetLang == "en")
     }
 }

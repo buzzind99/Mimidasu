@@ -24,6 +24,7 @@ struct AppModelSessionStatsTests {
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelStats"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelStats"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )

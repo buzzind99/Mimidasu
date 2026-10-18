@@ -14,6 +14,13 @@ enum ToastKey {
     static let exportFailed = "export.failed"
     static let dictionaryLookup = "dictionary.lookup"
     static let favorites = "favorites.unavailable"
+    /// The archive store could not be opened or written to.
+    static let archiveUnavailable = "archive.unavailable"
+    /// Post-stop confirmation that the session landed as a Recent.
+    static let archiveRecent = "archive.recent"
+    /// The bulk archive-translation job: one card that morphs from progress
+    /// into the run's summary.
+    static let archiveTranslation = "archive.translation"
 }
 
 /// State behind the toast stack. Posts are deduped by key — a repeat event
@@ -24,20 +31,29 @@ enum ToastKey {
 @Observable
 @MainActor
 final class ToastCenter {
-    /// The three toast classes: transient warnings auto-dismiss after 3 s
-    /// (delay is per-center); persistent cards stay until dismissed — by
-    /// their condition clearing, a fix action, or session teardown.
+    /// The toast classes: transient warnings auto-dismiss after 3 s (delay
+    /// is per-center); persistent cards stay until dismissed — by their
+    /// condition clearing, a fix action, or session teardown. `.info` is the
+    /// neutral card (bulk-job progress and its summary): no severity tint,
+    /// and whether it auto-dismisses follows its payload, not the style.
     enum Style: Equatable, Sendable {
         case yellowAuto
         case yellowPersistent
         case redPersistent
+        case info
 
         var autoDismisses: Bool {
             switch self {
             case .yellowAuto: true
-            case .yellowPersistent, .redPersistent: false
+            case .yellowPersistent, .redPersistent, .info: false
             }
         }
+    }
+
+    /// A card's progress payload (the bulk job's done/total sentences).
+    struct ToastProgress: Equatable, Sendable {
+        var done: Int
+        var total: Int
     }
 
     struct Action: Equatable {
@@ -61,6 +77,22 @@ final class ToastCenter {
         let title: String
         let body: String
         let action: Action?
+        /// The card's progress bar payload, when it has one.
+        var progress: ToastProgress?
+        /// Whether the card renders its × affordance.
+        var isClosable = false
+
+        /// Whether the card auto-dismisses on the standard delay: a
+        /// yellow-auto card always; an info card only as a plain summary
+        /// (no progress to finish, no action to take — the all-success
+        /// variant); the persistent classes never.
+        var autoDismisses: Bool {
+            switch style {
+            case .yellowAuto: true
+            case .yellowPersistent, .redPersistent: false
+            case .info: progress == nil && action == nil
+            }
+        }
     }
 
     private(set) var toasts: [Toast] = []
@@ -87,19 +119,26 @@ final class ToastCenter {
     /// Adds a toast (newest first), deduping by `key`: an existing card with
     /// the same key is replaced in place — keeping its `id` so SwiftUI treats
     /// it as a content update rather than a remove+insert — and its
-    /// auto-dismiss timer reset.
+    /// auto-dismiss timer reset. `isClosable` nil resolves per style and
+    /// payload (`defaultIsClosable`).
     func post(
-        key: String, style: Style, title: String, body: String, action: Action? = nil
+        key: String, style: Style, title: String, body: String, action: Action? = nil,
+        progress: ToastProgress? = nil, isClosable: Bool? = nil
     ) {
+        let closable = isClosable ?? Self.defaultIsClosable(style: style, progress: progress)
         let toast: Toast
         if let at = toasts.firstIndex(where: { toast in toast.key == key }) {
             toast = Toast(
                 id: toasts[at].id, key: key, style: style,
-                title: title, body: body, action: action
+                title: title, body: body, action: action,
+                progress: progress, isClosable: closable
             )
             toasts[at] = toast
         } else {
-            toast = Toast(key: key, style: style, title: title, body: body, action: action)
+            toast = Toast(
+                key: key, style: style, title: title, body: body, action: action,
+                progress: progress, isClosable: closable
+            )
             toasts.insert(toast, at: 0)
         }
         if toasts.count > Self.maxVisible {
@@ -109,6 +148,17 @@ final class ToastCenter {
             toasts.removeSubrange(Self.maxVisible...)
         }
         scheduleAutoDismiss(of: toast)
+    }
+
+    /// The × affordance's default: transient cards carry one; a persistent
+    /// warning does not; an info card carries one except while it reports
+    /// progress (its Cancel action is the exit there).
+    static func defaultIsClosable(style: Style, progress: ToastProgress?) -> Bool {
+        switch style {
+        case .yellowAuto: true
+        case .yellowPersistent, .redPersistent: false
+        case .info: progress == nil
+        }
     }
 
     /// Removes the card with the given key (condition cleared).
@@ -126,14 +176,14 @@ final class ToastCenter {
         toasts.removeAll()
     }
 
-    /// Arms the auto-dismiss timer for transient cards (`.yellowAuto`).
-    /// Dismissal is keyed on the toast's `id`; the guard is defense-in-depth
-    /// — the timer is always cancelled before a replacement is scheduled, so
-    /// a stale firing should not occur, and with the replaced card's id
-    /// preserved a late fire would simply be a correct dismissal.
+    /// Arms the auto-dismiss timer for transient cards. Dismissal is keyed
+    /// on the toast's `id`; the guard is defense-in-depth — the timer is
+    /// always cancelled before a replacement is scheduled, so a stale firing
+    /// should not occur, and with the replaced card's id preserved a late
+    /// fire would simply be a correct dismissal.
     private func scheduleAutoDismiss(of toast: Toast) {
         timers.removeValue(forKey: toast.key)?()
-        guard toast.style.autoDismisses else { return }
+        guard toast.autoDismisses else { return }
         timers[toast.key] = scheduler(autoDismissAfter) { [weak self] in
             self?.dismiss(id: toast.id)
         }

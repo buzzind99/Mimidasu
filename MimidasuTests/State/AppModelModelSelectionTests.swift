@@ -21,6 +21,7 @@ struct AppModelModelSelectionTests {
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelSelection"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelSelection"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             highFidelityProbe: { _ in false },
             initialModelResolve: resolve
         )

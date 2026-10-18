@@ -21,6 +21,7 @@ struct AppModelToastWiringTests {
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelToastWiring"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelToastWiring"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )

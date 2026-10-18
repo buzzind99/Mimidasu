@@ -19,6 +19,7 @@ struct AppModelRetranslateLaneFailureTests {
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelRetranslateLaneFailure"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelRetranslateLaneFailure"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )

@@ -26,6 +26,7 @@ struct AppModelDictionaryTests {
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelDictionary"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelDictionary"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )

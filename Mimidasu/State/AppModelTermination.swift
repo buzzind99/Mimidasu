@@ -6,13 +6,28 @@ extension AppModel {
     func stop() {
         // `.starting` is stoppable too: begin() is a multi-await operation
         // (TCC prompt, capture, engine), and a session the user cancels
-        // mid-start must never come up afterwards.
-        guard phase == .starting || phase == .running || phase == .sourceLost else { return }
+        // mid-start must never come up afterwards. `.paused` is live: stop
+        // from paused finalizes normally.
+        guard phase == .starting || phase == .running || phase == .paused || phase == .sourceLost
+        else { return }
         phase = .stopping
 
         stopTask = Task { @MainActor in
             await performStop()
             stopTask = nil
+        }
+    }
+
+    /// Whether pressing Stop must ask first: a non-empty transcript in a
+    /// live-ish phase with a store that can actually persist the result.
+    /// Empty sessions, cancel-during-start, and an unavailable store stop
+    /// directly; the quit path never prompts at all. The window presents the
+    /// alert — this is the policy it branches on.
+    var shouldConfirmStop: Bool {
+        guard !entries.isEmpty, archiveAvailable else { return false }
+        switch phase {
+        case .running, .paused, .sourceLost: return true
+        case .needsModel, .idle, .starting, .stopping, .failed: return false
         }
     }
 
@@ -54,11 +69,20 @@ extension AppModel {
         // reliably re-fire, so the teardown must not nil them (see
         // `RetranslateCoordinator.teardown`).
         retranslate.sessionDidEnd()
-        sessionEndedAt = .now
+        let endedAt = ContinuousClock.now
+        sessionEndedAt = endedAt
         // Stop/teardown clears all toasts and notices (phase → `.idle`).
         toasts.clearAll()
         notices.dismiss()
         phase = .idle
+        // The archive finalize runs last so its toast — or its one-shot
+        // failure warning — survives the teardown's `clearAll` above. Every
+        // stop finalizes as a recent; promotion is a later one-click action.
+        if let durationMS = activeSessionDurationMS(to: endedAt),
+           finalizeLiveSession(durationMS: durationMS)
+        {
+            postArchivedRecentToast()
+        }
     }
 
     /// Quit-time teardown, invoked via `.mimidasuAppWillTerminate` (posted by
@@ -82,7 +106,9 @@ extension AppModel {
         isTerminating = true
         if let stopTask {
             await stopTask.value
-        } else if phase == .starting || phase == .running || phase == .stopping || phase == .sourceLost {
+        } else if phase == .starting || phase == .running || phase == .paused
+            || phase == .stopping || phase == .sourceLost
+        {
             phase = .stopping
             await performStop()
         }

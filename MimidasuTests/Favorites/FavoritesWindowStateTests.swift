@@ -33,6 +33,7 @@ struct FavoritesWindowStateTests {
     private func makeModel() -> AppModel {
         AppModel(
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             jmDictLookup: makeMissingLookup()
         )
     }
@@ -43,7 +44,10 @@ struct FavoritesWindowStateTests {
     /// dictionary from a unit test.
     private func makeState() -> (FavoritesWindowState, AppModel) {
         let lookup = makeMissingLookup()
-        let model = AppModel(favorites: isolatedFavorites(), jmDictLookup: lookup)
+        let model = AppModel(
+            favorites: isolatedFavorites(), archive: isolatedArchive(),
+            jmDictLookup: lookup
+        )
         return (FavoritesWindowState(model: model, lookup: lookup), model)
     }
 

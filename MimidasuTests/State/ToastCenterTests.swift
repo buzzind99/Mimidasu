@@ -135,6 +135,120 @@ struct ToastCenterTests {
         #expect(spy.delays == [.seconds(3)])
     }
 
+    // MARK: - Info style
+
+    @Test("an info card with progress has no auto-dismiss timer")
+    func infoWithProgressHasNoTimer() {
+        let spy = ManualScheduler()
+        let center = makeSUT(scheduler: spy)
+
+        center.post(
+            key: "job", style: .info, title: "Translating…", body: "1/3 sentences",
+            progress: ToastCenter.ToastProgress(done: 1, total: 3)
+        )
+
+        #expect(spy.pendingCount == 0, "progress keeps the card up until the run ends")
+
+        spy.firePending()
+
+        #expect(center.toasts.count == 1, "the card survives")
+    }
+
+    @Test("an info summary with neither progress nor action auto-dismisses")
+    func infoSummaryAutoDismisses() {
+        let spy = ManualScheduler()
+        let center = makeSUT(scheduler: spy)
+
+        center.post(key: "job", style: .info, title: "Finished", body: "Translated 3 sentences")
+
+        #expect(spy.delays == [.seconds(3)])
+
+        spy.firePending()
+
+        #expect(center.toasts.isEmpty)
+    }
+
+    @Test("an info card with an action but no progress has no auto-dismiss timer")
+    func infoWithActionHasNoTimer() {
+        let spy = ManualScheduler()
+        let center = makeSUT(scheduler: spy)
+
+        center.post(
+            key: "job", style: .info, title: "Finished", body: "2 failed",
+            action: .init(label: "Retry failed sentences") {}
+        )
+
+        #expect(spy.pendingCount == 0, "an action keeps the card up until it is taken")
+
+        spy.firePending()
+
+        #expect(center.toasts.count == 1)
+    }
+
+    @Test(
+        "defaultIsClosable follows the style and the payload",
+        arguments: [
+            (ToastCenter.Style.yellowAuto, ToastCenter.ToastProgress?.none, true),
+            (ToastCenter.Style.yellowPersistent, ToastCenter.ToastProgress?.none, false),
+            (ToastCenter.Style.redPersistent, ToastCenter.ToastProgress?.none, false),
+            (ToastCenter.Style.info, ToastCenter.ToastProgress(done: 1, total: 3), false),
+            (ToastCenter.Style.info, ToastCenter.ToastProgress?.none, true)
+        ]
+    )
+    func defaultIsClosableByStyleAndPayload(
+        style: ToastCenter.Style, progress: ToastCenter.ToastProgress?, expected: Bool
+    ) {
+        let closable = ToastCenter.defaultIsClosable(style: style, progress: progress)
+
+        #expect(closable == expected)
+    }
+
+    @Test("an explicit isClosable argument overrides the style default")
+    func explicitIsClosableOverrides() {
+        let center = makeSUT(scheduler: ManualScheduler())
+
+        center.post(key: "a", style: .yellowAuto, title: "A", body: "b", isClosable: false)
+        center.post(
+            key: "i", style: .info, title: "I", body: "b",
+            progress: ToastCenter.ToastProgress(done: 0, total: 2), isClosable: true
+        )
+
+        let auto = center.toasts.first(where: { toast in toast.key == "a" })
+        let info = center.toasts.first(where: { toast in toast.key == "i" })
+        #expect(auto?.isClosable == false, "the transient default is turned off")
+        #expect(info?.isClosable == true, "the progress default is turned on")
+    }
+
+    @Test("reposting with changed progress replaces the card in place")
+    func repostWithChangedProgressReplacesInPlace() {
+        let center = makeSUT(scheduler: ManualScheduler())
+
+        center.post(
+            key: "job", style: .info, title: "Translating…", body: "0/3 sentences",
+            progress: ToastCenter.ToastProgress(done: 0, total: 3)
+        )
+        let originalID = center.toasts[0].id
+
+        center.post(
+            key: "job", style: .info, title: "Translating…", body: "2/3 sentences",
+            progress: ToastCenter.ToastProgress(done: 2, total: 3)
+        )
+
+        #expect(center.toasts.count == 1)
+        #expect(center.toasts[0].id == originalID, "the progress update keeps the card's identity")
+        #expect(center.toasts[0].progress == ToastCenter.ToastProgress(done: 2, total: 3))
+        #expect(center.toasts[0].body == "2/3 sentences")
+    }
+
+    @Test("the info style's own auto-dismiss flag stays conservative")
+    func infoStyleFlagStaysConservative() {
+        let center = makeSUT(scheduler: ManualScheduler())
+        center.post(key: "summary", style: .info, title: "Finished", body: "Translated 3 sentences")
+
+        #expect(ToastCenter.Style.info.autoDismisses == false)
+        #expect(center.toasts[0].autoDismisses, "the toast-level decision follows the payload")
+    }
+
     // MARK: - Cap
 
     @Test("posting beyond the cap drops the oldest card")

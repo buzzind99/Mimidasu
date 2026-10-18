@@ -58,6 +58,7 @@ struct AppModelTranslationHighFidelityTests {
             translationSettings: makeSettings(provider: .apple),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelHighFidelity"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             initialModelResolve: { _ in nil }
         )
         await model.initialModelCheck?.value
@@ -79,6 +80,7 @@ struct AppModelTranslationHighFidelityTests {
             translationSettings: makeSettings(provider: .apple),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelHighFidelity"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             highFidelityProbe: { _ in true },
             initialModelResolve: { _ in nil }
         )
@@ -102,6 +104,7 @@ struct AppModelTranslationHighFidelityTests {
             translationSettings: makeSettings(provider: .apple),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelHighFidelity"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             highFidelityProbe: { _ in
                 probeCalls.withLock { calls in
                     calls += 1
@@ -138,6 +141,7 @@ struct AppModelTranslationHighFidelityTests {
             translationSettings: settings,
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelHighFidelity"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             translationTransport: constantStatusTransport(401),
             highFidelityProbe: { _ in
                 probeCalls.withLock { calls in
@@ -180,6 +184,7 @@ struct AppModelTranslationHighFidelityTests {
             translationSettings: makeSettings(provider: .apple),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelHighFidelity"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             highFidelityProbe: { _ in
                 let call = probeCalls.withLock { calls in
                     calls += 1

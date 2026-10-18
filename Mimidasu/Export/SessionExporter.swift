@@ -29,6 +29,24 @@ enum SessionExporter {
         }
     }
 
+    /// A user-set session name as a filesystem-safe filename stem, or nil
+    /// when nothing usable remains. Path separators, colons, and control
+    /// characters become `-`; leading dots go (a dotfile-name stem would be
+    /// hidden files in the save panel), and surrounding whitespace is
+    /// trimmed.
+    static func sanitizedFilenameStem(_ name: String) -> String? {
+        let mapped = name.map { character in
+            character.isNewline || character.asciiValue.map { value in value < 0x20 } == true
+                || character == "/" || character == ":" || character == "\\"
+                ? "-" : character
+        }
+        let collapsed = String(mapped)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .drop(while: { character in character == "." })
+        let stem = String(collapsed).trimmingCharacters(in: .whitespaces)
+        return stem.isEmpty ? nil : stem
+    }
+
     // MARK: - Plain text
 
     static func plainText(entries: [SessionEntry]) -> String {

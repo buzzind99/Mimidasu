@@ -27,6 +27,7 @@ struct AppModelRetranslationTests {
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelRetranslation"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelRetranslation"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )

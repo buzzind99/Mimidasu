@@ -19,6 +19,7 @@ struct AppModelTranslationForwardingTests {
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelTranslationForwarding"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelTranslationForwarding"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )

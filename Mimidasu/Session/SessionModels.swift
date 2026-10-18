@@ -79,6 +79,16 @@ struct SessionEntry: Identifiable, Equatable, Sendable {
     }
 }
 
+extension SessionEntry {
+    /// The translation shown for one display language, or nil (the row's
+    /// `…` placeholder). Archive mode renders one language at a time; the
+    /// live pane keeps the joined display. `replaceTranslation` keeps at
+    /// most one entry per language, so the first match is the only match.
+    func translation(for language: String) -> SentenceTranslation? {
+        translations.first { translation in translation.lang == language }
+    }
+}
+
 /// Session metadata captured at Start.
 struct SessionMetadata: Equatable, Codable {
     var startedAt: Date
@@ -136,4 +146,9 @@ extension Notification.Name {
     /// master switch, lives in the main window itself).
     static let mimidasuTranslationOverlayVisibilityDidChange =
         Notification.Name("MimidasuTranslationOverlayVisibilityDidChange")
+
+    /// Posted by the post-stop toast's View action; observed in the main
+    /// window with `openWindow` (the openers' precedent).
+    static let mimidasuOpenArchiveWindow =
+        Notification.Name("MimidasuOpenArchiveWindow")
 }

@@ -37,9 +37,37 @@ extension AppModel {
         case .json:
             let results = snapshotTranslationResults()
             return try SessionExporter.json(
-                entries: entries, metadata: sessionController.sessionMetadata, results: results
+                entries: entries, metadata: exportMetadata, results: results
             )
         }
+    }
+
+    /// The fileExporter's suggested filename stem: the open archive's name
+    /// when it has one — sanitized for the filesystem — else the shared
+    /// default. The auto-title is deliberately not used: it embeds 「」 and a
+    /// date, which reads as noise in a save dialog.
+    var exportFilenameBase: String {
+        guard let name = openArchive?.summary.name,
+              let sanitized = SessionExporter.sanitizedFilenameStem(name)
+        else { return "mimidasu-session" }
+        return sanitized
+    }
+
+    /// The metadata the JSON export stamps: the open archive's stored
+    /// session when one fills the pane — the live controller's metadata
+    /// belongs to a session the archive replaced — else the live session's.
+    /// Nil without either (the exporter's defaults apply).
+    private var exportMetadata: SessionMetadata? {
+        guard let summary = openArchive?.summary else {
+            return sessionController.sessionMetadata
+        }
+        return SessionMetadata(
+            startedAt: summary.startedAt,
+            sourceLang: "ja",
+            targetLang: summary.targetLang,
+            model: summary.model,
+            chunkMS: summary.chunkMS ?? 160
+        )
     }
 
     private func snapshotTranslationResults() -> [Int: SentenceTranslation] {

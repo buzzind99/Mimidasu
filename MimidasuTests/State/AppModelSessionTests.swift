@@ -83,6 +83,10 @@ struct AppModelSessionTests {
         func finish() -> [ASREvent] {
             []
         }
+
+        func flushUtterance() -> [ASREvent] {
+            []
+        }
     }
 
     private final class ScriptedCapture: AudioCapturing, @unchecked Sendable {
@@ -125,6 +129,14 @@ struct AppModelSessionTests {
 
         func stop() {
             log.record("capture.stop")
+        }
+
+        func pause() async {
+            log.record("capture.pause")
+        }
+
+        func resume() async throws {
+            log.record("capture.resume")
         }
     }
 
@@ -190,6 +202,7 @@ struct AppModelSessionTests {
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelSession"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelSession"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             // Hermetic: session start activates the Apple engine, whose
             // probe would otherwise hit the real LanguageAvailability.
             highFidelityProbe: { _ in false },

@@ -103,7 +103,7 @@ struct SettingsTargetLanguageCard: View {
     /// design, the new target applies at the next session start.
     private var sessionIsLive: Bool {
         switch model.phase {
-        case .running, .starting, .stopping, .sourceLost: true
+        case .running, .paused, .starting, .stopping, .sourceLost: true
         case .needsModel, .idle, .failed: false
         }
     }

@@ -18,6 +18,7 @@ struct AppModelFavoritesTests {
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelFavorites"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelFavorites"),
             favorites: favorites,
+            archive: isolatedArchive(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )

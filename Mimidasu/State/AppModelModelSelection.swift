@@ -58,7 +58,7 @@ extension AppModel {
     /// the new engine in the background (`warmUpIfNeeded` re-arms on the new
     /// path).
     func selectModel(_ choice: ASRModelChoice) {
-        guard phase != .running, phase != .starting else { return }
+        guard phase != .running, phase != .paused, phase != .starting else { return }
         guard modelAvailability[choice] != nil else { return }
         asrModelSettings.select(choice)
         modelSelectionRefresh = Task { await refreshModelAvailability() }

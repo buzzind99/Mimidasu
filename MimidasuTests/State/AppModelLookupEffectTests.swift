@@ -30,6 +30,7 @@ final class AppModelLookupEffectTests {
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelLookupEffects"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelLookupEffects"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             highFidelityProbe: { _ in false },
             jmDictLookup: JMDictLookup(resolveDatabase: { [fixture] in fixture.url }),
             initialModelResolve: { _ in nil }

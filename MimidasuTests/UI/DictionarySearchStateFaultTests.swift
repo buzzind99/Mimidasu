@@ -34,7 +34,8 @@ struct DictionarySearchStateFaultTests {
         })
         engine.close()
         let model = AppModel(
-            favorites: isolatedFavorites(), dictionarySearch: engine
+            favorites: isolatedFavorites(), archive: isolatedArchive(),
+            dictionarySearch: engine
         )
         let state = DictionarySearchState(model: model)
         state.query = "食べる"
@@ -65,6 +66,7 @@ struct DictionarySearchStateFaultTests {
 
         let model = AppModel(
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             dictionarySearch: DictionarySearchEngine(resolveDatabase: { corrupt })
         )
         let state = DictionarySearchState(model: model)

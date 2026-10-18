@@ -47,6 +47,7 @@ struct AppModelTranslationTargetTests {
             translationSettings: settings,
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelTarget"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             translationTransport: constantStatusTransport(500),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
@@ -87,6 +88,7 @@ struct AppModelTranslationTargetTests {
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelTarget"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelTarget"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
@@ -125,6 +127,7 @@ struct AppModelTranslationTargetTests {
             translationSettings: settings,
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelTarget"),
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             translationTransport: transport,
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }

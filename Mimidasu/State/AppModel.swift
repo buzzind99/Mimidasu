@@ -8,6 +8,9 @@ enum SessionPhase: Equatable {
     case idle
     case starting
     case running
+    /// Capture suspended while the session stays live: the IOProc is stopped,
+    /// the timeline and duration freeze, and `resume()` returns to `.running`.
+    case paused
     case sourceLost
     case stopping
     case failed(String)
@@ -25,8 +28,10 @@ final class AppModel {
     var entries: [SessionEntry] = []
     /// SESSION-card character total: Σ sentence text lengths (translations
     /// excluded), maintained incrementally on sentence append / session
-    /// clear instead of re-summing the transcript per render.
-    private(set) var sessionCharacterCount = 0
+    /// clear / archive swap instead of re-summing the transcript per render.
+    /// Internal setter: the archive swap lives in `AppModelArchive.swift`
+    /// (file split for the lint gate).
+    var sessionCharacterCount = 0
     /// Observable mirror of `translationQueue.hasWorker` for the retry gate
     /// (the queue is not `@Observable`). An Apple run stays parked across a
     /// stop (true); an external run flips it false as its cancelled worker
@@ -139,6 +144,47 @@ final class AppModel {
     /// match set, never the database.
     let favorites: FavoritesStore
 
+    /// The session archive (SQLite): the live session persists through it
+    /// sentence by sentence, and the archive window reads it. Writes are
+    /// synchronous from the main actor under the store's mutex — per-
+    /// sentence/translation writes are ms-scale. Injectable for tests: the
+    /// default opens the production Application Support file.
+    let archive: ArchiveStore
+
+    /// The stored row of the live recording, created lazily with the first
+    /// finalized sentence. Nil before that (and when the archive is
+    /// unavailable). Mutated from the persistence path in
+    /// `AppModelArchive.swift`; reset at session begin.
+    var recordingSessionID: Int64?
+
+    /// Latched by the first failed archive write of a session: writes stop
+    /// being attempted, one warning toast is posted, and stop persists
+    /// nothing (and skips its prompt) for the rest of the session. Reset at
+    /// session begin. Mutated from `AppModelArchive.swift`.
+    var archiveWriteFailed = false
+
+    /// The stored session opened read-only in the transcript pane, or nil
+    /// when the pane shows live-session state. Mutated from
+    /// `AppModelArchive.swift`.
+    var openArchive: ArchivedSession?
+
+    /// The opened archive's viewing-language override (BCP-47 code): nil =
+    /// the archive's stored target. View-only state — switching never
+    /// mutates stored translations. Reset on open, cleared on close;
+    /// mutated from `AppModelArchive.swift` and the bulk job's add flows.
+    var archiveViewingLanguage: String?
+
+    /// The bulk archive-translation job: one run at a time over the opened
+    /// archive's sentences, with its engine resolver and landing sink wired
+    /// in `AppModelArchiveTranslation.swift`.
+    let archiveTranslationJob = ArchiveTranslationJob()
+
+    /// Bumped by every archive mutation (persist, finalize, sweep, promote,
+    /// rename, delete): the archive window reloads its rows when it changes.
+    /// Internal setter: mutated from `AppModelArchive.swift` (file split for
+    /// the lint gate).
+    var archiveRevision = 0
+
     /// Latest resolve result per choice (bundled → downloaded → dev, SHA-256
     /// verified). The Settings Model section reads it to enable selection;
     /// `modelURL` is the active choice's entry. Internal setter: written by
@@ -175,18 +221,43 @@ final class AppModel {
     var isTerminating = false
     /// SESSION-card duration anchors: set when a session's chunks start
     /// flowing (`onSessionBegin`) and when teardown completes
-    /// (`performStop`); both nil before the first session. Duration reads
-    /// now − startedAt while running, endedAt − startedAt after stop.
+    /// (`performStop`); both nil before the first session and while an
+    /// archived session is open (its stats live in the banner). Duration
+    /// reads now − startedAt while running, endedAt − startedAt after stop.
     /// Monotonic instants: a wall-clock change mid-session must not distort
-    /// the elapsed display.
-    private(set) var sessionStartedAt: ContinuousClock.Instant?
+    /// the elapsed display. Internal setter: the archive open/close swaps
+    /// live in `AppModelArchive.swift` (file split for the lint gate).
+    var sessionStartedAt: ContinuousClock.Instant?
     /// Internal setter: `performStop` lives in `AppModelTermination.swift`
     /// (file split for the lint gate).
     var sessionEndedAt: ContinuousClock.Instant?
     /// When the capture source died mid-session (`.sourceLost`). The SESSION
     /// card freezes at it during the outage — the session clock itself
     /// survives a successful restart, so duration resumes counting then.
-    private(set) var captureLostAt: ContinuousClock.Instant?
+    /// Internal setter: `restartCapture` lives in this file while the resume
+    /// fallback lives in `AppModelPause.swift` (file split for the lint
+    /// gate).
+    var captureLostAt: ContinuousClock.Instant?
+    /// Completed paused spans of the current session, excluded from the
+    /// displayed and stored duration. Mutated only by `AppModelPause.swift`
+    /// (file split for the lint gate); reset at session begin.
+    var sessionPausedTotal: Duration = .zero
+    /// When the current pause began; nil outside `.paused`. Mutated only by
+    /// `AppModelPause.swift`.
+    var pauseStartedAt: ContinuousClock.Instant?
+    /// A capture error observed while paused — the capture-lost deferral.
+    /// Surfaced only when a resume cannot bring the capture back (the
+    /// rebuild path reports it). Mutated only by `AppModelPause.swift` and
+    /// the capture-error wiring below.
+    var deferredCaptureError: String?
+    /// The in-flight pause/resume transition, if any. Resumes chain on it so
+    /// a resume clicked before `pause()`'s HAL stop landed can never restart
+    /// the IOProc before the stop did. Mutated only by `AppModelPause.swift`.
+    @ObservationIgnored var pauseTransitionTask: Task<Void, Never>?
+    /// True while a resume is airborne (the phase stays `.paused` until the
+    /// IOProc is back, so the flag is the double-click guard). Mutated only
+    /// by `AppModelPause.swift`.
+    @ObservationIgnored var resumeInFlight = false
     /// Injectable so tests can observe (and fake) the quit-time release of
     /// the process-warm ASR engine; the default drives the real factory.
     /// Internal: invoked from `AppModelTermination.swift`.
@@ -226,6 +297,7 @@ final class AppModel {
         translationSettings: TranslationSettings? = nil,
         asrModelSettings: ASRModelSettings? = nil,
         favorites: FavoritesStore? = nil,
+        archive: ArchiveStore? = nil,
         translationTransport: HTTPTranslationTransport? = nil,
         highFidelityProbe: @escaping @Sendable (String) async -> Bool = { code in
             await AppModel.checkHighFidelityAvailability(targetCode: code)
@@ -243,6 +315,7 @@ final class AppModel {
         self.translationSettings = translationSettings ?? TranslationSettings()
         self.asrModelSettings = asrModelSettings ?? ASRModelSettings()
         self.favorites = favorites ?? FavoritesStore()
+        self.archive = archive ?? ArchiveStore()
         self.jmDictLookup = jmDictLookup ?? JMDictLookup()
         self.dictionarySearch = dictionarySearch ?? DictionarySearchEngine()
         modelResolve = initialModelResolve
@@ -293,6 +366,10 @@ final class AppModel {
         // completes (fast in tests, bounded in production) — intentional.
         initialModelCheck = Task { await refreshModelAvailability() }
         prepareDictionaries()
+        // A `recording` row left by an unclean exit becomes an Interrupted
+        // recent before anything can list the archive.
+        sweepArchivesOnLaunch()
+        wireArchiveTranslationJob()
 
         willTerminateObserver = willTerminateNotifications.addObserver(
             forName: .mimidasuAppWillTerminate, object: nil, queue: .main
@@ -329,6 +406,11 @@ final class AppModel {
             sessionStartedAt = .now
             sessionEndedAt = nil
             captureLostAt = nil
+            // Pause state is per session: a fresh session starts unpaused
+            // with no accumulated paused time and no deferred capture error.
+            sessionPausedTotal = .zero
+            pauseStartedAt = nil
+            deferredCaptureError = nil
             // Dictionary state is per session too: the popover anchor and
             // the pinned card reset, and any in-flight lookup is dropped.
             selectedLookup = nil
@@ -353,7 +435,14 @@ final class AppModel {
             // A capture failure is fatal in any active phase: mid-session it
             // means the source is gone; during `.starting` it means the
             // session can never come up, so surface it instead of swallowing.
-            guard let self, phase == .running || phase == .starting else { return }
+            // While paused it is DEFERRED: the resume path rebuilds the
+            // capture, and only a failed resume reports capture lost.
+            guard let self else { return }
+            if phase == .paused {
+                deferredCaptureError = message
+                return
+            }
+            guard phase == .running || phase == .starting else { return }
             phase = .sourceLost
             captureLostAt = .now
             toasts.dismiss(key: ToastKey.noAudio)
@@ -396,6 +485,15 @@ final class AppModel {
     /// `onSessionBegin` does not re-fire.
     func restartCapture() {
         guard phase == .sourceLost else { return }
+        performCaptureRestart()
+    }
+
+    /// The shared capture-rebuild flow: the `.sourceLost` fix action above,
+    /// and the resume of a pause that found the capture dead (its caller sets
+    /// `.starting` first). A `stop()` during the rebuild wins the race — the
+    /// phase checks refuse to resurrect a stopped session. Internal: driven
+    /// from `AppModelPause.swift` (file split for the lint gate).
+    func performCaptureRestart() {
         phase = .starting
         Task { @MainActor in
             do {
@@ -422,6 +520,9 @@ final class AppModel {
         entryPositionBySentence[sentence.index] = entries.count
         entries.append(SessionEntry(sentence: sentence))
         sessionCharacterCount += sentence.text.count
+        // The archive row follows the transcript: persistence is the same
+        // synchronous main-actor path, governed by the per-session latch.
+        persistSentence(sentence)
         // Synchronous main-actor enqueue: by the time `stop` drains, every
         // emitted sentence is observably in the queue.
         translationQueue.enqueue(sentence)

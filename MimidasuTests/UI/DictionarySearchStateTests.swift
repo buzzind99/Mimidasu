@@ -69,6 +69,7 @@ struct DictionarySearchStateTests {
             .appendingPathComponent("mimidasu-search-state-missing-\(UUID().uuidString).sqlite")
         let model = AppModel(
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             dictionarySearch: DictionarySearchEngine(resolveDatabase: { missing })
         )
         return DictionarySearchState(model: model)

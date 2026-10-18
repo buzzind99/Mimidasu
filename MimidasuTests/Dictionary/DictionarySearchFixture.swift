@@ -72,6 +72,7 @@ final class DictionarySearchStateFixture {
         )
         let model = AppModel(
             favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
             jmDictLookup: lookup,
             dictionarySearch: searchEngine
         )

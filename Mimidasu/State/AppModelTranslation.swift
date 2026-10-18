@@ -10,7 +10,27 @@ import Translation
 
 extension AppModel: TranslationSessionPort {
     // `phase` and `toasts` are stored on `AppModel`; the landing below is
-    // the port's third member.
+    // the port's third member, and the archive checkpoints sit with it.
+
+    /// The archived session open in the transcript pane, or nil.
+    var archiveSessionID: Int64? {
+        openArchive?.id
+    }
+
+    /// The language the opened archive's pane shows: the viewing-language
+    /// override when one is selected, else the stored target. Read at route
+    /// time, so a row retried after the viewing language switched (or after
+    /// the archive closed) re-resolves against whatever is current then.
+    var archiveViewingCode: String? {
+        guard let archive = openArchive else { return nil }
+        return archiveViewingLanguage ?? archive.summary.targetLang
+    }
+
+    /// True from the bulk job's synchronous claim (engine resolution
+    /// included) until the run ends — the per-row retry guard.
+    var archiveTranslationRunning: Bool {
+        archiveTranslationJob.isActive
+    }
 
     /// Lands a delivered translation on its transcript row. Internal (not
     /// private) so tests can exercise known/unknown indexes, and named
@@ -28,6 +48,14 @@ extension AppModel: TranslationSessionPort {
         // transcript cleared underneath it) must still retire its marker,
         // or the row stays dimmed with its retry button dead.
         retranslate.clearMarkers(at: index)
+        // Archive mode: the store is the durable home of the result — the
+        // row update below renders it, and a reopen must find it again.
+        // Write-back precedes the row lookup so a result landing while the
+        // archive is closing still persists (its marker is retired either
+        // way).
+        if let archiveID = archiveSessionID {
+            archive.upsert(translation: translation, index: index, session: archiveID)
+        }
         guard let at = entryPositionBySentence[index] else { return false }
         entries[at].replaceTranslation(translation)
         return true
