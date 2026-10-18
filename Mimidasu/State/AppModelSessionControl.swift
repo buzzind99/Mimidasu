@@ -7,6 +7,11 @@ extension AppModel {
     // MARK: - Session control
 
     func start() {
+        // An open archive owns the pane: a session starting underneath it
+        // would upsert live results into the opened archive's id, and closing
+        // the archive would wipe the live transcript. The stop-confirmation's
+        // confirm path closes the archive first.
+        guard openArchive == nil else { return }
         guard !isCheckingModel, !isTerminating else { return }
         // A failed session restarts like an idle one (the sidebar offers
         // Start from `.failed`, and the failure card clears on the

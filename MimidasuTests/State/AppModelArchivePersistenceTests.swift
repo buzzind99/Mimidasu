@@ -22,12 +22,16 @@ struct AppModelArchivePersistenceTests {
         var processedSamples = 0
         var pushedSamples = 0
 
-        private let finals: [ASREvent]
         private var remaining: [ASREvent]
 
         init(finals: [ASREvent]) {
-            self.finals = finals
             remaining = finals
+        }
+
+        /// Appends one more final; the poll tick picks it up on its next fire
+        /// — the deterministic way to place a sentence in a chosen session.
+        func enqueue(_ event: ASREvent) {
+            remaining.append(event)
         }
 
         func prepare() {}
@@ -62,6 +66,7 @@ struct AppModelArchivePersistenceTests {
     private struct SUT {
         let model: AppModel
         let store: ArchiveStore
+        let engine: ScriptedASREngine
     }
 
     /// A model whose session engine emits `finals` (one per poll) over
@@ -92,7 +97,7 @@ struct AppModelArchivePersistenceTests {
         await model.refreshModelAvailability(
             resolve: { _ in URL(fileURLWithPath: "/tmp/model.gguf") }
         )
-        return SUT(model: model, store: store)
+        return SUT(model: model, store: store, engine: engine)
     }
 
     private func startRunning(_ sut: SUT) async {
@@ -171,6 +176,38 @@ struct AppModelArchivePersistenceTests {
 
         await stop(sut)
         #expect(sut.store.list().first?.sentenceCount == 2)
+    }
+
+    @Test("a second session with sentences gets its own archive row")
+    func secondSessionGetsOwnRow() async {
+        let sut = await makeSUT()
+        await startRunning(sut)
+        sut.engine.enqueue(sentenceFinal)
+        #expect(await pollUntil { sut.model.recordingSessionID != nil }, "the first sentence persists")
+        guard let firstID = sut.model.recordingSessionID else {
+            Issue.record("the first session should own a recording row")
+            return
+        }
+        await stop(sut)
+
+        await startRunning(sut)
+        sut.engine.enqueue(.final(text: "さようなら。", startSample: 16000, endSample: 32000, lang: "ja"))
+        #expect(
+            await pollUntil {
+                sut.model.recordingSessionID != nil && sut.model.recordingSessionID != firstID
+            },
+            "the second session opens its own recording row"
+        )
+        guard let secondID = sut.model.recordingSessionID else {
+            Issue.record("the second session should own a recording row")
+            return
+        }
+        await stop(sut)
+
+        let summaries = sut.store.list()
+        #expect(summaries.count == 2, "two stopped sessions, two rows")
+        #expect(Set(summaries.map(\.id)) == Set([firstID, secondID]))
+        #expect(summaries.allSatisfy { summary in summary.sentenceCount == 1 })
     }
 
     @Test("a session stopped without sentences persists nothing")
@@ -286,12 +323,41 @@ struct AppModelArchivePersistenceTests {
         await stop(sut)
     }
 
+    // MARK: - Pause persistence
+
+    @Test("stop from paused persists the final pause span and excludes it from the duration")
+    func pausedStopPersistsSpanAndExcludesItFromDuration() async {
+        let sut = await makeSUT(finals: [sentenceFinal])
+        await startRunning(sut)
+        #expect(await pollUntil { sut.model.recordingSessionID != nil }, "the sentence creates the row")
+
+        sut.model.pause()
+        #expect(await pollUntil { sut.model.phase == .paused })
+        try? await Task.sleep(for: .milliseconds(400))
+
+        await stop(sut)
+
+        #expect(sut.model.pauseStartedAt == nil, "the stop closes the open pause span")
+        guard let summary = sut.store.list().first,
+              let started = sut.model.sessionStartedAt,
+              let ended = sut.model.sessionEndedAt
+        else {
+            Issue.record("the stopped session should be stored with its clock anchors")
+            return
+        }
+        #expect(summary.pausedMS >= 400, "the stored paused time carries the final pause span")
+        let activeMS = AppModel.milliseconds(of: ended - started) - summary.pausedMS
+        #expect(
+            abs((summary.durationS ?? 0) * 1000 - activeMS) <= 1000,
+            "the stored duration excludes the paused span"
+        )
+    }
+
     // MARK: - Launch sweep
 
     @Test("the launch sweep turns an abandoned recording row into an interrupted recent")
-    func sweepFlipsAbandonedRecording() async {
+    func launchSweepFlipsAbandonedRecording() async {
         let store = isolatedArchive()
-        let sut = await makeSUT(store: store)
         let abandoned = store.append(
             sentence: Sentence(index: 0, startS: 0, endS: 1.5, lang: "ja", text: "こんにちは"),
             sessionID: nil,
@@ -300,13 +366,15 @@ struct AppModelArchivePersistenceTests {
                 sourceLang: "ja", targetLang: "en", model: "test-model", chunkMS: 160
             )
         )
-        #expect(abandoned != nil)
-        let revisionBefore = sut.model.archiveRevision
+        #expect(abandoned != nil, "the abandoned recording row is seeded first")
 
-        sut.model.sweepArchivesOnLaunch()
+        let sut = await makeSUT(store: store)
 
-        #expect(sut.store.list().first?.status == .interrupted)
-        #expect(sut.model.archiveRevision != revisionBefore)
+        #expect(
+            sut.store.list().first?.status == .interrupted,
+            "the launch sweep runs from init, before anything can list the archive"
+        )
+        #expect(sut.model.archiveRevision != 0, "the sweep bumps the revision")
     }
 
     // MARK: - Degraded store

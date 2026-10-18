@@ -33,9 +33,11 @@ struct AppModelArchiveTests {
     }
 
     /// A recent with two sentences ("こんにちは" and "さようなら") and a 90 s
-    /// duration, seeded into a fresh isolated store.
-    private func makeModel(sentences: [String] = ["こんにちは", "さようなら"]) -> (AppModel, Int64) {
-        let store = isolatedArchive()
+    /// duration, seeded into `store` (a fresh isolated one by default).
+    private func makeModel(
+        sentences: [String] = ["こんにちは", "さようなら"],
+        store: ArchiveStore = isolatedArchive()
+    ) async -> (AppModel, Int64) {
         var id: Int64?
         for (index, text) in sentences.enumerated() {
             id = store.append(
@@ -45,7 +47,11 @@ struct AppModelArchiveTests {
         if let id {
             store.finalize(session: id, durationMS: 90000, saved: false)
         }
-        let model = AppModel(favorites: isolatedFavorites(), archive: store)
+        let model = AppModel(
+            favorites: isolatedFavorites(), archive: store,
+            initialModelResolve: { _ in nil }
+        )
+        await model.initialModelCheck?.value
         return (model, id ?? -1)
     }
 
@@ -53,11 +59,24 @@ struct AppModelArchiveTests {
         SessionEntry(sentence: sentence(0, text: text))
     }
 
+    /// A store whose database path sits under a regular file, so the open
+    /// fails terminally and every write fails. Returns the temp root for the
+    /// caller's cleanup.
+    private func makeDegradedStore() -> (store: ArchiveStore, root: URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimidasu-archive-mode-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let blocker = root.appendingPathComponent("blocker")
+        try? Data().write(to: blocker)
+        let store = ArchiveStore(location: blocker.appendingPathComponent("archives.sqlite"))
+        return (store, root)
+    }
+
     // MARK: - Availability gate
 
     @Test("opening is allowed only from idle-ish phases")
-    func canOpenMatrix() {
-        let (model, _) = makeModel()
+    func canOpenMatrix() async {
+        let (model, _) = await makeModel()
 
         #expect(model.canOpenArchivedSession)
         model.phase = .needsModel
@@ -72,8 +91,8 @@ struct AppModelArchiveTests {
     }
 
     @Test("opening is refused while a session is live-ish")
-    func openRefusedWhileLive() {
-        let (model, id) = makeModel()
+    func openRefusedWhileLive() async {
+        let (model, id) = await makeModel()
         model.phase = .running
 
         model.openArchiveSession(id: id)
@@ -82,11 +101,26 @@ struct AppModelArchiveTests {
         #expect(model.entries.isEmpty)
     }
 
+    @Test("starting is refused while an archive is open")
+    func startRefusedWhileArchiveOpen() async {
+        let (model, id) = await makeModel()
+        model.phase = .idle
+        model.openArchiveSession(id: id)
+        let entriesBefore = model.entries
+
+        model.start()
+
+        #expect(model.phase == .idle, "the start never leaves idle")
+        #expect(model.openArchive?.id == id, "the archive stays open")
+        #expect(model.entries == entriesBefore, "the pane keeps showing the archive")
+        #expect(model.sessionStartedAt == nil, "no session began")
+    }
+
     // MARK: - Open / close
 
     @Test("opening swaps in the rows, metadata, and anchors")
-    func openLoadsRowsAndResetsAnchors() {
-        let (model, id) = makeModel()
+    func openLoadsRowsAndResetsAnchors() async {
+        let (model, id) = await makeModel()
         model.entries = [entry("live row")]
         model.sessionCharacterCount = 42
         model.hudVisible = true
@@ -110,8 +144,8 @@ struct AppModelArchiveTests {
     }
 
     @Test("opening an unknown id is a no-op")
-    func openUnknownIdIsNoop() {
-        let (model, _) = makeModel()
+    func openUnknownIdIsNoop() async {
+        let (model, _) = await makeModel()
 
         model.openArchiveSession(id: 9999)
 
@@ -120,8 +154,8 @@ struct AppModelArchiveTests {
     }
 
     @Test("closing empties the pane without restoring the live rows")
-    func closeEmptiesPane() {
-        let (model, id) = makeModel()
+    func closeEmptiesPane() async {
+        let (model, id) = await makeModel()
         model.openArchiveSession(id: id)
         #expect(!model.entries.isEmpty)
 
@@ -199,8 +233,8 @@ struct AppModelArchiveTests {
     }
 
     @Test("archive boundaries clear a pending archive-translation intent")
-    func boundariesClearPendingArchiveIntent() {
-        let (model, first) = makeModel()
+    func boundariesClearPendingArchiveIntent() async {
+        let (model, first) = await makeModel()
         let secondID = appendArchive(to: model.archive)
 
         model.openArchiveSession(id: first)
@@ -230,8 +264,8 @@ struct AppModelArchiveTests {
     // MARK: - Promote / rename / delete
 
     @Test("promoting moves the session to Saved and updates the open banner")
-    func promoteUpdatesStoreAndBanner() {
-        let (model, id) = makeModel()
+    func promoteUpdatesStoreAndBanner() async {
+        let (model, id) = await makeModel()
         model.openArchiveSession(id: id)
         let revisionBefore = model.archiveRevision
 
@@ -243,8 +277,8 @@ struct AppModelArchiveTests {
     }
 
     @Test("the banner save icon promotes once and then no-ops")
-    func saveOpenArchivePromotesOnce() {
-        let (model, id) = makeModel()
+    func saveOpenArchivePromotesOnce() async {
+        let (model, id) = await makeModel()
         model.openArchiveSession(id: id)
         #expect(model.openArchive?.summary.saved == false)
 
@@ -257,8 +291,8 @@ struct AppModelArchiveTests {
     }
 
     @Test("the banner save icon is a no-op with nothing open")
-    func saveOpenArchiveWithoutOpenIsNoop() {
-        let (model, _) = makeModel()
+    func saveOpenArchiveWithoutOpenIsNoop() async {
+        let (model, _) = await makeModel()
         let revisionBefore = model.archiveRevision
 
         model.saveOpenArchive()
@@ -268,8 +302,8 @@ struct AppModelArchiveTests {
     }
 
     @Test("renaming updates the store and the open banner; an empty name clears")
-    func renameUpdatesStoreAndBanner() {
-        let (model, id) = makeModel()
+    func renameUpdatesStoreAndBanner() async {
+        let (model, id) = await makeModel()
         model.openArchiveSession(id: id)
 
         model.renameArchive(id: id, name: "Lecture 3")
@@ -281,9 +315,37 @@ struct AppModelArchiveTests {
         #expect(model.openArchive?.summary.name == nil)
     }
 
+    @Test("each failed archive command warns dismissibly without bumping the revision")
+    func commandWriteFailuresWarn() async {
+        let (store, root) = makeDegradedStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cases: [(suffix: String, run: @MainActor (AppModel) -> Void)] = [
+            ("This rename wasn't applied.", { model in model.renameArchive(id: 7, name: "Nope") }),
+            ("This session wasn't saved.", { model in model.promoteArchive(id: 7) }),
+            ("This session wasn't deleted.", { model in model.deleteArchive(id: 7) })
+        ]
+
+        for testCase in cases {
+            let (model, _) = await makeModel(sentences: [], store: store)
+            let revisionBefore = model.archiveRevision
+
+            testCase.run(model)
+
+            let warning = model.toasts.toasts.first { toast in
+                toast.key == ToastKey.archiveUnavailable
+            }
+            #expect(
+                warning?.body == "The session store couldn't be written to. " + testCase.suffix,
+                "the failed command names its own outcome"
+            )
+            #expect(warning?.isClosable == true, "the command warning is dismissible")
+            #expect(model.archiveRevision == revisionBefore, "a failed command bumps nothing")
+        }
+    }
+
     @Test("deleting the open session closes it first, then removes it")
-    func deleteClosesAndRemoves() {
-        let (model, id) = makeModel()
+    func deleteClosesAndRemoves() async {
+        let (model, id) = await makeModel()
         model.openArchiveSession(id: id)
 
         model.deleteArchive(id: id)
@@ -297,8 +359,8 @@ struct AppModelArchiveTests {
     // MARK: - Finalize guard
 
     @Test("finalizing without a recording session persists nothing")
-    func finalizeWithoutRecordingIsNoop() {
-        let (model, _) = makeModel()
+    func finalizeWithoutRecordingIsNoop() async {
+        let (model, _) = await makeModel()
         let revisionBefore = model.archiveRevision
 
         let finalized = model.finalizeLiveSession(durationMS: 5000)
@@ -309,8 +371,8 @@ struct AppModelArchiveTests {
     }
 
     @Test("a healthy store reports the archive as available")
-    func healthyStoreIsAvailable() {
-        let (model, _) = makeModel()
+    func healthyStoreIsAvailable() async {
+        let (model, _) = await makeModel()
 
         #expect(model.archiveAvailable)
         #expect(!model.archiveWriteFailed)

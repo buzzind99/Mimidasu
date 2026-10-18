@@ -102,7 +102,8 @@ final class ArchiveStore: Sendable {
             try database.finalize(
                 sessionID: session, endedAt: Date(), durationMS: durationMS, saved: saved
             )
-            try database.enforceRecentCap(keeping: Self.recentCap)
+            // A transient cap failure must not mark the landed write as failed.
+            try? database.enforceRecentCap(keeping: Self.recentCap)
             return true
         } catch {
             return false
@@ -115,7 +116,8 @@ final class ArchiveStore: Sendable {
     func sweepInterrupted() -> Bool {
         do {
             try database.sweepInterrupted(endedAt: Date())
-            try database.enforceRecentCap(keeping: Self.recentCap)
+            // A transient cap failure must not mark the landed sweep as failed.
+            try? database.enforceRecentCap(keeping: Self.recentCap)
             return true
         } catch {
             return false

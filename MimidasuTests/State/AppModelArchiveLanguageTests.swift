@@ -248,7 +248,7 @@ struct AppModelArchiveLanguageTests {
 
     @Test("a failed archive-mode write warns without latching the live persistence")
     func failedArchiveWriteWarnsWithoutLatching() async {
-        let sut = await makeSUT()
+        let sut = await makeSUT(translations: [0: SentenceTranslation(lang: "fr", text: "Seed")])
         #expect(sut.store.delete(id: sut.id), "the row is removed underneath the open pane")
         let revisionBefore = sut.model.archiveRevision
 
@@ -256,12 +256,17 @@ struct AppModelArchiveLanguageTests {
             index: 0, translation: SentenceTranslation(lang: "fr", text: "Third")
         )
 
-        #expect(landed, "the pane row still takes the translation")
-        #expect(!sut.model.archiveWriteFailed, "an archive-mode failure never latches the live session")
+        #expect(!landed, "the failed write reports itself")
         #expect(
-            sut.model.toasts.toasts.contains { toast in toast.key == ToastKey.archiveUnavailable },
-            "the archive warning posts without latching"
+            sut.model.entries.first?.translation(for: "fr")?.text == "Seed",
+            "the row keeps its previous translation instead of a phantom one"
         )
+        #expect(!sut.model.archiveWriteFailed, "an archive-mode failure never latches the live session")
+        let warning = sut.model.toasts.toasts.first { toast in
+            toast.key == ToastKey.archiveUnavailable
+        }
+        #expect(warning != nil, "the archive warning posts without latching")
+        #expect(warning?.isClosable == true, "the archive-mode warning is dismissible")
         #expect(sut.model.archiveRevision == revisionBefore, "a failed write bumps nothing")
     }
 }

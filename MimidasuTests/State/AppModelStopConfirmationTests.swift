@@ -14,8 +14,13 @@ struct AppModelStopConfirmationTests {
     private let livePhases: [SessionPhase] = [.running, .paused, .sourceLost]
     private let quietPhases: [SessionPhase] = [.needsModel, .idle, .starting, .stopping, .failed("boom")]
 
-    private func makeModel(store: ArchiveStore = isolatedArchive()) -> AppModel {
-        AppModel(favorites: isolatedFavorites(), archive: store)
+    private func makeModel(store: ArchiveStore = isolatedArchive()) async -> AppModel {
+        let model = AppModel(
+            favorites: isolatedFavorites(), archive: store,
+            initialModelResolve: { _ in nil }
+        )
+        await model.initialModelCheck?.value
+        return model
     }
 
     private func entry(_ text: String) -> SessionEntry {
@@ -25,8 +30,8 @@ struct AppModelStopConfirmationTests {
     }
 
     @Test("a live-ish session with rows and a healthy store prompts")
-    func liveNonEmptyPrompts() {
-        let model = makeModel()
+    func liveNonEmptyPrompts() async {
+        let model = await makeModel()
         model.entries = [entry("こんにちは")]
 
         for phase in livePhases {
@@ -36,8 +41,8 @@ struct AppModelStopConfirmationTests {
     }
 
     @Test("an empty transcript never prompts")
-    func emptyTranscriptNeverPrompts() {
-        let model = makeModel()
+    func emptyTranscriptNeverPrompts() async {
+        let model = await makeModel()
         model.entries = []
 
         for phase in livePhases {
@@ -47,8 +52,8 @@ struct AppModelStopConfirmationTests {
     }
 
     @Test("quiet phases never prompt even with rows")
-    func quietPhasesNeverPrompt() {
-        let model = makeModel()
+    func quietPhasesNeverPrompt() async {
+        let model = await makeModel()
         model.entries = [entry("こんにちは")]
 
         for phase in quietPhases {
@@ -58,8 +63,8 @@ struct AppModelStopConfirmationTests {
     }
 
     @Test("a latched write failure skips the prompt")
-    func writeFailureSkipsPrompt() {
-        let model = makeModel()
+    func writeFailureSkipsPrompt() async {
+        let model = await makeModel()
         model.entries = [entry("こんにちは")]
         model.phase = .running
         model.archiveWriteFailed = true
@@ -68,7 +73,7 @@ struct AppModelStopConfirmationTests {
     }
 
     @Test("a degraded store skips the prompt")
-    func degradedStoreSkipsPrompt() {
+    func degradedStoreSkipsPrompt() async {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("mimidasu-stop-confirm-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -78,7 +83,7 @@ struct AppModelStopConfirmationTests {
         let store = ArchiveStore(location: blocker.appendingPathComponent("archives.sqlite"))
         #expect(store.isDegraded)
 
-        let model = makeModel(store: store)
+        let model = await makeModel(store: store)
         model.entries = [entry("こんにちは")]
         model.phase = .running
 

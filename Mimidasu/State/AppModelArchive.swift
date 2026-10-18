@@ -75,11 +75,12 @@ extension AppModel {
 
     /// Posts the archive-unavailable warning without latching: a per-operation
     /// archive-mode write can fail without disabling the live session's
-    /// persistence.
-    func postArchiveWriteWarning(body: String) {
+    /// persistence. `isClosable` is opt-in because the live session's warning
+    /// is a condition to fix, not a transient card to wave away.
+    func postArchiveWriteWarning(body: String, isClosable: Bool = false) {
         toasts.post(
             key: ToastKey.archiveUnavailable, style: .yellowPersistent,
-            title: "Archive unavailable", body: body
+            title: "Archive unavailable", body: body, isClosable: isClosable
         )
     }
 
@@ -212,7 +213,13 @@ extension AppModel {
     /// confirmation; updates the opened banner in place when it is the same
     /// session.
     func promoteArchive(id: Int64) {
-        guard archive.promote(id: id) else { return }
+        guard archive.promote(id: id) else {
+            postArchiveWriteWarning(
+                body: "The session store couldn't be written to. This session wasn't saved.",
+                isClosable: true
+            )
+            return
+        }
         if openArchive?.id == id {
             openArchive?.summary.saved = true
         }
@@ -230,7 +237,13 @@ extension AppModel {
     /// clears back to the auto-title. Tier, eviction, ordering, and
     /// timestamps are unaffected.
     func renameArchive(id: Int64, name: String?) {
-        guard archive.rename(id: id, name: name) else { return }
+        guard archive.rename(id: id, name: name) else {
+            postArchiveWriteWarning(
+                body: "The session store couldn't be written to. This rename wasn't applied.",
+                isClosable: true
+            )
+            return
+        }
         if openArchive?.id == id {
             openArchive?.summary.name = ArchiveStore.normalizedName(name)
         }
@@ -242,7 +255,13 @@ extension AppModel {
         if openArchive?.id == id {
             closeArchive()
         }
-        guard archive.delete(id: id) else { return }
+        guard archive.delete(id: id) else {
+            postArchiveWriteWarning(
+                body: "The session store couldn't be written to. This session wasn't deleted.",
+                isClosable: true
+            )
+            return
+        }
         archiveRevision &+= 1
     }
 }
