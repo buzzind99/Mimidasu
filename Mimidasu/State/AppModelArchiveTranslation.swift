@@ -14,11 +14,12 @@ extension AppModel {
         archiveTranslationJob.resolveEngine = { [weak self] provider, target in
             guard let self else { return .cancelled }
             return await retranslate.resolveArchiveJobEngine(
-                selection: archiveJobSelection(for: provider), target: target
+                selection: archiveJobSelection(for: provider, target: target), target: target
             )
         }
         archiveTranslationJob.land = { [weak self] index, translation in
-            self?.landArchiveTranslation(index: index, translation: translation)
+            guard let self else { return false }
+            return landArchiveTranslation(index: index, translation: translation)
         }
         archiveTranslationJob.onEvent = { [weak self] event in
             self?.handleArchiveTranslationEvent(event)
@@ -38,10 +39,14 @@ extension AppModel {
 
     /// The failure summary's Retry action: re-runs the same language and
     /// provider over exactly the failed sentences, in index order, without
-    /// re-raising the cloud disclosure.
+    /// re-raising the cloud disclosure. Refused when the archive moved on:
+    /// the run is built from the currently open archive, so retrying the
+    /// previous archive's failure set would silently modify a session the
+    /// result was never reported for.
     func retryFailedArchiveTranslation() {
         guard !archiveTranslationJob.isActive,
               let previous = archiveTranslationJob.currentRun,
+              previous.sessionID == openArchive?.id,
               !archiveTranslationJob.failureIndexes.isEmpty
         else { return }
         beginArchiveTranslation(
@@ -51,12 +56,29 @@ extension AppModel {
         )
     }
 
-    /// Stops the run in flight: no new sentence starts, whatever is
-    /// airborne still lands (partial results stay stored), and the toast
-    /// dismisses — a canceled run posts no summary.
+    /// The archive picker's start request: refused while another
+    /// cloud-disclosure intent is held (the raise would clobber it and swap
+    /// the presented sheet's content mid-flight); an Apple pick starts its
+    /// run directly, and an external pick stages the run for the disclosure
+    /// whose confirm callback starts it.
+    func requestArchiveTranslation(provider: TranslationProvider, lang: String) {
+        guard providerAwaitingDisclosure == nil else { return }
+        if provider == .apple {
+            beginArchiveTranslation(provider: .apple, lang: lang)
+        } else {
+            providerAwaitingDisclosure = .archiveTranslation(provider, lang: lang)
+        }
+    }
+
+    /// Stops the run in flight — no new sentence starts, whatever is
+    /// airborne still lands (partial results stay stored) — and dismisses
+    /// the run's card: a canceled run posts no summary. The dismissal is
+    /// unconditional, because the failure summary card outlives the finished
+    /// run; the archive boundaries route through here to clear it.
     func cancelArchiveTranslation() {
-        guard archiveTranslationJob.isActive else { return }
-        archiveTranslationJob.cancel()
+        if archiveTranslationJob.isActive {
+            archiveTranslationJob.cancel()
+        }
         toasts.dismiss(key: ToastKey.archiveTranslation)
     }
 
@@ -105,18 +127,21 @@ extension AppModel {
         }
     }
 
-    /// The run's Apple model: the effective re-translate selection when it
-    /// names an Apple model (its known-unavailable degrade included), else
-    /// Apple-fast — the archive route's mapping for `.session` and external
-    /// selections. The picker's provider, never the settings selection,
-    /// decides the branch.
-    private func archiveJobSelection(for provider: TranslationProvider) -> RetranslateEngine {
+    /// The run's Apple model: the effective re-translate selection resolved
+    /// against the RUN's target — probe evidence only counts for the pair it
+    /// was probed for, so the settings pair must not degrade a foreign
+    /// archive target — naming an Apple model, else Apple-fast. The
+    /// picker's provider, never the settings selection, decides the branch.
+    private func archiveJobSelection(
+        for provider: TranslationProvider, target: TargetLanguage
+    ) -> RetranslateEngine {
         guard provider == .apple else {
             return RetranslateEngine(provider: provider) ?? .appleFast
         }
-        switch retranslate.effectiveRetranslateSelection {
+        let selection = retranslate.effectiveRetranslateSelection(targetCode: target.code)
+        switch selection {
         case .appleFast, .appleHighFidelity:
-            return retranslate.effectiveRetranslateSelection
+            return selection
         case .session, .google, .deepl, .openrouter:
             return .appleFast
         }
@@ -135,17 +160,38 @@ extension AppModel {
     /// Lands one bulk result: the store upsert keyed by the run's captured
     /// session id (so an airborne result at close time still persists), the
     /// row swap only while the pane still shows that archive, and the
-    /// revision bump every archive surface re-reads through.
-    private func landArchiveTranslation(index: Int, translation: SentenceTranslation) {
-        guard let sessionID = archiveTranslationJob.currentRun?.sessionID else { return }
-        archive.upsert(translation: translation, index: index, session: sessionID)
+    /// revision bump every archive surface re-reads through. Returns whether
+    /// the write landed; a lost write posts the run's archive warning and
+    /// makes the sentence a retryable failure in the job's accounting.
+    private func landArchiveTranslation(index: Int, translation: SentenceTranslation) -> Bool {
+        guard let sessionID = archiveTranslationJob.currentRun?.sessionID else { return false }
+        let wrote = archive.upsert(translation: translation, index: index, session: sessionID)
         if openArchive?.id == sessionID, let at = entryPositionBySentence[index] {
             entries[at].replaceTranslation(translation)
+        }
+        guard wrote else {
+            reportArchiveWriteFailure()
+            return false
         }
         if openArchive?.id == sessionID {
             refreshOpenArchiveLanguages()
         }
         archiveRevision &+= 1
+        return true
+    }
+
+    /// Posts the archive warning once per run: repeats are skipped while the
+    /// card is up, and nothing latches — the per-session write latch belongs
+    /// to the live recording, so a later run reports its own failures.
+    private func reportArchiveWriteFailure() {
+        let warningVisible = toasts.toasts.contains { toast in
+            toast.key == ToastKey.archiveUnavailable
+        }
+        guard !warningVisible else { return }
+        postArchiveWriteWarning(
+            body: "The session store couldn't be written to. "
+                + "This translation wasn't added to the archive."
+        )
     }
 
     // MARK: - Event reporting
@@ -161,11 +207,11 @@ extension AppModel {
         case .cancelled:
             toasts.dismiss(key: ToastKey.archiveTranslation)
         case let .unavailable(reason):
-            // The lane's unavailable copy, verbatim: the two retry surfaces
-            // must not drift.
+            // The run's own card, not the lane's retry key: a first-time
+            // Translate must not read as a re-translation.
             toasts.post(
-                key: ToastKey.retranslate, style: .yellowAuto,
-                title: "Re-translate unavailable", body: reason
+                key: ToastKey.archiveTranslation, style: .yellowAuto,
+                title: "Archive translation unavailable", body: reason
             )
         }
     }
@@ -196,7 +242,8 @@ extension AppModel {
             toasts.post(
                 key: ToastKey.archiveTranslation, style: .info,
                 title: "Archive translation finished",
-                body: "Translated \(translated) sentences to \(language.nativeName)"
+                body: "Translated \(ArchivedSessionSummary.sentenceCountText(translated)) "
+                    + "to \(language.nativeName)"
             )
         } else {
             toasts.post(

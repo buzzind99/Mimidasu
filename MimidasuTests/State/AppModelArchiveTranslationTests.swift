@@ -140,14 +140,17 @@ struct AppModelArchiveTranslationTests {
         #expect(summary?.body == "2/3 translated · 1 failed")
         #expect(summary?.action?.label == "Retry failed sentences")
         #expect(summary?.autoDismisses == false, "the failure summary waits for its retry")
-        #expect(sut.model.providerAwaitingDisclosure == nil, "a retry never re-raises the disclosure")
 
+        // A deliberate held intent survives the retry: the retry neither
+        // re-raises the disclosure nor clears what is staged for another
+        // sheet.
+        sut.model.providerAwaitingDisclosure = .retranslateEngine(.deepl)
         engine.clearFailures()
         summary?.action?.handler()
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                archiveToast(sut.model)?.body == "Translated 1 sentences to Français"
+                archiveToast(sut.model)?.body == "Translated 1 sentence to Français"
                     && !sut.model.archiveTranslationRunning
             },
             "the retry lands the previously failed sentence"
@@ -160,8 +163,74 @@ struct AppModelArchiveTranslationTests {
             sut.model.entries.allSatisfy { entry in entry.translation(for: "fr") != nil },
             "every row now carries a translation"
         )
-        #expect(sut.model.providerAwaitingDisclosure == nil)
+        #expect(
+            sut.model.providerAwaitingDisclosure == .retranslateEngine(.deepl),
+            "the retry leaves the held disclosure intent untouched"
+        )
     }
+
+    @Test("a retry after the archive swapped is refused")
+    func retryAfterArchiveSwapIsRefused() async {
+        let sut = await makeSUT()
+        let engine = ScriptedArchiveEngine()
+        engine.fail(on: ["さようなら"])
+        install(engine, for: .google, on: sut.model)
+
+        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                !sut.model.archiveTranslationRunning
+                    && sut.model.archiveTranslationJob.failureIndexes == [1]
+            },
+            "the run finishes with one failure"
+        )
+        let batches = engine.recordedBatches.count
+
+        let otherID = appendArchive(to: sut.store)
+        sut.model.openArchiveSession(id: otherID)
+        #expect(sut.model.openArchive?.id == otherID, "the other archive is open")
+
+        sut.model.retryFailedArchiveTranslation()
+
+        #expect(!sut.model.archiveTranslationJob.isActive, "the cross-archive retry is refused")
+        #expect(engine.recordedBatches.count == batches, "no new engine batch is sent")
+        #expect(
+            sut.store.load(id: otherID)?.entries.allSatisfy { entry in entry.translations.isEmpty } == true,
+            "the swapped-in archive is never modified"
+        )
+    }
+
+    @Test("closing and reopening clears a finished run's failure card")
+    func closingAndReopeningClearsFailureCard() async {
+        let sut = await makeSUT()
+        let engine = ScriptedArchiveEngine()
+        engine.fail(on: ["さようなら"])
+        install(engine, for: .google, on: sut.model)
+
+        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                archiveToast(sut.model)?.title == "Archive translation finished"
+                    && !sut.model.archiveTranslationRunning
+            },
+            "the failure summary lands"
+        )
+        #expect(archiveToast(sut.model)?.action != nil, "the failure card is up and waits")
+
+        sut.model.closeArchive()
+
+        #expect(archiveToast(sut.model) == nil, "the card dismisses with the close even though the run had finished")
+
+        sut.model.openArchiveSession(id: sut.id)
+
+        #expect(archiveToast(sut.model) == nil, "the failure card never resurrects on reopen")
+    }
+}
+
+/// The cloud-disclosure, cancel-surface, unavailable-engine, lost-write,
+/// and completeness cases of the suite, split from the main declaration at
+/// the type-body-length gate.
+extension AppModelArchiveTranslationTests {
 
     // MARK: - Cloud disclosure
 
@@ -200,10 +269,7 @@ struct AppModelArchiveTranslationTests {
         )
         #expect(!sut.model.archiveTranslationRunning)
         #expect(sut.model.archiveTranslationJob.currentRun == nil)
-        #expect(
-            sut.model.archive.load(id: sut.id)?.entries.allSatisfy { entry in entry.translations.isEmpty }
-                == true
-        )
+        #expect(sut.model.archive.load(id: sut.id)?.entries.allSatisfy { entry in entry.translations.isEmpty } == true)
     }
 
     @Test("declining the archive-translation disclosure starts nothing")
@@ -268,10 +334,7 @@ struct AppModelArchiveTranslationTests {
 
         #expect(archiveToast(sut.model) == nil, "the card clears with the cancel")
         gate.release()
-        #expect(
-            await pollUntil(timeout: resultTimeout) { !sut.model.archiveTranslationRunning },
-            "the released run winds down"
-        )
+        #expect(await pollUntil(timeout: resultTimeout) { !sut.model.archiveTranslationRunning }, "the released run winds down")
         #expect(engine.recordedBatches == [["こんにちは"]], "no new sentence starts after the cancel")
         #expect(
             sut.store.load(id: sut.id)?.entries.first?.translations
@@ -281,6 +344,106 @@ struct AppModelArchiveTranslationTests {
         #expect(
             !sut.model.toasts.toasts.contains { toast in toast.title == "Archive translation finished" },
             "a canceled run posts no summary"
+        )
+    }
+
+    @Test("an open swap cancels the airborne run and its result persists under the original id")
+    func openSwapCancelsAndAirborneResultPersists() async {
+        let sut = await makeSUT()
+        let gate = PermitGate()
+        let engine = ScriptedArchiveEngine(gate: gate)
+        install(engine, for: .google, on: sut.model)
+
+        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                sut.model.archiveTranslationRunning && engine.recordedBatches.count == 1
+            },
+            "the run starts and parks on its first sentence"
+        )
+
+        let otherID = appendArchive(to: sut.store)
+        sut.model.openArchiveSession(id: otherID)
+
+        #expect(sut.model.openArchive?.id == otherID, "the swap opened the other archive")
+        #expect(archiveToast(sut.model) == nil, "the card clears with the swap")
+        gate.release()
+        #expect(
+            await pollUntil(timeout: resultTimeout) { !sut.model.archiveTranslationRunning },
+            "the released run winds down"
+        )
+        #expect(engine.recordedBatches.count == 1, "no new sentence starts after the swap")
+        #expect(
+            sut.store.load(id: sut.id)?.entries.first?.translations
+                == [SentenceTranslation(lang: "fr", text: "T:こんにちは", engine: .google)],
+            "the airborne result still persists under its own archive's id"
+        )
+        #expect(
+            sut.store.load(id: otherID)?.entries.allSatisfy { entry in entry.translations.isEmpty } == true,
+            "the newly opened archive is untouched"
+        )
+    }
+
+    @Test("the progress card's Cancel action stops the run and keeps the partial rows")
+    func toastCancelActionStopsRun() async {
+        let sut = await makeSUT()
+        let gate = PermitGate()
+        let engine = ScriptedArchiveEngine(gate: gate)
+        install(engine, for: .google, on: sut.model)
+
+        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                sut.model.archiveTranslationRunning && engine.recordedBatches.count == 1
+            },
+            "the run starts and parks on its first sentence"
+        )
+        #expect(archiveToast(sut.model)?.action != nil, "the progress card carries the Cancel action")
+
+        archiveToast(sut.model)?.action?.handler()
+
+        #expect(archiveToast(sut.model) == nil, "the cancel dismisses the card")
+        gate.release()
+        #expect(
+            await pollUntil(timeout: resultTimeout) { !sut.model.archiveTranslationRunning },
+            "the released run winds down"
+        )
+        #expect(engine.recordedBatches.count == 1, "no sentence starts after the cancel")
+        #expect(
+            sut.store.load(id: sut.id)?.entries.first?.translations
+                == [SentenceTranslation(lang: "fr", text: "T:こんにちは", engine: .google)],
+            "the airborne result still persists"
+        )
+    }
+
+    @Test("deleting the open archive cancels the run")
+    func deletingOpenArchiveCancelsRun() async {
+        let sut = await makeSUT()
+        let gate = PermitGate()
+        let engine = ScriptedArchiveEngine(gate: gate)
+        install(engine, for: .google, on: sut.model)
+
+        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                sut.model.archiveTranslationRunning && engine.recordedBatches.count == 1
+            },
+            "the run starts and parks on its first sentence"
+        )
+
+        sut.model.deleteArchive(id: sut.id)
+
+        #expect(archiveToast(sut.model) == nil, "the card clears with the delete")
+        #expect(sut.model.openArchive == nil, "the open archive is gone")
+        gate.release()
+        #expect(
+            await pollUntil(timeout: resultTimeout) { !sut.model.archiveTranslationRunning },
+            "the released run winds down"
+        )
+        #expect(engine.recordedBatches.count == 1, "no sentence starts after the delete")
+        #expect(
+            !sut.model.toasts.toasts.contains { toast in toast.title == "Archive translation finished" },
+            "the deleted archive's run posts no summary"
         )
     }
 
@@ -324,23 +487,86 @@ struct AppModelArchiveTranslationTests {
     @Test("an external start with no engine reports unavailable and starts nothing")
     func unavailableEngineReportsAndStartsNothing() async {
         let sut = await makeSUT()
-        sut.model.retranslateEngineFactory = { _ in nil }
+        sut.model.retranslateEngineFactory = { _, _ in nil }
 
         sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
 
         #expect(
-            await pollUntil(timeout: resultTimeout) { retranslateToast(sut.model) != nil },
+            await pollUntil(timeout: resultTimeout) { archiveToast(sut.model) != nil },
             "the unavailable report lands"
         )
-        let toast = retranslateToast(sut.model)
+        let toast = archiveToast(sut.model)
         #expect(toast?.style == .yellowAuto)
-        #expect(toast?.title == "Re-translate unavailable")
+        #expect(toast?.title == "Archive translation unavailable", "the run's own copy, not the retry key's")
         #expect(toast?.body == "No API key stored for Google Translate.")
+        #expect(toast?.progress == nil, "no progress card is ever posted")
+        #expect(retranslateToast(sut.model) == nil, "the per-row lane's key is untouched")
         #expect(!sut.model.archiveTranslationRunning, "the claim releases with the report")
-        #expect(archiveToast(sut.model) == nil, "no progress card is ever posted")
+        #expect(sut.model.archive.load(id: sut.id)?.entries.allSatisfy { entry in entry.translations.isEmpty } == true)
+    }
+
+    // MARK: - Lost store writes
+
+    @Test("lost store writes count as failed sentences and warn once per run")
+    func lostStoreWritesFailSentencesAndWarnOnce() async {
+        let sut = await makeSUT()
+        let gate = PermitGate()
+        let engine = ScriptedArchiveEngine(gate: gate)
+        install(engine, for: .google, on: sut.model)
+
+        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
         #expect(
-            sut.model.archive.load(id: sut.id)?.entries.allSatisfy { entry in entry.translations.isEmpty }
-                == true
+            await pollUntil(timeout: resultTimeout) {
+                sut.model.archiveTranslationRunning && engine.recordedBatches.count == 1
+            },
+            "the run parks on its first sentence"
+        )
+
+        // The session row vanishes under the run (a delete, or a store
+        // fault): every upsert for it now fails on the session foreign key.
+        #expect(sut.store.delete(id: sut.id))
+
+        gate.release()
+        gate.release()
+        gate.release()
+        #expect(
+            await pollUntil(timeout: resultTimeout) { !sut.model.archiveTranslationRunning },
+            "the run winds down"
+        )
+        #expect(sut.model.archiveTranslationJob.translatedCount == 0, "no lost write is counted as a success")
+        #expect(
+            sut.model.archiveTranslationJob.failureIndexes == [0, 1, 2],
+            "every lost write is a retryable failure"
+        )
+        let warnings = sut.model.toasts.toasts.filter { toast in toast.key == ToastKey.archiveUnavailable }
+        #expect(warnings.count == 1, "one warning card covers the run, not one per sentence")
+        #expect(
+            archiveToast(sut.model)?.body == "0/3 translated · 3 failed",
+            "the summary reports the lost writes honestly"
+        )
+    }
+
+    // MARK: - Complete-language rerun
+
+    @Test("a complete language reruns the whole session and overwrites the stored texts")
+    func completeLanguageRerunsWholeSession() async {
+        let sut = await makeSUT(translations: [0: "Seed 0", 1: "Seed 1", 2: "Seed 2"])
+        let engine = ScriptedArchiveEngine()
+        install(engine, for: .google, on: sut.model)
+
+        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
+            "the complete language re-runs every sentence"
+        )
+        #expect(
+            engine.recordedBatches == [["こんにちは"], ["さようなら"], ["おはよう"]],
+            "the whole session is sent, not the (empty) missing set"
+        )
+        #expect(
+            sut.store.load(id: sut.id)?.entries.map { entry in entry.translations } == expectedFRLandings,
+            "every stored seed is overwritten by the fresh pass"
         )
     }
 

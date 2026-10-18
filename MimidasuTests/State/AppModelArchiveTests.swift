@@ -5,7 +5,9 @@ import Testing
 /// `AppModel`'s archive-mode surface over a seeded in-temp store: the
 /// open/close of a stored session into the transcript pane (rows, metadata,
 /// anchors, HUD), the availability gate against live phases, the
-/// promote/rename/delete commands, and the banner-update-in-place behavior.
+/// promote/rename/delete commands, the banner-update-in-place behavior, and
+/// the bulk-run boundaries (a same-id reopen is a no-op; another id or a
+/// close cancels).
 ///
 /// No session machinery involved — these tests seed the store directly and
 /// poke `phase`; the begin-driven persistence lives in
@@ -129,6 +131,100 @@ struct AppModelArchiveTests {
         #expect(model.entries.isEmpty)
         #expect(model.entryPositionBySentence.isEmpty)
         #expect(model.sessionCharacterCount == 0)
+    }
+
+    // MARK: - Bulk-run boundaries
+
+    @Test("re-opening the open archive leaves its running run claimed")
+    func reopenSameArchiveKeepsRunningRun() async {
+        let sut = await makeSUT()
+        let gate = PermitGate()
+        let engine = ScriptedArchiveEngine(gate: gate)
+        install(engine, for: .google, on: sut.model)
+
+        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        #expect(
+            await pollUntil {
+                sut.model.archiveTranslationRunning && engine.recordedBatches.count == 1
+            },
+            "the run starts and parks on its first sentence"
+        )
+
+        sut.model.openArchiveSession(id: sut.id)
+
+        #expect(sut.model.archiveTranslationJob.isActive, "the same-id reopen must not cancel the run")
+        #expect(archiveToast(sut.model) != nil, "its progress card stays up")
+        #expect(engine.recordedBatches == [["こんにちは"]], "no new flight starts")
+
+        gate.release()
+        gate.release()
+        gate.release()
+        #expect(
+            await pollUntil { runFinished(sut.model, translated: 3) },
+            "the untouched run completes every sentence"
+        )
+    }
+
+    @Test("opening another archive cancels the run over the previous one")
+    func openAnotherArchiveCancelsRunningRun() async {
+        let sut = await makeSUT()
+        let secondID = appendArchive(to: sut.store)
+        let gate = PermitGate()
+        let engine = ScriptedArchiveEngine(gate: gate)
+        install(engine, for: .google, on: sut.model)
+
+        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        #expect(
+            await pollUntil {
+                sut.model.archiveTranslationRunning && engine.recordedBatches.count == 1
+            },
+            "the run starts and parks on its first sentence"
+        )
+
+        sut.model.openArchiveSession(id: secondID)
+
+        #expect(sut.model.openArchive?.id == secondID)
+        #expect(archiveToast(sut.model) == nil, "the swap cancels and clears the card")
+        gate.release()
+        #expect(
+            await pollUntil { !sut.model.archiveTranslationRunning },
+            "the released run winds down canceled"
+        )
+        #expect(engine.recordedBatches == [["こんにちは"]], "no new sentence starts after the cancel")
+        #expect(
+            sut.store.load(id: sut.id)?.entries.first?.translations
+                == [SentenceTranslation(lang: "fr", text: "T:こんにちは", engine: .google)],
+            "the airborne result still persists under the first archive"
+        )
+    }
+
+    @Test("archive boundaries clear a pending archive-translation intent")
+    func boundariesClearPendingArchiveIntent() {
+        let (model, first) = makeModel()
+        let secondID = appendArchive(to: model.archive)
+
+        model.openArchiveSession(id: first)
+        model.providerAwaitingDisclosure = .archiveTranslation(.deepl, lang: "fr")
+        model.openArchiveSession(id: first)
+        #expect(
+            model.providerAwaitingDisclosure == .archiveTranslation(.deepl, lang: "fr"),
+            "a same-id reopen swaps nothing and keeps the intent"
+        )
+
+        model.openArchiveSession(id: secondID)
+        #expect(model.providerAwaitingDisclosure == nil, "the swap clears the archive intent")
+
+        model.providerAwaitingDisclosure = .archiveTranslation(.google, lang: "de")
+        model.closeArchive()
+        #expect(model.providerAwaitingDisclosure == nil, "closing clears it")
+
+        model.openArchiveSession(id: first)
+        model.providerAwaitingDisclosure = .retranslateEngine(.deepl)
+        model.closeArchive()
+        #expect(
+            model.providerAwaitingDisclosure == .retranslateEngine(.deepl),
+            "other intent kinds survive the boundary"
+        )
     }
 
     // MARK: - Promote / rename / delete

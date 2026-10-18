@@ -114,6 +114,7 @@ struct ArchiveTranslationJobTests {
         ])
         #expect(job.kind == .google)
         #expect(job.currentRun == request)
+        #expect(job.pendingRequest == nil, "the request moves into `currentRun` once the run begins")
         #expect(job.isActive == false)
         #expect(job.isRunning == false)
     }
@@ -144,6 +145,48 @@ struct ArchiveTranslationJobTests {
         #expect(job.processed == 4, "the progress count includes the failures")
         #expect(recorder.events.last == .finished(translated: 2, failedIndexes: [1, 2]))
         #expect(job.isActive == false)
+    }
+
+    @Test("a landing sink reporting a lost write counts the sentence as failed")
+    func lostWriteCountsAsFailure() async {
+        let job = makeJob()
+        let engine = ScriptedEngine()
+        job.resolveEngine = { _, _ in .ready(engine: engine, kind: .google) }
+        let recorder = Recorder()
+        recorder.unlandedIndexes = [1]
+        job.onEvent = recorder.recordEvent
+        job.land = recorder.recordLanding
+
+        #expect(job.prepare())
+        await job.run(makeRequest())
+
+        #expect(recorder.landedIndexes == [0, 1, 2], "the sink still sees every result")
+        #expect(job.translatedCount == 2, "the lost write is not counted as a success")
+        #expect(job.failureIndexes == [1], "the lost write becomes a retryable failure")
+        #expect(job.processed == 3)
+        #expect(recorder.events.last == .finished(translated: 2, failedIndexes: [1]))
+    }
+
+    @Test("an engine-reported CancellationError fails that sentence and the walk continues")
+    func engineCancellationFailsOnlyItsSentence() async {
+        let job = makeJob()
+        let engine = ScriptedEngine()
+        engine.cancel(on: ["s1"])
+        job.resolveEngine = { _, _ in .ready(engine: engine, kind: .google) }
+        let recorder = Recorder()
+        job.onEvent = recorder.recordEvent
+        job.land = recorder.recordLanding
+
+        #expect(job.prepare())
+        await job.run(makeRequest(scope: .all))
+
+        #expect(
+            engine.recordedBatches == [["s0"], ["s1"], ["s2"]],
+            "the walk continues past the engine-reported cancellation"
+        )
+        #expect(recorder.landedIndexes == [0, 2])
+        #expect(job.failureIndexes == [1])
+        #expect(recorder.events.last == .finished(translated: 2, failedIndexes: [1]))
     }
 
     // MARK: - Cancel
@@ -177,6 +220,65 @@ struct ArchiveTranslationJobTests {
         ])
         #expect(job.isActive == false)
         #expect(job.isRunning == false)
+    }
+
+    @Test("a cancel during engine resolution discards the run silently")
+    func cancelDuringResolutionDiscardsRun() async {
+        let job = makeJob()
+        let gate = AsyncGate()
+        let engine = ScriptedEngine()
+        job.resolveEngine = { _, _ in
+            await gate.wait()
+            return .ready(engine: engine, kind: .google)
+        }
+        let recorder = Recorder()
+        job.onEvent = recorder.recordEvent
+        job.land = recorder.recordLanding
+
+        #expect(job.prepare())
+        let run = Task { await job.run(makeRequest()) }
+        #expect(
+            await pollUntil(timeout: resultTimeout) { gate.enteredCount == 1 },
+            "the run parks in engine resolution"
+        )
+        #expect(job.pendingRequest != nil, "the claimed request is visible while resolving")
+        job.cancel()
+        gate.open()
+        await run.value
+
+        #expect(recorder.events.isEmpty, "a cancelled resolution reports nothing")
+        #expect(recorder.landedIndexes.isEmpty)
+        #expect(engine.recordedBatches.isEmpty)
+        #expect(job.isActive == false)
+        #expect(job.isRunning == false)
+        #expect(job.currentRun == nil)
+        #expect(job.pendingRequest == nil)
+    }
+
+    @Test("a real cancel surfacing as a CancellationError stops the walk")
+    func realCancelThroughCancellationErrorStopsWalk() async {
+        let job = makeJob()
+        let gate = AsyncGate()
+        let engine = ScriptedEngine(gate: gate)
+        engine.cancel(on: ["s0"])
+        job.resolveEngine = { _, _ in .ready(engine: engine, kind: .google) }
+        let recorder = Recorder()
+        job.onEvent = recorder.recordEvent
+        job.land = recorder.recordLanding
+
+        #expect(job.prepare())
+        let run = Task { await job.run(makeRequest()) }
+        #expect(
+            await pollUntil(timeout: resultTimeout) { gate.enteredCount == 1 },
+            "the first sentence parks in the engine"
+        )
+        job.cancel()
+        gate.open()
+        await run.value
+
+        #expect(recorder.events.last == .cancelled(translated: 0))
+        #expect(engine.recordedBatches == [["s0"]], "no sentence starts after the cancel")
+        #expect(job.failureIndexes.isEmpty, "a real cancel is not a failure")
     }
 
     @Test("a missing-scope rerun after a cancel resumes with only the remaining indexes")
@@ -261,6 +363,11 @@ struct ArchiveTranslationJobTests {
         ])
         #expect(job.failureIndexes.isEmpty)
     }
+}
+
+/// The claim-lifecycle and engine-resolution cases of the suite, split from
+/// the main declaration at the type-body-length gate.
+extension ArchiveTranslationJobTests {
 
     // MARK: - Claim lifecycle
 
@@ -333,6 +440,7 @@ struct ArchiveTranslationJobTests {
         #expect(recorder.landedIndexes.isEmpty)
         #expect(job.isActive == false)
         #expect(job.isRunning == false)
+        #expect(job.pendingRequest == nil, "an early return clears the pending request")
     }
 
     @Test("a cancelled resolution stays silent")
@@ -350,6 +458,7 @@ struct ArchiveTranslationJobTests {
         #expect(recorder.landedIndexes.isEmpty)
         #expect(job.isActive == false)
         #expect(job.isRunning == false)
+        #expect(job.pendingRequest == nil)
     }
 
     @Test("an empty scope finishes at zero without resolving the engine")
@@ -369,6 +478,7 @@ struct ArchiveTranslationJobTests {
 
         #expect(recorder.events == [.finished(translated: 0, failedIndexes: [])])
         #expect(resolutions.withLock { count in count } == 0, "the resolver is never consulted")
+        #expect(job.pendingRequest == nil, "an empty scope never publishes a pending request")
         #expect(job.isActive == false)
     }
 
@@ -394,6 +504,7 @@ struct ArchiveTranslationJobTests {
         )
         #expect(job.isActive, "the claim is active from prepare onward")
         #expect(job.isRunning == false, "no engine work starts while resolving")
+        #expect(job.pendingRequest != nil, "the resolving request is readable during the claim")
 
         resolutionGate.open()
         #expect(
@@ -401,6 +512,7 @@ struct ArchiveTranslationJobTests {
             "the first sentence parks in the engine"
         )
         #expect(job.isRunning, "the loop is running once the engine is resolved")
+        #expect(job.pendingRequest == nil, "the pending request moved into `currentRun`")
         #expect(recorder.events.first == .started(total: 3))
 
         engineGate.open()
@@ -408,123 +520,5 @@ struct ArchiveTranslationJobTests {
         #expect(job.isRunning == false)
         #expect(job.isActive == false)
         #expect(recorder.events.last == .finished(translated: 3, failedIndexes: []))
-    }
-}
-
-// MARK: - Fixtures
-
-/// The job's event and landing sinks, kept together so a test can script a
-/// one-shot cancel after the Nth landing.
-@MainActor
-private final class Recorder {
-    private(set) var events: [ArchiveTranslationJob.Event] = []
-    private(set) var landedIndexes: [Int] = []
-    private(set) var landed: [SentenceTranslation] = []
-
-    /// The landing ordinal that triggers `cancel` once, then defuses.
-    var cancelAfterLandings: Int?
-    var cancel: (@MainActor () -> Void)?
-
-    func recordEvent(_ event: ArchiveTranslationJob.Event) {
-        events.append(event)
-    }
-
-    func recordLanding(_ index: Int, _ translation: SentenceTranslation) {
-        landedIndexes.append(index)
-        landed.append(translation)
-        if landedIndexes.count == cancelAfterLandings {
-            cancelAfterLandings = nil
-            cancel?()
-        }
-    }
-}
-
-/// A one-shot gate: `wait()` parks until `open()` releases every waiter, and
-/// later calls pass straight through. The entered count is the deterministic
-/// "the run reached this point" observable.
-private final class AsyncGate: @unchecked Sendable {
-    private struct State {
-        var open = false
-        var entered = 0
-        var waiters: [CheckedContinuation<Void, Never>] = []
-    }
-
-    private let state = Mutex(State())
-
-    var enteredCount: Int {
-        state.withLock { current in current.entered }
-    }
-
-    func wait() async {
-        await withCheckedContinuation { continuation in
-            let immediate = state.withLock { current -> CheckedContinuation<Void, Never>? in
-                current.entered += 1
-                guard !current.open else { return continuation }
-                current.waiters.append(continuation)
-                return nil
-            }
-            immediate?.resume()
-        }
-    }
-
-    func open() {
-        let parked = state.withLock { current -> [CheckedContinuation<Void, Never>] in
-            current.open = true
-            let waiters = current.waiters
-            current.waiters.removeAll()
-            return waiters
-        }
-        for waiter in parked {
-            waiter.resume()
-        }
-    }
-}
-
-/// Deterministic engine double: translates `text` to `"T:\(text)"`, records
-/// every batch (one sentence per call, the job's contract), fails on
-/// scripted inputs, and can park each call on a gate until released.
-private final class ScriptedEngine: TranslationEngine, @unchecked Sendable {
-    let preferredBatchSize = 1
-    var onRetry: (@Sendable (RetryProgress) -> Void)?
-
-    private struct State {
-        var batches: [[String]] = []
-        var failing: Set<String> = []
-        let gate: AsyncGate?
-    }
-
-    private let state: Mutex<State>
-
-    init(gate: AsyncGate? = nil) {
-        state = Mutex(State(gate: gate))
-    }
-
-    var recordedBatches: [[String]] {
-        state.withLock { current in current.batches }
-    }
-
-    /// Inputs that throw instead of translating.
-    func fail(on texts: Set<String>) {
-        state.withLock { current in current.failing.formUnion(texts) }
-    }
-
-    func clearFailures() {
-        state.withLock { current in current.failing.removeAll() }
-    }
-
-    func translate(_ texts: [String]) async throws -> [String] {
-        let gate = state.withLock { current -> AsyncGate? in
-            current.batches.append(texts)
-            return current.gate
-        }
-        if let gate {
-            await gate.wait()
-        }
-        try Task.checkCancellation()
-        let failing = state.withLock { current in current.failing }
-        if texts.contains(where: { text in failing.contains(text) }) {
-            throw TranslationEngineError.serverError(500)
-        }
-        return texts.map { text in "T:\(text)" }
     }
 }

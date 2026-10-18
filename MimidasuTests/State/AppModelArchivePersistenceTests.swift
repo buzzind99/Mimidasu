@@ -112,6 +112,19 @@ struct AppModelArchivePersistenceTests {
         text: "こんにちは。", startSample: 0, endSample: 16000, lang: "ja"
     )
 
+    /// A store whose database path sits under a regular file, so the open
+    /// fails terminally and every write fails. Returns the temp root for the
+    /// caller's cleanup.
+    private func makeDegradedStore() -> (store: ArchiveStore, root: URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimidasu-archive-degraded-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let blocker = root.appendingPathComponent("blocker")
+        try? Data().write(to: blocker)
+        let store = ArchiveStore(location: blocker.appendingPathComponent("archives.sqlite"))
+        return (store, root)
+    }
+
     // MARK: - Lazy recording row
 
     @Test("the first sentence creates the recording row; stop finalizes it")
@@ -171,6 +184,108 @@ struct AppModelArchivePersistenceTests {
         #expect(!sut.model.toasts.toasts.contains { toast in toast.key == ToastKey.archiveRecent })
     }
 
+    // MARK: - Translation write-back
+
+    @Test("a live translation persists mid-flight and survives the stop")
+    func liveTranslationPersistsMidFlightAndAfterStop() async {
+        let sut = await makeSUT(finals: [sentenceFinal])
+        await startRunning(sut)
+        #expect(await pollUntil { sut.model.recordingSessionID != nil }, "the sentence creates the row")
+        guard let id = sut.model.recordingSessionID else {
+            Issue.record("the recording row should exist")
+            return
+        }
+        let translation = SentenceTranslation(lang: "en", text: "Hello", engine: .appleFast)
+
+        sut.model.applyTranslation(index: 0, translation: translation)
+
+        #expect(
+            sut.store.load(id: id)?.entries.first?.translations == [translation],
+            "the recording row carries the landing immediately"
+        )
+
+        await stop(sut)
+
+        guard let reopened = sut.store.load(id: id) else {
+            Issue.record("the stopped session should still load")
+            return
+        }
+        #expect(reopened.summary.status == .complete)
+        #expect(
+            reopened.entries.first?.translations == [translation],
+            "the finalize keeps the translation"
+        )
+    }
+
+    @Test("a latched session skips translation upserts")
+    func latchedSessionSkipsTranslationUpserts() async {
+        let sut = await makeSUT(finals: [sentenceFinal])
+        await startRunning(sut)
+        #expect(await pollUntil { sut.model.recordingSessionID != nil })
+        guard let id = sut.model.recordingSessionID else {
+            Issue.record("the recording row should exist")
+            return
+        }
+        // A real latch also stops sentence appends, so the row would not stay
+        // healthy to receive a write; a healthy row plus the latch isolates
+        // the guard itself.
+        sut.model.archiveWriteFailed = true
+
+        sut.model.applyTranslation(
+            index: 0, translation: SentenceTranslation(lang: "en", text: "Hello")
+        )
+
+        #expect(
+            sut.store.load(id: id)?.entries.first?.translations.isEmpty == true,
+            "no orphan upsert is attempted once the latch is set"
+        )
+
+        await stop(sut)
+    }
+
+    @Test("a failed translation write latches the session")
+    func failedLiveTranslationWriteLatches() async {
+        let sut = await makeSUT(finals: [sentenceFinal])
+        await startRunning(sut)
+        #expect(await pollUntil { sut.model.recordingSessionID != nil })
+        guard let id = sut.model.recordingSessionID else {
+            Issue.record("the recording row should exist")
+            return
+        }
+        #expect(sut.store.delete(id: id), "removing the row underneath makes the upsert fail")
+
+        sut.model.applyTranslation(
+            index: 0, translation: SentenceTranslation(lang: "en", text: "Hello")
+        )
+
+        #expect(sut.model.archiveWriteFailed, "the failed write latches")
+        #expect(!sut.model.archiveAvailable)
+        #expect(
+            sut.model.toasts.toasts.filter { toast in toast.key == ToastKey.archiveUnavailable }.count == 1,
+            "one warning for the session"
+        )
+
+        await stop(sut)
+    }
+
+    @Test("the write latch resets when the next session begins")
+    func writeLatchResetsAtSessionBegin() async {
+        let (store, root) = makeDegradedStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sut = await makeSUT(finals: [sentenceFinal], store: store)
+        await startRunning(sut)
+        #expect(await pollUntil { sut.model.archiveWriteFailed }, "the failed append latches")
+
+        await stop(sut)
+        #expect(sut.model.archiveWriteFailed, "the latch outlives its own session")
+
+        // The scripted engine's only final was consumed by the first session,
+        // so the new session runs without sentences until the reset shows.
+        await startRunning(sut)
+        #expect(!sut.model.archiveWriteFailed, "a new session clears the latch")
+        await stop(sut)
+    }
+
     // MARK: - Launch sweep
 
     @Test("the launch sweep turns an abandoned recording row into an interrupted recent")
@@ -198,13 +313,8 @@ struct AppModelArchivePersistenceTests {
 
     @Test("a degraded store latches one warning toast and skips finalize")
     func degradedStoreLatchesOnce() async {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mimidasu-archive-degraded-\(UUID().uuidString)", isDirectory: true)
+        let (store, root) = makeDegradedStore()
         defer { try? FileManager.default.removeItem(at: root) }
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let blocker = root.appendingPathComponent("blocker")
-        try? Data().write(to: blocker)
-        let store = ArchiveStore(location: blocker.appendingPathComponent("archives.sqlite"))
         #expect(store.isDegraded)
 
         let sut = await makeSUT(finals: [

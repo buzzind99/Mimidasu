@@ -419,10 +419,11 @@ extension ArchiveStoreTests {
     }
 
     @Test("addLanguage registers membership and a repeat add is a no-op")
-    func addLanguageIsIdempotent() {
-        let (store, cleanup) = makeStore()
+    func addLanguageIsIdempotent() throws {
+        let (location, cleanup) = makeLocation()
         defer { cleanup() }
 
+        let store = ArchiveStore(location: location)
         guard let id = startSession(store) else {
             Issue.record("append should succeed")
             return
@@ -430,10 +431,8 @@ extension ArchiveStoreTests {
         #expect(store.addLanguage(id: id, lang: "fr"))
         #expect(store.addLanguage(id: id, lang: "fr"))
 
-        #expect(
-            store.summary(id: id)?.langs.map { count in count.lang } == ["en", "fr"],
-            "the repeat add does not duplicate the membership"
-        )
+        #expect(try membershipRowCount(at: location, id: id) == 1, "the repeat add inserts once")
+        #expect(store.summary(id: id)?.langs.map { count in count.lang } == ["en", "fr"])
     }
 
     @Test("membership lists at zero translated before any translation lands")
@@ -474,6 +473,45 @@ extension ArchiveStoreTests {
             store.summary(id: id)?.languageCount(for: "fr")
                 == ArchiveLanguageCount(lang: "fr", translated: 2)
         )
+    }
+
+    @Test("a single-session read scopes its counts, while the list keeps them per session")
+    func singleSessionCountsIgnoreOtherSessions() {
+        let (store, cleanup) = makeStore()
+        defer { cleanup() }
+
+        guard let first = finalizeRecent(store, startedAt: 1000) else {
+            Issue.record("seed should succeed")
+            return
+        }
+        #expect(store.addLanguage(id: first, lang: "fr"))
+        store.upsert(translation: SentenceTranslation(lang: "fr", text: "un"), index: 0, session: first)
+
+        guard let second = finalizeRecent(store, startedAt: 2000) else {
+            Issue.record("seed should succeed")
+            return
+        }
+        #expect(store.addLanguage(id: second, lang: "de"))
+        store.upsert(translation: SentenceTranslation(lang: "de", text: "eins"), index: 0, session: second)
+        #expect(store.addLanguage(id: second, lang: "it"))
+
+        #expect(
+            store.summary(id: first)?.languageCount(for: "fr")
+                == ArchiveLanguageCount(lang: "fr", translated: 1)
+        )
+        #expect(
+            store.summary(id: first)?.languageCount(for: "de") == nil,
+            "another session's language stays out of the scoped read"
+        )
+        #expect(
+            store.summary(id: first)?.languageCount(for: "it") == nil,
+            "another session's untranslated membership stays out too"
+        )
+
+        let listed = store.list()
+        #expect(listed.first { summary in summary.id == first }?.languageCount(for: "fr")?.translated == 1)
+        #expect(listed.first { summary in summary.id == second }?.languageCount(for: "de")?.translated == 1)
+        #expect(listed.first { summary in summary.id == second }?.languageCount(for: "it")?.translated == 0)
     }
 
     @Test("languages order target first, then membership, then translation-only")

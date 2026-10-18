@@ -50,11 +50,31 @@ extension AppModel: TranslationSessionPort {
         retranslate.clearMarkers(at: index)
         // Archive mode: the store is the durable home of the result — the
         // row update below renders it, and a reopen must find it again.
+        // A live session's recording row is durable home too, but only
+        // while its writes are trusted: once the per-session latch trips,
+        // sentence appends stop, so an upsert would leave an orphan row.
         // Write-back precedes the row lookup so a result landing while the
         // archive is closing still persists (its marker is retired either
         // way).
         if let archiveID = archiveSessionID {
-            archive.upsert(translation: translation, index: index, session: archiveID)
+            if archive.upsert(translation: translation, index: index, session: archiveID) {
+                // The summary-derived surfaces (banner chip, picker counts,
+                // disclosure count) read the store's counts, not `entries`.
+                refreshOpenArchiveLanguages()
+                archiveRevision &+= 1
+            } else {
+                postArchiveWriteWarning(
+                    body: "The session store couldn't be written to. "
+                        + "This translation wasn't added to the archive."
+                )
+            }
+        } else if let recordingID = recordingSessionID, !archiveWriteFailed {
+            if !archive.upsert(translation: translation, index: index, session: recordingID) {
+                latchArchiveWriteFailure(
+                    body: "The session store couldn't be written to. "
+                        + "Sessions can't be saved or listed; transcription continues."
+                )
+            }
         }
         guard let at = entryPositionBySentence[index] else { return false }
         entries[at].replaceTranslation(translation)

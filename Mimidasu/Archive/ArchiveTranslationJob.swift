@@ -66,6 +66,12 @@ final class ArchiveTranslationJob {
     /// The run in flight, or the last finished one — the retry-failed read.
     private(set) var currentRun: Request?
 
+    /// The claimed run awaiting engine resolution — the request becomes
+    /// visible the moment `run` starts resolving (the claim precedes it
+    /// only synchronously), and `beginRun` moves it into `currentRun`. Nil
+    /// while idle, while a run executes, and after every early return.
+    private(set) var pendingRequest: Request?
+
     /// The current (or last) run's resolved engine kind.
     private(set) var kind: TranslationEngineKind?
 
@@ -89,8 +95,10 @@ final class ArchiveTranslationJob {
         }
 
     /// Lands one fresh translation: the caller (the app model) owns the
-    /// store upsert, the row swap, and the refresh revision.
-    @ObservationIgnored var land: @MainActor (Int, SentenceTranslation) -> Void = { _, _ in }
+    /// store upsert, the row swap, and the refresh revision, and reports
+    /// whether the result actually landed — a false return records the
+    /// index as a retryable failure instead of counting success.
+    @ObservationIgnored var land: @MainActor (Int, SentenceTranslation) -> Bool = { _, _ in true }
 
     /// Progress/finish notifications; nil stays silent (tests).
     @ObservationIgnored var onEvent: (@MainActor (Event) -> Void)?
@@ -98,15 +106,19 @@ final class ArchiveTranslationJob {
     /// Claims the job slot synchronously, before the async run's engine
     /// resolution: per-row retries are refused from the click onward, so a
     /// session-backed engine never sees concurrent calls. Returns false when
-    /// a run is already claimed.
+    /// a run is already claimed. Clears a cancel left over from a previous
+    /// generation, so the claim is always fresh.
     func prepare() -> Bool {
         guard !isActive else { return false }
         isActive = true
+        isCancelled = false
         return true
     }
 
     /// Starts a prepared run. Refused — no event — when the slot wasn't
-    /// claimed (`prepare`) or a run is already executing.
+    /// claimed (`prepare`) or a run is already executing. A cancel landing
+    /// during engine resolution discards the run silently: the surface that
+    /// would have reported it is already gone.
     func run(_ request: Request) async {
         guard isActive, !isRunning else { return }
         let indexes = Self.indexes(for: request)
@@ -115,7 +127,13 @@ final class ArchiveTranslationJob {
             onEvent?(.finished(translated: 0, failedIndexes: []))
             return
         }
+        pendingRequest = request
         let resolution = await resolveEngine(request.provider, TargetLanguage(code: request.lang))
+        guard !isCancelled else {
+            pendingRequest = nil
+            isActive = false
+            return
+        }
         let engine: any TranslationEngine
         let resolvedKind: TranslationEngineKind
         switch resolution {
@@ -123,10 +141,12 @@ final class ArchiveTranslationJob {
             engine = resolvedEngine
             resolvedKind = engineKind
         case let .unavailable(reason):
+            pendingRequest = nil
             isActive = false
             onEvent?(.unavailable(reason: reason))
             return
         case .cancelled:
+            pendingRequest = nil
             isActive = false
             return
         }
@@ -145,8 +165,8 @@ final class ArchiveTranslationJob {
 
     private func beginRun(_ request: Request, kind: TranslationEngineKind, total: Int) {
         isRunning = true
-        isCancelled = false
         currentRun = request
+        pendingRequest = nil
         self.kind = kind
         self.total = total
         processed = 0
@@ -178,8 +198,9 @@ final class ArchiveTranslationJob {
     }
 
     /// One engine call. Returns true when the loop must stop without a
-    /// progress publication (an engine-reported cancellation); a failed call
-    /// is recorded and the walk continues.
+    /// progress publication (a cancellation of this job or its task); a
+    /// failed call — including a lost store write — is recorded and the
+    /// walk continues.
     private func translateOne(
         _ sentence: Sentence, of request: Request,
         through engine: any TranslationEngine, kind: TranslationEngineKind
@@ -193,14 +214,26 @@ final class ArchiveTranslationJob {
             }
             // A result that arrived after a cancel still lands: partial
             // results stay stored, and a fill-missing re-run resumes for
-            // free.
-            land(
+            // free. A sink reporting a lost write makes the sentence a
+            // retryable failure instead of a phantom success.
+            let landed = land(
                 sentence.index,
                 SentenceTranslation(lang: request.lang, text: text, engine: kind)
             )
-            translatedCount += 1
+            if landed {
+                translatedCount += 1
+            } else {
+                failureIndexes.append(sentence.index)
+            }
             return false
         } catch is CancellationError {
+            // An engine-reported cancellation without a cancel request is
+            // just one sentence's failure — only a real cancel stops the
+            // walk.
+            guard isCancelled || Task.isCancelled else {
+                failureIndexes.append(sentence.index)
+                return false
+            }
             return true
         } catch {
             failureIndexes.append(sentence.index)

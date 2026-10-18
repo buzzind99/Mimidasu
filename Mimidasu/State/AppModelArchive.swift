@@ -65,9 +65,18 @@ extension AppModel {
         !archive.isDegraded && !archiveWriteFailed
     }
 
-    /// The one-shot warning for either archive-failure surface.
-    private func latchArchiveWriteFailure(body: String) {
+    /// Latches the live session's write failure — the one-shot warning for a
+    /// session whose persistence can no longer be trusted — and posts it.
+    /// Internal so the translation write-back can latch through it.
+    func latchArchiveWriteFailure(body: String) {
         archiveWriteFailed = true
+        postArchiveWriteWarning(body: body)
+    }
+
+    /// Posts the archive-unavailable warning without latching: a per-operation
+    /// archive-mode write can fail without disabling the live session's
+    /// persistence.
+    func postArchiveWriteWarning(body: String) {
         toasts.post(
             key: ToastKey.archiveUnavailable, style: .yellowPersistent,
             title: "Archive unavailable", body: body
@@ -102,11 +111,25 @@ extension AppModel {
     /// Opens a stored session read-only into the transcript pane: rows and
     /// metadata swap, dictionary anchors reset, HUD/overlay force-hide, the
     /// session-clock anchors clear, and the re-translate lane generation
-    /// turns over. A bulk run on the previously opened archive is canceled
-    /// first (its airborne result still persists under its own id).
+    /// turns over. Re-opening the session already in the pane is a no-op —
+    /// its bulk run (and card) stays untouched. A bulk run over a different
+    /// archive is canceled first (its airborne result still persists under
+    /// its own id), and a pending external pick for the previous archive
+    /// clears with the swap.
     func openArchiveSession(id: Int64) {
-        guard canOpenArchivedSession, let loaded = archive.load(id: id) else { return }
+        guard canOpenArchivedSession else { return }
+        // The window's "back to pane" move: nothing swaps, so the running
+        // bulk job and its card must survive.
+        if openArchive?.id == id {
+            return
+        }
+        guard let loaded = archive.load(id: id) else { return }
         cancelArchiveTranslation()
+        // The sheet a pending archive-translation pick belongs to is leaving
+        // the pane with the previous archive; other intent kinds stay.
+        if case .archiveTranslation = providerAwaitingDisclosure {
+            providerAwaitingDisclosure = nil
+        }
         openArchive = loaded
         archiveViewingLanguage = nil
         entries = loaded.entries
@@ -135,10 +158,14 @@ extension AppModel {
     /// Closes the opened archive: the pane empties (no restore) and the
     /// lane generation turns over again so no straggler lands on the next
     /// archive's rows. A bulk run in flight is canceled (its landed rows
-    /// stay stored); the viewing language clears with the archive.
+    /// stay stored); the viewing language and any pending archive-translation
+    /// pick clear with the archive.
     func closeArchive() {
         guard openArchive != nil else { return }
         cancelArchiveTranslation()
+        if case .archiveTranslation = providerAwaitingDisclosure {
+            providerAwaitingDisclosure = nil
+        }
         openArchive = nil
         archiveViewingLanguage = nil
         entries.removeAll()

@@ -3,7 +3,7 @@ import Foundation
 import Testing
 
 /// Tests `ToastCenter`: post/dedup-by-key semantics (replace in place +
-/// auto-dismiss timer reset), the injectable scheduler driving the 6 s
+/// auto-dismiss timer reset), the injectable scheduler driving the 3 s
 /// auto-dismiss (yellow cards only), the ~3-card stack cap (oldest dropped),
 /// and dismissal/clearing.
 ///
@@ -126,13 +126,13 @@ struct ToastCenterTests {
     func delayIsInjectable() {
         let spy = ManualScheduler()
         let center = ToastCenter(
-            autoDismissAfter: .seconds(3),
+            autoDismissAfter: .seconds(7),
             scheduler: { delay, fire in spy.schedule(delay, fire) }
         )
 
         center.post(key: "a", style: .yellowAuto, title: "A", body: "quick")
 
-        #expect(spy.delays == [.seconds(3)])
+        #expect(spy.delays == [.seconds(7)], "the injected delay, not the default, reached the scheduler")
     }
 
     // MARK: - Info style
@@ -238,6 +238,27 @@ struct ToastCenterTests {
         #expect(center.toasts[0].id == originalID, "the progress update keeps the card's identity")
         #expect(center.toasts[0].progress == ToastCenter.ToastProgress(done: 2, total: 3))
         #expect(center.toasts[0].body == "2/3 sentences")
+    }
+
+    @Test("a progress re-post retires the summary's pending auto-dismiss")
+    func progressReplacesSummaryAndCancelsTimer() {
+        let spy = ManualScheduler()
+        let center = makeSUT(scheduler: spy)
+
+        center.post(key: "job", style: .info, title: "Finished", body: "Translated 3 sentences")
+        #expect(spy.pendingCount == 1, "the summary armed its own dismissal")
+
+        center.post(
+            key: "job", style: .info, title: "Translating…", body: "0/3 sentences",
+            progress: ToastCenter.ToastProgress(done: 0, total: 3)
+        )
+
+        #expect(spy.pendingCount == 0, "the summary's timer was cancelled")
+        #expect(center.toasts.count == 1, "the progress card replaced the summary in place")
+
+        spy.firePending()
+
+        #expect(center.toasts.count == 1, "no stale firing dismissed the card")
     }
 
     @Test("the info style's own auto-dismiss flag stays conservative")

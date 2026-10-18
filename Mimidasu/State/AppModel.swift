@@ -411,6 +411,9 @@ final class AppModel {
             sessionPausedTotal = .zero
             pauseStartedAt = nil
             deferredCaptureError = nil
+            // Archive persistence is per session too: a previous session's
+            // write latch must not disable this one.
+            archiveWriteFailed = false
             // Dictionary state is per session too: the popover anchor and
             // the pinned card reset, and any in-flight lookup is dropped.
             selectedLookup = nil

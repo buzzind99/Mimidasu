@@ -6,8 +6,8 @@ import Testing
 /// the viewing language default/switch/clear, membership adds on the open
 /// archive and on a stored sibling, add idempotence and revision bumps,
 /// membership persistence across a reopen, the summary's language set (the
-/// provider chooser's exclusion data), and the send-count/completeness
-/// reads after an add.
+/// provider chooser's exclusion data), and the send-count/completeness reads
+/// after an add or a per-row delivery.
 @MainActor
 @Suite("AppModelArchiveLanguage")
 struct AppModelArchiveLanguageTests {
@@ -151,9 +151,17 @@ struct AppModelArchiveLanguageTests {
         let second = sut.model.addArchiveLanguage(id: sut.id, lang: "fr")
 
         #expect(first)
-        #expect(second)
+        #expect(second, "the idempotent re-add still reports its write as landed")
         #expect(revisionAfterFirst != revisionBefore)
-        #expect(sut.model.archiveRevision != revisionAfterFirst)
+        #expect(
+            sut.model.archiveRevision != revisionAfterFirst,
+            "the add contract is bump-always, repeats included — every landed write bumps"
+        )
+        #expect(
+            sut.model.openArchive?.summary.languageCount(for: "fr")
+                == ArchiveLanguageCount(lang: "fr", translated: 0),
+            "the language stays one membership entry at zero"
+        )
         #expect(
             sut.model.openArchive?.summary.langs.filter { count in count.lang == "fr" }.count == 1,
             "the language set stays set-valued"
@@ -199,12 +207,61 @@ struct AppModelArchiveLanguageTests {
     @Test("a fresh membership reads as fully missing and incomplete")
     func membershipAddSendCountAndCompleteness() async {
         let sut = await makeSUT()
-        sut.model.addArchiveLanguage(id: sut.id, lang: "fr")
+        let added = sut.model.addArchiveLanguage(id: sut.id, lang: "fr")
+
+        #expect(added)
+        #expect(
+            sut.model.openArchive?.summary.languageCount(for: "fr")
+                == ArchiveLanguageCount(lang: "fr", translated: 0),
+            "the membership row exists before anything is translated"
+        )
 
         let sendCount = sut.model.archiveTranslationSendCount(lang: "fr")
         let complete = sut.model.archiveLanguageIsComplete("fr")
 
         #expect(sendCount == 3, "every sentence is still missing")
         #expect(!complete)
+    }
+
+    // MARK: - Per-row deliveries
+
+    @Test("a per-row delivery refreshes the summary counts and bumps the revision")
+    func perRowDeliveryRefreshesSummary() async {
+        let sut = await makeSUT(translations: [0: SentenceTranslation(lang: "fr", text: "Seed")])
+        let revisionBefore = sut.model.archiveRevision
+
+        sut.model.applyTranslation(index: 1, translation: SentenceTranslation(lang: "fr", text: "Second"))
+        sut.model.applyTranslation(index: 2, translation: SentenceTranslation(lang: "fr", text: "Third"))
+
+        #expect(
+            sut.model.openArchive?.summary.languageCount(for: "fr")
+                == ArchiveLanguageCount(lang: "fr", translated: 3),
+            "the banner's cached counts refresh in place"
+        )
+        #expect(
+            sut.model.archiveTranslationSendCount(lang: "fr") == 3,
+            "a complete language reads as a full re-send"
+        )
+        #expect(sut.model.archiveLanguageIsComplete("fr"))
+        #expect(sut.model.archiveRevision != revisionBefore, "the revision bumps for the window's rows")
+    }
+
+    @Test("a failed archive-mode write warns without latching the live persistence")
+    func failedArchiveWriteWarnsWithoutLatching() async {
+        let sut = await makeSUT()
+        #expect(sut.store.delete(id: sut.id), "the row is removed underneath the open pane")
+        let revisionBefore = sut.model.archiveRevision
+
+        let landed = sut.model.applyTranslation(
+            index: 0, translation: SentenceTranslation(lang: "fr", text: "Third")
+        )
+
+        #expect(landed, "the pane row still takes the translation")
+        #expect(!sut.model.archiveWriteFailed, "an archive-mode failure never latches the live session")
+        #expect(
+            sut.model.toasts.toasts.contains { toast in toast.key == ToastKey.archiveUnavailable },
+            "the archive warning posts without latching"
+        )
+        #expect(sut.model.archiveRevision == revisionBefore, "a failed write bumps nothing")
     }
 }

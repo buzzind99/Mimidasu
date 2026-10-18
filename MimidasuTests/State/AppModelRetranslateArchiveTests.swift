@@ -139,10 +139,11 @@ struct AppModelRetranslateArchiveTests {
     @Test("opening an archive retires every pending marker")
     func openRetiresMarkers() async {
         let sut = await makeSUT()
+        let other = appendArchive(to: sut.store)
         sut.model.pendingRetranslations = [0, 1]
         sut.model.lanePendingRetranslations = [0]
 
-        sut.model.openArchiveSession(id: sut.id)
+        sut.model.openArchiveSession(id: other)
 
         #expect(sut.model.pendingRetranslations.isEmpty)
         #expect(sut.model.lanePendingRetranslations.isEmpty)
@@ -237,7 +238,7 @@ struct AppModelRetranslateArchiveTests {
     func externalSelectionStampsArchiveTarget() async {
         let sut = await makeSUT()
         let engine = ArchiveEchoEngine()
-        sut.model.retranslateEngineFactory = { provider in
+        sut.model.retranslateEngineFactory = { provider, _ in
             provider == .google ? engine : nil
         }
         sut.model.translationSettings.selectRetranslate(.google)
@@ -259,7 +260,7 @@ struct AppModelRetranslateArchiveTests {
     @Test("an external selection with no usable engine reports unavailable and keeps the row")
     func externalSelectionWithoutEngineReports() async {
         let sut = await makeSUT()
-        sut.model.retranslateEngineFactory = { _ in nil }
+        sut.model.retranslateEngineFactory = { _, _ in nil }
         sut.model.translationSettings.selectRetranslate(.google)
         let target = sentence(sut, at: 0)
 
@@ -335,6 +336,79 @@ struct AppModelRetranslateArchiveTests {
         #expect(
             sut.model.retranslate.retranslateConfigTarget == "de",
             "the armed config was rebuilt for the new archive's target"
+        )
+    }
+
+    @Test("an archive row retry degrades high fidelity only for the probed pair")
+    func rowRetryDegradesHifiForProbedTarget() async throws {
+        guard #available(macOS 26.4, *) else {
+            try Test.cancel("the high-fidelity arm requires macOS 26.4")
+        }
+        let sut = await makeSUT()
+        sut.model.translationSettings.selectRetranslate(.appleHighFidelity)
+        // The probe landed not-installed for the archive's own pair — the
+        // row path degrades with the same target-scoped rule as the bulk run.
+        sut.model.appleHighFidelityProbe = (false, "fr")
+
+        sut.model.retranslateSentence(sentence(sut, at: 0))
+
+        #expect(sut.model.retranslateConfig != nil, "the degraded row retry arms the fast session")
+        #expect(sut.model.retranslateHifiConfig == nil, "the high-fidelity session is never armed")
+        #expect(sut.model.retranslate.retranslateConfigTarget == "fr")
+    }
+
+    @Test("a row retry that lands after a viewing-language switch keeps the click-time target")
+    func rowRetryKeepsClickTimeTarget() async {
+        let sut = await makeSUT()
+        let gate = PermitGate()
+        let engine = ScriptedArchiveEngine(gate: gate)
+        // The archive route arms its own dedicated session; seed it with the
+        // gated engine so both chained flights park on the same double.
+        sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "fr")
+        sut.model.retranslateSessionArrived(engine)
+
+        let first = sentence(sut, at: 0)
+        let second = sentence(sut, at: 1)
+        sut.model.retranslateSentence(first)
+        #expect(
+            await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
+            "the first flight parks in the engine"
+        )
+
+        sut.model.retranslateSentence(second)
+        #expect(sut.model.pendingRetranslations == [0, 1], "the second click chains behind the first")
+
+        // A viewing-language switch during the arm/flight window must not
+        // retarget the airborne work: both flights were clicked for `fr`.
+        sut.model.selectArchiveViewingLanguage("de")
+
+        gate.release()
+        gate.release()
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                let entries = sut.store.load(id: sut.id)?.entries ?? []
+                return entries.count == 2 && entries.allSatisfy { entry in
+                    entry.translation(for: "fr") != nil
+                }
+            },
+            "both flights land under the click-time language"
+        )
+        #expect(
+            sut.store.load(id: sut.id)?.entries.map { entry in entry.translations.first?.lang } == ["fr", "fr"],
+            "both stored results name the click-time language, not the switched viewing language"
+        )
+        #expect(
+            sut.model.entries.compactMap { entry in entry.translation(for: "de") }.isEmpty,
+            "no result is stored under the switched language"
+        )
+        #expect(
+            sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
+                == [.appleFast, .appleFast],
+            "both row markers describe the click-time language's result"
+        )
+        #expect(
+            sut.model.retranslate.retranslateConfigTarget == "fr",
+            "the armed config kept the click-time target"
         )
     }
 }

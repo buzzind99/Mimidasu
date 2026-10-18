@@ -131,7 +131,13 @@ extension ArchivedSessionSummary {
     }
 
     var sentenceCountText: String {
-        sentenceCount == 1 ? "1 sentence" : "\(sentenceCount) sentences"
+        Self.sentenceCountText(sentenceCount)
+    }
+
+    /// The shared phrasing for a sentence count ("1 sentence" / "3
+    /// sentences"), reused by copy that reports a scope's sentence total.
+    static func sentenceCountText(_ count: Int) -> String {
+        count == 1 ? "1 sentence" : "\(count) sentences"
     }
 
     /// Active duration as `h:mm:ss` (or `m:ss`), matching the SESSION

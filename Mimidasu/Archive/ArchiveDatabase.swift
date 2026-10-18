@@ -251,7 +251,7 @@ final class ArchiveDatabase: Sendable {
         try locked { db in
             let statement = try db.statement(Self.summarySQL + " WHERE s.status != 'recording' "
                 + "ORDER BY s.started_at DESC, s.id DESC")
-            return try Self.summariesWithLanguages(statement, db: db)
+            return try Self.summariesWithLanguages(statement, db: db, sessionID: nil)
         }
     }
 
@@ -262,7 +262,7 @@ final class ArchiveDatabase: Sendable {
             // refresh) reads whatever is stored.
             let statement = try db.statement(Self.summarySQL + " WHERE s.id = :id")
             statement.bind(Int(id), at: 1)
-            return try Self.summariesWithLanguages(statement, db: db).first
+            return try Self.summariesWithLanguages(statement, db: db, sessionID: id).first
         }
     }
 
@@ -416,16 +416,17 @@ extension ArchiveDatabase {
     /// set's order: the stored target first (the default viewing language),
     /// then membership rows in add order, then translation-only languages
     /// (a phase-1 archive has no membership rows, but still lists whatever
-    /// it was translated to).
+    /// it was translated to). `sessionID` scopes the language reads to the
+    /// one session the cursor holds.
     private static func summariesWithLanguages(
-        _ statement: SQLiteDatabase.Statement, db: SQLiteDatabase
+        _ statement: SQLiteDatabase.Statement, db: SQLiteDatabase, sessionID: Int64?
     ) throws -> [ArchivedSessionSummary] {
         var summaries = try summaries(statement)
         var targets: [Int64: String?] = [:]
         for summary in summaries {
             targets[summary.id] = summary.targetLang
         }
-        let counts = try languageCounts(db: db, targets: targets)
+        let counts = try languageCounts(db: db, targets: targets, sessionID: sessionID)
         for index in summaries.indices {
             summaries[index].langs = counts[summaries[index].id] ?? []
         }
@@ -433,16 +434,24 @@ extension ArchiveDatabase {
     }
 
     /// Two batched passes (membership rows, per-language translation counts)
-    /// for a whole request, composed in Swift; the reads are small at
-    /// archive scale, and a per-id variant would grow the prepared-statement
+    /// composed in Swift. The list path reads both tables once for the whole
+    /// request; a single-session read (`sessionID` non-nil) filters each
+    /// query by id, so a summary refresh — which runs once per landed
+    /// translation — stays proportional to the one session it reports. A
+    /// per-id variant for lists would instead grow the prepared-statement
     /// cache with every distinct id set.
     private static func languageCounts(
-        db: SQLiteDatabase, targets: [Int64: String?]
+        db: SQLiteDatabase, targets: [Int64: String?], sessionID: Int64?
     ) throws -> [Int64: [ArchiveLanguageCount]] {
+        let scope = sessionID == nil ? "" : " WHERE session_id = :session_id"
         var membership: [Int64: [String]] = [:]
         let membershipStatement = try db.statement(
-            "SELECT session_id, lang FROM session_languages ORDER BY session_id, rowid"
+            "SELECT session_id, lang FROM session_languages" + scope
+                + " ORDER BY session_id, rowid"
         )
+        if let sessionID {
+            membershipStatement.bind(Int(sessionID), at: 1)
+        }
         while try membershipStatement.step() {
             guard let id = membershipStatement.optionalInt(0),
                   let lang = membershipStatement.optionalText(1), !lang.isEmpty
@@ -451,9 +460,12 @@ extension ArchiveDatabase {
         }
         var translated: [Int64: [ArchiveLanguageCount]] = [:]
         let countStatement = try db.statement(
-            "SELECT session_id, lang, COUNT(*) FROM translations "
-                + "GROUP BY session_id, lang ORDER BY session_id, MIN(rowid)"
+            "SELECT session_id, lang, COUNT(*) FROM translations" + scope
+                + " GROUP BY session_id, lang ORDER BY session_id, MIN(rowid)"
         )
+        if let sessionID {
+            countStatement.bind(Int(sessionID), at: 1)
+        }
         while try countStatement.step() {
             guard let id = countStatement.optionalInt(0),
                   let lang = countStatement.optionalText(1), !lang.isEmpty
