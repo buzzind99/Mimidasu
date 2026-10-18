@@ -55,7 +55,7 @@ struct ArchiveTranslationResolutionTests {
         let toast = archiveToast(sut.model)
         #expect(toast?.style == .yellowAuto)
         #expect(toast?.title == "Archive translation unavailable", "the run posts under its own key")
-        #expect(toast?.body == "Apple (MTL) session is still starting — try again in a moment.")
+        #expect(toast?.body == "Apple (NMT) session is still starting — try again in a moment.")
         #expect(toast?.progress == nil, "no progress card for a failed start")
         #expect(!sut.model.archiveTranslationRunning, "a timed-out arm starts nothing")
         #expect(sut.model.archiveTranslationJob.currentRun == nil)

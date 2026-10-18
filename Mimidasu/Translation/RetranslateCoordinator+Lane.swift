@@ -294,7 +294,7 @@ extension RetranslateCoordinator {
             postRetranslateUnavailableToast(
                 laneKind == .appleHighFidelity
                     ? "Apple Intelligence session is still starting — try again in a moment."
-                    : "Apple (MTL) session is still starting — try again in a moment."
+                    : "Apple (NMT) session is still starting — try again in a moment."
             )
             return
         case let .ready(engine):

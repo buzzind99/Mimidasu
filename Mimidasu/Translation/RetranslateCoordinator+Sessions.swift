@@ -206,8 +206,8 @@ extension RetranslateCoordinator {
     /// fast session, a high-fidelity selection arms its session, and
     /// externals come from their stored key. The selection arrives already
     /// resolved against the run's target (the caller's archive-job mapping
-    /// applied `effectiveRetranslateSelection(targetCode:)`), so it is
-    /// passed through verbatim — no settings-pair degrade is re-applied.
+    /// applied `effectiveAppleTier(_:targetCode:)`), so it is passed through
+    /// verbatim — no settings-pair degrade is re-applied.
     func resolveArchiveJobEngine(
         selection: RetranslateEngine, target: TargetLanguage
     ) async -> ArchiveTranslationJob.EngineResolution {
@@ -263,7 +263,7 @@ extension RetranslateCoordinator {
             return .unavailable(
                 reason: kind == .appleHighFidelity
                     ? "Apple Intelligence session is still starting — try again in a moment."
-                    : "Apple (MTL) session is still starting — try again in a moment."
+                    : "Apple (NMT) session is still starting — try again in a moment."
             )
         case .cancelled:
             return .cancelled

@@ -55,7 +55,7 @@ struct RetranslateEngineTests {
     @Test("marker names match the labels shown on retried rows")
     func markerNamesMatchRowLabels() {
         #expect(TranslationEngineKind.appleHighFidelity.markerName == "Apple Intelligence")
-        #expect(TranslationEngineKind.appleFast.markerName == "Apple (MTL)")
+        #expect(TranslationEngineKind.appleFast.markerName == "Apple (NMT)")
         #expect(TranslationEngineKind.google.markerName == "Google Translate")
         #expect(TranslationEngineKind.deepl.markerName == "DeepL")
         #expect(TranslationEngineKind.openrouter.markerName == "OpenRouter")

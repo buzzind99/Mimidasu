@@ -55,11 +55,11 @@ enum TranslationEngineKind: String, Codable, Sendable, Equatable {
         }
     }
 
-    /// Marker suffix shown on retried rows ("· via Apple (MTL)").
+    /// Marker suffix shown on retried rows ("· via Apple (NMT)").
     var markerName: String {
         switch self {
         case .appleHighFidelity: "Apple Intelligence"
-        case .appleFast: "Apple (MTL)"
+        case .appleFast: "Apple (NMT)"
         case .google: "Google Translate"
         case .deepl: "DeepL"
         case .openrouter: "OpenRouter"

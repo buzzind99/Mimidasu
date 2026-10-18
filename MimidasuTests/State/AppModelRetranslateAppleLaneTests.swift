@@ -175,7 +175,7 @@ struct AppModelRetranslateAppleLaneTests {
         )
         let toast = model.toasts.toasts.first(where: { candidate in candidate.key == ToastKey.retranslate })
         #expect(toast?.title == "Re-translate unavailable")
-        #expect(toast?.body == "Apple (MTL) session is still starting — try again in a moment.")
+        #expect(toast?.body == "Apple (NMT) session is still starting — try again in a moment.")
         #expect(
             model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the row keeps its previous translation"
