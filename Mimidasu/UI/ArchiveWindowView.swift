@@ -20,6 +20,7 @@ enum ArchiveWindow {
 struct ArchiveWindowView: View {
     var model: AppModel
     @State private var state = ArchiveWindowState()
+    @AppearanceSetting private var appearance
     @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
@@ -32,6 +33,7 @@ struct ArchiveWindowView: View {
         }
         .frame(width: 640, height: 720, alignment: .top)
         .background(Theme.window)
+        .preferredColorScheme($appearance.resolvedColorScheme)
         .alert("Delete this session?", isPresented: deletePresented, presenting: state.pendingDelete) { summary in
             Button("Cancel", role: .cancel) { state.pendingDelete = nil }
             Button("Delete", role: .destructive) {
