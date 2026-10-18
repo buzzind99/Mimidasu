@@ -186,7 +186,7 @@ struct AppModelArchiveTests {
 
         sut.model.openArchiveSession(id: sut.id)
 
-        #expect(sut.model.archiveTranslationJob.isActive, "the same-id reopen must not cancel the run")
+        #expect(sut.model.archiveTranslationJob.activity != .idle, "the same-id reopen must not cancel the run")
         #expect(archiveToast(sut.model) != nil, "its progress card stays up")
         #expect(engine.recordedBatches == [["こんにちは"]], "no new flight starts")
 

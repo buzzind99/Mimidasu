@@ -141,7 +141,7 @@ struct ArchiveBannerView: View {
     /// language. Held back while a bulk run is claimed (one job at a time)
     /// and without a viewed language to translate.
     private var translateButton: some View {
-        let disabled = model.archiveTranslationJob.isActive || model.archiveViewingCode == nil
+        let disabled = model.archiveTranslationJob.activity != .idle || model.archiveViewingCode == nil
         return Button {
             isTranslatePopoverPresented = true
         } label: {
@@ -187,16 +187,14 @@ struct ArchiveBannerView: View {
         model.requestArchiveTranslation(engine: engine, lang: lang)
     }
 
-    /// Whether the bulk job claims this session and language — from the
-    /// synchronous claim through engine resolution and the run itself. The
-    /// claimed-but-resolving window reads the job's pending request, since
-    /// `currentRun` moves only when the run starts.
+    /// Whether the bulk job claims or runs for this session and language —
+    /// from the synchronous claim through the run's end. The scoped activity
+    /// carries the request throughout, so a foreign session or an idle slot
+    /// reads false.
     private func jobIsActive(on archive: ArchivedSession, lang: String?) -> Bool {
-        let job = model.archiveTranslationJob
-        guard let request = job.pendingRequest ?? job.currentRun else { return false }
-        return job.isActive
-            && request.sessionID == archive.id
-            && request.lang == lang
+        let activity = model.archiveTranslationJob.activity(for: archive.id)
+        guard let request = activity.request else { return false }
+        return request.lang == lang
     }
 
     @ViewBuilder

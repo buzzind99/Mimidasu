@@ -3,6 +3,16 @@ import Foundation
 import Synchronization
 import Testing
 
+/// A reference box the resolver wrapper increments before forwarding.
+@MainActor
+private final class ResolutionSignal {
+    private(set) var entered = 0
+
+    func record() {
+        entered += 1
+    }
+}
+
 /// Tests the Apple side of an archive-translation start's engine
 /// resolution: the picker's explicit tier parameter (a high-fidelity pick
 /// flying a pre-armed session, an NMT pick never upgrading on its own), the
@@ -45,7 +55,7 @@ struct ArchiveTranslationResolutionTests {
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
             "the armed high-fidelity session serves the whole run"
         )
-        #expect(sut.model.archiveTranslationJob.kind == .appleHighFidelity)
+        #expect(sut.model.archiveTranslationJob.lastRun?.kind == .appleHighFidelity)
         #expect(
             sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
                 == [.appleHighFidelity, .appleHighFidelity, .appleHighFidelity],
@@ -70,7 +80,7 @@ struct ArchiveTranslationResolutionTests {
         #expect(toast?.body == "Apple (NMT) session is still starting — try again in a moment.")
         #expect(toast?.progress == nil, "no progress card for a failed start")
         #expect(!sut.model.archiveTranslationRunning, "a timed-out arm starts nothing")
-        #expect(sut.model.archiveTranslationJob.currentRun == nil)
+        #expect(sut.model.archiveTranslationJob.lastRun == nil)
     }
 
     @Test("an Apple start with no hand-over reports the high-fidelity model's copy")
@@ -91,7 +101,7 @@ struct ArchiveTranslationResolutionTests {
             "the high-fidelity arm window reports its own copy"
         )
         #expect(!sut.model.archiveTranslationRunning)
-        #expect(sut.model.archiveTranslationJob.currentRun == nil)
+        #expect(sut.model.archiveTranslationJob.lastRun == nil)
     }
 
     @Test("a teardown during the arm wait cancels the start silently")
@@ -116,7 +126,7 @@ struct ArchiveTranslationResolutionTests {
             await pollUntil(timeout: resultTimeout) { !sut.model.archiveTranslationRunning },
             "the canceled resolution releases the claim"
         )
-        #expect(sut.model.archiveTranslationJob.currentRun == nil, "no run ever starts")
+        #expect(sut.model.archiveTranslationJob.lastRun == nil, "no run ever starts")
         #expect(engine.recordedBatches.isEmpty, "a post-teardown engine is never flown")
         #expect(archiveToast(sut.model) == nil, "no card for a canceled start")
         #expect(retranslateToast(sut.model) == nil, "a canceled start never reports")
@@ -140,7 +150,7 @@ struct ArchiveTranslationResolutionTests {
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
             "the late hand-over serves the whole run"
         )
-        #expect(sut.model.archiveTranslationJob.kind == .appleFast)
+        #expect(sut.model.archiveTranslationJob.lastRun?.kind == .appleFast)
         #expect(
             sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
                 == [.appleFast, .appleFast, .appleFast],
@@ -167,7 +177,7 @@ struct ArchiveTranslationResolutionTests {
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
             "the late hand-over serves the whole run"
         )
-        #expect(sut.model.archiveTranslationJob.kind == .appleHighFidelity)
+        #expect(sut.model.archiveTranslationJob.lastRun?.kind == .appleHighFidelity)
         #expect(
             sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
                 == [.appleHighFidelity, .appleHighFidelity, .appleHighFidelity],
@@ -223,7 +233,7 @@ struct ArchiveTranslationResolutionTests {
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
             "the foreign pair's probe does not degrade the pick"
         )
-        #expect(sut.model.archiveTranslationJob.kind == .appleHighFidelity)
+        #expect(sut.model.archiveTranslationJob.lastRun?.kind == .appleHighFidelity)
         #expect(
             sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
                 == [.appleHighFidelity, .appleHighFidelity, .appleHighFidelity],
@@ -265,7 +275,7 @@ struct ArchiveTranslationResolutionTests {
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
             "the degraded run flies the fast session"
         )
-        #expect(sut.model.archiveTranslationJob.kind == .appleFast)
+        #expect(sut.model.archiveTranslationJob.lastRun?.kind == .appleFast)
         #expect(
             sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
                 == [.appleFast, .appleFast, .appleFast],
@@ -288,7 +298,7 @@ struct ArchiveTranslationResolutionTests {
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
             "the explicit NMT pick serves the whole run"
         )
-        #expect(sut.model.archiveTranslationJob.kind == .appleFast)
+        #expect(sut.model.archiveTranslationJob.lastRun?.kind == .appleFast)
         #expect(
             sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
                 == [.appleFast, .appleFast, .appleFast],
@@ -361,6 +371,19 @@ struct ArchiveTranslationAdoptionTests {
         sut.model.entries.first { entry in entry.sentence.index == index }!.sentence
     }
 
+    /// Marks the instant the run enters engine resolution before forwarding
+    /// to the wired resolver. The claim is published synchronously, so tests
+    /// that must synchronize on resolution itself poll `entered`.
+    private func signalResolutionEntry(on sut: ArchiveTranslationSUT) -> ResolutionSignal {
+        let signal = ResolutionSignal()
+        let resolve = sut.model.archiveTranslationJob.resolveEngine
+        sut.model.archiveTranslationJob.resolveEngine = { engine, target in
+            signal.record()
+            return await resolve(engine, target)
+        }
+        return signal
+    }
+
     // MARK: - Lane chain and the job claim
 
     @Test("a run chains on airborne lane work before its first engine call")
@@ -383,10 +406,11 @@ struct ArchiveTranslationAdoptionTests {
             "the lane link parks in its engine"
         )
 
+        let signal = signalResolutionEntry(on: sut)
         sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                sut.model.archiveTranslationJob.pendingRequest != nil
+                signal.entered == 1
             },
             "the run reaches engine resolution while the lane link is airborne"
         )
@@ -420,10 +444,11 @@ struct ArchiveTranslationAdoptionTests {
         )
         let laneTask = sut.model.retranslateLaneTask
 
+        let signal = signalResolutionEntry(on: sut)
         sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                sut.model.archiveTranslationJob.pendingRequest != nil
+                signal.entered == 1
             },
             "the run reaches resolution behind the airborne lane"
         )
@@ -440,8 +465,8 @@ struct ArchiveTranslationAdoptionTests {
         gate.release()
         await laneTask?.value
 
-        #expect(sut.model.archiveTranslationJob.currentRun == nil, "no run ever starts")
-        #expect(sut.model.archiveTranslationJob.pendingRequest == nil, "the claim is fully released")
+        #expect(sut.model.archiveTranslationJob.lastRun == nil, "no run ever starts")
+        #expect(sut.model.archiveTranslationJob.activity == .idle, "the claim is fully released")
         #expect(engine.recordedBatches.isEmpty, "the run's engine is never flown")
         #expect(archiveToast(sut.model) == nil, "a cancelled resolution posts no card")
     }
@@ -496,10 +521,11 @@ struct ArchiveTranslationAdoptionTests {
         let engine = ScriptedArchiveEngine()
 
         // No pre-armed engine: the run's resolution parks in the arm wait.
+        let signal = signalResolutionEntry(on: sut)
         sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                sut.model.archiveTranslationJob.pendingRequest != nil
+                signal.entered == 1
             },
             "the run reaches engine resolution"
         )
@@ -519,7 +545,7 @@ struct ArchiveTranslationAdoptionTests {
             "no fr-stamped result ever lands"
         )
         #expect(engine.recordedBatches.isEmpty, "the de engine is never flown for the fr run")
-        #expect(sut.model.archiveTranslationJob.currentRun == nil, "no run ever starts")
+        #expect(sut.model.archiveTranslationJob.lastRun == nil, "no run ever starts")
         #expect(
             archiveToast(sut.model)?.body == "Apple (NMT) session is still starting — try again in a moment.",
             "the run reports the still-starting copy"

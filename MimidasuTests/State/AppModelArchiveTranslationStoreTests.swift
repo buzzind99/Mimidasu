@@ -81,7 +81,7 @@ struct AppModelArchiveTranslationStoreTests {
             "the fresh run sends every sentence"
         )
         #expect(
-            sut.model.archiveTranslationJob.currentRun?.scope == .missing,
+            sut.model.archiveTranslationJob.lastRun?.request.scope == .missing,
             "the scope stays missing — no phantom rows narrow or widen it"
         )
     }

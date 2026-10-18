@@ -194,7 +194,7 @@ struct AppModelArchiveTranslationTests {
 
         sut.model.retryFailedArchiveTranslation()
 
-        #expect(!sut.model.archiveTranslationJob.isActive, "the cross-archive retry is refused")
+        #expect(sut.model.archiveTranslationJob.activity == .idle, "the cross-archive retry is refused")
         #expect(engine.recordedBatches.count == batches, "no new engine batch is sent")
         #expect(
             sut.store.load(id: otherID)?.entries.allSatisfy { entry in entry.translations.isEmpty } == true,
@@ -250,8 +250,8 @@ extension AppModelArchiveTranslationTests {
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
             "the confirmed pick flies the run"
         )
-        #expect(sut.model.archiveTranslationJob.currentRun?.engine == .deepl)
-        #expect(sut.model.archiveTranslationJob.kind == .deepl)
+        #expect(sut.model.archiveTranslationJob.lastRun?.request.engine == .deepl)
+        #expect(sut.model.archiveTranslationJob.lastRun?.kind == .deepl)
         #expect(
             sut.model.entries.first?.translation(for: "fr")
                 == SentenceTranslation(lang: "fr", text: "T:こんにちは", engine: .deepl)
@@ -270,7 +270,7 @@ extension AppModelArchiveTranslationTests {
             "the staged intent stays for its own sheet"
         )
         #expect(!sut.model.archiveTranslationRunning)
-        #expect(sut.model.archiveTranslationJob.currentRun == nil)
+        #expect(sut.model.archiveTranslationJob.lastRun == nil)
         #expect(sut.model.archive.load(id: sut.id)?.entries.allSatisfy { entry in entry.translations.isEmpty } == true)
     }
 
@@ -285,7 +285,7 @@ extension AppModelArchiveTranslationTests {
 
         #expect(sut.model.providerAwaitingDisclosure == nil)
         #expect(!sut.model.archiveTranslationRunning)
-        #expect(sut.model.archiveTranslationJob.currentRun == nil)
+        #expect(sut.model.archiveTranslationJob.lastRun == nil)
         #expect(engine.recordedBatches.isEmpty, "the declined pick never reaches an engine")
     }
 
@@ -307,7 +307,7 @@ extension AppModelArchiveTranslationTests {
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
             "the armed session serves the whole run"
         )
-        #expect(sut.model.archiveTranslationJob.kind == .appleFast)
+        #expect(sut.model.archiveTranslationJob.lastRun?.kind == .appleFast)
         #expect(
             sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
                 == [.appleFast, .appleFast, .appleFast],
@@ -469,12 +469,12 @@ extension AppModelArchiveTranslationTests {
             },
             "the run claims the slot and parks"
         )
-        let claimed = sut.model.archiveTranslationJob.currentRun
+        let claimed = sut.model.archiveTranslationJob.activity.request
 
         sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
         sut.model.retranslateSentence(sut.model.entries[1].sentence)
 
-        #expect(sut.model.archiveTranslationJob.currentRun == claimed, "the second start is refused")
+        #expect(sut.model.archiveTranslationJob.activity.request == claimed, "the second start is refused")
         #expect(engine.recordedBatches == [["こんにちは"]], "only the claimed run's flight is airborne")
         #expect(sut.model.pendingRetranslations.isEmpty, "the per-row lane never takes a marker")
         #expect(retranslateToast(sut.model) == nil, "the per-row lane never reports")
@@ -485,6 +485,24 @@ extension AppModelArchiveTranslationTests {
         #expect(
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
             "the claimed run finishes alone"
+        )
+    }
+
+    // MARK: - Claim window
+
+    @Test("the claim window reads running from the click, before any resolution")
+    func claimWindowReadsRunningFromTheClick() async {
+        let sut = await makeSUT()
+        let engine = ScriptedArchiveEngine()
+        install(engine, for: .google, on: sut.model)
+
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
+
+        #expect(sut.model.archiveTranslationRunning, "the claimed run is visible from the click")
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
+            "the claimed run drains to completion"
         )
     }
 

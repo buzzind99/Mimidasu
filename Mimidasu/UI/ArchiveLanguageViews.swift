@@ -369,7 +369,7 @@ struct ArchiveTranslationEnginePicker: View {
     }
 
     private var jobIsActive: Bool {
-        model.archiveTranslationJob.isActive
+        model.archiveTranslationJob.activity != .idle
     }
 
     /// The start action is held back while a run is claimed (one job at a
@@ -410,7 +410,7 @@ struct ArchiveTranslationEnginePicker: View {
         // A run that reaches its engine is what closes the picker: an Apple
         // tier starts immediately, an external one after the cloud
         // disclosure is confirmed.
-        .onChange(of: model.archiveTranslationJob.isRunning) { _, isRunning in
+        .onChange(of: model.archiveTranslationJob.activity.isRunning) { _, isRunning in
             if isRunning {
                 isPresented = false
             }

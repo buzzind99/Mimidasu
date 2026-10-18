@@ -223,20 +223,17 @@ struct ArchiveWindowView: View {
 
     private func row(_ summary: ArchivedSessionSummary) -> some View {
         let job = model.archiveTranslationJob
-        // The claim counts from `prepare` onward: while the engine resolves
-        // the run lives in `pendingRequest`, and `currentRun` takes over
-        // when it starts.
-        let request = job.pendingRequest ?? job.currentRun
-        let runsHere = job.isActive && request?.sessionID == summary.id
+        // The scoped activity: this session's claim is visible from the
+        // click onward, and progress numbers belong to a started walk.
+        let activity = job.activity(for: summary.id)
+        let request = activity.request
         return ArchiveRow(
             model: model,
             summary: summary,
             canOpen: model.canOpenArchivedSession,
-            isJobRunning: runsHere,
-            jobLang: runsHere ? request?.lang : nil,
-            // Progress numbers belong to a started run; during resolution
-            // they still hold the previous run's values.
-            jobProgress: runsHere && job.isRunning ? (job.processed, job.total) : nil,
+            isJobRunning: request != nil,
+            jobLang: request?.lang,
+            jobProgress: activity.progress.map { progress in (progress.processed, progress.total) },
             chooserPresented: chooserPresented(summary),
             onOpen: { open(summary) },
             onDelete: { state.requestDelete(summary) },
@@ -264,8 +261,8 @@ private struct ArchiveRow: View {
     let summary: ArchivedSessionSummary
     let canOpen: Bool
     /// The bulk job claims this session (the chip line's busy state, from
-    /// engine resolution onward); the progress bar renders once the run
-    /// starts. `jobLang` names the language it walks.
+    /// the claim onward); the progress bar renders once the run starts.
+    /// `jobLang` names the language it walks.
     let isJobRunning: Bool
     let jobLang: String?
     /// The run's `(processed, total)`, for the progress bar.

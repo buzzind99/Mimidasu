@@ -54,29 +54,16 @@ final class ArchiveTranslationJob {
         case unavailable(reason: String)
     }
 
-    /// True from the synchronous `prepare()` claim until the run ends —
-    /// engine resolution included. The app model's per-row retry guard and
-    /// its one-job-at-a-time refusal read this.
-    private(set) var isActive = false
+    /// The job's present tense: one value every surface renders.
+    private(set) var activity: Activity = .idle
 
-    /// True from the moment the engine resolves until the loop exits (or a
-    /// cancel lands mid-flight).
-    private(set) var isRunning = false
+    /// The most recently begun run — inputs, resolved kind, and final
+    /// counts — the summary toast's and retry-failed's read. Survives the
+    /// run's end; untouched by a run that never began (empty scope,
+    /// unavailable, cancelled resolution).
+    private(set) var lastRun: LastRun?
 
-    /// The run in flight, or the last finished one — the retry-failed read.
-    private(set) var currentRun: Request?
-
-    /// The claimed run awaiting engine resolution — the request becomes
-    /// visible the moment `run` starts resolving (the claim precedes it
-    /// only synchronously), and `beginRun` moves it into `currentRun`. Nil
-    /// while idle, while a run executes, and after every early return.
-    private(set) var pendingRequest: Request?
-
-    /// The current (or last) run's resolved engine kind.
-    private(set) var kind: TranslationEngineKind?
-
-    private(set) var total = 0
-    private(set) var processed = 0
+    /// The run's accounting: live during the walk, final after it.
     private(set) var translatedCount = 0
 
     /// The run's failed indexes, in index order (the summary's retry set);
@@ -105,35 +92,32 @@ final class ArchiveTranslationJob {
     /// Progress/finish notifications; nil stays silent (tests).
     @ObservationIgnored var onEvent: (@MainActor (Event) -> Void)?
 
-    /// Claims the job slot synchronously, before the async run's engine
-    /// resolution: per-row retries are refused from the click onward, so a
-    /// session-backed engine never sees concurrent calls. Returns false when
-    /// a run is already claimed. Clears a cancel left over from a previous
-    /// generation, so the claim is always fresh.
-    func prepare() -> Bool {
-        guard !isActive else { return false }
-        isActive = true
+    /// Claims the job slot synchronously for `request` — the run is visible
+    /// as claimed from this instant (engine resolution included). Refused
+    /// while another run is claimed or executing. Clears a cancel left over
+    /// from a previous generation, so the claim is always fresh.
+    func claim(_ request: Request) -> Bool {
+        guard activity == .idle else { return false }
+        activity = .claimed(request)
         isCancelled = false
         return true
     }
 
-    /// Starts a prepared run. Refused — no event — when the slot wasn't
-    /// claimed (`prepare`) or a run is already executing. A cancel landing
-    /// during engine resolution discards the run silently: the surface that
-    /// would have reported it is already gone.
-    func run(_ request: Request) async {
-        guard isActive, !isRunning else { return }
+    /// Starts the claimed run: engine resolution, then the walk. Refused —
+    /// no event — when no run is claimed (or one is already executing). A
+    /// cancel landing during engine resolution discards the run silently:
+    /// the surface that would have reported it is already gone.
+    func run() async {
+        guard case let .claimed(request) = activity else { return }
         let indexes = Self.indexes(for: request)
         guard !indexes.isEmpty else {
-            isActive = false
+            activity = .idle
             onEvent?(.finished(translated: 0, failedIndexes: []))
             return
         }
-        pendingRequest = request
         let resolution = await resolveEngine(request.engine, TargetLanguage(code: request.lang))
         guard !isCancelled else {
-            pendingRequest = nil
-            isActive = false
+            activity = .idle
             return
         }
         let engine: any TranslationEngine
@@ -143,13 +127,11 @@ final class ArchiveTranslationJob {
             engine = resolvedEngine
             resolvedKind = engineKind
         case let .unavailable(reason):
-            pendingRequest = nil
-            isActive = false
+            activity = .idle
             onEvent?(.unavailable(reason: reason))
             return
         case .cancelled:
-            pendingRequest = nil
-            isActive = false
+            activity = .idle
             return
         }
         beginRun(request, kind: resolvedKind, total: indexes.count)
@@ -166,14 +148,12 @@ final class ArchiveTranslationJob {
     // MARK: - Run internals
 
     private func beginRun(_ request: Request, kind: TranslationEngineKind, total: Int) {
-        isRunning = true
-        currentRun = request
-        pendingRequest = nil
-        self.kind = kind
-        self.total = total
-        processed = 0
+        lastRun = LastRun(request: request, kind: kind, total: total, processed: 0)
         translatedCount = 0
         failureIndexes = []
+        activity = .running(
+            request, progress: RunProgress(kind: kind, processed: 0, total: total)
+        )
         onEvent?(.started(total: total))
     }
 
@@ -186,6 +166,7 @@ final class ArchiveTranslationJob {
         let sentenceByIndex = Dictionary(
             uniqueKeysWithValues: request.sentences.map { sentence in (sentence.index, sentence) }
         )
+        let total = indexes.count
         for index in indexes {
             if isCancelled || Task.isCancelled {
                 break
@@ -194,7 +175,10 @@ final class ArchiveTranslationJob {
             if await translateOne(sentence, of: request, through: engine, kind: kind) {
                 break
             }
-            processed = translatedCount + failureIndexes.count
+            let processed = translatedCount + failureIndexes.count
+            activity = .running(
+                request, progress: RunProgress(kind: kind, processed: processed, total: total)
+            )
             onEvent?(.progress(processed: processed, total: total))
         }
     }
@@ -244,8 +228,10 @@ final class ArchiveTranslationJob {
     }
 
     private func finishRun() {
-        isRunning = false
-        isActive = false
+        if let progress = activity.progress {
+            lastRun?.processed = progress.processed
+        }
+        activity = .idle
         if isCancelled || Task.isCancelled {
             onEvent?(.cancelled(translated: translatedCount))
         } else {

@@ -95,8 +95,8 @@ struct ArchiveTranslationJobTests {
         job.land = recorder.recordLanding
         let request = makeRequest()
 
-        #expect(job.prepare())
-        await job.run(request)
+        #expect(job.claim(request))
+        await job.run()
 
         #expect(scriptedEngine.recordedBatches == [["s0"], ["s1"], ["s2"]], "one sentence per engine call")
         #expect(recorder.landedIndexes == [0, 1, 2])
@@ -112,11 +112,11 @@ struct ArchiveTranslationJobTests {
             .progress(processed: 3, total: 3),
             .finished(translated: 3, failedIndexes: [])
         ])
-        #expect(job.kind == .google)
-        #expect(job.currentRun == request)
-        #expect(job.pendingRequest == nil, "the request moves into `currentRun` once the run begins")
-        #expect(job.isActive == false)
-        #expect(job.isRunning == false)
+        #expect(job.lastRun?.kind == .google)
+        #expect(job.lastRun?.request == request)
+        #expect(job.activity == .idle, "the request moves into `lastRun` once the run ends")
+        #expect(job.activity == .idle)
+        #expect(!job.activity.isRunning)
     }
 
     // MARK: - Failures
@@ -132,8 +132,8 @@ struct ArchiveTranslationJobTests {
         job.land = recorder.recordLanding
         let request = makeRequest(sentenceCount: 4, scope: .all)
 
-        #expect(job.prepare())
-        await job.run(request)
+        #expect(job.claim(request))
+        await job.run()
 
         #expect(
             engine.recordedBatches == [["s0"], ["s1"], ["s2"], ["s3"]],
@@ -142,9 +142,9 @@ struct ArchiveTranslationJobTests {
         #expect(recorder.landedIndexes == [0, 3])
         #expect(job.translatedCount == 2)
         #expect(job.failureIndexes == [1, 2])
-        #expect(job.processed == 4, "the progress count includes the failures")
+        #expect(job.lastRun?.processed == 4, "the progress count includes the failures")
         #expect(recorder.events.last == .finished(translated: 2, failedIndexes: [1, 2]))
-        #expect(job.isActive == false)
+        #expect(job.activity == .idle)
     }
 
     @Test("a landing sink reporting a lost write counts the sentence as failed")
@@ -157,13 +157,13 @@ struct ArchiveTranslationJobTests {
         job.onEvent = recorder.recordEvent
         job.land = recorder.recordLanding
 
-        #expect(job.prepare())
-        await job.run(makeRequest())
+        #expect(job.claim(makeRequest()))
+        await job.run()
 
         #expect(recorder.landedIndexes == [0, 1, 2], "the sink still sees every result")
         #expect(job.translatedCount == 2, "the lost write is not counted as a success")
         #expect(job.failureIndexes == [1], "the lost write becomes a retryable failure")
-        #expect(job.processed == 3)
+        #expect(job.lastRun?.processed == 3)
         #expect(recorder.events.last == .finished(translated: 2, failedIndexes: [1]))
     }
 
@@ -177,8 +177,8 @@ struct ArchiveTranslationJobTests {
         job.onEvent = recorder.recordEvent
         job.land = recorder.recordLanding
 
-        #expect(job.prepare())
-        await job.run(makeRequest(scope: .all))
+        #expect(job.claim(makeRequest(scope: .all)))
+        await job.run()
 
         #expect(
             engine.recordedBatches == [["s0"], ["s1"], ["s2"]],
@@ -203,8 +203,8 @@ struct ArchiveTranslationJobTests {
         job.land = recorder.recordLanding
         let request = makeRequest(sentenceCount: 5)
 
-        #expect(job.prepare())
-        await job.run(request)
+        #expect(job.claim(request))
+        await job.run()
 
         #expect(recorder.landedIndexes == [0, 1], "the partial results stay landed")
         #expect(recorder.landed == [
@@ -218,8 +218,9 @@ struct ArchiveTranslationJobTests {
             .progress(processed: 2, total: 5),
             .cancelled(translated: 2)
         ])
-        #expect(job.isActive == false)
-        #expect(job.isRunning == false)
+        #expect(job.activity == .idle)
+        #expect(!job.activity.isRunning)
+        #expect(job.lastRun?.processed == 2, "the cancel keeps the last published count")
     }
 
     @Test("a cancel during engine resolution discards the run silently")
@@ -235,13 +236,14 @@ struct ArchiveTranslationJobTests {
         job.onEvent = recorder.recordEvent
         job.land = recorder.recordLanding
 
-        #expect(job.prepare())
-        let run = Task { await job.run(makeRequest()) }
+        let request = makeRequest()
+        #expect(job.claim(request))
+        let run = Task { await job.run() }
         #expect(
             await pollUntil(timeout: resultTimeout) { gate.enteredCount == 1 },
             "the run parks in engine resolution"
         )
-        #expect(job.pendingRequest != nil, "the claimed request is visible while resolving")
+        #expect(job.activity == .claimed(request), "the claimed request is visible while resolving")
         job.cancel()
         gate.open()
         await run.value
@@ -249,10 +251,10 @@ struct ArchiveTranslationJobTests {
         #expect(recorder.events.isEmpty, "a cancelled resolution reports nothing")
         #expect(recorder.landedIndexes.isEmpty)
         #expect(engine.recordedBatches.isEmpty)
-        #expect(job.isActive == false)
-        #expect(job.isRunning == false)
-        #expect(job.currentRun == nil)
-        #expect(job.pendingRequest == nil)
+        #expect(job.activity == .idle)
+        #expect(!job.activity.isRunning)
+        #expect(job.lastRun == nil)
+        #expect(job.activity == .idle)
     }
 
     @Test("a real cancel surfacing as a CancellationError stops the walk")
@@ -266,8 +268,8 @@ struct ArchiveTranslationJobTests {
         job.onEvent = recorder.recordEvent
         job.land = recorder.recordLanding
 
-        #expect(job.prepare())
-        let run = Task { await job.run(makeRequest()) }
+        #expect(job.claim(makeRequest()))
+        let run = Task { await job.run() }
         #expect(
             await pollUntil(timeout: resultTimeout) { gate.enteredCount == 1 },
             "the first sentence parks in the engine"
@@ -292,14 +294,12 @@ struct ArchiveTranslationJobTests {
         job.onEvent = recorder.recordEvent
         job.land = recorder.recordLanding
 
-        #expect(job.prepare())
-        await job.run(makeRequest(sentenceCount: 5))
+        #expect(job.claim(makeRequest(sentenceCount: 5)))
+        await job.run()
         #expect(recorder.landedIndexes == [0, 1])
 
-        #expect(job.prepare())
-        await job.run(
-            makeRequest(sentenceCount: 5, translated: Set(recorder.landedIndexes))
-        )
+        #expect(job.claim(makeRequest(sentenceCount: 5, translated: Set(recorder.landedIndexes))))
+        await job.run()
 
         #expect(recorder.landedIndexes == [0, 1, 2, 3, 4])
         #expect(
@@ -320,14 +320,12 @@ struct ArchiveTranslationJobTests {
         job.onEvent = recorder.recordEvent
         job.land = recorder.recordLanding
 
-        #expect(job.prepare())
-        await job.run(makeRequest(sentenceCount: 5))
+        #expect(job.claim(makeRequest(sentenceCount: 5)))
+        await job.run()
         #expect(recorder.landedIndexes == [0, 1])
 
-        #expect(job.prepare())
-        await job.run(
-            makeRequest(sentenceCount: 5, translated: Set(recorder.landedIndexes), scope: .all)
-        )
+        #expect(job.claim(makeRequest(sentenceCount: 5, translated: Set(recorder.landedIndexes), scope: .all)))
+        await job.run()
 
         #expect(recorder.landedIndexes == [0, 1, 0, 1, 2, 3, 4])
         #expect(engine.recordedBatches == [
@@ -345,17 +343,13 @@ struct ArchiveTranslationJobTests {
         job.onEvent = recorder.recordEvent
         job.land = recorder.recordLanding
 
-        #expect(job.prepare())
-        await job.run(makeRequest(sentenceCount: 4, scope: .all))
+        #expect(job.claim(makeRequest(sentenceCount: 4, scope: .all)))
+        await job.run()
         #expect(job.failureIndexes == [1, 2])
 
         engine.clearFailures()
-        #expect(job.prepare())
-        await job.run(
-            makeRequest(
-                sentenceCount: 4, scope: .failedOnly(Set(job.failureIndexes))
-            )
-        )
+        #expect(job.claim(makeRequest(sentenceCount: 4, scope: .failedOnly(Set(job.failureIndexes)))))
+        await job.run()
 
         #expect(recorder.landedIndexes == [0, 3, 1, 2], "the retry lands the failed set after the first pass")
         #expect(engine.recordedBatches == [
@@ -374,9 +368,10 @@ extension ArchiveTranslationJobTests {
     @Test("prepare claims the slot once and refuses a second claim")
     func prepareClaimsTheSlotOnce() {
         let job = makeJob()
+        let request = makeRequest()
 
-        #expect(job.prepare())
-        #expect(job.prepare() == false)
+        #expect(job.claim(request))
+        #expect(job.claim(request) == false)
     }
 
     @Test("a run without the prepare claim is refused with no events")
@@ -388,12 +383,12 @@ extension ArchiveTranslationJobTests {
         job.onEvent = recorder.recordEvent
         job.land = recorder.recordLanding
 
-        await job.run(makeRequest())
+        await job.run()
 
         #expect(recorder.events.isEmpty)
         #expect(recorder.landedIndexes.isEmpty)
         #expect(engine.recordedBatches.isEmpty)
-        #expect(job.isActive == false)
+        #expect(job.activity == .idle)
     }
 
     @Test("a second prepare is refused while a run is airborne")
@@ -409,17 +404,18 @@ extension ArchiveTranslationJobTests {
         job.onEvent = recorder.recordEvent
         job.land = recorder.recordLanding
 
-        #expect(job.prepare())
-        let run = Task { await job.run(makeRequest()) }
+        let request = makeRequest()
+        #expect(job.claim(request))
+        let run = Task { await job.run() }
         #expect(
             await pollUntil(timeout: resultTimeout) { gate.enteredCount == 1 },
             "the run parks in engine resolution"
         )
-        #expect(job.prepare() == false, "the airborne run holds the claim")
+        #expect(job.claim(makeRequest()) == false, "the airborne run holds the claim")
 
         gate.open()
         await run.value
-        #expect(job.prepare(), "the finished run frees the slot")
+        #expect(job.claim(makeRequest()), "the finished run frees the slot")
     }
 
     // MARK: - Engine resolution outcomes
@@ -433,14 +429,14 @@ extension ArchiveTranslationJobTests {
         job.onEvent = recorder.recordEvent
         job.land = recorder.recordLanding
 
-        #expect(job.prepare())
-        await job.run(makeRequest())
+        #expect(job.claim(makeRequest()))
+        await job.run()
 
         #expect(recorder.events == [.unavailable(reason: reason)])
         #expect(recorder.landedIndexes.isEmpty)
-        #expect(job.isActive == false)
-        #expect(job.isRunning == false)
-        #expect(job.pendingRequest == nil, "an early return clears the pending request")
+        #expect(job.activity == .idle)
+        #expect(!job.activity.isRunning)
+        #expect(job.activity == .idle, "an early return releases the claim")
     }
 
     @Test("a cancelled resolution stays silent")
@@ -451,14 +447,14 @@ extension ArchiveTranslationJobTests {
         job.onEvent = recorder.recordEvent
         job.land = recorder.recordLanding
 
-        #expect(job.prepare())
-        await job.run(makeRequest())
+        #expect(job.claim(makeRequest()))
+        await job.run()
 
         #expect(recorder.events.isEmpty)
         #expect(recorder.landedIndexes.isEmpty)
-        #expect(job.isActive == false)
-        #expect(job.isRunning == false)
-        #expect(job.pendingRequest == nil)
+        #expect(job.activity == .idle)
+        #expect(!job.activity.isRunning)
+        #expect(job.activity == .idle)
     }
 
     @Test("an empty scope finishes at zero without resolving the engine")
@@ -473,13 +469,13 @@ extension ArchiveTranslationJobTests {
         job.onEvent = recorder.recordEvent
         job.land = recorder.recordLanding
 
-        #expect(job.prepare())
-        await job.run(makeRequest(translated: [0, 1, 2]))
+        #expect(job.claim(makeRequest(translated: [0, 1, 2])))
+        await job.run()
 
         #expect(recorder.events == [.finished(translated: 0, failedIndexes: [])])
         #expect(resolutions.withLock { count in count } == 0, "the resolver is never consulted")
-        #expect(job.pendingRequest == nil, "an empty scope never publishes a pending request")
-        #expect(job.isActive == false)
+        #expect(job.activity == .idle, "an empty scope leaves the activity idle")
+        #expect(job.activity == .idle)
     }
 
     @Test("the claim reads active while resolving and running once the engine is ready")
@@ -496,29 +492,30 @@ extension ArchiveTranslationJobTests {
         job.onEvent = recorder.recordEvent
         job.land = recorder.recordLanding
 
-        #expect(job.prepare())
-        let run = Task { await job.run(makeRequest()) }
+        let request = makeRequest()
+        #expect(job.claim(request))
+        let run = Task { await job.run() }
         #expect(
             await pollUntil(timeout: resultTimeout) { resolutionGate.enteredCount == 1 },
             "the run parks in engine resolution"
         )
-        #expect(job.isActive, "the claim is active from prepare onward")
-        #expect(job.isRunning == false, "no engine work starts while resolving")
-        #expect(job.pendingRequest != nil, "the resolving request is readable during the claim")
+        #expect(job.activity == .claimed(request), "the claim is active from the claim onward")
+        #expect(!job.activity.isRunning, "no engine work starts while resolving")
+        #expect(job.activity == .claimed(request), "the resolving request is readable during the claim")
 
         resolutionGate.open()
         #expect(
             await pollUntil(timeout: resultTimeout) { engineGate.enteredCount == 1 },
             "the first sentence parks in the engine"
         )
-        #expect(job.isRunning, "the loop is running once the engine is resolved")
-        #expect(job.pendingRequest == nil, "the pending request moved into `currentRun`")
+        #expect(job.activity.isRunning, "the loop is running once the engine is resolved")
+        #expect(job.activity.request == request, "the pending request moved into the running activity")
         #expect(recorder.events.first == .started(total: 3))
 
         engineGate.open()
         await run.value
-        #expect(job.isRunning == false)
-        #expect(job.isActive == false)
+        #expect(!job.activity.isRunning)
+        #expect(job.activity == .idle)
         #expect(recorder.events.last == .finished(translated: 3, failedIndexes: []))
     }
 }

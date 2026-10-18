@@ -44,14 +44,14 @@ extension AppModel {
     /// previous archive's failure set would silently modify a session the
     /// result was never reported for.
     func retryFailedArchiveTranslation() {
-        guard !archiveTranslationJob.isActive,
-              let previous = archiveTranslationJob.currentRun,
-              previous.sessionID == openArchive?.id,
+        guard archiveTranslationJob.activity == .idle,
+              let previous = archiveTranslationJob.lastRun,
+              previous.request.sessionID == openArchive?.id,
               !archiveTranslationJob.failureIndexes.isEmpty
         else { return }
         beginArchiveTranslation(
-            engine: previous.engine,
-            lang: previous.lang,
+            engine: previous.request.engine,
+            lang: previous.request.lang,
             scope: .failedOnly(Set(archiveTranslationJob.failureIndexes))
         )
     }
@@ -76,7 +76,7 @@ extension AppModel {
     /// unconditional, because the failure summary card outlives the finished
     /// run; the archive boundaries route through here to clear it.
     func cancelArchiveTranslation() {
-        if archiveTranslationJob.isActive {
+        if archiveTranslationJob.activity != .idle {
             archiveTranslationJob.cancel()
         }
         toasts.dismiss(key: ToastKey.archiveTranslation)
@@ -104,12 +104,13 @@ extension AppModel {
     // MARK: - Internals
 
     /// The one start path: begin (the derived scope) and retry-failed (the
-    /// explicit failure set) both land here.
+    /// explicit failure set) both land here. The request is built first,
+    /// then claimed synchronously — the run reads as claimed from this
+    /// instant — and finally the async walk starts.
     private func beginArchiveTranslation(
         engine: RetranslateEngine, lang: String, scope: ArchiveTranslationJob.Scope?
     ) {
         guard let archive = openArchive else { return }
-        guard archiveTranslationJob.prepare() else { return }
         let translated = Self.translatedIndexes(in: archive.entries, lang: lang)
         let resolvedScope = scope
             ?? (translated.count >= archive.entries.count && !archive.entries.isEmpty
@@ -122,8 +123,9 @@ extension AppModel {
             translated: translated,
             scope: resolvedScope
         )
+        guard archiveTranslationJob.claim(request) else { return }
         Task { [archiveTranslationJob] in
-            await archiveTranslationJob.run(request)
+            await archiveTranslationJob.run()
         }
     }
 
@@ -167,7 +169,7 @@ extension AppModel {
     /// accounting — the row keeps its previous text, so the display never
     /// claims a translation the store lacks.
     private func landArchiveTranslation(index: Int, translation: SentenceTranslation) -> Bool {
-        guard let sessionID = archiveTranslationJob.currentRun?.sessionID else { return false }
+        guard let sessionID = archiveTranslationJob.activity.request?.sessionID else { return false }
         let wrote = archive.upsert(translation: translation, index: index, session: sessionID)
         guard wrote else {
             // The run's row vanishing mid-flight is expected when the run was
@@ -227,12 +229,12 @@ extension AppModel {
     /// The keyed progress card: per-key dedup replaces it in place, so the
     /// bar animates instead of flashing. Cancel keeps partial results.
     private func postArchiveTranslationProgress(processed: Int, total: Int) {
-        guard let request = archiveTranslationJob.currentRun else { return }
+        guard case let .running(request, progress) = archiveTranslationJob.activity else { return }
         let language = TargetLanguage(code: request.lang)
         toasts.post(
             key: ToastKey.archiveTranslation, style: .info,
             title: "Translating to \(language.nativeName)…",
-            body: "\(archiveTranslationJob.kind?.markerName ?? request.engine.displayName) · "
+            body: "\(progress.kind.markerName) · "
                 + "\(processed)/\(ArchivedSessionSummary.sentenceCountText(total))",
             action: ToastCenter.Action(label: "Cancel") { [weak self] in
                 self?.cancelArchiveTranslation()
@@ -245,8 +247,8 @@ extension AppModel {
     /// variant auto-dismisses; a failure summary carries the retry action
     /// over exactly the failed sentences.
     private func postArchiveTranslationSummary(translated: Int, failedIndexes: [Int]) {
-        guard let request = archiveTranslationJob.currentRun else { return }
-        let language = TargetLanguage(code: request.lang)
+        guard let run = archiveTranslationJob.lastRun else { return }
+        let language = TargetLanguage(code: run.request.lang)
         if failedIndexes.isEmpty {
             toasts.post(
                 key: ToastKey.archiveTranslation, style: .info,
@@ -258,7 +260,7 @@ extension AppModel {
             toasts.post(
                 key: ToastKey.archiveTranslation, style: .info,
                 title: "Archive translation finished",
-                body: "\(translated)/\(archiveTranslationJob.total) translated to "
+                body: "\(translated)/\(run.total) translated to "
                     + "\(language.nativeName) · \(failedIndexes.count) failed",
                 action: ToastCenter.Action(label: "Retry failed sentences") { [weak self] in
                     self?.retryFailedArchiveTranslation()

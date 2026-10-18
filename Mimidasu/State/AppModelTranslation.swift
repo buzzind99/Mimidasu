@@ -29,7 +29,7 @@ extension AppModel: TranslationSessionPort {
     /// True from the bulk job's synchronous claim (engine resolution
     /// included) until the run ends — the per-row retry guard.
     var archiveTranslationRunning: Bool {
-        archiveTranslationJob.isActive
+        archiveTranslationJob.activity != .idle
     }
 
     /// Lands a delivered translation on its transcript row. Internal (not

@@ -281,7 +281,7 @@ struct AppModelCloudDisclosureTests {
         sut.model.requestArchiveTranslation(engine: .appleHighFidelity, lang: "fr")
 
         #expect(
-            sut.model.archiveTranslationJob.isActive,
+            sut.model.archiveTranslationJob.activity != .idle,
             "the Apple Intelligence pick starts its run without a sheet"
         )
         #expect(sut.model.providerAwaitingDisclosure == nil)
