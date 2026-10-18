@@ -161,19 +161,25 @@ extension AppModel {
 
     /// Lands one bulk result: the store upsert keyed by the run's captured
     /// session id (so an airborne result at close time still persists), the
-    /// row swap only while the pane still shows that archive, and the
-    /// revision bump every archive surface re-reads through. Returns whether
-    /// the write landed; a lost write posts the run's archive warning and
-    /// makes the sentence a retryable failure in the job's accounting.
+    /// row swap only when the write landed and the pane still shows that
+    /// archive, and the revision bump every archive surface re-reads through.
+    /// Returns whether the write landed; a lost write posts the run's archive
+    /// warning and makes the sentence a retryable failure in the job's
+    /// accounting — the row keeps its previous text, so the display never
+    /// claims a translation the store lacks.
     private func landArchiveTranslation(index: Int, translation: SentenceTranslation) -> Bool {
         guard let sessionID = archiveTranslationJob.currentRun?.sessionID else { return false }
         let wrote = archive.upsert(translation: translation, index: index, session: sessionID)
+        guard wrote else {
+            // The run's row vanishing mid-flight is expected when the run was
+            // torn down (close/swap/delete); only a genuine fault reports.
+            if !archiveTranslationJob.isCancelled {
+                reportArchiveWriteFailure()
+            }
+            return false
+        }
         if openArchive?.id == sessionID, let at = entryPositionBySentence[index] {
             entries[at].replaceTranslation(translation)
-        }
-        guard wrote else {
-            reportArchiveWriteFailure()
-            return false
         }
         if openArchive?.id == sessionID {
             refreshOpenArchiveLanguages()
@@ -192,7 +198,8 @@ extension AppModel {
         guard !warningVisible else { return }
         postArchiveWriteWarning(
             body: "The session store couldn't be written to. "
-                + "This translation wasn't added to the archive."
+                + "This translation wasn't added to the archive.",
+            isClosable: true
         )
     }
 
@@ -226,7 +233,8 @@ extension AppModel {
         toasts.post(
             key: ToastKey.archiveTranslation, style: .info,
             title: "Translating to \(language.nativeName)…",
-            body: "\(request.engine.displayName) · \(processed)/\(total) sentences",
+            body: "\(archiveTranslationJob.kind?.markerName ?? request.engine.displayName) · "
+                + "\(processed)/\(ArchivedSessionSummary.sentenceCountText(total))",
             action: ToastCenter.Action(label: "Cancel") { [weak self] in
                 self?.cancelArchiveTranslation()
             },
@@ -251,8 +259,8 @@ extension AppModel {
             toasts.post(
                 key: ToastKey.archiveTranslation, style: .info,
                 title: "Archive translation finished",
-                body: "\(translated)/\(archiveTranslationJob.total) translated · "
-                    + "\(failedIndexes.count) failed",
+                body: "\(translated)/\(archiveTranslationJob.total) translated to "
+                    + "\(language.nativeName) · \(failedIndexes.count) failed",
                 action: ToastCenter.Action(label: "Retry failed sentences") { [weak self] in
                     self?.retryFailedArchiveTranslation()
                 }

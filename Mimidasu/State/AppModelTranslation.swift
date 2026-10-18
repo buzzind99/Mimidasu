@@ -39,9 +39,12 @@ extension AppModel: TranslationSessionPort {
     /// same-language translation in place and appends only a genuinely new
     /// language. So a repeat, an engine-swap replay, and a manual retry all
     /// land as the fresh text — none of them can grow an `" / "` pileup.
-    /// Returns whether the row was still present; a false return means the
-    /// transcript no longer contains the index (the callers that must not
-    /// act on a vanished row — the lane's cache seeding — check it).
+    /// Returns whether the row took the translation: false when the
+    /// transcript no longer contains the index, or when an archive-mode
+    /// write failed. A failed archive write leaves the row on its previous
+    /// text, so the display never shows a translation the store lacks (the
+    /// callers that must not act on a vanished row — the lane's cache
+    /// seeding — check the return).
     @discardableResult
     func applyTranslation(index: Int, translation: SentenceTranslation) -> Bool {
         // Cleared before the row lookup: a result whose row is gone (the
@@ -57,16 +60,22 @@ extension AppModel: TranslationSessionPort {
         // archive is closing still persists (its marker is retired either
         // way).
         if let archiveID = archiveSessionID {
-            if archive.upsert(translation: translation, index: index, session: archiveID) {
+            let stored = archive.upsert(translation: translation, index: index, session: archiveID)
+            if stored {
                 // The summary-derived surfaces (banner chip, picker counts,
                 // disclosure count) read the store's counts, not `entries`.
                 refreshOpenArchiveLanguages()
                 archiveRevision &+= 1
             } else {
+                // The row keeps its previous text: a displayed translation
+                // the store lacks would make the next run's scope disagree
+                // with the summary-derived counts.
                 postArchiveWriteWarning(
                     body: "The session store couldn't be written to. "
-                        + "This translation wasn't added to the archive."
+                        + "This translation wasn't added to the archive.",
+                    isClosable: true
                 )
+                return false
             }
         } else if let recordingID = recordingSessionID, !archiveWriteFailed {
             if !archive.upsert(translation: translation, index: index, session: recordingID) {

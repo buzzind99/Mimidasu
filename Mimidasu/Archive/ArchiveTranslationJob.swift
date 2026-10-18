@@ -84,7 +84,9 @@ final class ArchiveTranslationJob {
     /// translations.
     private(set) var failureIndexes: [Int] = []
 
-    private var isCancelled = false
+    /// Readable so the landing sink can tell a teardown-orphaned write
+    /// failure (the surface is going away) from a genuine store fault.
+    private(set) var isCancelled = false
 
     /// Resolves the run's engine — the coordinator's archive-job route.
     /// Injected by the app model; the default refuses, so an unwired job
