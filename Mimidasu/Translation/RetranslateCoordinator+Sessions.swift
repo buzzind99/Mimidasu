@@ -42,11 +42,20 @@ extension RetranslateCoordinator {
     /// waits on its own host's hand-over, never the other's. Named apart from
     /// the `retranslateSessionEngine` / `retranslateHifiSessionEngine`
     /// properties it reads so a call site is never mistaken for one.
-    /// (Internal, not private: the lane runner polls it.)
+    /// Target-gated: an armed config rebuilt for another target carries that
+    /// target's hand-over, so a link still waiting for its own target must
+    /// not adopt it. (Internal, not private: the lane runner polls it.)
     func laneEngineStorage(
-        for kind: TranslationEngineKind
+        for kind: TranslationEngineKind, target: String
     ) -> (any TranslationEngine)? {
-        kind == .appleHighFidelity ? retranslateHifiSessionEngine : retranslateSessionEngine
+        switch kind {
+        case .appleHighFidelity:
+            retranslateHifiConfigTarget == target ? retranslateHifiSessionEngine : nil
+        case .appleFast:
+            retranslateConfigTarget == target ? retranslateSessionEngine : nil
+        case .google, .deepl, .openrouter:
+            nil
+        }
     }
 
     /// Arms the kind's dedicated session on the first retry through it.
@@ -236,26 +245,33 @@ extension RetranslateCoordinator {
     }
 
     /// The Apple half of the job resolution: arms the kind's dedicated
-    /// session for the run's target, chains on whatever lane work is
-    /// airborne (per-row retries are refused from the job's claim onward, so
-    /// the captured link is the last one — a session-backed engine never
-    /// sees concurrent calls), then waits for the hand-over. A timeout
-    /// reports the still-starting copy and keeps the config armed, so the
-    /// next attempt is instant once the session (or its language pack)
-    /// lands; a cancellation is a teardown, whose surface is already gone.
-    /// A teardown can land after the wait resolved — the rebuilt
-    /// `.translationTask` host hands over a fresh engine and the wait's
-    /// storage read can adopt it — so deliverability is re-checked before
-    /// the engine is handed to the run.
+    /// session for the run's target, waits for the lane chain to drain (per-
+    /// row retries are refused from the job's claim onward, so the chain is
+    /// already being cut off — but a link airborne before the claim may
+    /// still be flying, and a session-backed engine never sees concurrent
+    /// calls), then waits for the hand-over. The chain wait polls
+    /// deliverability too: a close/swap turns the epoch over, which releases
+    /// the job's claim immediately instead of parking it behind a link whose
+    /// result is already undeliverable. A timeout reports the still-starting
+    /// copy and keeps the config armed, so the next attempt is instant once
+    /// the session (or its language pack) lands; a cancellation is a
+    /// teardown, whose surface is already gone. A teardown can land after
+    /// the wait resolved — the rebuilt `.translationTask` host hands over a
+    /// fresh engine and the wait's storage read can adopt it — so
+    /// deliverability is re-checked before the engine is handed to the run.
     private func resolveJobAppleEngine(
         kind: TranslationEngineKind, target: TargetLanguage
     ) async -> ArchiveTranslationJob.EngineResolution {
         let epoch = retranslateSessionEpoch
         armRetranslateSessionIfNeeded(for: kind, target: target.code)
-        if let airborne = retranslateLaneTask {
-            await airborne.value
+        while !laneChainIdle {
+            guard retranslateLaneCanDeliver(epoch: epoch) else { return .cancelled }
+            try? await Task.sleep(for: .milliseconds(50))
         }
-        switch await laneEngine(laneEngineStorage(for: kind), kind: kind, epoch: epoch) {
+        switch await laneEngine(
+            laneEngineStorage(for: kind, target: target.code),
+            kind: kind, epoch: epoch, target: target.code
+        ) {
         case let .ready(engine):
             guard retranslateLaneCanDeliver(epoch: epoch) else { return .cancelled }
             return .ready(engine: engine, kind: kind)
@@ -285,12 +301,14 @@ extension RetranslateCoordinator {
     /// Apple selection while its dedicated session is still arming) waits a
     /// bounded interval for the `.translationTask` host to hand one over —
     /// acquisition is sub-second once armed, the bound only catches
-    /// pathological cases. The deadline is monotonic (`ContinuousClock`) —
-    /// wall-clock `Date` would skew on clock changes. A lane or job that
-    /// dies mid-wait (stop, teardown) exits promptly instead of polling its
-    /// nilled storage out the whole arm window.
+    /// pathological cases. Storage is read for `target` only: a config
+    /// re-armed for another target never serves this wait. The deadline is
+    /// monotonic (`ContinuousClock`) — wall-clock `Date` would skew on clock
+    /// changes. A lane or job that dies mid-wait (stop, teardown) exits
+    /// promptly instead of polling its nilled storage out the whole arm
+    /// window.
     func laneEngine(
-        _ engine: (any TranslationEngine)?, kind: TranslationEngineKind, epoch: Int
+        _ engine: (any TranslationEngine)?, kind: TranslationEngineKind, epoch: Int, target: String
     ) async -> LaneEngineResolution {
         if let engine {
             return .ready(engine)
@@ -299,7 +317,7 @@ extension RetranslateCoordinator {
         // Polls the storage the loop exits on and returns that same value: a
         // re-read after the loop would race a teardown and read nil as a
         // timeout.
-        var resolved = laneEngineStorage(for: kind)
+        var resolved = laneEngineStorage(for: kind, target: target)
         while resolved == nil, ContinuousClock.now < deadline {
             guard retranslateLaneCanDeliver(epoch: epoch) else { return .cancelled }
             do {
@@ -307,7 +325,7 @@ extension RetranslateCoordinator {
             } catch {
                 return .cancelled
             }
-            resolved = laneEngineStorage(for: kind)
+            resolved = laneEngineStorage(for: kind, target: target)
         }
         guard let resolved else { return .timedOut }
         return .ready(resolved)

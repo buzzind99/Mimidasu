@@ -65,6 +65,33 @@ final class RetranslateCoordinator {
     /// never sees concurrent `translate` calls.
     @ObservationIgnored var retranslateLaneTask: Task<Void, Never>?
 
+    /// True while the newest lane-chain link has not finished. The chain is
+    /// serial (each link awaits the previous), so the newest link's
+    /// completion is the whole chain's. The bulk job's resolution waits on
+    /// this instead of a captured task, so a close/swap releases the job's
+    /// claim without awaiting a link the teardown already made
+    /// undeliverable.
+    @ObservationIgnored private(set) var laneChainIdle = true
+
+    /// Serial of the newest lane-chain link (see `laneChainIdle`): an older
+    /// link finishing after a newer one exists must not idle the chain.
+    @ObservationIgnored private var laneChainSerial = 0
+
+    /// Registers a new lane-chain link and returns its serial. The chain is
+    /// marked busy before the link task exists, so a wait never observes an
+    /// idle chain mid-registration.
+    func beginLaneChainLink() -> Int {
+        laneChainSerial += 1
+        laneChainIdle = false
+        return laneChainSerial
+    }
+
+    /// Marks the chain idle when `serial` is still the newest link's.
+    func endLaneChainLink(serial: Int) {
+        guard serial == laneChainSerial else { return }
+        laneChainIdle = true
+    }
+
     /// Session boundary token for the re-translate lane, in the same spirit
     /// as `TranslationQueue`'s session epoch: bumped in
     /// `sessionWillBegin`, `sessionDidEnd`, and `teardown` (a mid-session

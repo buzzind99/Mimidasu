@@ -85,6 +85,10 @@ struct AppModelRetranslateAppleLaneTests {
 
         #expect(model.retranslateConfig == nil)
         #expect(model.retranslateHifiConfig == nil)
+        #expect(
+            model.retranslate.laneEngineStorage(for: .google, target: "en") == nil,
+            "an external kind has no stored session to adopt"
+        )
     }
 
     @Test("arming an already-armed kind never reassigns its config")

@@ -1,22 +1,33 @@
 import Foundation
 @testable import Mimidasu
+import Synchronization
 import Testing
 
 /// Tests the Apple side of an archive-translation start's engine
 /// resolution: the picker's explicit tier parameter (a high-fidelity pick
 /// flying a pre-armed session, an NMT pick never upgrading on its own), the
 /// still-starting copy each Apple model reports when its arm window runs
-/// out, the silent release when a teardown lands under the wait, the chain
-/// on airborne lane work before the first engine call, and the
-/// pair-scoped high-fidelity degrade. The settings re-translate selection
-/// plays no part: the run resolves exactly the engine the pick names.
-/// Shares the harness (seeded store, scripted engine, permit gate) with the
-/// `AppModelArchiveTranslation` suite.
+/// out, the silent release when a teardown lands under the wait, the
+/// un-pre-armed run resolving on the late hand-over, and the pair-scoped
+/// high-fidelity degrade — with the progress card naming the tier that
+/// actually runs. The settings re-translate selection plays no part: the
+/// run resolves exactly the engine the pick names. The lane-chain half (the
+/// job's claim over airborne lane work, its release when the surface goes
+/// away, and the target-gated adoption of dedicated-session engines by the
+/// per-row lane, the bulk run, and the factory) lives in the sibling
+/// `ArchiveTranslationAdoption` suite in this file, split to keep both type
+/// bodies under the lint gate. Shares the harness (seeded store, scripted
+/// engine, permit gate) with the `AppModelArchiveTranslation` suite.
 @MainActor
 @Suite("AppModelArchiveTranslationResolution")
 struct ArchiveTranslationResolutionTests {
 
     private let resultTimeout: TimeInterval = 5
+
+    /// The open archive's row for `index`.
+    private func sentence(_ sut: ArchiveTranslationSUT, at index: Int) -> Sentence {
+        sut.model.entries.first { entry in entry.sentence.index == index }!.sentence
+    }
 
     @Test("a high-fidelity selection flies the armed high-fidelity session")
     func highFidelityStartUsesArmedHifiSession() async throws {
@@ -111,35 +122,83 @@ struct ArchiveTranslationResolutionTests {
         #expect(retranslateToast(sut.model) == nil, "a canceled start never reports")
     }
 
-    @Test("a run chains on airborne lane work before its first engine call")
-    func queuedRunChainsOnAirborneLaneWork() async {
+    // MARK: - Un-pre-armed hand-over
+
+    @Test("a fast run with no pre-armed engine resolves on the late hand-over")
+    func unarmedFastRunResolvesOnLateHandover() async {
         let sut = await makeSUT()
         let engine = ScriptedArchiveEngine()
-        sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "fr")
-        sut.model.retranslateSessionArrived(engine)
-
-        let gate = PermitGate()
-        sut.model.retranslateLaneTask = Task {
-            await gate.acquire()
-        }
 
         sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
         #expect(
-            await pollUntil(timeout: resultTimeout) {
-                sut.model.archiveTranslationJob.pendingRequest != nil
-            },
-            "the run reaches engine resolution while the lane link is airborne"
+            await pollUntil(timeout: resultTimeout) { sut.model.retranslateConfig != nil },
+            "the run's resolution arms the fast session"
         )
-        #expect(
-            engine.recordedBatches.isEmpty,
-            "the first call waits out the airborne lane work"
-        )
+        sut.model.retranslateSessionArrived(engine)
 
-        gate.release()
         #expect(
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
-            "the run proceeds once the chain clears"
+            "the late hand-over serves the whole run"
         )
+        #expect(sut.model.archiveTranslationJob.kind == .appleFast)
+        #expect(
+            sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
+                == [.appleFast, .appleFast, .appleFast],
+            "every landed row is stamped fast"
+        )
+    }
+
+    @Test("a high-fidelity run with no pre-armed engine resolves on the late hand-over")
+    func unarmedHifiRunResolvesOnLateHandover() async throws {
+        guard #available(macOS 26.4, *) else {
+            try Test.cancel("the high-fidelity lane requires macOS 26.4")
+        }
+        let sut = await makeSUT()
+        let engine = ScriptedArchiveEngine()
+
+        sut.model.beginArchiveTranslation(engine: .appleHighFidelity, lang: "fr")
+        #expect(
+            await pollUntil(timeout: resultTimeout) { sut.model.retranslateHifiConfig != nil },
+            "the run's resolution arms the high-fidelity session"
+        )
+        sut.model.retranslateHifiSessionArrived(engine)
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
+            "the late hand-over serves the whole run"
+        )
+        #expect(sut.model.archiveTranslationJob.kind == .appleHighFidelity)
+        #expect(
+            sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
+                == [.appleHighFidelity, .appleHighFidelity, .appleHighFidelity],
+            "every landed row is stamped high fidelity"
+        )
+    }
+
+    @Test("the engine factory receives the run's target, not the settings target")
+    func engineFactoryReceivesRunTarget() async {
+        let sut = await makeSUT()
+        #expect(
+            sut.model.translationSettings.targetLanguage.code == "en",
+            "the settings target differs from the archive's stored target"
+        )
+        let engine = ScriptedArchiveEngine()
+        let recorded = Mutex<[(provider: TranslationProvider, target: String)]>([])
+        sut.model.retranslateEngineFactory = { provider, target in
+            recorded.withLock { current in current.append((provider, target.code)) }
+            return provider == .google ? engine : nil
+        }
+
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
+            "the external run serves the whole session"
+        )
+        let calls = recorded.withLock { current in current }
+        #expect(calls.count == 1, "one engine build for the run")
+        #expect(calls.first?.provider == .google)
+        #expect(calls.first?.target == "fr", "the factory builds over the run's target")
     }
 
     // MARK: - Target-scoped high-fidelity resolution
@@ -181,12 +240,27 @@ struct ArchiveTranslationResolutionTests {
         // The probe landed not-installed for the archive's own pair: the
         // pair genuinely cannot serve high fidelity, so the run degrades.
         sut.model.appleHighFidelityProbe = (false, "fr")
-        let engine = ScriptedArchiveEngine()
+        let gate = PermitGate()
+        let engine = ScriptedArchiveEngine(gate: gate)
         sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "fr")
         sut.model.retranslateSessionArrived(engine)
 
         sut.model.beginArchiveTranslation(engine: .appleHighFidelity, lang: "fr")
 
+        // Park the run on its first flight: the card is still the progress
+        // variant, and it must name the model that actually runs.
+        #expect(
+            await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
+            "the degraded run reaches its first flight"
+        )
+        #expect(
+            archiveToast(sut.model)?.body.contains("Apple (NMT)") == true,
+            "the progress card names the resolved tier, not the requested one"
+        )
+
+        gate.release()
+        gate.release()
+        gate.release()
         #expect(
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
             "the degraded run flies the fast session"
@@ -267,6 +341,188 @@ struct ArchiveTranslationResolutionTests {
         #expect(
             sut.model.archiveHighFidelityOffered(for: "en"),
             "evidence for one pair does not describe the other's offer"
+        )
+    }
+}
+
+/// The lane-chain half of the archive-translation coverage: the job's claim
+/// over airborne lane work and its release when the surface goes away, plus
+/// the target-gated adoption of dedicated-session engines by the per-row
+/// lane, the bulk run, and the external engine factory. Split into its own
+/// suite to keep both type bodies under the lint gate.
+@MainActor
+@Suite("AppModelArchiveTranslationAdoption")
+struct ArchiveTranslationAdoptionTests {
+
+    private let resultTimeout: TimeInterval = 5
+
+    /// The open archive's row for `index`.
+    private func sentence(_ sut: ArchiveTranslationSUT, at index: Int) -> Sentence {
+        sut.model.entries.first { entry in entry.sentence.index == index }!.sentence
+    }
+
+    // MARK: - Lane chain and the job claim
+
+    @Test("a run chains on airborne lane work before its first engine call")
+    func queuedRunChainsOnAirborneLaneWork() async {
+        let sut = await makeSUT()
+        let engine = ScriptedArchiveEngine()
+        sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "fr")
+        sut.model.retranslateSessionArrived(engine)
+
+        // Park a real lane link on a gated external engine: the row retry
+        // registers through `runRetranslateLane`, so the chain bookkeeping
+        // the run's resolution reads is live.
+        let gate = PermitGate()
+        let laneEngine = ScriptedArchiveEngine(gate: gate)
+        install(laneEngine, for: .google, on: sut.model)
+        sut.model.translationSettings.selectRetranslate(.google)
+        sut.model.retranslateSentence(sentence(sut, at: 0))
+        #expect(
+            await pollUntil(timeout: resultTimeout) { laneEngine.recordedBatches.count == 1 },
+            "the lane link parks in its engine"
+        )
+
+        sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                sut.model.archiveTranslationJob.pendingRequest != nil
+            },
+            "the run reaches engine resolution while the lane link is airborne"
+        )
+        #expect(
+            engine.recordedBatches.isEmpty,
+            "the first call waits out the airborne lane work"
+        )
+
+        gate.release()
+        #expect(
+            await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
+            "the run proceeds once the chain clears"
+        )
+    }
+
+    @Test("a close during resolution releases the job claim behind an airborne lane")
+    func closeDuringResolutionReleasesClaimBehindAirborneLane() async {
+        let sut = await makeSUT()
+        let engine = ScriptedArchiveEngine()
+        sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "fr")
+        sut.model.retranslateSessionArrived(engine)
+
+        let gate = PermitGate()
+        let laneEngine = ScriptedArchiveEngine(gate: gate)
+        install(laneEngine, for: .google, on: sut.model)
+        sut.model.translationSettings.selectRetranslate(.google)
+        sut.model.retranslateSentence(sentence(sut, at: 0))
+        #expect(
+            await pollUntil(timeout: resultTimeout) { laneEngine.recordedBatches.count == 1 },
+            "the lane link parks in its engine"
+        )
+        let laneTask = sut.model.retranslateLaneTask
+
+        sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                sut.model.archiveTranslationJob.pendingRequest != nil
+            },
+            "the run reaches resolution behind the airborne lane"
+        )
+
+        // Close before the lane is released: the epoch turns over, so the
+        // resolution's deliverability poll must release the job's claim
+        // instead of parking behind the airborne link until it drains.
+        sut.model.closeArchive()
+        #expect(
+            await pollUntil(timeout: resultTimeout) { !sut.model.archiveTranslationRunning },
+            "the close releases the job claim"
+        )
+
+        gate.release()
+        await laneTask?.value
+
+        #expect(sut.model.archiveTranslationJob.currentRun == nil, "no run ever starts")
+        #expect(sut.model.archiveTranslationJob.pendingRequest == nil, "the claim is fully released")
+        #expect(engine.recordedBatches.isEmpty, "the run's engine is never flown")
+        #expect(archiveToast(sut.model) == nil, "a cancelled resolution posts no card")
+    }
+
+    // MARK: - Target-gated engine adoption
+
+    @Test("a lane whose kind was re-armed for another target never adopts that engine")
+    func foreignTargetLaneNeverAdoptsRearmedEngine() async {
+        let sut = await makeSUT()
+        sut.model.laneArmTimeout = .milliseconds(300)
+        let engine = ScriptedArchiveEngine()
+
+        // A `fr` retry with no engine armed: the lane parks in the arm wait.
+        sut.model.retranslateSentence(sentence(sut, at: 0))
+        #expect(sut.model.pendingRetranslations.contains(0), "the fr click marks its row")
+
+        // The pane moves to `de` and a `de` retry re-arms the fast config for
+        // its own target; its lane chains behind the parked fr link.
+        sut.model.selectArchiveViewingLanguage("de")
+        sut.model.retranslateSentence(sentence(sut, at: 1))
+        #expect(
+            sut.model.retranslate.retranslateConfigTarget == "de",
+            "the de click rebuilds the armed config for its target"
+        )
+
+        // The hand-over serves the de config only.
+        sut.model.retranslateSessionArrived(engine)
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                sut.model.entries.first(where: { entry in entry.sentence.index == 1 })?
+                    .translation(for: "de") != nil
+            },
+            "the de retry lands normally"
+        )
+        #expect(
+            engine.recordedBatches == [["さようなら"]],
+            "only the de flight flew — the fr lane never adopted the de engine"
+        )
+        #expect(
+            sut.model.entries.compactMap { entry in entry.translation(for: "fr") }.isEmpty,
+            "the fr row keeps no wrong-language result"
+        )
+        #expect(sut.model.pendingRetranslations.isEmpty, "the timed-out fr marker retires too")
+        #expect(sut.model.lanePendingRetranslations.isEmpty)
+    }
+
+    @Test("a bulk run resolving for another target never adopts a re-armed engine")
+    func foreignTargetJobResolutionNeverAdoptsRearmedEngine() async {
+        let sut = await makeSUT()
+        sut.model.laneArmTimeout = .milliseconds(300)
+        let engine = ScriptedArchiveEngine()
+
+        // No pre-armed engine: the run's resolution parks in the arm wait.
+        sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                sut.model.archiveTranslationJob.pendingRequest != nil
+            },
+            "the run reaches engine resolution"
+        )
+
+        // The pane moves to `de` and the same config is re-armed for it; the
+        // hand-over stores a `de` engine.
+        sut.model.selectArchiveViewingLanguage("de")
+        sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "de")
+        sut.model.retranslateSessionArrived(engine)
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) { !sut.model.archiveTranslationRunning },
+            "the run times out and releases its claim"
+        )
+        #expect(
+            sut.model.entries.compactMap { entry in entry.translation(for: "fr") }.isEmpty,
+            "no fr-stamped result ever lands"
+        )
+        #expect(engine.recordedBatches.isEmpty, "the de engine is never flown for the fr run")
+        #expect(sut.model.archiveTranslationJob.currentRun == nil, "no run ever starts")
+        #expect(
+            archiveToast(sut.model)?.body == "Apple (NMT) session is still starting — try again in a moment.",
+            "the run reports the still-starting copy"
         )
     }
 }

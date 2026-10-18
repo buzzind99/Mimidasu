@@ -181,9 +181,10 @@ extension RetranslateCoordinator {
         // the lane waits for it (bounded) instead of blocking the click.
         // The armed config bakes in the click-time lane target — the
         // archive's viewing language in archive mode, the settings target
-        // live.
+        // live. The stored engine is read for that same target: a config
+        // rebuilt for another target's hand-over never serves this lane.
         armRetranslateSessionIfNeeded(for: kind, target: target.code)
-        return .alternate(kind, engine: laneEngineStorage(for: kind))
+        return .alternate(kind, engine: laneEngineStorage(for: kind, target: target.code))
     }
 
     /// Builds the lane's external engine over `target` — the click-time lane
@@ -232,11 +233,15 @@ extension RetranslateCoordinator {
         // lane task outliving its session would otherwise land on an
         // unrelated row of the next one, whose indexes restart at 0.
         let epoch = retranslateSessionEpoch
+        let serial = beginLaneChainLink()
         retranslateLaneTask = Task { [weak self] in
             await previous?.value
             // A deallocated coordinator has no markers left to retire, so
             // the weak unwrap is the only exit that skips `retireLaneMarker`.
             guard let self else { return }
+            // Every exit drains this link; a superseded link's exit leaves
+            // the chain busy for the newer one still running.
+            defer { endLaneChainLink(serial: serial) }
             guard retranslateLaneCanDeliver(epoch: epoch) else {
                 retireLaneMarker(sentence.index, epoch: epoch)
                 return
@@ -258,20 +263,24 @@ extension RetranslateCoordinator {
     /// The lane task's second half, split out at the function-length gate:
     /// resolves the engine for the (possibly probe-degraded) lane kind and
     /// flies it, or reports the resolution's outcome. An Apple kind re-reads
-    /// its own storage — after a degrade, the click-time engine belongs to
-    /// the abandoned kind (a stored hifi engine while the lane now flies
-    /// fast). Externals keep their click-time engine.
+    /// its own storage for the click-time target — after a degrade, the
+    /// click-time engine belongs to the abandoned kind (a stored hifi engine
+    /// while the lane now flies fast), and a config re-armed for another
+    /// target must not serve this lane. Externals keep their click-time
+    /// engine.
     private func flyResolvedLane(
         _ sentence: Sentence, laneKind: TranslationEngineKind,
         engine: (any TranslationEngine)?, epoch: Int, target: TargetLanguage
     ) async {
         let laneEngineCandidate: (any TranslationEngine)? = switch laneKind {
         case .appleFast, .appleHighFidelity:
-            laneEngineStorage(for: laneKind)
+            laneEngineStorage(for: laneKind, target: target.code)
         case .google, .deepl, .openrouter:
             engine
         }
-        let resolved = await laneEngine(laneEngineCandidate, kind: laneKind, epoch: epoch)
+        let resolved = await laneEngine(
+            laneEngineCandidate, kind: laneKind, epoch: epoch, target: target.code
+        )
         switch resolved {
         case .cancelled:
             // The stop already cleared every toast; a "still starting"
