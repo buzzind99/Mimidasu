@@ -70,6 +70,14 @@ protocol AudioCapturing: AnyObject, Sendable {
     var onIOError: ((CaptureError) -> Void)? { get set }
     func start() async throws
     func stop()
+    /// Suspends capture without tearing anything down: the IOProc stops at
+    /// the HAL (no callbacks fire, the system capture indicator goes dark)
+    /// and the rig — tap, aggregate, IOProc, listeners — survives for
+    /// `resume()`. A chunk that races the fence is dropped.
+    func pause() async
+    /// Restarts the IOProc stopped by `pause()`. Throws when the rig is gone
+    /// (a stop raced the pause) or the HAL refuses the restart.
+    func resume() async throws
 }
 
 /// Teardown-vs-callback state. Sample callbacks run on `ioQueue`, but
@@ -82,6 +90,9 @@ private struct CaptureState {
     /// True for the whole of `start()`, so two concurrent starts can't both
     /// pass the `isRunning` guard and clobber each other's HAL objects.
     var isStarting = false
+    /// The pause fence: set before the IOProc stop is issued, so a callback
+    /// that races the stop cannot append or emit after `pause()` returns.
+    var isPaused = false
     var accumulated: [Float] = []
     /// Read cursor into `accumulated`: consumed chunks compact once per
     /// callback instead of a `removeFirst` memmove per chunk.
@@ -155,6 +166,12 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
         state.withLock { current in current.isRunning }
     }
 
+    /// Whether the capture is suspended mid-session (rig alive, IOProc
+    /// stopped). Read by `SessionController` tests and the resume guards.
+    var isPaused: Bool {
+        state.withLock { current in current.isPaused }
+    }
+
     // MARK: - Lifecycle
 
     func start() async throws {
@@ -223,6 +240,7 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
 
         state.withLock { current in
             current.isRunning = true
+            current.isPaused = false
         }
         #if DEBUG
             let rate = halRig.currentTapFormat?.mSampleRate ?? 0
@@ -234,6 +252,7 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
         let wasRunning = state.withLock { current -> Bool in
             guard current.isRunning else { return false }
             current.isRunning = false
+            current.isPaused = false
             current.accumulated.removeAll(keepingCapacity: true)
             current.accumulatedStart = 0
             return true
@@ -246,6 +265,42 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
         // thread (it can block for an IO period); the claim happens
         // synchronously so a deinit racing the task can't leak or double-free.
         resetPipeline(blocking: false)
+    }
+
+    /// Suspends capture: the fence goes up synchronously (any callback that
+    /// races the IOProc stop finds `isPaused` set under the state lock and
+    /// drops its chunk), then the tracked IOProc stops at the HAL. The tap,
+    /// aggregate, IOProc, listeners, and resampler caches all stay alive for
+    /// `resume()` — no HAL rebuild.
+    func pause() async {
+        let wasLive = state.withLock { current -> Bool in
+            guard current.isRunning, !current.isPaused else { return false }
+            current.isPaused = true
+            current.accumulated.removeAll(keepingCapacity: true)
+            current.accumulatedStart = 0
+            return true
+        }
+        guard wasLive else { return }
+        await halRig.stopIO()
+    }
+
+    /// Restarts the IOProc stopped by `pause()`. `isPaused` clears only on a
+    /// successful start, so a failed resume leaves the capture paused (the
+    /// caller falls back to the capture-lost rebuild path).
+    func resume() async throws {
+        let isPaused = state.withLock { current -> Bool in
+            current.isRunning && current.isPaused
+        }
+        guard isPaused else {
+            throw CaptureError.setupFailed("capture is not paused")
+        }
+        guard let status = await halRig.startIO() else {
+            throw CaptureError.setupFailed("capture rig is gone")
+        }
+        guard status == noErr else {
+            throw CaptureError.classifyStartStatus(status)
+        }
+        state.withLock { current in current.isPaused = false }
     }
 
     // MARK: - Test seam
@@ -270,6 +325,7 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
         let wasRunning = state.withLock { current -> Bool in
             guard current.isRunning else { return false }
             current.isRunning = false
+            current.isPaused = false
             current.accumulated.removeAll(keepingCapacity: true)
             current.accumulatedStart = 0
             return true
@@ -309,7 +365,7 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
     func handleAudioBufferList(
         _ abl: UnsafePointer<AudioBufferList>, format: AudioStreamBasicDescription
     ) {
-        guard isRunning else { return }
+        guard isRunning, !isPaused else { return }
         guard format.mFormatID == kAudioFormatLinearPCM else { return }
 
         guard let mono = extractMono(from: abl, format: format) else {
@@ -318,12 +374,13 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable {
         }
         guard !mono.isEmpty else { return }
 
-        // The entry `isRunning` check is only a pre-filter; `stop()` may have
-        // fenced teardown while this callback was extracting. The locked
-        // re-check makes teardown vs. in-flight-callback mutually exclusive.
+        // The entry `isRunning`/`isPaused` check is only a pre-filter;
+        // `stop()` or `pause()` may have fenced teardown while this callback
+        // was extracting. The locked re-check makes teardown/pause vs. an
+        // in-flight callback mutually exclusive.
         var formatUnavailable = false
         state.withLock { current in
-            guard current.isRunning else { return }
+            guard current.isRunning, !current.isPaused else { return }
             guard append(mono, format: format, to: &current) else {
                 formatUnavailable = true
                 return

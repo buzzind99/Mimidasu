@@ -45,6 +45,16 @@ struct AudioCaptureHALTests {
         #expect(error.localizedDescription == "system audio capture device died")
     }
 
+    @Test("stopIO and startIO no-op without a tracked rig")
+    func pauseHelpersWithoutRigAreNoops() async {
+        let hal = AudioCaptureHAL()
+
+        await hal.stopIO()
+        let status = await hal.startIO()
+
+        #expect(status == nil, "no tracked aggregate/IOProc reads as no rig, not a status")
+    }
+
     private static func makeASBD(sampleRate: Double) -> AudioStreamBasicDescription {
         AudioStreamBasicDescription(
             mSampleRate: sampleRate,

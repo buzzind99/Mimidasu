@@ -145,6 +145,41 @@ final class AudioCaptureHAL: @unchecked Sendable {
         )
     }
 
+    // MARK: - Pause / resume
+
+    /// The tracked aggregate + IOProc pair, or nil when no rig is up. A
+    /// snapshot under the mutex: a racing teardown may claim the objects
+    /// after the read, in which case the HAL call reports a bad object and
+    /// the caller's failure path runs.
+    private func trackedIO() -> (aggregate: AudioDeviceID, ioProc: AudioDeviceIOProcID)? {
+        live.withLock { current in
+            guard let aggregate = current.aggregateID, let ioProc = current.ioProcID
+            else { return nil }
+            return (aggregate, ioProc)
+        }
+    }
+
+    /// Stops the tracked IOProc without releasing anything: the tap,
+    /// aggregate, IOProc, listeners, and format stay live for a resume.
+    /// `AudioDeviceStop` waits for in-flight IO blocks to drain, so it runs
+    /// off the caller thread (mirrors `teardownDetached`); a no-op when no
+    /// rig is up.
+    func stopIO() async {
+        guard let tracked = trackedIO() else { return }
+        await Task.detached(priority: .userInitiated) {
+            AudioDeviceStop(tracked.aggregate, tracked.ioProc)
+        }.value
+    }
+
+    /// Restarts the IOProc stopped by `stopIO()`. Returns the raw HAL status
+    /// (nil when no rig is up — a racing teardown); the caller classifies.
+    func startIO() async -> OSStatus? {
+        guard let tracked = trackedIO() else { return nil }
+        return await Task.detached(priority: .userInitiated) {
+            AudioDeviceStart(tracked.aggregate, tracked.ioProc)
+        }.value
+    }
+
     // MARK: - Teardown
 
     /// Synchronous teardown for callers already off their critical thread
@@ -208,6 +243,9 @@ final class AudioCaptureHAL: @unchecked Sendable {
 
     /// Static so teardown never needs `self`; `AudioDeviceStop` drains
     /// in-flight IO blocks before returning, so the caller may be any thread.
+    /// Idempotent with respect to a paused (already stopped) IOProc: the HAL
+    /// reports a status for a stopped proc and the destroy calls below still
+    /// release everything.
     private static func destroy(
         tap: AudioObjectID?, aggregate: AudioDeviceID?, ioProc: AudioDeviceIOProcID?
     ) {
