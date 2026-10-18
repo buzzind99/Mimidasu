@@ -262,6 +262,84 @@ struct CrispASREngineLifecycleTests {
         requireFinal(drained.first, text: "<sil>", start: 0, end: 16000)
     }
 
+    // MARK: - flushUtterance() (pause flush)
+
+    @Test("flushUtterance decodes a loud utterance the VAD never analyzed")
+    func flushDecodesUnanalyzedLoudUtterance() throws {
+        let library = FakeCrispASRLibrary()
+        library.transcribeReplies = ["短い。"]
+        let engine = try makePreparedEngine(library)
+
+        // 0.4 s is below the 0.5 s VAD dispatch interval: no analyze pass
+        // ran, so only the RMS backstop knows this buffer is not silent.
+        engine.push(Array(loudSecond.prefix(6400)))
+        #expect(library.vadCalls.isEmpty, "no VAD pass was due")
+
+        let drained = engine.flushUtterance()
+
+        #expect(drained.count == 1, "a word spoken just before the pause must not be dropped")
+        requireFinal(drained.first, text: "短い。", start: 0, end: 6400)
+        #expect(library.transcribeCalls.count == 1)
+    }
+
+    @Test("flushUtterance advances processedSamples over the consumed buffer")
+    func flushAdvancesProcessedSamples() throws {
+        let library = FakeCrispASRLibrary()
+        library.transcribeReplies = ["短い。"]
+        let engine = try makePreparedEngine(library)
+
+        engine.push(Array(loudSecond.prefix(6400)))
+        #expect(engine.processedSamples == 0, "nothing decoded yet")
+
+        _ = engine.flushUtterance()
+
+        #expect(engine.processedSamples == 6400)
+        #expect(engine.processedSamples == engine.pushedSamples, "the backlog must not resurface as latency")
+    }
+
+    @Test("flushUtterance closes the whole snapshot so the unanalyzed tail is not re-seeded")
+    func flushClosesUnanalyzedTail() async throws {
+        let library = FakeCrispASRLibrary()
+        library.vadReplies = [.spans([(start: 0.0, end: 1.0)])]
+        library.transcribeReplies = ["", "まいった。"] // window partial, flush decode
+        let engine = try makePreparedEngine(library)
+
+        engine.push(loudSecond)
+        #expect(await pollUntilOffMain { library.transcribeCalls.count == 1 }, "the VAD confirmed speech")
+        engine.push([Float](repeating: 0.1, count: 1600)) // 0.1 s, no VAD pass yet
+
+        let drained = engine.flushUtterance()
+
+        #expect(drained.count == 1)
+        requireFinal(drained.first, text: "まいった。", start: 0, end: 16000)
+        #expect(
+            state(engine) { current in current.utterance.isEmpty },
+            "the decoded tail must not come back as the next utterance"
+        )
+        #expect(engine.processedSamples == engine.pushedSamples)
+    }
+
+    @Test("flushUtterance does not latch finishing: pushes and polls still work after")
+    func flushDoesNotLatchFinishing() async throws {
+        let library = FakeCrispASRLibrary()
+        library.vadReplies = [.spans([(start: 0.0, end: 1.0)])]
+        library.transcribeReplies = ["", "フラッシュ。"]
+        let engine = try makePreparedEngine(library)
+
+        engine.push(loudSecond)
+        #expect(await pollUntilOffMain { library.transcribeCalls.count == 1 }, "speech confirmed")
+
+        let drained = engine.flushUtterance()
+
+        #expect(drained.count == 1)
+        requireFinal(drained.first, text: "フラッシュ。", start: 0, end: 16000)
+        #expect(!state(engine) { current in current.finishing }, "a pause flush must not end the stream")
+        #expect(engine.poll() == nil, "the flush drained the inbox")
+
+        engine.push(loudSecond)
+        #expect(engine.pushedSamples == 2 * CrispASREngine.sampleRate, "pushes still land after a flush")
+    }
+
     // MARK: - Drained teardown (in-flight job vs. free)
 
     @Test("close frees the session once the in-flight decode drains within the grace")

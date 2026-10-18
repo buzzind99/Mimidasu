@@ -70,14 +70,19 @@ extension CrispASREngine {
 
         // Flush any open utterance synchronously — capture has already
         // stopped, so nothing new can arrive. Skip speechless buffers
-        // (VAD-confirmed silence, or the RMS backstop in degraded mode).
+        // (VAD-confirmed silence, or the RMS backstop in degraded mode); a
+        // loud buffer with no VAD pass yet still counts, since a word
+        // spoken just before a pause has had no pass to confirm it.
         // Snapshot under the state mutex: `close()` nils the session there.
-        let (pcm, start, end, hadSpeech, sessionHandle) = state.withLock { current in
+        let (pcm, start, end, utteranceStart, hadSpeech, sessionHandle) = state.withLock { current in
             (
                 current.utterance,
                 current.vadFirstSpeechStartSample ?? current.utteranceStartSample,
                 current.vadLastSpeechEndSample ?? (current.utteranceStartSample + current.utterance.count),
-                current.utteranceHasSpeech || (!current.vadActive && current.utteranceHasLoudAudio),
+                current.utteranceStartSample,
+                current.utteranceHasSpeech
+                    || (current.utteranceHasLoudAudio
+                        && (!current.vadActive || current.vadAnalyzedThroughSample == 0)),
                 current.session
             )
         }
@@ -86,40 +91,63 @@ extension CrispASREngine {
         // outlived the drain still owns the session, and two concurrent
         // `transcribe` calls on one session are undefined. The hung job's
         // text is lost; everything already in the inbox still drains below.
-        // The decode holds `prepareMutex` — the same lock `close()` takes
-        // before its drain — so a concurrent close can only free (or leak)
-        // the session after the flush has left it, never underneath it.
-        // The handle was snapshotted before the lock, though, so the lock
-        // alone is not protection enough: a close could acquire it first
-        // (its drain cannot see this not-yet-started, unflagged flush) and
-        // free the session in between — the in-lock re-check below skips
-        // the flush then. The re-check is pointer equality, so it only
-        // guarantees the nilled-session case; production never reopens a
-        // closed engine, so a reused address is not a live concern.
+        var decodedSnapshot = false
         if drainedCleanly, hadSpeech, let sessionHandle {
-            prepareMutex.withLock { _ in
-                guard state.withLock({ current in current.session }) == sessionHandle else { return }
-                if let raw = decode(pcm: pcm, session: sessionHandle) {
-                    let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                    #if DEBUG
-                        print("[asr] flush decode: \(pcm.count) samples -> \(text.isEmpty ? "no text" : "\(text.count) chars")")
-                    #endif
-                    if !text.isEmpty {
-                        state.withLock { current in
-                            current.inbox.append(.final(
-                                text: text, startSample: start, endSample: end, lang: languageCode
-                            ))
-                        }
-                    }
-                }
-            }
+            decodedSnapshot = decodeFlushedSnapshot(
+                pcm: pcm, start: start, end: end,
+                utteranceStart: utteranceStart, sessionHandle: sessionHandle
+            )
         }
 
         // Close out the utterance either way: a pause must resume with a
         // fresh utterance (the flush final covered the old one), and at
-        // finish the reset is a no-op on a session that is going away.
+        // finish the reset is a no-op on a session that is going away. When
+        // the flush decoded, capture is fenced and the whole snapshot was
+        // already consumed — close all of it, or the unanalyzed tail would
+        // come back as the next utterance and be transcribed again. Else
+        // the VAD end is the finalized span and the rest re-seeds.
         state.withLock { current in
-            finalizeUtterance(&current, end: end)
+            finalizeUtterance(
+                &current,
+                end: decodedSnapshot ? start + current.utterance.count : end
+            )
+        }
+    }
+
+    /// The flush decode half of `flushOpenUtterance`, run under
+    /// `prepareMutex` (the lock `close()` takes before its drain). Returns
+    /// true when it ran — even when the decode failed or produced no text —
+    /// so the caller closes the whole snapshot out. The handle was
+    /// snapshotted before the lock, so the in-lock re-check below is what
+    /// skips the flush when a close acquired the lock first and freed the
+    /// session; pointer equality only guarantees the nilled-session case,
+    /// and production never reopens a closed engine.
+    private func decodeFlushedSnapshot(
+        pcm: [Float], start: Int, end: Int,
+        utteranceStart: Int, sessionHandle: OpaquePointer?
+    ) -> Bool {
+        prepareMutex.withLock { _ in
+            guard state.withLock({ current in current.session }) == sessionHandle else { return false }
+            // The flush consumed the whole buffer: advance the processed
+            // accounting (as `runDecode` does) or the poll tick would
+            // republish the pre-pause backlog as latency while paused.
+            state.withLock { current in
+                current.processedCount = max(current.processedCount, utteranceStart + pcm.count)
+            }
+            if let raw = decode(pcm: pcm, session: sessionHandle) {
+                let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                #if DEBUG
+                    print("[asr] flush decode: \(pcm.count) samples -> \(text.isEmpty ? "no text" : "\(text.count) chars")")
+                #endif
+                if !text.isEmpty {
+                    state.withLock { current in
+                        current.inbox.append(.final(
+                            text: text, startSample: start, endSample: end, lang: languageCode
+                        ))
+                    }
+                }
+            }
+            return true
         }
     }
 

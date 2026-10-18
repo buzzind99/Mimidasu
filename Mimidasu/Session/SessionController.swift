@@ -321,8 +321,15 @@ final class SessionController {
         // must see the teardown and skip its flush (see `pause()`).
         isStopping = true
         // A pause flush in flight owns the engine's session — `finish()`
-        // must never decode concurrently with it.
-        await pauseFlushTask?.value
+        // must never decode concurrently with it. Consume its events here:
+        // a racing pause skipped delivery when it saw the latch, and a
+        // pause that did deliver has already nil'd the field, so exactly
+        // one consumer delivers the flushed sentence.
+        if let flush = pauseFlushTask {
+            for event in await flush.value {
+                handleASREvent(event)
+            }
+        }
         // Strictly ordered teardown: capture stops first (synchronous fence),
         // then the ASR finish → drain runs off-main — `finish` does a bounded
         // drain wait plus a synchronous flush decode, a multi-second C call

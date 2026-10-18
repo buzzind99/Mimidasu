@@ -50,6 +50,8 @@ struct SessionControllerPauseTests {
 
         private let log: CallLog
         private let flushScript: [ASREvent]
+        /// Set by a race test: `flushUtterance` parks until `open()`.
+        var flushPark: FlushPark?
 
         init(log: CallLog, flush: [ASREvent] = []) {
             self.log = log
@@ -77,6 +79,7 @@ struct SessionControllerPauseTests {
 
         func flushUtterance() -> [ASREvent] {
             log.record("engine.flushUtterance")
+            flushPark?.park()
             return flushScript
         }
     }
@@ -273,6 +276,37 @@ struct SessionControllerPauseTests {
         #expect(sut.sentences().map { sentence in sentence.text } == [flushTailSentence])
     }
 
+    @Test("a stop racing the airborne pause flush still delivers the flushed final")
+    func stopRacingAirborneFlushDeliversFinal() async throws {
+        let sut = makeSUT(flush: [
+            .final(text: flushTailSentence, startSample: 0, endSample: 16000, lang: "ja")
+        ])
+        let park = FlushPark()
+        sut.engine.flushPark = park
+        _ = try await sut.controller.begin(modelURL: nil, modelID: "test-model")
+
+        let pauseTask = Task { await sut.controller.pause() }
+        // Registered before the gate wait: an aborted test still opens the
+        // park so the detached flush cannot block a thread forever.
+        defer { park.open() }
+        // `#require`, not `#expect`: a flush that never parks must abort the
+        // test — continuing would await a gate nothing ever entered.
+        try #require(await pollUntil { park.isEntered }, "the pause flush is airborne")
+
+        // stop()'s latch runs before its first suspension: the yield hands it
+        // the main actor while the flush is still parked, so pause() wakes to
+        // a latched `isStopping` and skips its delivery. stop() consumes the
+        // flush, and it cannot be awaited directly while the gate is held.
+        let stopTask = Task { await sut.controller.stop() }
+        await Task.yield()
+        park.open()
+        await stopTask.value
+        await pauseTask.value
+
+        #expect(sut.sentences().map { sentence in sentence.text } == [flushTailSentence])
+        #expect(park.callCount == 1, "the flush decode ran exactly once")
+    }
+
     private final class WarningFlag: @unchecked Sendable {
         private let lock = NSLock()
         private var value = false
@@ -284,5 +318,43 @@ struct SessionControllerPauseTests {
         var fired: Bool {
             lock.withLock { value }
         }
+    }
+}
+
+/// A one-shot park for the scripted engine's flush: `park()` marks the flush
+/// entered and blocks until `open()`. Calls after the open pass straight
+/// through, so a regression that flushes twice cannot hang the suite; the
+/// wait is bounded so one that never opens surfaces as a failure, not a wedge.
+private final class FlushPark: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var enteredValue = false
+    private var openValue = false
+    private var calls = 0
+
+    var isEntered: Bool {
+        condition.withLock { enteredValue }
+    }
+
+    var callCount: Int {
+        condition.withLock { calls }
+    }
+
+    func park() {
+        condition.lock()
+        defer { condition.unlock() }
+        calls += 1
+        enteredValue = true
+        condition.broadcast()
+        let deadline = Date().addingTimeInterval(10)
+        while !openValue {
+            guard condition.wait(until: deadline) else { break }
+        }
+    }
+
+    func open() {
+        condition.lock()
+        openValue = true
+        condition.broadcast()
+        condition.unlock()
     }
 }
