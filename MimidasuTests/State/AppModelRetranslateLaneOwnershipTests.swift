@@ -73,7 +73,7 @@ struct AppModelRetranslateLaneOwnershipTests {
         let stragglerEngine = LaneGatedEngine()
         let liveEngine = LaneGatedEngine()
         let factoryCalls = Mutex(0)
-        model.retranslateEngineFactory = { _ in
+        model.retranslateEngineFactory = { _, _ in
             let call = factoryCalls.withLock { counter -> Int in
                 defer { counter += 1 }
                 return counter
@@ -156,7 +156,7 @@ struct AppModelRetranslateLaneOwnershipTests {
     func queueUnavailableKeepsLaneMarker() async {
         let model = await makeSUT()
         let engine = LaneGatedEngine()
-        model.retranslateEngineFactory = { _ in engine }
+        model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
         model.activeTranslationEngine = .apple
@@ -190,7 +190,7 @@ struct AppModelRetranslateLaneOwnershipTests {
     func laneRetriedBacklogRowSurvivesReconnectReplay() async {
         let model = await makeSUT()
         let engine = LaneEchoEngine()
-        model.retranslateEngineFactory = { _ in engine }
+        model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
         // No worker attached: both sentences pile up in the queue's
@@ -240,7 +240,7 @@ struct AppModelRetranslateLaneOwnershipTests {
     func laneResultForVanishedRowSkipsCacheSeed() async {
         let model = await makeSUT()
         let engine = LaneGatedEngine()
-        model.retranslateEngineFactory = { _ in engine }
+        model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
         let worker = Task { await model.translationQueue.run(with: QueueEchoEngine()) }

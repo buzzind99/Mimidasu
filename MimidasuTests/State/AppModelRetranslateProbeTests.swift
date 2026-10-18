@@ -186,6 +186,12 @@ struct AppModelRetranslateProbeTests {
 
         model.retranslateSentence(sentence)
         #expect(model.retranslateHifiConfig != nil, "the click armed the hifi lane on the pending probe")
+        // A stale hifi hand-over arrives before the probe lands: the
+        // degraded lane must not fly it — it belongs to the abandoned
+        // high-fidelity generation. The landing re-reads the (newly armed)
+        // fast lane's own storage instead.
+        let staleHifiEngine = LaneEchoEngine()
+        model.retranslateHifiSessionArrived(staleHifiEngine)
         // The probe lands NOT installed: the selection degrades to the fast
         // model. The lane arms the fast lane and flies IT — stamping the
         // model that actually ran, never hifi over fallback-fast text. The
@@ -204,6 +210,10 @@ struct AppModelRetranslateProbeTests {
                     == [SentenceTranslation(lang: "en", text: "JA:テスト", engine: .appleFast)]
             },
             "the degraded lane lands stamped with the fast model"
+        )
+        #expect(
+            staleHifiEngine.recordedBatches.isEmpty,
+            "the abandoned high-fidelity engine is never flown"
         )
         #expect(model.pendingRetranslations.isEmpty)
         #expect(model.lanePendingRetranslations.isEmpty)

@@ -57,7 +57,7 @@ struct AppModelRetranslateLaneTests {
     func laneResultStampsEngineAndSeedsCacheUnstamped() async {
         let model = await makeSUT()
         let engine = LaneEchoEngine()
-        model.retranslateEngineFactory = { provider in
+        model.retranslateEngineFactory = { provider, _ in
             #expect(provider == .google)
             return engine
         }
@@ -91,7 +91,7 @@ struct AppModelRetranslateLaneTests {
     func unavailableLaneEnginePostsToastAndSkips() async {
         let model = await makeSUT()
         let calls = Mutex(0)
-        model.retranslateEngineFactory = { provider in
+        model.retranslateEngineFactory = { provider, _ in
             calls.withLock { counter in counter += 1 }
             #expect(provider == .openrouter)
             return nil
@@ -121,7 +121,7 @@ struct AppModelRetranslateLaneTests {
     func laneTranslationsSerialize() async {
         let model = await makeSUT()
         let engine = LaneGatedEngine()
-        model.retranslateEngineFactory = { _ in engine }
+        model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
         let first = makeSentence(index: 1, text: "一")
@@ -151,7 +151,7 @@ struct AppModelRetranslateLaneTests {
     func duplicateLaneClickIsRefused() async {
         let model = await makeSUT()
         let engine = LaneGatedEngine()
-        model.retranslateEngineFactory = { _ in engine }
+        model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
         let sentence = makeSentence(index: 7, text: "一")
@@ -180,7 +180,7 @@ struct AppModelRetranslateLaneTests {
     func chainedLaneTaskResumingAfterStopRetiresMarker() async {
         let model = await makeSUT()
         let engine = LaneGatedEngine()
-        model.retranslateEngineFactory = { _ in engine }
+        model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
         let worker = await attachWorker(model)
@@ -281,7 +281,7 @@ struct AppModelRetranslateLaneTests {
     func laneResultAfterStopIsDropped() async {
         let model = await makeSUT()
         let engine = LaneGatedEngine()
-        model.retranslateEngineFactory = { _ in engine }
+        model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
         let worker = await attachWorker(model)
@@ -326,7 +326,7 @@ struct AppModelRetranslateLaneTests {
     func laneFlightAcrossSessionBoundaryIsDropped() async {
         let model = await makeSUT()
         let engine = LaneGatedEngine()
-        model.retranslateEngineFactory = { _ in engine }
+        model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
         let worker = await attachWorker(model)
@@ -382,7 +382,7 @@ struct AppModelRetranslateLaneTests {
     func laneFlightDuringCaptureRestartRetiresMarker() async {
         let model = await makeSUT()
         let engine = LaneGatedEngine()
-        model.retranslateEngineFactory = { _ in engine }
+        model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .sourceLost
         let sentence = makeSentence(index: 4)
@@ -420,7 +420,7 @@ struct AppModelRetranslateLaneTests {
     func midSessionTeardownRefusesInFlightLaneDelivery() async {
         let model = await makeSUT()
         let engine = LaneGatedEngine()
-        model.retranslateEngineFactory = { _ in engine }
+        model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
         let sentence = makeSentence(index: 7)

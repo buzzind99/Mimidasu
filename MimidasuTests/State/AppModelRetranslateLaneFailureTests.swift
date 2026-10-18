@@ -38,7 +38,7 @@ struct AppModelRetranslateLaneFailureTests {
     @Test("a failed lane run posts the failure toast and clears the marker")
     func failedLaneRunPostsFailureToastAndClearsMarker() async {
         let model = await makeSUT()
-        model.retranslateEngineFactory = { _ in LaneEmptyEngine() }
+        model.retranslateEngineFactory = { _, _ in LaneEmptyEngine() }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
         let sentence = makeSentence(index: 7)
@@ -70,7 +70,7 @@ struct AppModelRetranslateLaneFailureTests {
     func laneFailureCrossingStopPostsNoToast() async {
         let model = await makeSUT()
         let engine = LaneGatedFailingEngine()
-        model.retranslateEngineFactory = { _ in engine }
+        model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
         // A served backlog keeps a stop's translation-tail drain instant.
@@ -123,7 +123,7 @@ struct AppModelRetranslateLaneFailureTests {
     func cancelledLaneFlightIsDroppedSilently() async {
         let model = await makeSUT()
         let engine = LaneCancellableEngine()
-        model.retranslateEngineFactory = { _ in engine }
+        model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
         let sentence = makeSentence(index: 7)

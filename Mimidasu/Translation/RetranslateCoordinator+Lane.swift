@@ -42,7 +42,12 @@ extension RetranslateCoordinator {
         if !archiveOpen, queue.isAwaitingTranslation(sentence) {
             return
         }
-        switch resolveRetranslateRoute() {
+        // The click-time lane target, captured once: the archive's viewing
+        // language can switch while the lane arms or waits, and the result
+        // must be stamped — and the engine built — for the language the
+        // retry was clicked in, never a later reading.
+        let target = laneTargetLanguage
+        switch resolveRetranslateRoute(target: target) {
         case .session:
             // Today's path verbatim: the queue owns the retry (cache evicted,
             // re-enqueued) and the result lands unstamped — never marked.
@@ -73,7 +78,7 @@ extension RetranslateCoordinator {
             if !archiveOpen {
                 queue.dropPending(sentence)
             }
-            runRetranslateLane(sentence, kind: kind, engine: engine)
+            runRetranslateLane(sentence, kind: kind, engine: engine, target: target)
         case let .unavailable(reason):
             // Toast + skip — no state touched, the row keeps its translation.
             postRetranslateUnavailableToast(reason)
@@ -91,18 +96,18 @@ extension RetranslateCoordinator {
         case unavailable(String)
     }
 
-    private func resolveRetranslateRoute() -> RetranslateRoute {
+    private func resolveRetranslateRoute(target: TargetLanguage) -> RetranslateRoute {
         if archiveOpen {
-            return resolveArchiveRoute()
+            return resolveArchiveRoute(target: target)
         }
-        let selection = effectiveRetranslateSelection
+        let selection = effectiveRetranslateSelection(targetCode: target.code)
         switch selection {
         case .session:
             return .session
         case .appleFast:
-            return resolveAppleModelRoute(.appleFast)
+            return resolveAppleModelRoute(.appleFast, target: target)
         case .appleHighFidelity:
-            return resolveAppleModelRoute(.appleHighFidelity)
+            return resolveAppleModelRoute(.appleHighFidelity, target: target)
         case .google, .deepl, .openrouter:
             guard let provider = selection.provider else { return .session }
             // A selection naming the attached provider IS the session
@@ -112,7 +117,7 @@ extension RetranslateCoordinator {
             if provider == live?.activeExternalProvider {
                 return .session
             }
-            let engine = laneExternalEngine(for: provider)
+            let engine = laneExternalEngine(for: provider, target: target)
             guard let engine else {
                 return .unavailable("No API key stored for \(provider.displayName).")
             }
@@ -126,16 +131,19 @@ extension RetranslateCoordinator {
     /// Archive mode route: every selection serves through a dedicated
     /// alternate — never the queue, which has no session to deliver into.
     /// `.session` ("whatever the live session ran") has no referent with no
-    /// live session; it maps to Apple-fast, the plain on-device route.
-    private func resolveArchiveRoute() -> RetranslateRoute {
-        switch effectiveRetranslateSelection {
+    /// live session; it maps to Apple-fast, the plain on-device route. The
+    /// selection resolves against the click-time lane target: probe evidence
+    /// only counts for the pair it was probed for, so the settings pair must
+    /// not degrade a foreign archive target's high-fidelity request.
+    private func resolveArchiveRoute(target: TargetLanguage) -> RetranslateRoute {
+        switch effectiveRetranslateSelection(targetCode: target.code) {
         case .session, .appleFast:
-            return armedRoute(.appleFast)
+            return armedRoute(.appleFast, target: target)
         case .appleHighFidelity:
-            return armedRoute(.appleHighFidelity)
+            return armedRoute(.appleHighFidelity, target: target)
         case let selection:
-            guard let provider = selection.provider else { return armedRoute(.appleFast) }
-            let engine = laneExternalEngine(for: provider)
+            guard let provider = selection.provider else { return armedRoute(.appleFast, target: target) }
+            let engine = laneExternalEngine(for: provider, target: target)
             guard let engine else {
                 return .unavailable("No API key stored for \(provider.displayName).")
             }
@@ -143,7 +151,9 @@ extension RetranslateCoordinator {
         }
     }
 
-    private func resolveAppleModelRoute(_ kind: TranslationEngineKind) -> RetranslateRoute {
+    private func resolveAppleModelRoute(
+        _ kind: TranslationEngineKind, target: TargetLanguage
+    ) -> RetranslateRoute {
         if #available(macOS 26.4, *) {
             // A live Apple session running the same model de facto would
             // return byte-identical text with no marker — a no-op that reads
@@ -155,7 +165,7 @@ extension RetranslateCoordinator {
             if liveSessionRunsKind(kind) {
                 return .session
             }
-            return armedRoute(kind)
+            return armedRoute(kind, target: target)
         }
         // Below 26.4 one Apple model exists (fast, no strategy API) and the
         // live Apple session already runs it. The high-fidelity arm is
@@ -163,33 +173,36 @@ extension RetranslateCoordinator {
         // below 26.4 first — and stays as defense in depth; do not simplify
         // it away with that degrade.
         return kind == .appleHighFidelity || liveSessionRunsKind(.appleFast)
-            ? .session : armedRoute(kind)
+            ? .session : armedRoute(kind, target: target)
     }
 
-    private func armedRoute(_ kind: TranslationEngineKind) -> RetranslateRoute {
+    private func armedRoute(_ kind: TranslationEngineKind, target: TargetLanguage) -> RetranslateRoute {
         // Arming is optimistic: if the dedicated session is still starting,
         // the lane waits for it (bounded) instead of blocking the click.
-        // The armed config bakes in the lane target — the archive's stored
-        // target in archive mode, the settings target live.
-        armRetranslateSessionIfNeeded(for: kind, target: laneTargetLanguage.code)
+        // The armed config bakes in the click-time lane target — the
+        // archive's viewing language in archive mode, the settings target
+        // live.
+        armRetranslateSessionIfNeeded(for: kind, target: target.code)
         return .alternate(kind, engine: laneEngineStorage(for: kind))
     }
 
-    /// Builds the lane's external engine over the lane's target (the
-    /// archive's stored target in archive mode — the row being retried was
-    /// translated to that language, not the settings one). The test factory
-    /// is authoritative when set: a nil result means "unavailable" (no
-    /// key), never a fall-through to the real engine. (Internal, not
-    /// private: the bulk job's resolution in `+Sessions` reuses it.)
-    func laneExternalEngine(for provider: TranslationProvider) -> (any TranslationEngine)? {
+    /// Builds the lane's external engine over `target` — the click-time lane
+    /// target (the archive's viewing language in archive mode, the settings
+    /// target live). The test factory is authoritative when set: a nil
+    /// result means "unavailable" (no key), never a fall-through to the real
+    /// engine. (Internal, not private: the bulk job's resolution in
+    /// `+Sessions` reuses it.)
+    func laneExternalEngine(
+        for provider: TranslationProvider, target: TargetLanguage
+    ) -> (any TranslationEngine)? {
         if let factory = retranslateEngineFactory {
-            return factory(provider)
+            return factory(provider, target)
         }
         // A nil `live` is unreachable behind the caller's live-phase guard
         // (a live phase implies the host, which owns both coordinators); in
         // archive mode `live` exists with any app model.
         guard let live else { return nil }
-        return live.makeExternalEngine(for: provider, target: laneTargetLanguage)
+        return live.makeExternalEngine(for: provider, target: target)
     }
 
     // MARK: - Lane runner
@@ -211,7 +224,8 @@ extension RetranslateCoordinator {
     /// queue path there. External lanes skip the wait — the live session
     /// can never be (or turn into) a paid provider.
     private func runRetranslateLane(
-        _ sentence: Sentence, kind: TranslationEngineKind, engine: (any TranslationEngine)?
+        _ sentence: Sentence, kind: TranslationEngineKind,
+        engine: (any TranslationEngine)?, target: TargetLanguage
     ) {
         let previous = retranslateLaneTask
         // The session this retry belongs to. See `retranslateSessionEpoch`: a
@@ -229,47 +243,68 @@ extension RetranslateCoordinator {
             }
             // Probe deferral — Apple-kind lanes only (external lanes pass straight through; see doc above).
             let laneKind: TranslationEngineKind
-            switch await probeGate(for: kind, epoch: epoch, sentence: sentence) {
+            switch await probeGate(for: kind, epoch: epoch, sentence: sentence, target: target) {
             case .done:
                 return
             case let .proceed(resolvedKind):
                 laneKind = resolvedKind
             }
-            let resolved = await laneEngine(engine, kind: laneKind, epoch: epoch)
-            switch resolved {
-            case .cancelled:
-                // The stop already cleared every toast; a "still starting"
-                // message here would outlive it and misreport a cancellation.
+            await flyResolvedLane(
+                sentence, laneKind: laneKind, engine: engine, epoch: epoch, target: target
+            )
+        }
+    }
+
+    /// The lane task's second half, split out at the function-length gate:
+    /// resolves the engine for the (possibly probe-degraded) lane kind and
+    /// flies it, or reports the resolution's outcome. An Apple kind re-reads
+    /// its own storage — after a degrade, the click-time engine belongs to
+    /// the abandoned kind (a stored hifi engine while the lane now flies
+    /// fast). Externals keep their click-time engine.
+    private func flyResolvedLane(
+        _ sentence: Sentence, laneKind: TranslationEngineKind,
+        engine: (any TranslationEngine)?, epoch: Int, target: TargetLanguage
+    ) async {
+        let laneEngineCandidate: (any TranslationEngine)? = switch laneKind {
+        case .appleFast, .appleHighFidelity:
+            laneEngineStorage(for: laneKind)
+        case .google, .deepl, .openrouter:
+            engine
+        }
+        let resolved = await laneEngine(laneEngineCandidate, kind: laneKind, epoch: epoch)
+        switch resolved {
+        case .cancelled:
+            // The stop already cleared every toast; a "still starting"
+            // message here would outlive it and misreport a cancellation.
+            retireLaneMarker(sentence.index, epoch: epoch)
+            return
+        case .timedOut:
+            // The dedicated Apple session is still starting (or a
+            // first-use language-pack prompt is up). The config stays
+            // armed, so the next click is instant once it lands. Only
+            // Apple selections can arrive here — externals build their
+            // engine (or fail) at resolve time.
+            retireLaneMarker(sentence.index, epoch: epoch)
+            // The wait consumed the whole arm window — the outcome most
+            // likely to have crossed a stop (older links are not
+            // cancelled), so the same delivery guard as `.ready` applies
+            // before reporting; a stale expiry must not repost over the
+            // cleared stack.
+            guard retranslateLaneCanDeliver(epoch: epoch) else { return }
+            postRetranslateUnavailableToast(
+                laneKind == .appleHighFidelity
+                    ? "Apple Intelligence session is still starting — try again in a moment."
+                    : "Apple (MTL) session is still starting — try again in a moment."
+            )
+            return
+        case let .ready(engine):
+            // The wait may have consumed the stop window; re-check before
+            // flying so a stopped session never issues an engine call.
+            guard retranslateLaneCanDeliver(epoch: epoch) else {
                 retireLaneMarker(sentence.index, epoch: epoch)
                 return
-            case .timedOut:
-                // The dedicated Apple session is still starting (or a
-                // first-use language-pack prompt is up). The config stays
-                // armed, so the next click is instant once it lands. Only
-                // Apple selections can arrive here — externals build their
-                // engine (or fail) at resolve time.
-                retireLaneMarker(sentence.index, epoch: epoch)
-                // The wait consumed the whole arm window — the outcome most
-                // likely to have crossed a stop (older links are not
-                // cancelled), so the same delivery guard as `.ready` applies
-                // before reporting; a stale expiry must not repost over the
-                // cleared stack.
-                guard retranslateLaneCanDeliver(epoch: epoch) else { return }
-                postRetranslateUnavailableToast(
-                    laneKind == .appleHighFidelity
-                        ? "Apple Intelligence session is still starting — try again in a moment."
-                        : "Apple (MTL) session is still starting — try again in a moment."
-                )
-                return
-            case let .ready(engine):
-                // The wait may have consumed the stop window; re-check before
-                // flying so a stopped session never issues an engine call.
-                guard retranslateLaneCanDeliver(epoch: epoch) else {
-                    retireLaneMarker(sentence.index, epoch: epoch)
-                    return
-                }
-                await fly(sentence, through: engine, kind: laneKind, epoch: epoch)
             }
+            await fly(sentence, through: engine, kind: laneKind, epoch: epoch, target: target)
         }
     }
 
@@ -290,7 +325,7 @@ extension RetranslateCoordinator {
     /// the live session's identity, and there is no live session to
     /// duplicate.
     private func probeGate(
-        for kind: TranslationEngineKind, epoch: Int, sentence: Sentence
+        for kind: TranslationEngineKind, epoch: Int, sentence: Sentence, target: TargetLanguage
     ) async -> ProbeGateOutcome {
         if archiveOpen {
             return .proceed(kind)
@@ -318,7 +353,7 @@ extension RetranslateCoordinator {
             )
             return .done
         case .landed:
-            return probeLandedOutcome(kind: kind, epoch: epoch, sentence: sentence)
+            return probeLandedOutcome(kind: kind, epoch: epoch, sentence: sentence, target: target)
         }
     }
 
@@ -328,7 +363,7 @@ extension RetranslateCoordinator {
     /// this lane must then arm and wait on instead — and a same-engine
     /// resolution is handed to the queue path.
     private func probeLandedOutcome(
-        kind: TranslationEngineKind, epoch: Int, sentence: Sentence
+        kind: TranslationEngineKind, epoch: Int, sentence: Sentence, target: TargetLanguage
     ) -> ProbeGateOutcome {
         guard retranslateLaneCanDeliver(epoch: epoch) else {
             retireLaneMarker(sentence.index, epoch: epoch)
@@ -340,7 +375,7 @@ extension RetranslateCoordinator {
             return .done
         }
         if laneKind != kind {
-            armRetranslateSessionIfNeeded(for: laneKind, target: laneTargetLanguage.code)
+            armRetranslateSessionIfNeeded(for: laneKind, target: target.code)
         }
         return .proceed(laneKind)
     }
@@ -373,11 +408,11 @@ extension RetranslateCoordinator {
         return .landed
     }
 
-    /// The lane's Apple kind once the probe has landed: the click-time kind,
-    /// unless a not-installed landing degrades a high-fidelity selection to
-    /// the fast model — the same resolution `effectiveRetranslateSelection`
-    /// applies once the probe has landed. (Internal, not private: the bulk
-    /// job's resolution in `+Sessions` applies the same degrade.)
+    /// The lane's Apple kind once the probe has landed (the live session's
+    /// identity, so the settings pair is the probed pair): the click-time
+    /// kind, unless a not-installed landing degrades a high-fidelity
+    /// selection to the fast model — the same resolution
+    /// `effectiveRetranslateSelection` applies once the probe has landed.
     func kindAfterProbeLanding(_ kind: TranslationEngineKind) -> TranslationEngineKind {
         guard kind == .appleHighFidelity, highFidelityKnownUnavailable else { return kind }
         return .appleFast
@@ -403,15 +438,14 @@ extension RetranslateCoordinator {
 
     /// Runs the engine call and lands (or reports) the result. Split out of
     /// the lane task so the `do`/`catch` stays legible next to the guards.
+    /// `target` is the click-time lane target: an archive close (or a
+    /// viewing-language switch) during the round-trip turns over the epoch
+    /// and the delivery guard below retires the result, so the stamp
+    /// describes the pane the retry was clicked in.
     private func fly(
         _ sentence: Sentence, through engine: any TranslationEngine,
-        kind: TranslationEngineKind, epoch: Int
+        kind: TranslationEngineKind, epoch: Int, target: TargetLanguage
     ) async {
-        // The lane's target, captured before the flight: an archive close
-        // during the round-trip turns over the epoch and the delivery guard
-        // below retires the result, so the stamp describes the pane the
-        // retry was clicked in.
-        let target = laneTargetLanguage
         do {
             let results = try await engine.translate([sentence.text])
             // Re-check after the flight: a stop during the round-trip already

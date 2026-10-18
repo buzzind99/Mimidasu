@@ -102,7 +102,7 @@ struct AppModelTranslationForwardingTests {
 
         model.laneArmTimeout = .milliseconds(25)
         model.probeSettleTimeout = .milliseconds(25)
-        model.retranslateEngineFactory = { _ -> (any TranslationEngine)? in nil }
+        model.retranslateEngineFactory = { _, _ -> (any TranslationEngine)? in nil }
 
         #expect(model.retranslate.laneArmTimeout == .milliseconds(25))
         #expect(model.retranslate.probeSettleTimeout == .milliseconds(25))

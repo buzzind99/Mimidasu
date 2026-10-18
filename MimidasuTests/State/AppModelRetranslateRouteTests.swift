@@ -168,7 +168,7 @@ struct AppModelRetranslateRouteTests {
         let model = await makeSUT()
         model.appleHighFidelityProbe = (true, "en")
         let laneCalls = Mutex(0)
-        model.retranslateEngineFactory = { provider in
+        model.retranslateEngineFactory = { provider, _ in
             laneCalls.withLock { counter in counter += 1 }
             #expect(provider == .google, "only external selections reach the factory")
             return LaneEchoEngine()
@@ -204,7 +204,7 @@ struct AppModelRetranslateRouteTests {
     func duplicateExternalSelectionRoutesToSession() async {
         let model = await makeSUT()
         let laneCalls = Mutex(0)
-        model.retranslateEngineFactory = { _ in
+        model.retranslateEngineFactory = { _, _ in
             laneCalls.withLock { counter in counter += 1 }
             return LaneEchoEngine()
         }
@@ -244,7 +244,7 @@ struct AppModelRetranslateRouteTests {
         // engine.
         model.appleHighFidelityProbe = (false, "en")
         let laneCalls = Mutex(0)
-        model.retranslateEngineFactory = { provider in
+        model.retranslateEngineFactory = { provider, _ in
             laneCalls.withLock { counter in counter += 1 }
             #expect(provider == .google, "only external selections reach the factory")
             return LaneEchoEngine()

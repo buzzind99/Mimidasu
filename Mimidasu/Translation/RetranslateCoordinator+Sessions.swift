@@ -203,26 +203,30 @@ extension RetranslateCoordinator {
 
     /// Resolves the bulk archive-translation job's engine, mirroring the
     /// archive route's mapping: `.session` / `.appleFast` arm the dedicated
-    /// fast session, a high-fidelity selection degrades where the pair is
-    /// known unavailable, and externals come from their stored key.
+    /// fast session, a high-fidelity selection arms its session, and
+    /// externals come from their stored key. The selection arrives already
+    /// resolved against the run's target (the caller's archive-job mapping
+    /// applied `effectiveRetranslateSelection(targetCode:)`), so it is
+    /// passed through verbatim — no settings-pair degrade is re-applied.
     func resolveArchiveJobEngine(
         selection: RetranslateEngine, target: TargetLanguage
     ) async -> ArchiveTranslationJob.EngineResolution {
         if let provider = selection.provider {
-            return archiveExternalResolution(for: provider)
+            return archiveExternalResolution(for: provider, target: target)
         }
         let kind: TranslationEngineKind = selection == .appleHighFidelity
-            ? kindAfterProbeLanding(.appleHighFidelity)
+            ? .appleHighFidelity
             : .appleFast
         return await resolveJobAppleEngine(kind: kind, target: target)
     }
 
     /// The external half of the job resolution: the provider's stored key
-    /// supplies its lane engine, or the run reports the missing key.
+    /// supplies its lane engine over the run's target, or the run reports
+    /// the missing key.
     private func archiveExternalResolution(
-        for provider: TranslationProvider
+        for provider: TranslationProvider, target: TargetLanguage
     ) -> ArchiveTranslationJob.EngineResolution {
-        guard let engine = laneExternalEngine(for: provider) else {
+        guard let engine = laneExternalEngine(for: provider, target: target) else {
             return .unavailable(reason: "No API key stored for \(provider.displayName).")
         }
         return .ready(
@@ -239,6 +243,10 @@ extension RetranslateCoordinator {
     /// reports the still-starting copy and keeps the config armed, so the
     /// next attempt is instant once the session (or its language pack)
     /// lands; a cancellation is a teardown, whose surface is already gone.
+    /// A teardown can land after the wait resolved — the rebuilt
+    /// `.translationTask` host hands over a fresh engine and the wait's
+    /// storage read can adopt it — so deliverability is re-checked before
+    /// the engine is handed to the run.
     private func resolveJobAppleEngine(
         kind: TranslationEngineKind, target: TargetLanguage
     ) async -> ArchiveTranslationJob.EngineResolution {
@@ -249,6 +257,7 @@ extension RetranslateCoordinator {
         }
         switch await laneEngine(laneEngineStorage(for: kind), kind: kind, epoch: epoch) {
         case let .ready(engine):
+            guard retranslateLaneCanDeliver(epoch: epoch) else { return .cancelled }
             return .ready(engine: engine, kind: kind)
         case .timedOut:
             return .unavailable(

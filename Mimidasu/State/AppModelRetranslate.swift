@@ -27,6 +27,14 @@ extension AppModel {
         retranslate.highFidelityKnownUnavailable
     }
 
+    /// High fidelity is *known* unavailable for `targetCode` — probe
+    /// evidence only counts for the pair it was probed for, so a row whose
+    /// target differs from the settings target is not described by the
+    /// settings probe.
+    func highFidelityKnownUnavailable(for targetCode: String) -> Bool {
+        retranslate.highFidelityKnownUnavailable(for: targetCode)
+    }
+
     /// The Apple model the re-translate selection can actually deliver.
     var effectiveRetranslateSelection: RetranslateEngine {
         retranslate.effectiveRetranslateSelection
@@ -130,8 +138,11 @@ extension AppModel {
     }
 
     /// Injectable factory for the lane's external engines (tests); nil
-    /// drives the live session's `makeExternalEngine(for:)`.
-    var retranslateEngineFactory: (@Sendable (TranslationProvider) -> (any TranslationEngine)?)? {
+    /// drives the live session's `makeExternalEngine(for:target:)`. The
+    /// closure receives the click-time lane target.
+    var retranslateEngineFactory:
+        (@Sendable (TranslationProvider, TargetLanguage) -> (any TranslationEngine)?)?
+    {
         get { retranslate.retranslateEngineFactory }
         set { retranslate.retranslateEngineFactory = newValue }
     }

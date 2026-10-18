@@ -92,9 +92,11 @@ final class RetranslateCoordinator {
     @ObservationIgnored var probeSettleTimeout = Duration.seconds(3)
 
     /// Injectable factory for the lane's external engines (tests); nil
-    /// drives the live session's `makeExternalEngine(for:)`.
+    /// drives the live session's `makeExternalEngine(for:target:)`. The
+    /// target is the click-time lane target, so a build for a foreign
+    /// archive target is never served to a settings-target flight.
     @ObservationIgnored var retranslateEngineFactory:
-        (@Sendable (TranslationProvider) -> (any TranslationEngine)?)?
+        (@Sendable (TranslationProvider, TargetLanguage) -> (any TranslationEngine)?)?
 
     /// The app-model port (phase, toasts, row landing). Weak: the app model
     /// owns this coordinator.
@@ -204,23 +206,30 @@ extension RetranslateCoordinator {
         live?.appleHighFidelityProbe.targetCode == settings.targetLanguage.code
     }
 
-    /// High fidelity is *known* unavailable when the last probe landed for the
-    /// current target and reported it not installed. Deliberately narrower
+    /// High fidelity is *known* unavailable when the last probe landed for
+    /// `targetCode` and reported it not installed. Deliberately narrower
     /// than `appleHighFidelity == false`: a probe that never landed
     /// (`targetCode == nil`) or one run for a different target is not evidence
     /// of unavailability, and treating it as such would hide the feature on a
-    /// capable machine for the whole probe window.
-    var highFidelityKnownUnavailable: Bool {
-        live?.appleHighFidelityProbe.targetCode == settings.targetLanguage.code
+    /// capable machine for the whole probe window. Probe evidence is scoped
+    /// to the pair it ran for, so a foreign archive target compares against
+    /// its own code, never the settings pair.
+    func highFidelityKnownUnavailable(for targetCode: String) -> Bool {
+        live?.appleHighFidelityProbe.targetCode == targetCode
             && live?.appleHighFidelityProbe.installed == false
     }
 
-    /// The Apple model the re-translate selection can actually deliver, which
-    /// is not always the selected one. `.appleHighFidelity` names a strategy
-    /// the OS may not be able to serve: where the ja→target pair is not
-    /// `.installed` for it, the dedicated config still requests high
-    /// fidelity and the framework silently falls back to the fast model (the
-    /// same caveat `makeConfig` documents). Requesting it anyway would
+    /// The settings-pair spelling of `highFidelityKnownUnavailable(for:)`.
+    var highFidelityKnownUnavailable: Bool {
+        highFidelityKnownUnavailable(for: settings.targetLanguage.code)
+    }
+
+    /// The Apple model the re-translate selection can actually deliver for
+    /// `targetCode`, which is not always the selected one. `.appleHighFidelity`
+    /// names a strategy the OS may not be able to serve: where the ja→target
+    /// pair is not `.installed` for it, the dedicated config still requests
+    /// high fidelity and the framework silently falls back to the fast model
+    /// (the same caveat `makeConfig` documents). Requesting it anyway would
     /// return text byte-identical to a live fast session while stamping the
     /// row `.appleHighFidelity` — a "· via Apple Intelligence" marker over
     /// fast-model output. So a *known*-unavailable high-fidelity route degrades
@@ -230,11 +239,22 @@ extension RetranslateCoordinator {
     /// requested and the selection always degrades. Every consumer switches on
     /// the effective selection, so the persisted `.appleHighFidelity` is never
     /// rewritten; only its resolution degrades.
-    var effectiveRetranslateSelection: RetranslateEngine {
+    ///
+    /// Accepted caveat: a foreign target (an archive whose viewing language
+    /// differs from the settings target) has no probe evidence, so it keeps
+    /// requesting high fidelity and the framework may silently serve the
+    /// fast model — the same caveat the config builders document. No
+    /// on-demand probe runs at archive-run start.
+    func effectiveRetranslateSelection(targetCode: String) -> RetranslateEngine {
         let selection = settings.retranslateEngine
         guard selection == .appleHighFidelity else { return selection }
         guard #available(macOS 26.4, *) else { return .appleFast }
-        return highFidelityKnownUnavailable ? .appleFast : .appleHighFidelity
+        return highFidelityKnownUnavailable(for: targetCode) ? .appleFast : .appleHighFidelity
+    }
+
+    /// The settings-pair spelling of `effectiveRetranslateSelection(targetCode:)`.
+    var effectiveRetranslateSelection: RetranslateEngine {
+        effectiveRetranslateSelection(targetCode: settings.targetLanguage.code)
     }
 
     /// True when the configured retry engine resolves to an engine *other
