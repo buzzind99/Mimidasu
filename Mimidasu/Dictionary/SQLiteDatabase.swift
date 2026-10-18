@@ -43,6 +43,11 @@ final class SQLiteDatabase: @unchecked Sendable {
             sqlite3_bind_int64(handle, index, Int64(value))
         }
 
+        /// Binds a double at the 1-based parameter `index` (REAL columns).
+        func bind(_ value: Double, at index: Int32) {
+            sqlite3_bind_double(handle, index, value)
+        }
+
         /// Advances the statement: true on a row, false once done.
         func step() throws(Error) -> Bool {
             switch sqlite3_step(handle) {
@@ -67,6 +72,11 @@ final class SQLiteDatabase: @unchecked Sendable {
         /// The 0-based column as a non-optional integer (a NOT NULL column).
         func requiredInt(_ index: Int32) -> Int {
             Int(sqlite3_column_int64(handle, index))
+        }
+
+        /// The 0-based column as a non-optional double (a NOT NULL REAL column).
+        func requiredDouble(_ index: Int32) -> Double {
+            sqlite3_column_double(handle, index)
         }
 
         /// The 0-based column as a Bool (nonzero = true).
@@ -164,6 +174,13 @@ final class SQLiteDatabase: @unchecked Sendable {
     /// The connection's current error code and message.
     func lastError() -> Error {
         Self.error(handle)
+    }
+
+    /// The rowid of the most recently successful INSERT on this connection.
+    /// Callers run under the database's own lock, so no other writer on this
+    /// handle can interleave between the insert and this read.
+    func lastInsertRowID() -> Int64 {
+        sqlite3_last_insert_rowid(handle)
     }
 
     /// Finalizes every cached statement and closes the handle. Idempotent, so
