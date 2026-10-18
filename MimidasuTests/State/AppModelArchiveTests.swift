@@ -142,7 +142,7 @@ struct AppModelArchiveTests {
         let engine = ScriptedArchiveEngine(gate: gate)
         install(engine, for: .google, on: sut.model)
 
-        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
         #expect(
             await pollUntil {
                 sut.model.archiveTranslationRunning && engine.recordedBatches.count == 1
@@ -173,7 +173,7 @@ struct AppModelArchiveTests {
         let engine = ScriptedArchiveEngine(gate: gate)
         install(engine, for: .google, on: sut.model)
 
-        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
         #expect(
             await pollUntil {
                 sut.model.archiveTranslationRunning && engine.recordedBatches.count == 1

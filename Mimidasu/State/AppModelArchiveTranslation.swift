@@ -11,10 +11,10 @@ extension AppModel {
     /// Wires the bulk job's engine resolver, landing sink, and event
     /// reporter. Called once from `init`, after the coordinators exist.
     func wireArchiveTranslationJob() {
-        archiveTranslationJob.resolveEngine = { [weak self] provider, target in
+        archiveTranslationJob.resolveEngine = { [weak self] engine, target in
             guard let self else { return .cancelled }
             return await retranslate.resolveArchiveJobEngine(
-                selection: archiveJobSelection(for: provider, target: target), target: target
+                selection: archiveJobSelection(for: engine, target: target), target: target
             )
         }
         archiveTranslationJob.land = { [weak self] index, translation in
@@ -28,17 +28,17 @@ extension AppModel {
 
     // MARK: - Commands
 
-    /// Starts a bulk run for one language through `provider` — the provider
-    /// picker's action and the cloud disclosure's confirm callback. The
-    /// scope derives from the language's completeness: missing sentences
+    /// Starts a bulk run for one language through `engine` — the archive
+    /// engine picker's action and the cloud disclosure's confirm callback.
+    /// The scope derives from the language's completeness: missing sentences
     /// fill, a complete language re-translates every sentence as a fresh
     /// full pass. A no-op while a run is claimed or no archive is open.
-    func beginArchiveTranslation(provider: TranslationProvider, lang: String) {
-        beginArchiveTranslation(provider: provider, lang: lang, scope: nil)
+    func beginArchiveTranslation(engine: RetranslateEngine, lang: String) {
+        beginArchiveTranslation(engine: engine, lang: lang, scope: nil)
     }
 
     /// The failure summary's Retry action: re-runs the same language and
-    /// provider over exactly the failed sentences, in index order, without
+    /// engine over exactly the failed sentences, in index order, without
     /// re-raising the cloud disclosure. Refused when the archive moved on:
     /// the run is built from the currently open archive, so retrying the
     /// previous archive's failure set would silently modify a session the
@@ -50,7 +50,7 @@ extension AppModel {
               !archiveTranslationJob.failureIndexes.isEmpty
         else { return }
         beginArchiveTranslation(
-            provider: previous.provider,
+            engine: previous.engine,
             lang: previous.lang,
             scope: .failedOnly(Set(archiveTranslationJob.failureIndexes))
         )
@@ -58,15 +58,15 @@ extension AppModel {
 
     /// The archive picker's start request: refused while another
     /// cloud-disclosure intent is held (the raise would clobber it and swap
-    /// the presented sheet's content mid-flight); an Apple pick starts its
-    /// run directly, and an external pick stages the run for the disclosure
-    /// whose confirm callback starts it.
-    func requestArchiveTranslation(provider: TranslationProvider, lang: String) {
+    /// the presented sheet's content mid-flight); an Apple-tier engine pick
+    /// starts its run directly, and an external engine pick stages the run
+    /// for the disclosure whose confirm callback starts it.
+    func requestArchiveTranslation(engine: RetranslateEngine, lang: String) {
         guard providerAwaitingDisclosure == nil else { return }
-        if provider == .apple {
-            beginArchiveTranslation(provider: .apple, lang: lang)
-        } else {
+        if let provider = engine.provider {
             providerAwaitingDisclosure = .archiveTranslation(provider, lang: lang)
+        } else {
+            beginArchiveTranslation(engine: engine, lang: lang)
         }
     }
 
@@ -82,7 +82,7 @@ extension AppModel {
         toasts.dismiss(key: ToastKey.archiveTranslation)
     }
 
-    /// The sentences a run for `lang` would send — the provider picker's
+    /// The sentences a run for `lang` would send — the engine picker's
     /// count line and the pending disclosure's body: the missing count, or
     /// the full sentence count when the language is complete (a Retranslate
     /// re-sends every sentence). Nil with no archive open.
@@ -106,7 +106,7 @@ extension AppModel {
     /// The one start path: begin (the derived scope) and retry-failed (the
     /// explicit failure set) both land here.
     private func beginArchiveTranslation(
-        provider: TranslationProvider, lang: String, scope: ArchiveTranslationJob.Scope?
+        engine: RetranslateEngine, lang: String, scope: ArchiveTranslationJob.Scope?
     ) {
         guard let archive = openArchive else { return }
         guard archiveTranslationJob.prepare() else { return }
@@ -117,7 +117,7 @@ extension AppModel {
         let request = ArchiveTranslationJob.Request(
             sessionID: archive.id,
             lang: lang,
-            provider: provider,
+            engine: engine,
             sentences: archive.entries.map { entry in entry.sentence },
             translated: translated,
             scope: resolvedScope
@@ -127,24 +127,26 @@ extension AppModel {
         }
     }
 
-    /// The run's Apple model: the effective re-translate selection resolved
-    /// against the RUN's target — probe evidence only counts for the pair it
-    /// was probed for, so the settings pair must not degrade a foreign
-    /// archive target — naming an Apple model, else Apple-fast. The
-    /// picker's provider, never the settings selection, decides the branch.
+    /// The run's engine: the picker's explicit selection, passed through —
+    /// Apple high fidelity degrades to the fast model only on pair-scoped
+    /// evidence that the strategy can't be served for the run's target
+    /// (below macOS 26.4, or the probe landed not-installed for exactly that
+    /// pair). The settings re-translate selection plays no part: the
+    /// picker's own row decides the tier.
     private func archiveJobSelection(
-        for provider: TranslationProvider, target: TargetLanguage
+        for engine: RetranslateEngine, target: TargetLanguage
     ) -> RetranslateEngine {
-        guard provider == .apple else {
-            return RetranslateEngine(provider: provider) ?? .appleFast
-        }
-        let selection = retranslate.effectiveRetranslateSelection(targetCode: target.code)
-        switch selection {
-        case .appleFast, .appleHighFidelity:
-            return selection
-        case .session, .google, .deepl, .openrouter:
-            return .appleFast
-        }
+        retranslate.effectiveAppleTier(engine, targetCode: target.code)
+    }
+
+    /// Whether the archive engine picker offers — and defaults to — the
+    /// Apple Intelligence tier for `lang`: the strategy API exists (macOS
+    /// 26.4+) and the pair isn't known unavailable. Probe evidence is
+    /// pair-scoped, so an unprobed pair stays offered; the framework's
+    /// silent fast fallback covers the remainder.
+    func archiveHighFidelityOffered(for lang: String) -> Bool {
+        guard #available(macOS 26.4, *) else { return false }
+        return !highFidelityKnownUnavailable(for: lang)
     }
 
     private static func translatedIndexes(
@@ -224,7 +226,7 @@ extension AppModel {
         toasts.post(
             key: ToastKey.archiveTranslation, style: .info,
             title: "Translating to \(language.nativeName)…",
-            body: "\(request.provider.displayName) · \(processed)/\(total) sentences",
+            body: "\(request.engine.displayName) · \(processed)/\(total) sentences",
             action: ToastCenter.Action(label: "Cancel") { [weak self] in
                 self?.cancelArchiveTranslation()
             },

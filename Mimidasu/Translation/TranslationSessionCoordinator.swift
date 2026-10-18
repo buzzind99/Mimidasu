@@ -317,8 +317,13 @@ extension TranslationSessionCoordinator {
             providerAwaitingDisclosure = nil
             settings.selectRetranslate(engine)
         case let .archiveTranslation(provider, lang):
+            // Validate the mapping BEFORE clearing the slot: a failed
+            // mapping must not close the sheet having applied nothing
+            // (defense in depth — archive intents are only built for
+            // external providers, where the mapping is total).
+            guard let engine = RetranslateEngine(provider: provider) else { return }
             providerAwaitingDisclosure = nil
-            host?.beginArchiveTranslation(provider: provider, lang: lang)
+            host?.beginArchiveTranslation(engine: engine, lang: lang)
         }
     }
 

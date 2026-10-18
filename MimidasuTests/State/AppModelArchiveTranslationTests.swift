@@ -36,7 +36,7 @@ struct AppModelArchiveTranslationTests {
         let engine = ScriptedArchiveEngine()
         install(engine, for: .google, on: sut.model)
 
-        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
 
         #expect(
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
@@ -78,7 +78,7 @@ struct AppModelArchiveTranslationTests {
         let engine = ScriptedArchiveEngine(gate: gate)
         install(engine, for: .google, on: sut.model)
 
-        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
         #expect(
             await pollUntil(timeout: resultTimeout) { archiveToast(sut.model)?.progress != nil },
             "the started event posts the progress card"
@@ -127,7 +127,7 @@ struct AppModelArchiveTranslationTests {
         engine.fail(on: ["さようなら"])
         install(engine, for: .google, on: sut.model)
 
-        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
         #expect(
             await pollUntil(timeout: resultTimeout) {
                 archiveToast(sut.model)?.title == "Archive translation finished"
@@ -176,7 +176,7 @@ struct AppModelArchiveTranslationTests {
         engine.fail(on: ["さようなら"])
         install(engine, for: .google, on: sut.model)
 
-        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
         #expect(
             await pollUntil(timeout: resultTimeout) {
                 !sut.model.archiveTranslationRunning
@@ -207,7 +207,7 @@ struct AppModelArchiveTranslationTests {
         engine.fail(on: ["さようなら"])
         install(engine, for: .google, on: sut.model)
 
-        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
         #expect(
             await pollUntil(timeout: resultTimeout) {
                 archiveToast(sut.model)?.title == "Archive translation finished"
@@ -248,7 +248,7 @@ extension AppModelArchiveTranslationTests {
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
             "the confirmed pick flies the run"
         )
-        #expect(sut.model.archiveTranslationJob.currentRun?.provider == .deepl)
+        #expect(sut.model.archiveTranslationJob.currentRun?.engine == .deepl)
         #expect(sut.model.archiveTranslationJob.kind == .deepl)
         #expect(
             sut.model.entries.first?.translation(for: "fr")
@@ -299,7 +299,7 @@ extension AppModelArchiveTranslationTests {
         sut.model.retranslateSessionArrived(engine)
         #expect(sut.model.retranslateSessionEngine != nil, "the hand-over stores the session")
 
-        sut.model.beginArchiveTranslation(provider: .apple, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
 
         #expect(
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
@@ -322,7 +322,7 @@ extension AppModelArchiveTranslationTests {
         let engine = ScriptedArchiveEngine(gate: gate)
         install(engine, for: .google, on: sut.model)
 
-        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
         #expect(
             await pollUntil(timeout: resultTimeout) {
                 sut.model.archiveTranslationRunning && engine.recordedBatches.count == 1
@@ -354,7 +354,7 @@ extension AppModelArchiveTranslationTests {
         let engine = ScriptedArchiveEngine(gate: gate)
         install(engine, for: .google, on: sut.model)
 
-        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
         #expect(
             await pollUntil(timeout: resultTimeout) {
                 sut.model.archiveTranslationRunning && engine.recordedBatches.count == 1
@@ -391,7 +391,7 @@ extension AppModelArchiveTranslationTests {
         let engine = ScriptedArchiveEngine(gate: gate)
         install(engine, for: .google, on: sut.model)
 
-        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
         #expect(
             await pollUntil(timeout: resultTimeout) {
                 sut.model.archiveTranslationRunning && engine.recordedBatches.count == 1
@@ -423,7 +423,7 @@ extension AppModelArchiveTranslationTests {
         let engine = ScriptedArchiveEngine(gate: gate)
         install(engine, for: .google, on: sut.model)
 
-        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
         #expect(
             await pollUntil(timeout: resultTimeout) {
                 sut.model.archiveTranslationRunning && engine.recordedBatches.count == 1
@@ -456,7 +456,7 @@ extension AppModelArchiveTranslationTests {
         let engine = ScriptedArchiveEngine(gate: gate)
         install(engine, for: .google, on: sut.model)
 
-        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
         #expect(
             await pollUntil(timeout: resultTimeout) {
                 sut.model.archiveTranslationRunning && engine.recordedBatches.count == 1
@@ -465,7 +465,7 @@ extension AppModelArchiveTranslationTests {
         )
         let claimed = sut.model.archiveTranslationJob.currentRun
 
-        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
         sut.model.retranslateSentence(sut.model.entries[1].sentence)
 
         #expect(sut.model.archiveTranslationJob.currentRun == claimed, "the second start is refused")
@@ -489,7 +489,7 @@ extension AppModelArchiveTranslationTests {
         let sut = await makeSUT()
         sut.model.retranslateEngineFactory = { _, _ in nil }
 
-        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
 
         #expect(
             await pollUntil(timeout: resultTimeout) { archiveToast(sut.model) != nil },
@@ -514,7 +514,7 @@ extension AppModelArchiveTranslationTests {
         let engine = ScriptedArchiveEngine(gate: gate)
         install(engine, for: .google, on: sut.model)
 
-        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
         #expect(
             await pollUntil(timeout: resultTimeout) {
                 sut.model.archiveTranslationRunning && engine.recordedBatches.count == 1
@@ -554,7 +554,7 @@ extension AppModelArchiveTranslationTests {
         let engine = ScriptedArchiveEngine()
         install(engine, for: .google, on: sut.model)
 
-        sut.model.beginArchiveTranslation(provider: .google, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
 
         #expect(
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },

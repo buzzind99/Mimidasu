@@ -27,7 +27,7 @@ final class ArchiveTranslationJob {
     struct Request: Equatable, Sendable {
         let sessionID: Int64
         let lang: String
-        let provider: TranslationProvider
+        let engine: RetranslateEngine
         let sentences: [Sentence]
         let translated: Set<Int>
         let scope: Scope
@@ -90,7 +90,7 @@ final class ArchiveTranslationJob {
     /// Injected by the app model; the default refuses, so an unwired job
     /// can never fly.
     @ObservationIgnored var resolveEngine:
-        @MainActor (TranslationProvider, TargetLanguage) async -> EngineResolution = { _, _ in
+        @MainActor (RetranslateEngine, TargetLanguage) async -> EngineResolution = { _, _ in
             .unavailable(reason: "No translation engine attached — try again in a moment.")
         }
 
@@ -128,7 +128,7 @@ final class ArchiveTranslationJob {
             return
         }
         pendingRequest = request
-        let resolution = await resolveEngine(request.provider, TargetLanguage(code: request.lang))
+        let resolution = await resolveEngine(request.engine, TargetLanguage(code: request.lang))
         guard !isCancelled else {
             pendingRequest = nil
             isActive = false

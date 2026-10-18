@@ -38,12 +38,12 @@ struct ArchiveTranslationJobTests {
         sentenceCount: Int = 3,
         translated: Set<Int> = [],
         scope: ArchiveTranslationJob.Scope = .missing,
-        provider: TranslationProvider = .google
+        engine: RetranslateEngine = .google
     ) -> ArchiveTranslationJob.Request {
         ArchiveTranslationJob.Request(
             sessionID: sessionID,
             lang: language,
-            provider: provider,
+            engine: engine,
             sentences: makeSentences(sentenceCount),
             translated: translated,
             scope: scope
@@ -84,11 +84,11 @@ struct ArchiveTranslationJobTests {
     @Test("a run lands one result per sentence in index order and publishes progress 1..N")
     func landsInIndexOrderAndPublishesProgress() async {
         let job = makeJob()
-        let engine = ScriptedEngine()
-        job.resolveEngine = { provider, target in
-            #expect(provider == .google)
+        let scriptedEngine = ScriptedEngine()
+        job.resolveEngine = { engine, target in
+            #expect(engine == .google)
             #expect(target.code == "en")
-            return .ready(engine: engine, kind: .google)
+            return .ready(engine: scriptedEngine, kind: .google)
         }
         let recorder = Recorder()
         job.onEvent = recorder.recordEvent
@@ -98,7 +98,7 @@ struct ArchiveTranslationJobTests {
         #expect(job.prepare())
         await job.run(request)
 
-        #expect(engine.recordedBatches == [["s0"], ["s1"], ["s2"]], "one sentence per engine call")
+        #expect(scriptedEngine.recordedBatches == [["s0"], ["s1"], ["s2"]], "one sentence per engine call")
         #expect(recorder.landedIndexes == [0, 1, 2])
         #expect(recorder.landed == [
             SentenceTranslation(lang: language, text: "T:s0", engine: .google),

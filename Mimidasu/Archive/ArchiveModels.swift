@@ -39,7 +39,7 @@ struct ArchiveLanguageCount: Equatable, Sendable, Identifiable {
     }
 
     /// True when this language's chip reads as complete (`N/N` with a
-    /// non-empty session) — the provider picker's Retranslate mode.
+    /// non-empty session) — the engine picker's Retranslate mode.
     func isComplete(of total: Int) -> Bool {
         total > 0 && translated >= total
     }

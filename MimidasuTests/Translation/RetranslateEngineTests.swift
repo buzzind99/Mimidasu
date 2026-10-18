@@ -61,6 +61,16 @@ struct RetranslateEngineTests {
         #expect(TranslationEngineKind.openrouter.markerName == "OpenRouter")
     }
 
+    @Test("engine display names match the picker labels")
+    func displayNamesMatchPickerLabels() {
+        #expect(RetranslateEngine.session.displayName == "Session engine")
+        #expect(RetranslateEngine.appleFast.displayName == "Apple (NMT)")
+        #expect(RetranslateEngine.appleHighFidelity.displayName == "Apple Intelligence")
+        #expect(RetranslateEngine.google.displayName == "Google Translate")
+        #expect(RetranslateEngine.deepl.displayName == "DeepL")
+        #expect(RetranslateEngine.openrouter.displayName == "OpenRouter")
+    }
+
     @Test("disclosure intents identify themselves for the sheet and name their provider")
     func disclosureIntentsIdentifyThemselves() {
         #expect(PendingCloudDisclosure.providerSwitch(.deepl).id == "switch.deepl")

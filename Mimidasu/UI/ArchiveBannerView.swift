@@ -3,7 +3,7 @@ import SwiftUI
 /// The opened archive's banner at the top of the transcript pane: title with
 /// the rename pencil, the meta line (start datetime, duration, sentences,
 /// characters), and the trailing cluster — the viewed-language chip (the
-/// switch-language popover), the Translate button (the provider picker), and
+/// switch-language popover), the Translate button (the engine picker), and
 /// the save icon — an outline bookmark that promotes a Recent, a filled
 /// accent bookmark once Saved (display only, no demotion).
 struct ArchiveBannerView: View {
@@ -126,7 +126,7 @@ struct ArchiveBannerView: View {
             .background(Capsule().fill(Theme.tileFill))
     }
 
-    /// The Translate button: opens the provider picker for the viewed
+    /// The Translate button: opens the engine picker for the viewed
     /// language. Held back while a bulk run is claimed (one job at a time)
     /// and without a viewed language to translate.
     private var translateButton: some View {
@@ -157,11 +157,11 @@ struct ArchiveBannerView: View {
         .accessibilityLabel("Translate the viewed language")
         .popover(isPresented: $isTranslatePopoverPresented, arrowEdge: .bottom) {
             if let code = model.archiveViewingCode {
-                ArchiveTranslationProviderPicker(
+                ArchiveTranslationEnginePicker(
                     model: model,
                     lang: code,
                     language: TargetLanguage(code: code),
-                    onStart: { provider in startTranslation(provider, lang: code) },
+                    onStart: { engine in startTranslation(engine, lang: code) },
                     isPresented: $isTranslatePopoverPresented
                 )
             }
@@ -169,11 +169,11 @@ struct ArchiveBannerView: View {
     }
 
     /// Routes the picker's start through the model: the request is refused
-    /// while another cloud-disclosure intent is held, an Apple pick starts
-    /// its run directly, and an external pick is parked for the disclosure
-    /// whose confirm callback starts the run.
-    private func startTranslation(_ provider: TranslationProvider, lang: String) {
-        model.requestArchiveTranslation(provider: provider, lang: lang)
+    /// while another cloud-disclosure intent is held, an Apple-tier pick
+    /// starts its run directly, and an external pick is parked for the
+    /// disclosure whose confirm callback starts the run.
+    private func startTranslation(_ engine: RetranslateEngine, lang: String) {
+        model.requestArchiveTranslation(engine: engine, lang: lang)
     }
 
     /// Whether the bulk job claims this session and language — from the

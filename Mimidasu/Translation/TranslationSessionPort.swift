@@ -39,7 +39,7 @@ protocol TranslationSessionPort: AnyObject {
     func applyTranslation(index: Int, translation: SentenceTranslation) -> Bool
 
     /// Starts the bulk archive-translation run the cloud disclosure just
-    /// confirmed (the held external selection). A no-op while a run is
-    /// claimed or no archive is open.
-    func beginArchiveTranslation(provider: TranslationProvider, lang: String)
+    /// confirmed (the held external selection, mapped to its engine). A no-op
+    /// while a run is claimed or no archive is open.
+    func beginArchiveTranslation(engine: RetranslateEngine, lang: String)
 }

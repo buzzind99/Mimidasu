@@ -2,7 +2,7 @@ import SwiftUI
 
 // The language surfaces of archive mode, kept in one cluster: the capsule
 // chip shared by the banner and the archive rows, the row's `+` pill, the
-// switch-language popover with its in-popover add chooser, and the provider
+// switch-language popover with its in-popover add chooser, and the engine
 // picker behind the banner's Translate button.
 
 /// One language's count chip (`FR 40/183`): the badge code in the plain
@@ -313,19 +313,50 @@ struct ArchiveSwitchLanguagePopover: View {
     }
 }
 
-/// The provider picker behind the banner's Translate button, for the viewed
-/// language: Apple on-device plus every external provider (configured ones
-/// selectable), a count line, and the start action — fill-missing
-/// ("Translate N") or a fresh full pass over a complete language
-/// ("Retranslate N").
-struct ArchiveTranslationProviderPicker: View {
+/// The engine picker behind the banner's Translate button, for the viewed
+/// language: the two on-device Apple tiers — Apple Intelligence offered and
+/// defaulted to whenever the OS can serve the pair, Apple (NMT) otherwise —
+/// plus every external provider (configured ones selectable), a count line,
+/// and the start action — fill-missing ("Translate N") or a fresh full pass
+/// over a complete language ("Retranslate N").
+struct ArchiveTranslationEnginePicker: View {
     var model: AppModel
     let lang: String
     let language: TargetLanguage
-    let onStart: (TranslationProvider) -> Void
+    let onStart: (RetranslateEngine) -> Void
     @Binding var isPresented: Bool
 
-    @State private var provider: TranslationProvider = .apple
+    /// The user's pick; nil until they choose — the offered default applies.
+    @State private var selection: RetranslateEngine?
+
+    /// Whether the OS can serve the high-fidelity tier for this language.
+    private var hifiOffered: Bool {
+        model.archiveHighFidelityOffered(for: lang)
+    }
+
+    private var defaultEngine: RetranslateEngine {
+        hifiOffered ? .appleHighFidelity : .appleFast
+    }
+
+    private var selectedEngine: RetranslateEngine {
+        selection ?? defaultEngine
+    }
+
+    /// High fidelity first (the preferred tier), then NMT, then the
+    /// externals in picker order.
+    private var engineOptions: [RetranslateEngine] {
+        var engines: [RetranslateEngine] = []
+        if hifiOffered {
+            engines.append(.appleHighFidelity)
+        }
+        engines.append(.appleFast)
+        engines.append(
+            contentsOf: TranslationProvider.allCases
+                .filter { provider in provider.isExternal }
+                .compactMap { provider in RetranslateEngine(provider: provider) }
+        )
+        return engines
+    }
 
     /// The sentences a run would send: missing count, or the full sentence
     /// count when the language is complete.
@@ -355,14 +386,14 @@ struct ArchiveTranslationProviderPicker: View {
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(Theme.primaryText)
                 Text(isComplete
-                    ? "Pick a provider, then press Retranslate"
-                    : "Pick a provider, then press Translate")
+                    ? "Pick an engine, then press Retranslate"
+                    : "Pick an engine, then press Translate")
                     .font(.system(size: 10.5))
                     .foregroundStyle(Theme.secondaryText)
             }
             VStack(spacing: 2) {
-                ForEach(TranslationProvider.allCases) { option in
-                    providerRow(option)
+                ForEach(engineOptions, id: \.rawValue) { engine in
+                    engineRow(engine)
                 }
             }
             Rectangle()
@@ -376,8 +407,8 @@ struct ArchiveTranslationProviderPicker: View {
         }
         .padding(12)
         .frame(width: 300)
-        // A run that reaches its engine is what closes the picker: the
-        // Apple path starts immediately, the external one after the cloud
+        // A run that reaches its engine is what closes the picker: an Apple
+        // tier starts immediately, an external one after the cloud
         // disclosure is confirmed.
         .onChange(of: model.archiveTranslationJob.isRunning) { _, isRunning in
             if isRunning {
@@ -402,22 +433,22 @@ struct ArchiveTranslationProviderPicker: View {
         isComplete ? "Retranslate \(sendCount)" : "Translate \(sendCount)"
     }
 
-    // MARK: - Provider rows
+    // MARK: - Engine rows
 
-    private func providerRow(_ option: TranslationProvider) -> some View {
-        let configured = option == .apple || model.translationSettings.hasKey(for: option)
-        let isSelected = provider == option
+    private func engineRow(_ engine: RetranslateEngine) -> some View {
+        let configured = isConfigured(engine)
+        let isSelected = selectedEngine == engine
         return Button {
             guard configured else { return }
-            provider = option
+            selection = engine
         } label: {
             HStack(spacing: 9) {
                 radio(selected: isSelected)
-                Text(option == .apple ? "Apple" : option.displayName)
+                Text(engine.displayName)
                     .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(Theme.primaryText)
                 Spacer(minLength: 8)
-                Text(tailText(option, configured: configured))
+                Text(tailText(engine, configured: configured))
                     .font(.system(size: 10.5))
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -444,10 +475,15 @@ struct ArchiveTranslationProviderPicker: View {
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
-    private func tailText(_ option: TranslationProvider, configured: Bool) -> String {
-        if option == .apple {
-            return "On-device"
-        }
+    /// On-device tiers need no key; an external row is usable only while its
+    /// provider has a stored key.
+    private func isConfigured(_ engine: RetranslateEngine) -> Bool {
+        guard let provider = engine.provider else { return true }
+        return model.translationSettings.hasKey(for: provider)
+    }
+
+    private func tailText(_ engine: RetranslateEngine, configured: Bool) -> String {
+        guard engine.provider != nil else { return "On-device" }
         return configured ? "Configured" : "Not configured"
     }
 
@@ -471,7 +507,7 @@ struct ArchiveTranslationProviderPicker: View {
 
     private var actionButton: some View {
         Button {
-            onStart(provider)
+            onStart(selectedEngine)
         } label: {
             Text(actionLabel)
                 .font(.system(size: 11.5, weight: .bold))

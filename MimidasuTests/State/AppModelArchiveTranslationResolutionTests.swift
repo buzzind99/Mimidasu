@@ -3,13 +3,15 @@ import Foundation
 import Testing
 
 /// Tests the Apple side of an archive-translation start's engine
-/// resolution: the high-fidelity selection flying a pre-armed session, the
+/// resolution: the picker's explicit tier parameter (a high-fidelity pick
+/// flying a pre-armed session, an NMT pick never upgrading on its own), the
 /// still-starting copy each Apple model reports when its arm window runs
 /// out, the silent release when a teardown lands under the wait, the chain
 /// on airborne lane work before the first engine call, and the
-/// target-scoped high-fidelity degrade. Shares the harness (seeded store,
-/// scripted engine, permit gate) with the `AppModelArchiveTranslation`
-/// suite.
+/// pair-scoped high-fidelity degrade. The settings re-translate selection
+/// plays no part: the run resolves exactly the engine the pick names.
+/// Shares the harness (seeded store, scripted engine, permit gate) with the
+/// `AppModelArchiveTranslation` suite.
 @MainActor
 @Suite("AppModelArchiveTranslationResolution")
 struct ArchiveTranslationResolutionTests {
@@ -22,12 +24,11 @@ struct ArchiveTranslationResolutionTests {
             try Test.cancel("the high-fidelity lane requires macOS 26.4")
         }
         let sut = await makeSUT()
-        sut.model.translationSettings.selectRetranslate(.appleHighFidelity)
         let engine = ScriptedArchiveEngine()
         sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleHighFidelity, target: "fr")
         sut.model.retranslateHifiSessionArrived(engine)
 
-        sut.model.beginArchiveTranslation(provider: .apple, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .appleHighFidelity, lang: "fr")
 
         #expect(
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
@@ -46,7 +47,7 @@ struct ArchiveTranslationResolutionTests {
         let sut = await makeSUT()
         sut.model.laneArmTimeout = .milliseconds(60)
 
-        sut.model.beginArchiveTranslation(provider: .apple, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
 
         #expect(
             await pollUntil(timeout: resultTimeout) { archiveToast(sut.model) != nil },
@@ -68,9 +69,8 @@ struct ArchiveTranslationResolutionTests {
         }
         let sut = await makeSUT()
         sut.model.laneArmTimeout = .milliseconds(60)
-        sut.model.translationSettings.selectRetranslate(.appleHighFidelity)
 
-        sut.model.beginArchiveTranslation(provider: .apple, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .appleHighFidelity, lang: "fr")
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
@@ -88,7 +88,7 @@ struct ArchiveTranslationResolutionTests {
         let sut = await makeSUT()
         sut.model.laneArmTimeout = .seconds(2)
 
-        sut.model.beginArchiveTranslation(provider: .apple, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
         #expect(
             await pollUntil(timeout: resultTimeout) { sut.model.retranslateConfig != nil },
             "the run's resolution armed the fast session"
@@ -123,7 +123,7 @@ struct ArchiveTranslationResolutionTests {
             await gate.acquire()
         }
 
-        sut.model.beginArchiveTranslation(provider: .apple, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
         #expect(
             await pollUntil(timeout: resultTimeout) {
                 sut.model.archiveTranslationJob.pendingRequest != nil
@@ -144,28 +144,25 @@ struct ArchiveTranslationResolutionTests {
 
     // MARK: - Target-scoped high-fidelity resolution
 
-    @Test("a settings-pair probe does not degrade a foreign archive target")
-    func foreignTargetKeepsRequestingHifi() async throws {
+    @Test("a probe for another pair is not evidence against the picker's high-fidelity choice")
+    func foreignProbeDoesNotDegradeTheHifiPick() async throws {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("the high-fidelity lane requires macOS 26.4")
         }
         let sut = await makeSUT()
-        sut.model.translationSettings.selectRetranslate(.appleHighFidelity)
-        // The probe landed not-installed for the SETTINGS pair (`en`); the
+        // The probe landed not-installed for another pair (`en`); the
         // archive runs to `fr`, whose availability was never probed — not
-        // evidence for the foreign target.
+        // evidence against the picker's explicit high-fidelity choice.
         sut.model.appleHighFidelityProbe = (false, "en")
         let engine = ScriptedArchiveEngine()
         sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleHighFidelity, target: "fr")
         sut.model.retranslateHifiSessionArrived(engine)
 
-        #expect(sut.model.effectiveRetranslateSelection == .appleFast, "the settings pair itself degrades")
-
-        sut.model.beginArchiveTranslation(provider: .apple, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .appleHighFidelity, lang: "fr")
 
         #expect(
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
-            "the foreign target's run still resolves high fidelity"
+            "the foreign pair's probe does not degrade the pick"
         )
         #expect(sut.model.archiveTranslationJob.kind == .appleHighFidelity)
         #expect(
@@ -181,7 +178,6 @@ struct ArchiveTranslationResolutionTests {
             try Test.cancel("the high-fidelity lane requires macOS 26.4")
         }
         let sut = await makeSUT()
-        sut.model.translationSettings.selectRetranslate(.appleHighFidelity)
         // The probe landed not-installed for the archive's own pair: the
         // pair genuinely cannot serve high fidelity, so the run degrades.
         sut.model.appleHighFidelityProbe = (false, "fr")
@@ -189,7 +185,7 @@ struct ArchiveTranslationResolutionTests {
         sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "fr")
         sut.model.retranslateSessionArrived(engine)
 
-        sut.model.beginArchiveTranslation(provider: .apple, lang: "fr")
+        sut.model.beginArchiveTranslation(engine: .appleHighFidelity, lang: "fr")
 
         #expect(
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
@@ -202,6 +198,29 @@ struct ArchiveTranslationResolutionTests {
             "the stamps name the model that actually ran"
         )
         #expect(sut.model.retranslateHifiConfig == nil, "the high-fidelity session is never armed")
+    }
+
+    @Test("an NMT pick flies fast even where high fidelity is installed")
+    func nmtPickFliesFastWithHifiInstalled() async {
+        let sut = await makeSUT()
+        sut.model.appleHighFidelityProbe = (true, "fr")
+        let engine = ScriptedArchiveEngine()
+        sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "fr")
+        sut.model.retranslateSessionArrived(engine)
+
+        sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
+            "the explicit NMT pick serves the whole run"
+        )
+        #expect(sut.model.archiveTranslationJob.kind == .appleFast)
+        #expect(
+            sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
+                == [.appleFast, .appleFast, .appleFast],
+            "the stamps name the model that actually ran"
+        )
+        #expect(sut.model.retranslateHifiConfig == nil, "an explicit NMT pick never upgrades")
     }
 
     @Test("the high-fidelity known-unavailable facade is scoped to the row's target")
@@ -219,5 +238,35 @@ struct ArchiveTranslationResolutionTests {
         )
         #expect(!sut.model.highFidelityKnownUnavailable(for: "de"))
         #expect(sut.model.highFidelityKnownUnavailable, "the settings-pair read still delegates")
+    }
+
+    // MARK: - Picker offer
+
+    @Test("the picker offers high fidelity for a pair with no unavailability evidence")
+    func pickerOffersHighFidelityWithoutEvidence() async throws {
+        guard #available(macOS 26.4, *) else {
+            try Test.cancel("the high-fidelity offer requires macOS 26.4")
+        }
+        let sut = await makeSUT()
+
+        #expect(sut.model.archiveHighFidelityOffered(for: "fr"))
+    }
+
+    @Test("a probe landed not-installed withdraws the offer only for its pair")
+    func probeWithdrawsOfferOnlyForItsPair() async throws {
+        guard #available(macOS 26.4, *) else {
+            try Test.cancel("the high-fidelity offer requires macOS 26.4")
+        }
+        let sut = await makeSUT()
+        sut.model.appleHighFidelityProbe = (false, "fr")
+
+        #expect(
+            !sut.model.archiveHighFidelityOffered(for: "fr"),
+            "the probed pair withdraws its offer"
+        )
+        #expect(
+            sut.model.archiveHighFidelityOffered(for: "en"),
+            "evidence for one pair does not describe the other's offer"
+        )
     }
 }

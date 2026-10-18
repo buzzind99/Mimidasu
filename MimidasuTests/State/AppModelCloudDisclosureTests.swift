@@ -252,13 +252,13 @@ struct AppModelCloudDisclosureTests {
     /// The archive picker shares the one disclosure slot: a held intent is
     /// never clobbered (the raise would swap the presented sheet's content
     /// mid-flight), and with a free slot the external pick stages the run's
-    /// own intent while the Apple pick starts its run directly.
+    /// own intent while the Apple Intelligence pick starts its run directly.
     @Test("the archive picker respects a held intent and stages its own")
     func archivePickerRespectsHeldIntent() async {
         let sut = await makeSUT()
 
         sut.model.providerAwaitingDisclosure = .retranslateEngine(.deepl)
-        sut.model.requestArchiveTranslation(provider: .google, lang: "fr")
+        sut.model.requestArchiveTranslation(engine: .google, lang: "fr")
 
         #expect(
             sut.model.providerAwaitingDisclosure == .retranslateEngine(.deepl),
@@ -267,7 +267,7 @@ struct AppModelCloudDisclosureTests {
         #expect(!sut.model.archiveTranslationRunning, "the blocked pick starts nothing")
 
         sut.model.providerAwaitingDisclosure = nil
-        sut.model.requestArchiveTranslation(provider: .google, lang: "fr")
+        sut.model.requestArchiveTranslation(engine: .google, lang: "fr")
 
         #expect(
             sut.model.providerAwaitingDisclosure == .archiveTranslation(.google, lang: "fr"),
@@ -275,12 +275,15 @@ struct AppModelCloudDisclosureTests {
         )
         #expect(!sut.model.archiveTranslationRunning)
 
-        // With the slot free, the Apple pick needs no sheet and starts.
+        // With the slot free, the Apple Intelligence pick needs no sheet and starts.
         sut.model.providerAwaitingDisclosure = nil
         sut.model.laneArmTimeout = .milliseconds(40)
-        sut.model.requestArchiveTranslation(provider: .apple, lang: "fr")
+        sut.model.requestArchiveTranslation(engine: .appleHighFidelity, lang: "fr")
 
-        #expect(sut.model.archiveTranslationJob.isActive, "the Apple pick starts its run without a sheet")
+        #expect(
+            sut.model.archiveTranslationJob.isActive,
+            "the Apple Intelligence pick starts its run without a sheet"
+        )
         #expect(sut.model.providerAwaitingDisclosure == nil)
         #expect(
             await pollUntil(timeout: 5) { !sut.model.archiveTranslationRunning },

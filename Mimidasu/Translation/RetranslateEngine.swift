@@ -21,6 +21,20 @@ enum RetranslateEngine: String, Codable, CaseIterable, Sendable, Equatable, Hash
         }
     }
 
+    /// Display label for surfaces that pick an engine (the archive engine
+    /// picker's rows, the bulk run's progress card). `.session` names no
+    /// engine of its own — only the settings card offers it.
+    var displayName: String {
+        switch self {
+        case .session: "Session engine"
+        case .appleFast: "Apple (NMT)"
+        case .appleHighFidelity: "Apple Intelligence"
+        case .google: "Google Translate"
+        case .deepl: "DeepL"
+        case .openrouter: "OpenRouter"
+        }
+    }
+
     /// The selection behind a Settings provider row; nil for Apple, which
     /// has no lane of its own.
     init?(provider: TranslationProvider) {
