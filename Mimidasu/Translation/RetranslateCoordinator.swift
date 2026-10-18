@@ -224,32 +224,36 @@ extension RetranslateCoordinator {
         highFidelityKnownUnavailable(for: settings.targetLanguage.code)
     }
 
-    /// The Apple model the re-translate selection can actually deliver for
-    /// `targetCode`, which is not always the selected one. `.appleHighFidelity`
-    /// names a strategy the OS may not be able to serve: where the ja→target
-    /// pair is not `.installed` for it, the dedicated config still requests
-    /// high fidelity and the framework silently falls back to the fast model
-    /// (the same caveat `makeConfig` documents). Requesting it anyway would
-    /// return text byte-identical to a live fast session while stamping the
-    /// row `.appleHighFidelity` — a "· via Apple Intelligence" marker over
-    /// fast-model output. So a *known*-unavailable high-fidelity route degrades
-    /// to the fast model, which is a genuine alternate.
-    ///
-    /// Below 26.4 there is no strategy API at all, so high fidelity cannot be
-    /// requested and the selection always degrades. Every consumer switches on
-    /// the effective selection, so the persisted `.appleHighFidelity` is never
-    /// rewritten; only its resolution degrades.
+    /// The Apple tier `engine` can actually deliver for `targetCode`, which
+    /// is not always the selected one. `.appleHighFidelity` names a strategy
+    /// the OS may not be able to serve: below 26.4 there is no strategy API
+    /// at all, and where the ja→target pair is not `.installed` the dedicated
+    /// config still requests high fidelity and the framework silently falls
+    /// back to the fast model (the same caveat `makeConfig` documents).
+    /// Requesting it anyway would return text byte-identical to a fast
+    /// session while stamping the row `.appleHighFidelity` — a "· via Apple
+    /// Intelligence" marker over fast-model output. So a *known*-unavailable
+    /// high-fidelity route degrades to the fast model, which is a genuine
+    /// alternate. Non-Apple selections pass through untouched.
     ///
     /// Accepted caveat: a foreign target (an archive whose viewing language
     /// differs from the settings target) has no probe evidence, so it keeps
     /// requesting high fidelity and the framework may silently serve the
     /// fast model — the same caveat the config builders document. No
     /// on-demand probe runs at archive-run start.
-    func effectiveRetranslateSelection(targetCode: String) -> RetranslateEngine {
-        let selection = settings.retranslateEngine
-        guard selection == .appleHighFidelity else { return selection }
+    func effectiveAppleTier(_ engine: RetranslateEngine, targetCode: String) -> RetranslateEngine {
+        guard engine == .appleHighFidelity else { return engine }
         guard #available(macOS 26.4, *) else { return .appleFast }
         return highFidelityKnownUnavailable(for: targetCode) ? .appleFast : .appleHighFidelity
+    }
+
+    /// The settings re-translate selection resolved for `targetCode` — the
+    /// settings-selection spelling of `effectiveAppleTier(_:targetCode:)`,
+    /// which documents the degrade semantics. Every consumer switches on the
+    /// effective selection, so the persisted `.appleHighFidelity` is never
+    /// rewritten; only its resolution degrades.
+    func effectiveRetranslateSelection(targetCode: String) -> RetranslateEngine {
+        effectiveAppleTier(settings.retranslateEngine, targetCode: targetCode)
     }
 
     /// The settings-pair spelling of `effectiveRetranslateSelection(targetCode:)`.
