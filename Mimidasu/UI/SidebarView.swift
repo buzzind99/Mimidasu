@@ -11,6 +11,12 @@ struct SidebarView: View {
     /// forwarded straight from `ContentView`'s single slot, so the card never
     /// presents an alert of its own.
     let onFavoriteRemovalRequest: (String) -> Void
+    /// The capsule's Stop path. The request, not the action: the window owns
+    /// the stop confirmation slot, so the sidebar only files the intent.
+    let onStopRequest: () -> Void
+    /// The capsule's Start path (the archive-open close-and-start question
+    /// lives in the window's slot).
+    let onStartRequest: () -> Void
     @AppStorage(ReadingAnnotation.storageKey) private var readingAnnotation = ReadingAnnotation.romaji
     @AppStorage(CursorMode.storageKey) private var cursorMode = CursorMode.none
     @AppStorage(UIScale.storageKey) private var uiScale = UIScale.default
@@ -27,13 +33,14 @@ struct SidebarView: View {
     @State private var settingsClosedAt: ContinuousClock.Instant?
 
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             brandHeader
                 .padding(.bottom, 26)
 
-            sessionButton
+            sessionRow
 
             sectionLabel("ANNOTATION")
             annotationPicker
@@ -46,8 +53,12 @@ struct SidebarView: View {
 
             Spacer()
 
-            sessionCard
-                .padding(.bottom, 14)
+            // Archive mode hides the SESSION card: the archived stats live
+            // in the transcript pane's banner instead.
+            if model.openArchive == nil {
+                sessionCard
+                    .padding(.bottom, 14)
+            }
 
             toolbar
         }
@@ -60,7 +71,9 @@ struct SidebarView: View {
             isPresented: $exportPresented,
             document: exportData.map { data in ExportDocument(data: data) },
             contentTypes: [exportFormat.contentType],
-            defaultFilename: "mimidasu-session.\(exportFormat.fileExtension)"
+            // An opened archive's name (sanitized) when it has one; the
+            // shared default otherwise.
+            defaultFilename: "\(model.exportFilenameBase).\(exportFormat.fileExtension)"
         ) { result in
             if case let .failure(error) = result {
                 model.toasts.post(
@@ -94,22 +107,73 @@ struct SidebarView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.secondaryText)
             }
+
+            Spacer()
+
+            archiveButton
         }
+    }
+
+    /// The archive window opener — history icon, standard button chrome at
+    /// the brand header's trailing edge. Always enabled: a degraded store
+    /// still opens the window, which explains itself.
+    private var archiveButton: some View {
+        Button {
+            openWindow(id: ArchiveWindow.sceneID)
+        } label: {
+            Image(systemName: "clock.arrow.circlepath")
+                .foregroundStyle(Theme.primaryText.opacity(0.7))
+                .frame(width: 34, height: 32)
+                .cardSurface(radius: 9)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverHighlight(iconButtonShape)
+        .help("Open the session archive")
+        .accessibilityLabel("Open the session archive")
     }
 
     // MARK: - Session capsule
 
     /// Pure mapping (unit-tested): phase → capsule presentation + ASR dot.
     private var status: SidebarStatus {
-        SidebarStatus.map(phase: model.phase, isCheckingModel: model.isCheckingModel)
+        SidebarStatus.map(
+            phase: model.phase, isCheckingModel: model.isCheckingModel,
+            archiveOpen: model.openArchive != nil
+        )
+    }
+
+    /// The capsule plus its round companions: the pause/resume toggle while a
+    /// session is live, the close (x) while an archived session is open.
+    private var sessionRow: some View {
+        HStack(spacing: 8) {
+            sessionButton
+            if status.showsPauseButton {
+                roundButton(
+                    systemImage: model.phase == .paused ? "play.fill" : "pause.fill",
+                    help: model.phase == .paused ? "Resume capture" : "Pause capture"
+                ) {
+                    if model.phase == .running {
+                        model.pause()
+                    } else if model.phase == .paused {
+                        model.resume()
+                    }
+                }
+            }
+            if status.showsCloseArchive {
+                roundButton(systemImage: "xmark", help: "Close the archive") {
+                    model.closeArchive()
+                }
+            }
+        }
     }
 
     private var sessionButton: some View {
         Button {
             if status.isLiveSession {
-                model.stop()
+                onStopRequest()
             } else {
-                model.start()
+                onStartRequest()
             }
         } label: {
             Label(status.sessionTitle, systemImage: status.sessionIcon)
@@ -124,6 +188,28 @@ struct SidebarView: View {
         }
         .buttonStyle(.plain)
         .disabled(status.isSessionDisabled)
+    }
+
+    /// Round companion chrome (pause/resume, close archive): card fill with a
+    /// hairline stroke, sized to the capsule row.
+    private func roundButton(
+        systemImage: String, help: String, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.primaryText)
+                .frame(width: 40, height: 40)
+                .background(
+                    Circle()
+                        .fill(Theme.cardFill)
+                        .overlay(Circle().stroke(Theme.cardStroke))
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .hoverHighlight(Circle())
+        .help(help)
     }
 
     // MARK: - Annotation picker
@@ -344,8 +430,15 @@ extension SidebarView {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .hoverHighlight(iconButtonShape)
-        .help("Show or hide the floating overlays (subtitle + translations)")
+        .hoverHighlight(iconButtonShape, isEnabled: model.openArchive == nil)
+        // The floating overlays are live-session chrome: forced hidden and
+        // untogglable while an archived session fills the pane.
+        .disabled(model.openArchive != nil)
+        .help(
+            model.openArchive != nil
+                ? "Unavailable in archive mode"
+                : "Show or hide the floating overlays (subtitle + translations)"
+        )
     }
 
     private var settingsButton: some View {

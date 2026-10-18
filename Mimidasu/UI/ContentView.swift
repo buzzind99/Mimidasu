@@ -120,6 +120,14 @@ struct ContentView: View {
     /// reason: the popover is a window of its own, and an alert presented there
     /// is orphaned — backdrop and all — the moment the popover closes.
     @State private var pendingFavoriteRemoval: String?
+    /// The stop awaiting confirmation, and the close-the-archive-and-start
+    /// question. Window-level slots (the sidebar capsule files the request,
+    /// the window presents), one each per `FavoriteRemovalConfirmation`'s
+    /// pattern.
+    @State private var pendingStop = false
+    @State private var pendingArchiveStart = false
+
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Group {
@@ -133,6 +141,22 @@ struct ContentView: View {
         .frame(minWidth: isOnboarding ? 800 : 1080, minHeight: isOnboarding ? 720 : 800)
         .onboardingWindowFootprint(isOnboarding)
         .favoriteRemovalConfirmation(model, pendingRemoval: $pendingFavoriteRemoval)
+        .stopConfirmation(model, isPresented: $pendingStop)
+        .archiveStartConfirmation(model, isPresented: $pendingArchiveStart)
+        // The bulk archive translation's cloud disclosure: the intent slot is
+        // shared with the settings sheet, each window presenting only its own
+        // intents (see `archiveDisclosure`).
+        .sheet(item: archiveDisclosure) { disclosure in
+            CloudDisclosureSheet(
+                intent: disclosure,
+                sentenceCount: disclosureSentenceCount(disclosure),
+                onConfirm: { model.confirmCloudDisclosure(disclosure) },
+                onDecline: { model.declineCloudDisclosure() }
+            )
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mimidasuOpenArchiveWindow)) { _ in
+            openWindow(id: ArchiveWindow.sceneID)
+        }
         .onAppear {
             Task { await model.refreshModelAvailability() }
         }
@@ -153,11 +177,62 @@ struct ContentView: View {
         model.lookupPopoverBinding(for: .liveStrip)
     }
 
+    /// The shared disclosure slot, filtered to the archive bulk-run intent:
+    /// the settings intents present in the Settings scene's own sheet, this
+    /// one never sees them. Writing nil — the sheet's dismissal — declines
+    /// the held slot; decline is idempotent, so a dismissal after an
+    /// explicit Decline's clear changes nothing.
+    private var archiveDisclosure: Binding<PendingCloudDisclosure?> {
+        Binding(
+            get: {
+                guard let pending = model.providerAwaitingDisclosure,
+                      case .archiveTranslation = pending
+                else { return nil }
+                return pending
+            },
+            set: { newValue in
+                if newValue == nil {
+                    model.declineCloudDisclosure()
+                }
+            }
+        )
+    }
+
+    /// The sentences the intent's run would send — the disclosure body's
+    /// count line. Nil for the settings intents (their copy carries none).
+    private func disclosureSentenceCount(_ disclosure: PendingCloudDisclosure) -> Int? {
+        if case let .archiveTranslation(_, lang) = disclosure {
+            return model.archiveTranslationSendCount(lang: lang)
+        }
+        return nil
+    }
+
     /// Files the un-star question the shared window-level alert presents. Both
     /// dictionary hosts get this one closure, so which control was pressed is
     /// the only thing either of them contributes.
     private func requestFavoriteRemoval(_ headword: String) {
         pendingFavoriteRemoval = headword
+    }
+
+    /// The capsule's Stop path: the policy decides whether the window asks
+    /// first; quiet phases (empty transcript, cancel-during-start, unavailable
+    /// store) stop directly.
+    private func requestStop() {
+        if model.shouldConfirmStop {
+            pendingStop = true
+        } else {
+            model.stop()
+        }
+    }
+
+    /// The capsule's Start path: an open archive never refuses outright — it
+    /// asks to close first; otherwise start is direct.
+    private func requestStart() {
+        if model.openArchive != nil {
+            pendingArchiveStart = true
+        } else {
+            model.start()
+        }
     }
 
     private var mainContent: some View {
@@ -170,34 +245,44 @@ struct ContentView: View {
         return HStack(spacing: 0) {
             SidebarView(
                 model: model,
-                onFavoriteRemovalRequest: requestFavoriteRemoval
+                onFavoriteRemovalRequest: requestFavoriteRemoval,
+                onStopRequest: requestStop,
+                onStartRequest: requestStart
             )
             Rectangle()
                 .fill(Theme.divider)
                 .frame(width: 1)
                 .ignoresSafeArea()
             VStack(spacing: 0) {
+                if model.openArchive != nil {
+                    ArchiveBannerView(model: model)
+                }
                 TranscriptView(
                     model: model,
                     onFavoriteRemovalRequest: requestFavoriteRemoval
                 )
-                LiveStripView(
-                    live: live,
-                    onCopy: { text in model.copySnippet(text) },
-                    onLookup: { token in model.handleLookupTap(token, source: .liveStrip) },
-                    isFavorite: model.favoriteSegmentMatcher
-                )
-                // Strip-anchored popover: single non-virtualized view, so
-                // the strip owns it while the selection's anchor is the
-                // live strip. Source-keyed so a strip retap swaps content
-                // in place instead of a dismiss+replace.
-                .popover(isPresented: liveStripLookupPresented) {
-                    if let selected = model.selectedLookup?.popoverItem(for: .liveStrip) {
-                        DictionaryPopoverView(
-                            model: model,
-                            selected: selected,
-                            onFavoriteRemovalRequest: requestFavoriteRemoval
-                        )
+                // Archive mode: the live strip hides entirely (nothing is
+                // live; the banner carries the archived stats) and its
+                // strip-anchored popover has no anchor to mount on.
+                if model.openArchive == nil {
+                    LiveStripView(
+                        live: live,
+                        onCopy: { text in model.copySnippet(text) },
+                        onLookup: { token in model.handleLookupTap(token, source: .liveStrip) },
+                        isFavorite: model.favoriteSegmentMatcher
+                    )
+                    // Strip-anchored popover: single non-virtualized view, so
+                    // the strip owns it while the selection's anchor is the
+                    // live strip. Source-keyed so a strip retap swaps content
+                    // in place instead of a dismiss+replace.
+                    .popover(isPresented: liveStripLookupPresented) {
+                        if let selected = model.selectedLookup?.popoverItem(for: .liveStrip) {
+                            DictionaryPopoverView(
+                                model: model,
+                                selected: selected,
+                                onFavoriteRemovalRequest: requestFavoriteRemoval
+                            )
+                        }
                     }
                 }
             }

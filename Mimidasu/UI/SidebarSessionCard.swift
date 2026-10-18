@@ -23,16 +23,19 @@ extension SidebarView {
         .cardSurface()
     }
 
-    /// Duration ticks at 1 s while running (now − startedAt, monotonic
-    /// instants so wall-clock changes cannot distort it); frozen at endedAt
-    /// after stop, at captureLostAt during a source-lost outage (the clock
-    /// resumes on restart recovery); "—" before the first session.
+    /// Duration ticks at 1 s while running or paused (the paused span is
+    /// excluded from the active-duration math, so the displayed value simply
+    /// freezes while paused); frozen at endedAt after stop, at captureLostAt
+    /// during a source-lost outage (the clock resumes on restart recovery);
+    /// "—" before the first session.
     @ViewBuilder
     private var durationStat: some View {
-        if model.phase == .running {
+        if model.phase == .running || model.phase == .paused {
             TimelineView(.periodic(from: .now, by: 1)) { _ in
                 stat(
-                    value: Self.durationText(from: model.sessionStartedAt, to: ContinuousClock.now),
+                    value: Self.durationText(
+                        from: model.activeSessionStart(at: .now), to: ContinuousClock.now
+                    ),
                     label: "Duration"
                 )
             }
@@ -42,11 +45,8 @@ extension SidebarView {
     }
 
     private var frozenDurationText: String {
-        guard let started = model.sessionStartedAt else { return "—" }
-        return Self.durationText(
-            from: started,
-            to: model.sessionEndedAt ?? model.captureLostAt ?? ContinuousClock.now
-        )
+        let end = model.sessionEndedAt ?? model.captureLostAt ?? ContinuousClock.now
+        return Self.durationText(from: model.activeSessionStart(at: end), to: end)
     }
 
     static func durationText(

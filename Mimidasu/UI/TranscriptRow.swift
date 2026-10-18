@@ -17,6 +17,10 @@ struct TranscriptRow: View {
     static let retryActionTitle = "Re-translate this line"
 
     let entry: SessionEntry
+    /// Archive mode's viewed language: the row renders that language's
+    /// translation alone. Nil (the live pane) keeps the joined
+    /// multi-language line.
+    let displayLanguage: String?
     /// Snapshot, not a settings wrapper — see the note above.
     let annotation: ReadingAnnotation
     let scale: UIScale
@@ -178,10 +182,10 @@ struct TranscriptRow: View {
 
     @ViewBuilder
     private var translationRow: some View {
-        if let joined = entry.joinedTranslations {
+        if let shown = shownTranslation {
             // The bar overlays the text's leading edge so it stretches to the
             // full height of the (possibly multi-line) translation.
-            translationText(joined)
+            translationText(shown)
                 .font(.system(size: 13 * scale.factor))
                 .textSelection(.enabled)
                 .overlay(alignment: .leading) {
@@ -201,6 +205,15 @@ struct TranscriptRow: View {
         }
     }
 
+    /// The line the row renders: the viewed language's translation in
+    /// archive mode — never the joined string, so an untranslated row keeps
+    /// its placeholder however many other languages it holds — and the
+    /// joined multi-language text live.
+    private var shownTranslation: String? {
+        guard let displayLanguage else { return entry.joinedTranslations }
+        return entry.translation(for: displayLanguage)?.text
+    }
+
     /// The translation with its provenance suffix when the row was retried
     /// through a different engine.
     ///
@@ -213,8 +226,8 @@ struct TranscriptRow: View {
     /// sentence's last word, so it can neither split internally nor wrap
     /// alone onto a new line. The trade of living inside the selectable
     /// text: the suffix copies with the sentence.
-    private func translationText(_ joined: String) -> some View {
-        let translation = Text(joined).foregroundStyle(Theme.translationTeal)
+    private func translationText(_ text: String) -> some View {
+        let translation = Text(text).foregroundStyle(Theme.translationTeal)
         guard let retranslateMarker else { return translation }
         let glued = retranslateMarker.replacingOccurrences(of: " ", with: "\u{00A0}")
         let suffix = Text("\u{00A0}\u{00A0}\(glued)")

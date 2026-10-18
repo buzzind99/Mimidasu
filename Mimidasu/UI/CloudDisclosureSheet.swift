@@ -12,6 +12,9 @@ import SwiftUI
 /// external provider, either kind.
 struct CloudDisclosureSheet: View {
     let intent: PendingCloudDisclosure
+    /// The sentences an archive bulk run would send — the intent's count
+    /// line. Nil for the settings intents (the copy carries no count).
+    var sentenceCount: Int?
     let onConfirm: () -> Void
     let onDecline: () -> Void
 
@@ -33,7 +36,7 @@ struct CloudDisclosureSheet: View {
                 SettingsPill(label: "Cancel") {
                     onDecline()
                 }
-                SettingsPill(label: "Use \(provider.shortName)", prominent: true) {
+                SettingsPill(label: confirmLabel, prominent: true) {
                     onConfirm()
                 }
             }
@@ -49,6 +52,8 @@ struct CloudDisclosureSheet: View {
             "Translate with \(provider.displayName)?"
         case .retranslateEngine:
             "Retry translations with \(provider.displayName)?"
+        case .archiveTranslation:
+            "Send text to \(provider.displayName)?"
         }
     }
 
@@ -61,6 +66,23 @@ struct CloudDisclosureSheet: View {
             "Lines you explicitly re-translate will be sent to "
                 + "\(provider.displayName) over the internet to be translated. "
                 + "The live translation engine is unchanged. "
+        case .archiveTranslation:
+            if let sentenceCount {
+                "\(sentenceCount) sentences will be sent from your Mac to "
+                    + "\(provider.displayName) for translation."
+            } else {
+                "Sentences will be sent from your Mac to \(provider.displayName) "
+                    + "for translation."
+            }
+        }
+    }
+
+    private var confirmLabel: String {
+        switch intent {
+        case .providerSwitch, .retranslateEngine:
+            "Use \(provider.shortName)"
+        case .archiveTranslation:
+            "Continue"
         }
     }
 }

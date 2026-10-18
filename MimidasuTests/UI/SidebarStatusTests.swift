@@ -37,7 +37,7 @@ struct SidebarStatusTests {
 
     @Test("live phases offer Stop and stay reachable")
     func livePhases() {
-        for phase in [SessionPhase.running, .sourceLost] {
+        for phase in [SessionPhase.running, .sourceLost, .paused] {
             let status = SidebarStatus.map(phase: phase, isCheckingModel: false)
 
             #expect(status.isLiveSession)
@@ -45,6 +45,41 @@ struct SidebarStatusTests {
             #expect(status.sessionIcon == "stop.fill")
             #expect(!status.isSessionDisabled)
         }
+    }
+
+    @Test("the pause button shows only while running or paused")
+    func pauseButtonVisibility() {
+        for phase in [SessionPhase.running, .paused] {
+            #expect(SidebarStatus.map(phase: phase, isCheckingModel: false).showsPauseButton)
+        }
+        for phase in [SessionPhase.idle, .needsModel, .starting, .stopping, .sourceLost, .failed("x")] {
+            #expect(!SidebarStatus.map(phase: phase, isCheckingModel: false).showsPauseButton)
+        }
+    }
+
+    @Test("paused reads neutral on the ASR dot and keeps Stop reachable")
+    func pausedPresentation() {
+        let status = SidebarStatus.map(phase: .paused, isCheckingModel: false)
+
+        #expect(status.asrDot == .neutral)
+        #expect(!status.isSessionDisabled)
+    }
+
+    @Test("archive open shows the close button; a live phase always wins")
+    func archiveOpenPresentation() {
+        let open = SidebarStatus.map(phase: .idle, isCheckingModel: false, archiveOpen: true)
+        #expect(open.showsCloseArchive)
+        #expect(!open.showsPauseButton)
+        #expect(!open.isLiveSession)
+        #expect(open.sessionTitle == "Start session")
+
+        // Open implies a non-live phase by construction; a live phase never
+        // shows the close affordance even if the flag were passed.
+        let live = SidebarStatus.map(phase: .running, isCheckingModel: false, archiveOpen: true)
+        #expect(!live.showsCloseArchive)
+        #expect(live.showsPauseButton)
+
+        #expect(!SidebarStatus.map(phase: .idle, isCheckingModel: false).showsCloseArchive)
     }
 
     @Test("an in-flight model check gates Start but never Stop")

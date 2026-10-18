@@ -67,7 +67,7 @@ struct SettingsView: View {
         // activation is held in `providerAwaitingDisclosure` (a provider
         // switch or a re-translate engine selection); confirming completes
         // the held intent, dismissing either way clears the bound item.
-        .sheet(item: $model.providerAwaitingDisclosure) { disclosure in
+        .sheet(item: settingsDisclosure) { disclosure in
             CloudDisclosureSheet(
                 // The presented intent, not the live slot: if the slot is
                 // clobbered while the sheet is up, confirming this sheet must
@@ -96,6 +96,27 @@ struct SettingsView: View {
             // availability probe is a no-op once loaded anyway.
             Task { await model.appleTranslationAvailability.refreshIfNeeded() }
         }
+    }
+
+    /// The shared disclosure slot, filtered to the settings intents: an
+    /// archive bulk run's intent belongs to the main window's sheet and must
+    /// never present here. Writing nil — the sheet's dismissal — declines the
+    /// held slot; decline is idempotent.
+    private var settingsDisclosure: Binding<PendingCloudDisclosure?> {
+        Binding(
+            get: {
+                guard let pending = model.providerAwaitingDisclosure else { return nil }
+                switch pending {
+                case .providerSwitch, .retranslateEngine: return pending
+                case .archiveTranslation: return nil
+                }
+            },
+            set: { newValue in
+                if newValue == nil {
+                    model.declineCloudDisclosure()
+                }
+            }
+        )
     }
 
     // MARK: - Header

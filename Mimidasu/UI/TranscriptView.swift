@@ -70,6 +70,8 @@ struct TranscriptView: View {
                 ForEach(model.entries) { entry in
                     TranscriptRow(
                         entry: entry,
+                        displayLanguage: model.openArchive != nil
+                            ? model.archiveViewingCode : nil,
                         annotation: readingAnnotation,
                         scale: uiScale,
                         cursorMode: cursorMode,
@@ -174,7 +176,15 @@ struct TranscriptView: View {
     /// cannot reach this view either, and a queued line's button is the
     /// common case anyway — it simply comes back with the batch.
     private func retryEnabled(for entry: SessionEntry) -> Bool {
-        guard model.phase == .running || model.phase == .sourceLost else { return false }
+        // Archive mode: the opened session is the deliverer (the lane routes
+        // through its dedicated engines), so only an in-flight retry or a
+        // claimed bulk job (one translation at a time) holds the button back.
+        if model.openArchive != nil {
+            return !model.pendingRetranslations.contains(entry.sentence.index)
+                && !model.archiveTranslationRunning
+        }
+        guard model.phase == .running || model.phase == .sourceLost || model.phase == .paused
+        else { return false }
         if !model.alternateRetranslateEngineActive {
             guard model.translationWorkerActive else { return false }
             if case .unavailable = model.translationStatus {
@@ -193,29 +203,42 @@ struct TranscriptView: View {
     /// just-retried row that the landing probe immediately removes. External
     /// identity needs no probe.
     private func retranslateMarker(for entry: SessionEntry) -> String? {
-        guard model.translationSettings.showsRetranslateMarker,
-              // Matched by language, not `.last`: the row renders every
-              // translation, so the marker must describe the one shown for
-              // the current target rather than whichever came last.
-              let translation = entry.translations.first(where: { existing in
-                  existing.lang == model.translationSettings.targetLanguage.code
-              }),
-              let engine = translation.engine
+        guard model.translationSettings.showsRetranslateMarker else { return nil }
+        // The row's target language: the open archive's viewed language in
+        // archive mode (retries stamp it), the settings target live.
+        let targetCode = model.openArchive != nil
+            ? (model.archiveViewingCode ?? model.translationSettings.targetLanguage.code)
+            : model.translationSettings.targetLanguage.code
+        // Matched by language, not `.last`: the row renders every
+        // translation, so the marker must describe the one shown for the
+        // current target rather than whichever came last.
+        guard let translation = entry.translations.first(where: { existing in
+            existing.lang == targetCode
+        }),
+            let engine = translation.engine
         else { return nil }
+        // Once the probe has landed not-installed, a row stamped
+        // `.appleHighFidelity` actually holds the fast model's text — the
+        // framework silently falls back — so its marker must not claim
+        // Apple Intelligence. Applies in both modes.
+        if engine == .appleHighFidelity, model.highFidelityKnownUnavailable {
+            return nil
+        }
+        // Archive mode: there is no live engine to differ from — every
+        // archive retry runs through a dedicated alternate, so the stamp
+        // itself is the provenance. The probe-pending hold below describes
+        // the live session's identity and does not apply.
+        if model.openArchive != nil {
+            return "· via \(engine.markerName)"
+        }
         // Only the Apple kinds depend on the probe. While it is pending the
         // identity is unknown under ANY live engine (external sessions probe
         // too, and a probe killed by a stop leaves the tuple at
         // `(false, nil)` while the transcript stays on screen), so an Apple
-        // marker waits for it. And once the probe has landed
-        // not-installed, a row stamped `.appleHighFidelity` actually holds
-        // the fast model's text — the framework silently falls back — so
-        // its marker must not claim Apple Intelligence.
+        // marker waits for it.
         if engine == .appleFast || engine == .appleHighFidelity,
            model.appleHighFidelityProbe.targetCode == nil
         {
-            return nil
-        }
-        if engine == .appleHighFidelity, model.highFidelityKnownUnavailable {
             return nil
         }
         guard engine != model.activeEngineKind else { return nil }

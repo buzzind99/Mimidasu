@@ -22,7 +22,7 @@ struct SidebarStatus: Equatable {
     }
 
     /// Stop-capsule states: a live session (or one whose capture source was
-    /// lost) offers Stop; everything else offers Start.
+    /// lost, or a paused one) offers Stop; everything else offers Start.
     let isLiveSession: Bool
     let sessionTitle: String
     let sessionIcon: String
@@ -30,11 +30,19 @@ struct SidebarStatus: Equatable {
     /// Stop must stay reachable from a live session.
     let isSessionDisabled: Bool
     let asrDot: DotTone
+    /// The round pause/resume button beside the capsule, shown while a
+    /// session is live (`.running` / `.paused`). Hidden in archive mode.
+    let showsPauseButton: Bool
+    /// The round close (x) button beside the capsule, shown while an
+    /// archived session is open in the pane.
+    let showsCloseArchive: Bool
 
-    static func map(phase: SessionPhase, isCheckingModel: Bool) -> SidebarStatus {
-        let isLive = phase == .running || phase == .sourceLost
+    static func map(
+        phase: SessionPhase, isCheckingModel: Bool, archiveOpen: Bool = false
+    ) -> SidebarStatus {
+        let isLive = phase == .running || phase == .sourceLost || phase == .paused
         let title = switch phase {
-        case .running, .sourceLost: "Stop session"
+        case .running, .sourceLost, .paused: "Stop session"
         case .starting: "Starting…"
         case .stopping: "Stopping…"
         case .idle, .needsModel, .failed: "Start session"
@@ -42,16 +50,23 @@ struct SidebarStatus: Equatable {
         let dot: DotTone = switch phase {
         case .running: .green
         case .starting, .stopping: .yellow
+        case .paused: .neutral
         case .sourceLost, .failed: .red
         case .idle, .needsModel: .neutral
         }
+        // Archive mode: the capsule stays the normal Start session (the
+        // action asks to close first) and the round x closes directly.
+        // Open implies a non-live phase by construction, so the live
+        // presentation above never competes with it.
         return SidebarStatus(
             isLiveSession: isLive,
             sessionTitle: title,
             sessionIcon: isLive ? "stop.fill" : "play.fill",
             isSessionDisabled: phase == .starting || phase == .stopping
                 || (isCheckingModel && !isLive),
-            asrDot: dot
+            asrDot: dot,
+            showsPauseButton: phase == .running || phase == .paused,
+            showsCloseArchive: archiveOpen && !isLive
         )
     }
 

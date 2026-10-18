@@ -47,6 +47,16 @@ struct MimidasuApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
+
+        // The archive window: a separate scene over the store's sessions, so
+        // it can sit beside the transcript while a session runs. The view
+        // fixes its own frame and supplies its own header band in place of
+        // the hidden title bar.
+        Window(ArchiveWindow.title, id: ArchiveWindow.sceneID) {
+            ArchiveWindowView(model: appDelegate.model)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
     }
 }
 
@@ -113,12 +123,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var referenceWindowObserver: NSObjectProtocol?
     private var auxiliaryCloseObserver: NSObjectProtocol?
     private var resignKeyObserver: NSObjectProtocol?
-    /// The live reference window, if any — tracks instance identity so a
-    /// refocus never re-centers it, only a fresh window does.
-    private weak var referenceWindow: NSWindow?
-    /// The live Settings window, if any — same instance-identity tracking as
-    /// `referenceWindow`: a sheet present/dismiss cycle re-keys the cached
-    /// window without it being a fresh open.
+    /// The live reference and archive windows by title — each tracks instance
+    /// identity so a refocus never re-centers it, only a fresh window does.
+    private var auxiliaryWindows: [String: NSWindow] = [:]
+    /// The live Settings window, if any — same instance-identity tracking: a
+    /// sheet present/dismiss cycle re-keys the cached window without it being
+    /// a fresh open.
     private weak var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -129,6 +139,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // cancelled the translation run and stranded the queue's pending
         // sentences.
         translationSessionPanel.bind(model: model)
+        observeSettingsWindow()
+        observeAuxiliaryWindows()
+    }
+
+    /// The Settings window's AppKit-level chrome and dismiss behavior. A
+    /// fresh instance keys on open; a click outside (resign key) closes it.
+    private func observeSettingsWindow() {
         keyWindowObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
         ) { [weak self] note in
@@ -145,7 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if window.titleVisibility != .hidden {
                     self.hideTitleChrome(of: window)
                 }
-                // Same placement contract as the reference observer below:
+                // Same placement contract as the auxiliary observers below:
                 // the window belongs to the main window's Space — stationary
                 // (exempt from Mission Control rearrangement — deliberate
                 // here, so Settings does not tile alongside the transcript;
@@ -173,11 +190,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // dictionary-English notice — and closing the window the instant a
         // question appeared would be its own bug.
         //
-        // The reference window is deliberately NOT on this path: it holds the
-        // user's starred words and their search, so it stays up until it is
-        // closed explicitly. It also carries no side costs for staying open —
-        // its openers re-key it rather than recreating it, and its state
-        // resets at close.
+        // The reference and archive windows are deliberately NOT on this
+        // path: they hold the user's words — starred lookups and stored
+        // sessions — so they stay up until closed explicitly.
         resignKeyObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didResignKeyNotification, object: nil, queue: .main
         ) { note in
@@ -189,47 +204,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 window.performClose(nil)
             }
         }
-        // The reference window belongs to the main window's Space: it floats
-        // over it (including fullscreen) and cannot be dragged to another
-        // Space. SwiftUI exposes no scene modifier for collection behavior,
-        // so it is set at the AppKit level on first key — the same bridge
-        // as the settings chrome-hiding above. Title-matched: only the
-        // reference scene carries it. Unlike Settings, it is NOT stationary:
-        // `.stationary` exempts a window from Mission Control entirely, which
-        // left it sitting full-size and opaque over the dimmed backdrop while
-        // every other window receded into a tile. `fullScreenAuxiliary` still
-        // lets the window coexist with the fullscreen main window's Space;
-        // `moveToActiveSpace` still moves it to the active Space when
-        // activated (the opener lives in the main window, so that is always
-        // the main window's Space) instead of reopening where it was last
-        // closed. A fresh instance also opens centered; refocusing the open
-        // window never moves it.
+    }
+
+    /// The reference and archive windows belong to the main window's Space:
+    /// they float over it (including fullscreen) and cannot be dragged to
+    /// another Space. SwiftUI exposes no scene modifier for collection
+    /// behavior, so it is set at the AppKit level on first key — the same
+    /// bridge as the settings chrome-hiding. Title-matched per scene; each
+    /// keeps its own instance cache. Unlike Settings, they are NOT
+    /// stationary: `.stationary` exempts a window from Mission Control
+    /// entirely, which left it sitting full-size and opaque over the dimmed
+    /// backdrop while every other window receded into a tile.
+    /// `fullScreenAuxiliary` still lets the window coexist with the
+    /// fullscreen main window's Space; `moveToActiveSpace` still moves it to
+    /// the active Space when activated (the opener lives in the main window,
+    /// so that is always the main window's Space) instead of reopening where
+    /// it was last closed. A fresh instance also opens centered; refocusing
+    /// the open window never moves it.
+    private func observeAuxiliaryWindows() {
         referenceWindowObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
         ) { [weak self] note in
             let window = note.object as? NSWindow
             MainActor.assumeIsolated {
-                guard let self, let window, window.title == ReferenceWindow.title else { return }
-                window.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
-                if self.referenceWindow !== window {
-                    self.referenceWindow = window
-                    window.center()
-                }
+                guard let self, let window else { return }
+                self.adoptAuxiliaryWindow(window)
             }
         }
-        // Both scenes cache their windows, so a reopen would restore the
-        // last dragged spot. Centering on close resets it — the close and
-        // the move land in the same tick, so no jump is visible.
+        // The scenes cache their windows, so a reopen would restore the last
+        // dragged spot. Centering on close resets it — the close and the move
+        // land in the same tick, so no jump is visible.
         auxiliaryCloseObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification, object: nil, queue: .main
         ) { note in
             let window = note.object as? NSWindow
             MainActor.assumeIsolated {
                 guard let window, window.title == ReferenceWindow.title
+                    || window.title == ArchiveWindow.title
                     || SettingsWindowController.isSettingsWindow(window)
                 else { return }
                 window.center()
             }
+        }
+    }
+
+    /// Applies the auxiliary placement contract to a freshly keyed reference
+    /// or archive window; a no-op for every other window.
+    private func adoptAuxiliaryWindow(_ window: NSWindow) {
+        guard window.title == ReferenceWindow.title || window.title == ArchiveWindow.title
+        else { return }
+        window.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
+        if auxiliaryWindows[window.title] !== window {
+            auxiliaryWindows[window.title] = window
+            window.center()
         }
     }
 
