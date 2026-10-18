@@ -256,4 +256,32 @@ struct MockASREngineTests {
         #expect(engine.finish().isEmpty, "the pending final is delivered exactly once")
         #expect(engine.poll() == nil, "poll must not redeliver the flushed final")
     }
+
+    // MARK: - flushUtterance
+
+    @Test("flushUtterance delivers the pending final and leaves the stream resumable")
+    func flushUtteranceDeliversPendingFinal() {
+        for _ in 0 ..< 6 {
+            pushSpeech()
+        }
+
+        let events = engine.flushUtterance()
+
+        #expect(events.count == 1)
+        guard case let .final(text, _, _, lang)? = events.first else {
+            Issue.record("expected a .final event, got \(String(describing: events.first))")
+            return
+        }
+        #expect(text == "今日はいい天気ですね。")
+        #expect(lang == "ja")
+
+        // Parity with the real engine's pause flush: nothing is latched, so
+        // pushes resume cleanly and poll delivers again.
+        var resumed = false
+        for _ in 0 ..< 20 where !resumed {
+            pushSpeech()
+            resumed = engine.poll() != nil
+        }
+        #expect(resumed, "pushes resume cleanly after the flush")
+    }
 }

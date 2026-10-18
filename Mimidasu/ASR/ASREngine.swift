@@ -15,6 +15,10 @@ protocol ASREngine: AnyObject, Sendable {
     /// capture stops first, then finish → drain. The engine stays warm — the
     /// loaded model is reused by the next session.
     func finish() -> [ASREvent]
+    /// Flush the open utterance as a final (decode + emit) without ending the
+    /// stream — the pause path. Unlike `finish()`, the engine is not latched
+    /// and the utterance closes out, so post-resume pushes start a fresh one.
+    func flushUtterance() -> [ASREvent]
     /// Samples actually processed by the decoder (latency readback).
     var processedSamples: Int { get }
     /// Samples pushed into the stream but not necessarily processed yet.

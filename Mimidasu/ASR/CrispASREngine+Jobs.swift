@@ -380,7 +380,9 @@ extension CrispASREngine {
     /// a final decode covered): drops the finalized span, re-seeding any
     /// speech that resumed while the decode was in flight as the start of
     /// the next utterance, and resets all endpoint state.
-    private func finalizeUtterance(_ state: inout State, end: Int) {
+    /// (Internal, not private: the pause flush in `+Teardown.swift` closes
+    /// the utterance out through the same rule.)
+    func finalizeUtterance(_ state: inout State, end: Int) {
         let finalized = end - state.utteranceStartSample
         if finalized >= 0, finalized < state.utterance.count {
             state.utterance.removeFirst(finalized)

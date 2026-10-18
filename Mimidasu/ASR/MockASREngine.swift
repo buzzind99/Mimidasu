@@ -67,4 +67,11 @@ final class MockASREngine: ASREngine, @unchecked Sendable {
         guard let event = poll() else { return [] }
         return [event]
     }
+
+    func flushUtterance() -> [ASREvent] {
+        // Parity with the real engine's pause flush: an undelivered pending
+        // final lands as a sentence; nothing else is latched, so pushes
+        // resume cleanly.
+        finish()
+    }
 }

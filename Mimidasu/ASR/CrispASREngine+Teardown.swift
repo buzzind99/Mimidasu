@@ -49,6 +49,23 @@ extension CrispASREngine {
 
     func finish() -> [ASREvent] {
         state.withLock { current in current.finishing = true }
+        flushOpenUtterance()
+        return drainInbox()
+    }
+
+    /// Flushes the open utterance without ending the stream (pause). The
+    /// engine is NOT latched finishing: pushes resume cleanly, and the
+    /// closed-out utterance means post-resume speech starts fresh.
+    func flushUtterance() -> [ASREvent] {
+        flushOpenUtterance()
+        return drainInbox()
+    }
+
+    /// The shared flush half of `finish()` / `flushUtterance()`: waits
+    /// (bounded) for in-flight jobs, decodes the open utterance into the
+    /// inbox as a final, and closes the utterance out. Callers own the
+    /// latch and the inbox drain.
+    private func flushOpenUtterance() {
         let drainedCleanly = awaitIdleJobs(timeout: drainTimeout)
 
         // Flush any open utterance synchronously — capture has already
@@ -98,7 +115,16 @@ extension CrispASREngine {
             }
         }
 
-        return state.withLock { current -> [ASREvent] in
+        // Close out the utterance either way: a pause must resume with a
+        // fresh utterance (the flush final covered the old one), and at
+        // finish the reset is a no-op on a session that is going away.
+        state.withLock { current in
+            finalizeUtterance(&current, end: end)
+        }
+    }
+
+    private func drainInbox() -> [ASREvent] {
+        state.withLock { current -> [ASREvent] in
             let drained = current.inbox
             current.inbox = []
             return drained
