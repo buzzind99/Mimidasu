@@ -39,6 +39,11 @@ final class RetranslateCoordinator {
     /// session, armed by the first Apple-fast retry.
     var retranslateConfig: TranslationSession.Configuration?
 
+    /// The target code `retranslateConfig` was built for. Arming rebuilds a
+    /// config whose target no longer matches (an armed config pins its
+    /// target); nil while the config is unarmed.
+    @ObservationIgnored var retranslateConfigTarget: String?
+
     /// The fast-model session handed out by the second `.translationTask`
     /// host, stored as the queue-side engine adapter.
     var retranslateSessionEngine: (any TranslationEngine)?
@@ -46,6 +51,10 @@ final class RetranslateCoordinator {
     /// Config for the dedicated high-fidelity (Apple Intelligence)
     /// re-translate session, armed by the first Apple-Intelligence retry.
     var retranslateHifiConfig: TranslationSession.Configuration?
+
+    /// The target code `retranslateHifiConfig` was built for (see
+    /// `retranslateConfigTarget`).
+    @ObservationIgnored var retranslateHifiConfigTarget: String?
 
     /// The high-fidelity session handed out by the third `.translationTask`
     /// host, stored as the queue-side engine adapter.
@@ -118,6 +127,26 @@ final class RetranslateCoordinator {
     /// The host's toast stack, or nil when the host is gone.
     var toasts: ToastCenter? {
         host?.toasts
+    }
+
+    /// Whether an archived session is open in the transcript pane — the
+    /// lane's second gate and its route switch: with no live session, every
+    /// retry runs through a dedicated alternate engine and lands back into
+    /// the store instead of the queue.
+    var archiveOpen: Bool {
+        host?.archiveSessionID != nil
+    }
+
+    /// The lane's target language: the opened archive's viewing language
+    /// when there is one, else the settings target. The viewing language is
+    /// the archive's stored target by default (switching it is view-only);
+    /// an archive's codes resolve through the language table (unknown codes
+    /// fall back to English, mirroring the persisted-selection rule).
+    var laneTargetLanguage: TargetLanguage {
+        guard archiveOpen, let code = host?.archiveViewingCode else {
+            return settings.targetLanguage
+        }
+        return TargetLanguage(code: code)
     }
 }
 
@@ -215,7 +244,21 @@ extension RetranslateCoordinator {
     /// names the live session's own engine is not an alternate: the lane
     /// would run the identical engine (for Apple, a deterministic one) and
     /// show no marker.
+    ///
+    /// Archive mode has no live session to differ from: every retry is a
+    /// dedicated alternate there (a `.session` selection maps to Apple-fast;
+    /// externals are alternates when their key is usable), so only the
+    /// key-less external case reports "not an alternate".
     var alternateRetranslateEngineActive: Bool {
+        if archiveOpen {
+            switch effectiveRetranslateSelection {
+            case .session, .appleFast, .appleHighFidelity:
+                return true
+            case let selection:
+                guard let provider = selection.provider else { return false }
+                return settings.hasKey(for: provider)
+            }
+        }
         switch effectiveRetranslateSelection {
         case .session:
             return false

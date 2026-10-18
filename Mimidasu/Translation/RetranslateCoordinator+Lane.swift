@@ -24,12 +24,24 @@ extension RetranslateCoordinator {
     ///
     /// `.sourceLost` counts as live: capture can die mid-session while
     /// translation keeps draining, and a line worth re-running is exactly
-    /// what a user reaches for then.
+    /// what a user reaches for then. An open archive is the second gate: no
+    /// live session, but the pane's rows are just as retryable.
     func retranslateSentence(_ sentence: Sentence) {
-        guard sessionPhase == .running || sessionPhase == .sourceLost else { return }
-        guard !pendingRetranslations.contains(sentence.index),
-              !queue.isAwaitingTranslation(sentence)
-        else { return }
+        let livePhase = sessionPhase == .running || sessionPhase == .sourceLost
+            || sessionPhase == .paused
+        guard livePhase || archiveOpen else { return }
+        // The bulk job owns the archive's engines while a run is claimed
+        // (resolution included): a session-backed Apple engine must never
+        // see concurrent calls.
+        guard host?.archiveTranslationRunning != true else { return }
+        guard !pendingRetranslations.contains(sentence.index) else { return }
+        // The queue's awaited-sentence check guards the queue route's
+        // double-click case. In archive mode the queue has no bearing on
+        // these rows (its ids restart at 0 in every session and can collide
+        // with the archive's), so the check is skipped with the route.
+        if !archiveOpen, queue.isAwaitingTranslation(sentence) {
+            return
+        }
         switch resolveRetranslateRoute() {
         case .session:
             // Today's path verbatim: the queue owns the retry (cache evicted,
@@ -56,8 +68,11 @@ extension RetranslateCoordinator {
             // The lane owns this sentence now: if it sits in a failed-out
             // backlog, drop the queued copy so a later Reconnect replay
             // cannot re-translate it and overwrite the lane's stamped
-            // result with an unstamped one.
-            queue.dropPending(sentence)
+            // result with an unstamped one. Archive mode never touches the
+            // queue (see the gate above).
+            if !archiveOpen {
+                queue.dropPending(sentence)
+            }
             runRetranslateLane(sentence, kind: kind, engine: engine)
         case let .unavailable(reason):
             // Toast + skip — no state touched, the row keeps its translation.
@@ -76,17 +91,10 @@ extension RetranslateCoordinator {
         case unavailable(String)
     }
 
-    /// Outcome of resolving the lane's engine. `.timedOut` and `.cancelled`
-    /// are distinct on purpose: the timeout reports a still-starting session,
-    /// while a cancellation is a user-initiated stop whose toasts are already
-    /// cleared, so reporting it would post a stray message.
-    private enum LaneEngineResolution {
-        case ready(any TranslationEngine)
-        case timedOut
-        case cancelled
-    }
-
     private func resolveRetranslateRoute() -> RetranslateRoute {
+        if archiveOpen {
+            return resolveArchiveRoute()
+        }
         let selection = effectiveRetranslateSelection
         switch selection {
         case .session:
@@ -111,6 +119,26 @@ extension RetranslateCoordinator {
             // The provider is external here, so the kind mapping is total
             // (only Apple maps to nil); the fallback mirrors the live-identity
             // read in `activeEngineKind`.
+            return .alternate(TranslationEngineKind(provider: provider) ?? .appleFast, engine: engine)
+        }
+    }
+
+    /// Archive mode route: every selection serves through a dedicated
+    /// alternate — never the queue, which has no session to deliver into.
+    /// `.session` ("whatever the live session ran") has no referent with no
+    /// live session; it maps to Apple-fast, the plain on-device route.
+    private func resolveArchiveRoute() -> RetranslateRoute {
+        switch effectiveRetranslateSelection {
+        case .session, .appleFast:
+            return armedRoute(.appleFast)
+        case .appleHighFidelity:
+            return armedRoute(.appleHighFidelity)
+        case let selection:
+            guard let provider = selection.provider else { return armedRoute(.appleFast) }
+            let engine = laneExternalEngine(for: provider)
+            guard let engine else {
+                return .unavailable("No API key stored for \(provider.displayName).")
+            }
             return .alternate(TranslationEngineKind(provider: provider) ?? .appleFast, engine: engine)
         }
     }
@@ -141,21 +169,27 @@ extension RetranslateCoordinator {
     private func armedRoute(_ kind: TranslationEngineKind) -> RetranslateRoute {
         // Arming is optimistic: if the dedicated session is still starting,
         // the lane waits for it (bounded) instead of blocking the click.
-        armRetranslateSessionIfNeeded(for: kind)
+        // The armed config bakes in the lane target — the archive's stored
+        // target in archive mode, the settings target live.
+        armRetranslateSessionIfNeeded(for: kind, target: laneTargetLanguage.code)
         return .alternate(kind, engine: laneEngineStorage(for: kind))
     }
 
-    /// Builds the lane's external engine. The test factory is authoritative
-    /// when set: a nil result means "unavailable" (no key), never a
-    /// fall-through to the real engine.
-    private func laneExternalEngine(for provider: TranslationProvider) -> (any TranslationEngine)? {
+    /// Builds the lane's external engine over the lane's target (the
+    /// archive's stored target in archive mode — the row being retried was
+    /// translated to that language, not the settings one). The test factory
+    /// is authoritative when set: a nil result means "unavailable" (no
+    /// key), never a fall-through to the real engine. (Internal, not
+    /// private: the bulk job's resolution in `+Sessions` reuses it.)
+    func laneExternalEngine(for provider: TranslationProvider) -> (any TranslationEngine)? {
         if let factory = retranslateEngineFactory {
             return factory(provider)
         }
         // A nil `live` is unreachable behind the caller's live-phase guard
-        // (a live phase implies the host, which owns both coordinators).
+        // (a live phase implies the host, which owns both coordinators); in
+        // archive mode `live` exists with any app model.
         guard let live else { return nil }
-        return live.makeExternalEngine(for: provider)
+        return live.makeExternalEngine(for: provider, target: laneTargetLanguage)
     }
 
     // MARK: - Lane runner
@@ -252,10 +286,15 @@ extension RetranslateCoordinator {
     /// and the landing re-routes — session hand-over when the live session
     /// turns out to run the requested engine, degrade-to-fast when the
     /// pair cannot serve high fidelity, or a "still checking" toast on
-    /// timeout.
+    /// timeout. Archive mode skips the gate entirely: the probe describes
+    /// the live session's identity, and there is no live session to
+    /// duplicate.
     private func probeGate(
         for kind: TranslationEngineKind, epoch: Int, sentence: Sentence
     ) async -> ProbeGateOutcome {
+        if archiveOpen {
+            return .proceed(kind)
+        }
         switch kind {
         case .appleFast, .appleHighFidelity:
             break // the landing decides duplicate-vs-alternate for both
@@ -279,24 +318,31 @@ extension RetranslateCoordinator {
             )
             return .done
         case .landed:
-            guard retranslateLaneCanDeliver(epoch: epoch) else {
-                retireLaneMarker(sentence.index, epoch: epoch)
-                return .done
-            }
-            // The landing can change the selection's resolution — a
-            // not-installed landing degrades a high-fidelity
-            // selection to the fast model, whose dedicated session
-            // this lane must then arm and wait on instead.
-            let laneKind = kindAfterProbeLanding(kind)
-            if liveSessionRunsKind(laneKind) {
-                handRetranslateToSession(sentence)
-                return .done
-            }
-            if laneKind != kind {
-                armRetranslateSessionIfNeeded(for: laneKind)
-            }
-            return .proceed(laneKind)
+            return probeLandedOutcome(kind: kind, epoch: epoch, sentence: sentence)
         }
+    }
+
+    /// The gate's `.landed` successor: the landing can change the
+    /// selection's resolution — a not-installed landing degrades a
+    /// high-fidelity selection to the fast model, whose dedicated session
+    /// this lane must then arm and wait on instead — and a same-engine
+    /// resolution is handed to the queue path.
+    private func probeLandedOutcome(
+        kind: TranslationEngineKind, epoch: Int, sentence: Sentence
+    ) -> ProbeGateOutcome {
+        guard retranslateLaneCanDeliver(epoch: epoch) else {
+            retireLaneMarker(sentence.index, epoch: epoch)
+            return .done
+        }
+        let laneKind = kindAfterProbeLanding(kind)
+        if liveSessionRunsKind(laneKind) {
+            handRetranslateToSession(sentence)
+            return .done
+        }
+        if laneKind != kind {
+            armRetranslateSessionIfNeeded(for: laneKind, target: laneTargetLanguage.code)
+        }
+        return .proceed(laneKind)
     }
 
     /// Outcome of waiting for the activation probe to land. `.timedOut` and
@@ -330,8 +376,9 @@ extension RetranslateCoordinator {
     /// The lane's Apple kind once the probe has landed: the click-time kind,
     /// unless a not-installed landing degrades a high-fidelity selection to
     /// the fast model — the same resolution `effectiveRetranslateSelection`
-    /// applies once the probe has landed.
-    private func kindAfterProbeLanding(_ kind: TranslationEngineKind) -> TranslationEngineKind {
+    /// applies once the probe has landed. (Internal, not private: the bulk
+    /// job's resolution in `+Sessions` applies the same degrade.)
+    func kindAfterProbeLanding(_ kind: TranslationEngineKind) -> TranslationEngineKind {
         guard kind == .appleHighFidelity, highFidelityKnownUnavailable else { return kind }
         return .appleFast
     }
@@ -360,6 +407,11 @@ extension RetranslateCoordinator {
         _ sentence: Sentence, through engine: any TranslationEngine,
         kind: TranslationEngineKind, epoch: Int
     ) async {
+        // The lane's target, captured before the flight: an archive close
+        // during the round-trip turns over the epoch and the delivery guard
+        // below retires the result, so the stamp describes the pane the
+        // retry was clicked in.
+        let target = laneTargetLanguage
         do {
             let results = try await engine.translate([sentence.text])
             // Re-check after the flight: a stop during the round-trip already
@@ -375,7 +427,7 @@ extension RetranslateCoordinator {
                 throw TranslationEngineError.badResponse("Expected 1 non-empty translation, got 0")
             }
             let pair = SentenceTranslation(
-                lang: settings.targetLanguage.code,
+                lang: target.code,
                 text: text,
                 engine: kind
             )
@@ -386,8 +438,10 @@ extension RetranslateCoordinator {
             // when the row actually took the result — `applyTranslation`
             // reports whether the row was still present, so a result whose
             // row vanished (transcript cleared underneath it) never leaves
-            // the retried text in the cache.
-            if landed {
+            // the retried text in the cache. Archive mode never seeds: the
+            // cache belongs to the live session's queue, and an archive
+            // result must not leak into a later session's rows.
+            if landed, !archiveOpen {
                 queue.seedCache(sentence, pair)
             }
         } catch is CancellationError {
@@ -400,13 +454,20 @@ extension RetranslateCoordinator {
         }
     }
 
-    /// Whether a lane result captured against `epoch` may still be applied:
-    /// the session must be live (so a stop, or a capture restart that parks
-    /// the phase in `.starting`, refuses the delivery) and must be the one
-    /// the retry was clicked in.
-    private func retranslateLaneCanDeliver(epoch: Int) -> Bool {
-        (sessionPhase == .running || sessionPhase == .sourceLost)
-            && epoch == retranslateSessionEpoch
+    /// Whether a lane result captured against `epoch` may still be applied.
+    /// Live: the session must be live (so a stop, or a capture restart that
+    /// parks the phase in `.starting`, refuses the delivery) and must be the
+    /// one the retry was clicked in. Archive mode: no phase to read — the
+    /// open archive is the delivery target — and the epoch carries the
+    /// whole check, since open and close both turn the lane generation over.
+    /// (Internal, not private: the lane wait in `+Sessions` polls it, for
+    /// the lane and for the bulk job.)
+    func retranslateLaneCanDeliver(epoch: Int) -> Bool {
+        guard epoch == retranslateSessionEpoch else { return false }
+        if archiveOpen {
+            return true
+        }
+        return sessionPhase == .running || sessionPhase == .sourceLost || sessionPhase == .paused
     }
 
     /// Retires the dim cue for a lane-owned index. Every exit that will not
@@ -433,38 +494,6 @@ extension RetranslateCoordinator {
         guard epoch == retranslateSessionEpoch else { return }
         pendingRetranslations.remove(index)
         lanePendingRetranslations.remove(index)
-    }
-
-    /// Resolves the lane's engine: a built engine passes through; nil (an
-    /// Apple selection while its dedicated session is still arming) waits a
-    /// bounded interval for the `.translationTask` host to hand one over —
-    /// acquisition is sub-second once armed, the bound only catches
-    /// pathological cases. The deadline is monotonic (`ContinuousClock`) —
-    /// wall-clock `Date` would skew on clock changes. A lane that dies
-    /// mid-wait (stop, teardown) exits promptly instead of polling its
-    /// nilled storage out the whole arm window.
-    private func laneEngine(
-        _ engine: (any TranslationEngine)?, kind: TranslationEngineKind, epoch: Int
-    ) async -> LaneEngineResolution {
-        if let engine {
-            return .ready(engine)
-        }
-        let deadline = ContinuousClock.now + laneArmTimeout
-        // Polls the storage the loop exits on and returns that same value: a
-        // re-read after the loop would race a teardown and read nil as a
-        // timeout.
-        var resolved = laneEngineStorage(for: kind)
-        while resolved == nil, ContinuousClock.now < deadline {
-            guard retranslateLaneCanDeliver(epoch: epoch) else { return .cancelled }
-            do {
-                try await Task.sleep(for: Duration.milliseconds(50))
-            } catch {
-                return .cancelled
-            }
-            resolved = laneEngineStorage(for: kind)
-        }
-        guard let resolved else { return .timedOut }
-        return .ready(resolved)
     }
 
     // MARK: - Lane toasts

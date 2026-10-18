@@ -12,17 +12,21 @@ enum ActiveTranslationEngine: Equatable {
 }
 
 /// The intent held behind the cloud disclosure sheet: completing a provider
-/// switch (the live translation engine) or a re-translate engine selection.
-/// Both raise the same sheet with the same semantics — raised on every
-/// selection, no persisted acknowledgment.
+/// switch (the live translation engine), a re-translate engine selection, or
+/// a bulk archive-translation start. All raise the same sheet with the same
+/// semantics — raised on every selection, no persisted acknowledgment.
 enum PendingCloudDisclosure: Equatable, Identifiable {
     case providerSwitch(TranslationProvider)
     case retranslateEngine(TranslationProvider)
+    /// A bulk run's external provider pick, paired with the run's language;
+    /// unlike the settings intents this is job-local (never persisted).
+    case archiveTranslation(TranslationProvider, lang: String)
 
     var id: String {
         switch self {
         case let .providerSwitch(provider): "switch.\(provider.rawValue)"
         case let .retranslateEngine(provider): "retranslate.\(provider.rawValue)"
+        case let .archiveTranslation(provider, lang): "archive.\(provider.rawValue).\(lang)"
         }
     }
 
@@ -30,6 +34,7 @@ enum PendingCloudDisclosure: Equatable, Identifiable {
         switch self {
         case let .providerSwitch(provider): provider
         case let .retranslateEngine(provider): provider
+        case let .archiveTranslation(provider, _): provider
         }
     }
 }
@@ -233,7 +238,8 @@ extension TranslationSessionCoordinator {
     func providerDidChange() {
         // Nil-host reads `.idle` through `sessionPhase`, so an unwired
         // coordinator no-ops here by contract.
-        guard sessionPhase == .running || sessionPhase == .sourceLost else { return }
+        guard sessionPhase == .running || sessionPhase == .sourceLost || sessionPhase == .paused
+        else { return }
         let provider = settings.selectedProvider
         if provider.isExternal, settings.key(for: provider) == nil {
             return
@@ -310,6 +316,9 @@ extension TranslationSessionCoordinator {
             guard let engine = RetranslateEngine(provider: provider) else { return }
             providerAwaitingDisclosure = nil
             settings.selectRetranslate(engine)
+        case let .archiveTranslation(provider, lang):
+            providerAwaitingDisclosure = nil
+            host?.beginArchiveTranslation(provider: provider, lang: lang)
         }
     }
 
@@ -323,15 +332,16 @@ extension TranslationSessionCoordinator {
     /// Builds `provider`'s engine, or nil when the provider isn't external
     /// or has no usable key (Apple is served by the `.translationTask` host
     /// in `activate`; the unconfigured edge falls back to Apple with a note
-    /// there). The selected target language threads into every engine: the
-    /// OpenRouter prompt names it, Google/DeepL map it to their wire codes.
-    /// No retry hook is wired — the activation path attaches `onRetry`
-    /// after building; the re-translate lane leaves it nil.
-    func makeExternalEngine(for provider: TranslationProvider) -> (any TranslationEngine)? {
+    /// there). The target threads into every engine: the OpenRouter prompt
+    /// names it, Google/DeepL map it to their wire codes. No retry hook is
+    /// wired — the activation path attaches `onRetry` after building; the
+    /// re-translate lane leaves it nil.
+    func makeExternalEngine(
+        for provider: TranslationProvider, target: TargetLanguage
+    ) -> (any TranslationEngine)? {
         guard provider.isExternal, let key = settings.key(for: provider) else {
             return nil
         }
-        let target = settings.targetLanguage
         return switch provider {
         case .apple:
             nil
@@ -347,6 +357,11 @@ extension TranslationSessionCoordinator {
                 transport: transport
             )
         }
+    }
+
+    /// The settings-target spelling, for the activation path.
+    func makeExternalEngine(for provider: TranslationProvider) -> (any TranslationEngine)? {
+        makeExternalEngine(for: provider, target: settings.targetLanguage)
     }
 }
 

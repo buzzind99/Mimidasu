@@ -10,22 +10,32 @@ extension RetranslateCoordinator {
 
     // MARK: - Dedicated Apple sessions
 
-    /// ja→target configuration for one of the dedicated re-translate
+    /// ja→`target` configuration for one of the dedicated re-translate
     /// sessions. Mirrors the live session's config except the strategy,
     /// which is set EXPLICITLY on 26.4+ — the property's default follows the
     /// SDK the app was built against, which would hand both lanes the same
     /// model as the live session and return byte-identical text, defeating
     /// the feature. Below 26.4 the config stays plain (the session is the
-    /// fast model by definition).
-    func makeRetranslateConfig(highFidelity: Bool) -> TranslationSession.Configuration {
+    /// fast model by definition). The target is passed in rather than read
+    /// from the settings: an archive retry runs to the archived session's
+    /// stored target, which can differ from the current selection.
+    func makeRetranslateConfig(
+        highFidelity: Bool, target: String
+    ) -> TranslationSession.Configuration {
         var config = TranslationSession.Configuration(
             source: Locale.Language(identifier: "ja"),
-            target: Locale.Language(identifier: settings.targetLanguage.code)
+            target: Locale.Language(identifier: target)
         )
         if #available(macOS 26.4, *) {
             config.preferredStrategy = highFidelity ? .highFidelity : .lowLatency
         }
         return config
+    }
+
+    /// The settings-target spelling, for callers outside the lane (the
+    /// `.translationTask` hosts' configs, tests).
+    func makeRetranslateConfig(highFidelity: Bool) -> TranslationSession.Configuration {
+        makeRetranslateConfig(highFidelity: highFidelity, target: settings.targetLanguage.code)
     }
 
     /// The stored dedicated-session engine for an Apple kind — each lane
@@ -40,25 +50,40 @@ extension RetranslateCoordinator {
     }
 
     /// Arms the kind's dedicated session on the first retry through it.
-    /// Never reassigns an armed config: reassignment is a path SwiftUI's
-    /// `.translationTask` may not reliably re-fire on, and a timeout keeps
-    /// the config armed so the next click is instant once the session (or
-    /// its language-pack download) lands. Arming also clears any stored
-    /// engine for the kind: the wait that follows must be for THIS config's
-    /// hand-over, never a stale engine an unknown path left behind.
-    func armRetranslateSessionIfNeeded(for kind: TranslationEngineKind) {
+    /// Never pointlessly reassigns an armed config: reassignment is a path
+    /// SwiftUI's `.translationTask` may not reliably re-fire on, and a
+    /// timeout keeps the config armed so the next click is instant once the
+    /// session (or its language-pack download) lands. An armed config does
+    /// pin its target, though — a retry whose lane target differs (the
+    /// settings target changed, or an archive carries a different stored
+    /// target) rebuilds through the proven invalidate+reassign path.
+    /// Arming also clears any stored engine for the kind: the wait that
+    /// follows must be for THIS config's hand-over, never a stale engine an
+    /// unknown path left behind.
+    func armRetranslateSessionIfNeeded(for kind: TranslationEngineKind, target: String) {
         switch kind {
         case .appleFast:
-            guard retranslateConfig == nil else { return }
+            guard retranslateConfig == nil || retranslateConfigTarget != target else { return }
             retranslateSessionEngine = nil
-            retranslateConfig = makeRetranslateConfig(highFidelity: false)
+            retranslateConfig = armedConfig(
+                retranslateConfig, highFidelity: false, target: target
+            )
+            retranslateConfigTarget = target
         case .appleHighFidelity:
-            guard retranslateHifiConfig == nil else { return }
+            guard retranslateHifiConfig == nil || retranslateHifiConfigTarget != target else { return }
             retranslateHifiSessionEngine = nil
-            retranslateHifiConfig = makeRetranslateConfig(highFidelity: true)
+            retranslateHifiConfig = armedConfig(
+                retranslateHifiConfig, highFidelity: true, target: target
+            )
+            retranslateHifiConfigTarget = target
         case .google, .deepl, .openrouter:
             break // externals build their engine at click time; no session
         }
+    }
+
+    /// The settings-target spelling, for the app-model facade and tests.
+    func armRetranslateSessionIfNeeded(for kind: TranslationEngineKind) {
+        armRetranslateSessionIfNeeded(for: kind, target: settings.targetLanguage.code)
     }
 
     /// Stores the fast-model session handed over by the second
@@ -133,21 +158,150 @@ extension RetranslateCoordinator {
         retranslateSessionEpoch += 1
         pendingRetranslations.subtract(lanePendingRetranslations)
         lanePendingRetranslations.removeAll()
-        retranslateConfig = rebuildRetranslateConfig(retranslateConfig, highFidelity: false)
+        // The rebuild preserves each armed config's target: the parked
+        // successor session keeps running it, and a next arm for a
+        // different target rebuilds again through the mismatch check.
+        retranslateConfig = rebuiltConfig(
+            retranslateConfig, highFidelity: false,
+            target: retranslateConfigTarget ?? laneTargetLanguage.code
+        )
         retranslateSessionEngine = nil
-        retranslateHifiConfig = rebuildRetranslateConfig(retranslateHifiConfig, highFidelity: true)
+        retranslateHifiConfig = rebuiltConfig(
+            retranslateHifiConfig, highFidelity: true,
+            target: retranslateHifiConfigTarget ?? laneTargetLanguage.code
+        )
         retranslateHifiSessionEngine = nil
     }
 
-    /// The teardown successor of an armed lane config: invalidated, then
-    /// rebuilt for the same kind so the host's `.translationTask` sees a
-    /// change and re-fires. A nil config was never armed — it stays nil.
-    private func rebuildRetranslateConfig(
-        _ config: TranslationSession.Configuration?, highFidelity: Bool
+    /// The arm's successor of a lane config: a never-armed config (nil) is
+    /// built fresh; an armed one for a different target is invalidated
+    /// first. Invalidate + reassign is the proven `.translationTask`
+    /// re-fire path (`refreshConfig` uses it), so a target change re-fires
+    /// instead of gambling on a reassignment SwiftUI may ignore.
+    private func armedConfig(
+        _ config: TranslationSession.Configuration?, highFidelity: Bool, target: String
+    ) -> TranslationSession.Configuration {
+        if var existing = config {
+            existing.invalidate()
+        }
+        return makeRetranslateConfig(highFidelity: highFidelity, target: target)
+    }
+
+    /// The teardown/arm successor of lane configs: invalidated, then
+    /// rebuilt for the same kind and target so the host's `.translationTask`
+    /// sees a change and re-fires. A nil config was never armed — it stays
+    /// nil.
+    private func rebuiltConfig(
+        _ config: TranslationSession.Configuration?, highFidelity: Bool, target: String
     ) -> TranslationSession.Configuration? {
         guard var config else { return nil }
         config.invalidate()
-        return makeRetranslateConfig(highFidelity: highFidelity)
+        return makeRetranslateConfig(highFidelity: highFidelity, target: target)
+    }
+
+    // MARK: - Bulk job engine resolution
+
+    /// Resolves the bulk archive-translation job's engine, mirroring the
+    /// archive route's mapping: `.session` / `.appleFast` arm the dedicated
+    /// fast session, a high-fidelity selection degrades where the pair is
+    /// known unavailable, and externals come from their stored key.
+    func resolveArchiveJobEngine(
+        selection: RetranslateEngine, target: TargetLanguage
+    ) async -> ArchiveTranslationJob.EngineResolution {
+        if let provider = selection.provider {
+            return archiveExternalResolution(for: provider)
+        }
+        let kind: TranslationEngineKind = selection == .appleHighFidelity
+            ? kindAfterProbeLanding(.appleHighFidelity)
+            : .appleFast
+        return await resolveJobAppleEngine(kind: kind, target: target)
+    }
+
+    /// The external half of the job resolution: the provider's stored key
+    /// supplies its lane engine, or the run reports the missing key.
+    private func archiveExternalResolution(
+        for provider: TranslationProvider
+    ) -> ArchiveTranslationJob.EngineResolution {
+        guard let engine = laneExternalEngine(for: provider) else {
+            return .unavailable(reason: "No API key stored for \(provider.displayName).")
+        }
+        return .ready(
+            engine: engine,
+            kind: TranslationEngineKind(provider: provider) ?? .appleFast
+        )
+    }
+
+    /// The Apple half of the job resolution: arms the kind's dedicated
+    /// session for the run's target, chains on whatever lane work is
+    /// airborne (per-row retries are refused from the job's claim onward, so
+    /// the captured link is the last one — a session-backed engine never
+    /// sees concurrent calls), then waits for the hand-over. A timeout
+    /// reports the still-starting copy and keeps the config armed, so the
+    /// next attempt is instant once the session (or its language pack)
+    /// lands; a cancellation is a teardown, whose surface is already gone.
+    private func resolveJobAppleEngine(
+        kind: TranslationEngineKind, target: TargetLanguage
+    ) async -> ArchiveTranslationJob.EngineResolution {
+        let epoch = retranslateSessionEpoch
+        armRetranslateSessionIfNeeded(for: kind, target: target.code)
+        if let airborne = retranslateLaneTask {
+            await airborne.value
+        }
+        switch await laneEngine(laneEngineStorage(for: kind), kind: kind, epoch: epoch) {
+        case let .ready(engine):
+            return .ready(engine: engine, kind: kind)
+        case .timedOut:
+            return .unavailable(
+                reason: kind == .appleHighFidelity
+                    ? "Apple Intelligence session is still starting — try again in a moment."
+                    : "Apple (MTL) session is still starting — try again in a moment."
+            )
+        case .cancelled:
+            return .cancelled
+        }
+    }
+
+    /// Outcome of resolving a lane or job engine. `.timedOut` and
+    /// `.cancelled` are distinct on purpose: the timeout reports a
+    /// still-starting session, while a cancellation is a user-initiated
+    /// stop/teardown whose toasts are already cleared, so reporting it would
+    /// post a stray message.
+    enum LaneEngineResolution {
+        case ready(any TranslationEngine)
+        case timedOut
+        case cancelled
+    }
+
+    /// Resolves the lane's engine: a built engine passes through; nil (an
+    /// Apple selection while its dedicated session is still arming) waits a
+    /// bounded interval for the `.translationTask` host to hand one over —
+    /// acquisition is sub-second once armed, the bound only catches
+    /// pathological cases. The deadline is monotonic (`ContinuousClock`) —
+    /// wall-clock `Date` would skew on clock changes. A lane or job that
+    /// dies mid-wait (stop, teardown) exits promptly instead of polling its
+    /// nilled storage out the whole arm window.
+    func laneEngine(
+        _ engine: (any TranslationEngine)?, kind: TranslationEngineKind, epoch: Int
+    ) async -> LaneEngineResolution {
+        if let engine {
+            return .ready(engine)
+        }
+        let deadline = ContinuousClock.now + laneArmTimeout
+        // Polls the storage the loop exits on and returns that same value: a
+        // re-read after the loop would race a teardown and read nil as a
+        // timeout.
+        var resolved = laneEngineStorage(for: kind)
+        while resolved == nil, ContinuousClock.now < deadline {
+            guard retranslateLaneCanDeliver(epoch: epoch) else { return .cancelled }
+            do {
+                try await Task.sleep(for: Duration.milliseconds(50))
+            } catch {
+                return .cancelled
+            }
+            resolved = laneEngineStorage(for: kind)
+        }
+        guard let resolved else { return .timedOut }
+        return .ready(resolved)
     }
 }
 
@@ -176,6 +330,24 @@ extension RetranslateCoordinator {
     /// session (indexes restart at 0) and swap an unrelated row's
     /// translation.
     func sessionDidEnd() {
+        pendingRetranslations.removeAll()
+        teardown()
+    }
+
+    /// Archive boundary — an archived session was opened into the pane. Its
+    /// rows replace the live transcript's wholesale, so every marker
+    /// (queue-owned included) has lost its deliverer, and the lane teardown
+    /// cancels in-flight work and bumps the epoch: a straggler from the
+    /// live session (or the previously opened archive, whose indexes are
+    /// unrelated) must never land on the new rows.
+    func archiveWillOpen() {
+        pendingRetranslations.removeAll()
+        teardown()
+    }
+
+    /// Archive boundary — the opened archive closed and the pane emptied.
+    /// Same retirement: nothing the lane could deliver to remains on screen.
+    func archiveWillClose() {
         pendingRetranslations.removeAll()
         teardown()
     }
