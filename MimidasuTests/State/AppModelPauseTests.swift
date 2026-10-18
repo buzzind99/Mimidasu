@@ -49,9 +49,16 @@ struct AppModelPauseTests {
         var pushedSamples = 0
 
         private let log: FlowLog
+        private var remaining: [ASREvent] = []
 
         init(log: FlowLog) {
             self.log = log
+        }
+
+        /// Appends one more final; the poll tick picks it up on its next fire
+        /// — the deterministic way to place a sentence in a chosen session.
+        func enqueue(_ event: ASREvent) {
+            remaining.append(event)
         }
 
         func prepare() {
@@ -65,7 +72,7 @@ struct AppModelPauseTests {
         func push(_ samples: [Float]) {}
 
         func poll() -> ASREvent? {
-            nil
+            remaining.isEmpty ? nil : remaining.removeFirst()
         }
 
         func finish() -> [ASREvent] {
@@ -85,10 +92,17 @@ struct AppModelPauseTests {
 
         private let log: FlowLog
         private let resumeError: (any Error)?
+        private let pauseGate: PermitGate?
+        private let resumeGate: PermitGate?
 
-        init(log: FlowLog, resumeError: (any Error)? = nil) {
+        init(
+            log: FlowLog, resumeError: (any Error)? = nil,
+            pauseGate: PermitGate? = nil, resumeGate: PermitGate? = nil
+        ) {
             self.log = log
             self.resumeError = resumeError
+            self.pauseGate = pauseGate
+            self.resumeGate = resumeGate
         }
 
         func start() async throws {
@@ -101,10 +115,16 @@ struct AppModelPauseTests {
 
         func pause() async {
             log.record("capture.pause")
+            if let pauseGate {
+                await pauseGate.acquire()
+            }
         }
 
         func resume() async throws {
             log.record("capture.resume")
+            if let resumeGate {
+                await resumeGate.acquire()
+            }
             if let resumeError {
                 throw resumeError
             }
@@ -115,14 +135,25 @@ struct AppModelPauseTests {
         let model: AppModel
         let controller: SessionController
         let log: FlowLog
+        let store: ArchiveStore
+        let engine: ScriptedASREngine
     }
 
     /// A model over a real `SessionController` with scripted engine/capture.
-    /// `resumeError` makes the capture's `resume()` fail.
-    private func makeSUT(resumeError: (any Error)? = nil) async -> SUT {
+    /// `resumeError` makes the capture's `resume()` fail; `pauseGate` /
+    /// `resumeGate` park the capture transitions so a racing resume can be
+    /// observed mid-flight.
+    private func makeSUT(
+        resumeError: (any Error)? = nil,
+        pauseGate: PermitGate? = nil,
+        resumeGate: PermitGate? = nil
+    ) async -> SUT {
         let log = FlowLog()
         let engine = ScriptedASREngine(log: log)
-        let capture = ScriptedCapture(log: log, resumeError: resumeError)
+        let capture = ScriptedCapture(
+            log: log, resumeError: resumeError, pauseGate: pauseGate, resumeGate: resumeGate
+        )
+        let store = isolatedArchive()
         let model = AppModel(
             makeSessionController: { live, latency, _, translationQueue in
                 SessionController(
@@ -135,7 +166,7 @@ struct AppModelPauseTests {
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelPause"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelPause"),
             favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
+            archive: store,
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil },
             retireWarmEngine: { log.record("engine.retire") }
@@ -144,7 +175,10 @@ struct AppModelPauseTests {
         await model.refreshModelAvailability(
             resolve: { _ in URL(fileURLWithPath: "/tmp/model.gguf") }
         )
-        return SUT(model: model, controller: model.sessionController, log: log)
+        return SUT(
+            model: model, controller: model.sessionController, log: log,
+            store: store, engine: engine
+        )
     }
 
     private func startRunning(_ sut: SUT) async {
@@ -210,6 +244,27 @@ struct AppModelPauseTests {
         #expect(sut.model.activeSessionDurationMS(to: now) == nil)
     }
 
+    @Test("a completed resume folds the pause span into the accumulated paused total")
+    func resumeAccumulatesPausedSpan() async {
+        let sut = await makeSUT()
+        await startRunning(sut)
+        sut.model.pause()
+        #expect(await pollUntil { sut.model.phase == .paused })
+        try? await Task.sleep(for: .milliseconds(50))
+
+        sut.model.resume()
+
+        #expect(await pollUntil { sut.model.phase == .running })
+        #expect(
+            sut.model.sessionPausedTotal >= .milliseconds(50),
+            "the paused span is accumulated on the resume"
+        )
+        #expect(sut.model.pauseStartedAt == nil, "the open span is closed")
+
+        sut.model.stop()
+        #expect(await pollUntil { sut.model.phase == .idle })
+    }
+
     // MARK: - Deferred capture-lost
 
     @Test("capture loss while paused is deferred, not surfaced")
@@ -224,6 +279,72 @@ struct AppModelPauseTests {
         #expect(sut.model.phase == .paused)
         #expect(sut.model.deferredCaptureError == "device died")
         #expect(!sut.model.toasts.toasts.contains { toast in toast.key == ToastKey.captureLost })
+    }
+
+    @Test("a successful resume clears a deferral observed while it was in flight")
+    func resumeClearsConcurrentDeferral() async {
+        let gate = PermitGate()
+        let sut = await makeSUT(resumeGate: gate)
+        await startRunning(sut)
+        sut.model.pause()
+        #expect(await pollUntil { sut.log.contains(inOrder: ["capture.pause"]) })
+
+        sut.model.resume()
+        #expect(
+            await pollUntil { sut.log.contains(inOrder: ["capture.resume"]) },
+            "the resume parks on its gate"
+        )
+        sut.controller.onCaptureError?("device died")
+        #expect(sut.model.deferredCaptureError == "device died", "the error defers while paused")
+
+        gate.release()
+
+        #expect(await pollUntil { sut.model.phase == .running })
+        #expect(
+            sut.model.deferredCaptureError == nil,
+            "the successful resume clears the stale deferral"
+        )
+
+        sut.model.stop()
+        #expect(await pollUntil { sut.model.phase == .idle })
+    }
+
+    @Test("a deferred-error resume waits for the airborne pause before rebuilding")
+    func deferredResumeChainsBehindAirbornePause() async {
+        let gate = PermitGate()
+        let sut = await makeSUT(pauseGate: gate)
+        await startRunning(sut)
+        sut.model.pause()
+        #expect(
+            await pollUntil { sut.log.contains(inOrder: ["capture.pause"]) },
+            "the pause parks on its gate"
+        )
+        #expect(sut.model.phase == .paused)
+
+        sut.model.deferredCaptureError = "device died"
+        sut.model.resume()
+
+        // The pause task still holds the transition, so the rebuild must not
+        // have begun yet; without the chain it would flip the phase to
+        // `.starting` synchronously.
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(sut.model.phase == .paused, "the restart waits behind the pause")
+        #expect(
+            sut.log.names.filter { name in name == "capture.start" }.count == 1,
+            "no capture restart starts while the pause is airborne"
+        )
+
+        gate.release()
+
+        #expect(
+            await pollUntil { sut.model.phase == .running },
+            "the released chain rebuilds the capture and resumes"
+        )
+        #expect(sut.log.names.filter { name in name == "capture.start" }.count == 2)
+        #expect(sut.model.deferredCaptureError == nil)
+
+        sut.model.stop()
+        #expect(await pollUntil { sut.model.phase == .idle })
     }
 
     @Test("resume with a deferred error rebuilds the capture instead of resuming it")
@@ -249,15 +370,27 @@ struct AppModelPauseTests {
 
     @Test("a failed resume falls back to the capture-lost flow")
     func failedResumeReportsCaptureLost() async {
-        let sut = await makeSUT(resumeError: CaptureError.setupFailed("boom"))
+        let gate = PermitGate()
+        let sut = await makeSUT(resumeError: CaptureError.setupFailed("boom"), resumeGate: gate)
         await startRunning(sut)
         sut.model.pause()
         #expect(await pollUntil { sut.log.contains(inOrder: ["capture.pause"]) })
 
         sut.model.resume()
+        #expect(
+            await pollUntil { sut.log.contains(inOrder: ["capture.resume"]) },
+            "the resume parks on its gate"
+        )
+        sut.controller.onCaptureError?("device died")
+        #expect(sut.model.deferredCaptureError == "device died")
+        gate.release()
 
         #expect(await pollUntil { sut.model.phase == .sourceLost })
         #expect(sut.model.toasts.toasts.contains { toast in toast.key == ToastKey.captureLost })
+        #expect(
+            sut.model.deferredCaptureError == nil,
+            "the failed resume clears the stale deferral"
+        )
     }
 
     // MARK: - Stop from paused
@@ -273,5 +406,54 @@ struct AppModelPauseTests {
 
         #expect(await pollUntil { sut.model.phase == .idle })
         #expect(sut.log.contains(inOrder: ["capture.stop", "engine.finish"]))
+    }
+
+    @Test("stop from paused closes the final pause span and persists it")
+    func stopFromPausedClosesPauseSpan() async {
+        let sut = await makeSUT()
+        await startRunning(sut)
+        sut.engine.enqueue(
+            .final(text: "こんにちは。", startSample: 0, endSample: 16000, lang: "ja")
+        )
+        #expect(
+            await pollUntil { sut.model.recordingSessionID != nil },
+            "the sentence creates the recording row"
+        )
+
+        sut.model.pause()
+        #expect(await pollUntil { sut.model.phase == .paused })
+        try? await Task.sleep(for: .milliseconds(400))
+
+        sut.model.stop()
+        #expect(await pollUntil(timeout: 8) { sut.model.phase == .idle }, "stop winds down")
+
+        #expect(sut.model.pauseStartedAt == nil, "the open pause span is closed by the stop")
+        guard let summary = sut.store.list().first,
+              let started = sut.model.sessionStartedAt,
+              let ended = sut.model.sessionEndedAt
+        else {
+            Issue.record("the stopped session should be stored with its clock anchors")
+            return
+        }
+        #expect(summary.pausedMS >= 400, "the stored paused time carries the final span")
+        let activeMS = AppModel.milliseconds(of: ended - started) - summary.pausedMS
+        #expect(
+            abs((summary.durationS ?? 0) * 1000 - activeMS) <= 1000,
+            "the stored duration excludes the paused span"
+        )
+    }
+
+    @Test("quitting while paused closes the open pause span")
+    func quitWhilePausedClosesPauseSpan() async {
+        let sut = await makeSUT()
+        await startRunning(sut)
+        sut.model.pause()
+        #expect(await pollUntil { sut.model.phase == .paused })
+
+        await sut.model.shutdownForTermination()
+
+        #expect(sut.model.pauseStartedAt == nil, "the quit-time teardown closes the pause span")
+        #expect(sut.model.phase == .idle)
+        #expect(sut.log.names.contains("engine.retire"))
     }
 }

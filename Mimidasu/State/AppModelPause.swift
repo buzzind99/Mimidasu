@@ -36,11 +36,19 @@ extension AppModel {
         let previous = pauseTransitionTask
         if deferredCaptureError != nil {
             deferredCaptureError = nil
-            finishPauseSpan()
-            performCaptureRestart()
             pauseTransitionTask = Task { @MainActor [weak self] in
+                // Chain behind the pause transition like the normal branch:
+                // an airborne pause flush must not cut or clear the freshly
+                // restarted stream's first sentence.
                 await previous?.value
-                self?.resumeInFlight = false
+                guard let self else { return }
+                guard phase == .paused else {
+                    resumeInFlight = false
+                    return
+                }
+                finishPauseSpan()
+                performCaptureRestart()
+                resumeInFlight = false
             }
         } else {
             pauseTransitionTask = Task { @MainActor [weak self] in
@@ -51,12 +59,14 @@ extension AppModel {
                     resumeInFlight = false
                     guard phase == .paused else { return }
                     finishPauseSpan()
+                    deferredCaptureError = nil
                     phase = .running
                     syncPausedToArchive()
                 } catch {
                     resumeInFlight = false
                     guard phase == .paused else { return }
                     finishPauseSpan()
+                    deferredCaptureError = nil
                     phase = .sourceLost
                     captureLostAt = .now
                     postCaptureLost(body: "Resume failed: \(error.localizedDescription)")

@@ -44,6 +44,11 @@ extension AppModel {
     /// does not reliably re-fire on. Internal: driven by `stop()` and from
     /// the quit-time teardown below.
     func performStop() async {
+        // Close any open pause span first: the span folds into the session's
+        // paused total (and its stored paused time) while the recording row
+        // is still addressable, before the teardown nils it. Idempotent, so
+        // the quit path and a resume that already closed the span are safe.
+        finishPauseSpan()
         await sessionController.stop()
         // End order is live-then-lane (begin order in `wireSessionController`
         // is lane-then-live). The halves are independent — worker/sequence/

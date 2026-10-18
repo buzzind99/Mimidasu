@@ -507,6 +507,9 @@ final class AppModel {
                 guard phase == .starting else { return }
                 phase = .running
                 captureLostAt = nil
+                // A fresh capture is up: any error observed while the old one
+                // was down must not force another rebuild later.
+                deferredCaptureError = nil
                 toasts.dismiss(key: ToastKey.captureLost)
                 sessionController.armNoAudioWatchdog()
             } catch {
