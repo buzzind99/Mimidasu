@@ -123,9 +123,8 @@ struct SessionControllerTests {
         #expect(sut.controller.sessionMetadata == nil)
     }
 
-    /// A model switch must re-arm the warm-up (keyed on the warmed path), or
-    /// the first session start after the switch loads the new GGUF on the
-    /// main actor instead of reusing a background-prepared engine.
+    /// A model switch must re-arm the warm-up (keyed on the warmed path):
+    /// otherwise the next start loads the new GGUF on the main actor.
     @Test("warm-up re-arms when the model path changes")
     func warmUpRearmsForDifferentPath() async {
         let sut = makeSUT()
@@ -558,6 +557,11 @@ private final class ScriptedASREngine: ASREngine, @unchecked Sendable {
         return finishQueue
     }
 
+    func flushUtterance() -> [ASREvent] {
+        log.record("engine.flushUtterance")
+        return []
+    }
+
     var allPushedChunks: [[Float]] {
         lock.withLock { pushedChunks }
     }
@@ -584,5 +588,13 @@ private final class ScriptedCapture: AudioCapturing, @unchecked Sendable {
 
     func stop() {
         log.record("capture.stop")
+    }
+
+    func pause() async {
+        log.record("capture.pause")
+    }
+
+    func resume() async throws {
+        log.record("capture.resume")
     }
 }

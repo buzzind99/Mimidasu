@@ -38,6 +38,10 @@ struct SessionControllerNoAudioTests {
         func finish() -> [ASREvent] {
             []
         }
+
+        func flushUtterance() -> [ASREvent] {
+            []
+        }
     }
 
     private final class ScriptedCapture: AudioCapturing, @unchecked Sendable {
@@ -46,6 +50,8 @@ struct SessionControllerNoAudioTests {
 
         func start() async throws {}
         func stop() {}
+        func pause() async {}
+        func resume() async throws {}
     }
 
     private struct SUT {

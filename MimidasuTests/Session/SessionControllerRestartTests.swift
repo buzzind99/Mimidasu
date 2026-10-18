@@ -66,6 +66,11 @@ struct SessionControllerRestartTests {
             return []
         }
 
+        func flushUtterance() -> [ASREvent] {
+            log.record("engine.flushUtterance")
+            return []
+        }
+
         var allPushedChunks: [[Float]] {
             lock.withLock { pushedChunks }
         }
@@ -87,6 +92,14 @@ struct SessionControllerRestartTests {
 
         func stop() {
             log.record("capture.stop")
+        }
+
+        func pause() async {
+            log.record("capture.pause")
+        }
+
+        func resume() async throws {
+            log.record("capture.resume")
         }
     }
 
@@ -114,6 +127,14 @@ struct SessionControllerRestartTests {
 
         func stop() {
             log.record("capture.stop")
+        }
+
+        func pause() async {
+            log.record("capture.pause")
+        }
+
+        func resume() async throws {
+            log.record("capture.resume")
         }
     }
 

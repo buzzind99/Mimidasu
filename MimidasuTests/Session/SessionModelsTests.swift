@@ -218,6 +218,41 @@ struct SessionModelsTests {
         ])
     }
 
+    // MARK: - SessionEntry.translation(for:)
+
+    @Test("translation(for:) returns the matching language's entry with its engine stamp")
+    func translationForReturnsMatchingLanguage() {
+        var entry = makeEntry()
+        entry.replaceTranslation(
+            SentenceTranslation(lang: "en", text: firstTranslationText, engine: .google)
+        )
+        entry.replaceTranslation(
+            SentenceTranslation(lang: "ko", text: secondTranslationText, engine: .deepl)
+        )
+
+        let translation = entry.translation(for: "ko")
+
+        #expect(translation == SentenceTranslation(lang: "ko", text: secondTranslationText, engine: .deepl))
+    }
+
+    @Test("translation(for:) returns nil for a language the entry doesn't hold")
+    func translationForReturnsNilForMissingLanguage() {
+        var entry = makeEntry()
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
+
+        #expect(entry.translation(for: "ko") == nil)
+    }
+
+    @Test("translation(for:) reads the fresh text after a same-language replacement")
+    func translationForReadsFreshText() {
+        var entry = makeEntry()
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
+
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: "Howdy"))
+
+        #expect(entry.translation(for: "en") == SentenceTranslation(lang: "en", text: "Howdy"))
+    }
+
     // MARK: - SentenceTranslation engine provenance
 
     @Test("old JSON without an engine field decodes with engine nil")

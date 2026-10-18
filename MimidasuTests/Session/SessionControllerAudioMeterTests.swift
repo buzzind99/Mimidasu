@@ -138,6 +138,10 @@ private final class ScriptedASREngine: ASREngine, @unchecked Sendable {
     func finish() -> [ASREvent] {
         []
     }
+
+    func flushUtterance() -> [ASREvent] {
+        []
+    }
 }
 
 private final class ScriptedCapture: AudioCapturing, @unchecked Sendable {
@@ -146,4 +150,6 @@ private final class ScriptedCapture: AudioCapturing, @unchecked Sendable {
 
     func start() async throws {}
     func stop() {}
+    func pause() async {}
+    func resume() async throws {}
 }
