@@ -40,11 +40,12 @@ enum PendingCloudDisclosure: Equatable, Identifiable {
 }
 
 /// The live translation session: which engine is attached to the queue, the
-/// manual retry, the one-way Apple fallback latch, the high-fidelity probe,
-/// and the provider-selection machinery (key verification + cloud
-/// disclosure). Deep module behind one seam — `activate` / `retry` /
-/// `providerDidChange` / `handleStatus` — with the host's phase, entries,
-/// and toasts reached through `TranslationSessionPort`.
+/// manual retry, the one-way Apple fallback latch, the high-fidelity
+/// evidence owned by `AppleTierAvailability`, and the provider-selection
+/// machinery (key verification + cloud disclosure). Deep module behind one
+/// seam — `activate` / `retry` / `providerDidChange` / `handleStatus` — with
+/// the host's phase, entries, and toasts reached through
+/// `TranslationSessionPort`.
 ///
 /// Invalidates its sibling `RetranslateCoordinator` whenever the live engine
 /// changes via explicit user intent: an Apple activation tears the dedicated
@@ -52,8 +53,7 @@ enum PendingCloudDisclosure: Equatable, Identifiable {
 /// generation the live switch just retired). The one exception is the
 /// latched external→Apple fallback, which deliberately keeps the lane alive
 /// — an in-flight lane result still has its deliverer. Status handling,
-/// toast reconciliation, the fallback latch, the config build, and the
-/// probe live in
+/// toast reconciliation, the fallback latch, and the config build live in
 /// `TranslationSessionCoordinator+Status.swift`.
 @Observable
 @MainActor
@@ -81,10 +81,19 @@ final class TranslationSessionCoordinator {
     /// prompt).
     var translationConfig: TranslationSession.Configuration?
 
-    /// Outcome of the last high-fidelity (Apple Intelligence) probe: whether
-    /// the OS reports the strategy installed, and the ja→target code it was
-    /// probed for (nil until a probe lands).
-    var appleHighFidelityProbe: (installed: Bool, targetCode: String?) = (false, nil)
+    /// Outcome of the last high-fidelity (Apple Intelligence) probe, owned by
+    /// `tierAvailability`: whether the OS reports the strategy installed, and
+    /// the ja→target code it was probed for (nil until a probe lands). The
+    /// setter lands evidence directly (the test seam).
+    var appleHighFidelityProbe: (installed: Bool, targetCode: String?) {
+        get { tierAvailability.probe }
+        set {
+            tierAvailability.land(
+                installed: newValue.installed,
+                targetCode: newValue.targetCode
+            )
+        }
+    }
 
     /// The intent held behind the cloud disclosure sheet; nil when no
     /// disclosure is pending. Shared with the re-translate lane, whose
@@ -95,11 +104,6 @@ final class TranslationSessionCoordinator {
     /// belong to SwiftUI's `.translationTask` instead. Torn down on stop and
     /// re-attached on every activation.
     @ObservationIgnored var translationWorker: Task<Void, Never>?
-
-    /// Monotonic token ruling which high-fidelity probe may land: every
-    /// engine attach and teardown bumps it, so a probe superseded before it
-    /// finished is dropped.
-    @ObservationIgnored var highFidelitySequence = 0
 
     /// The re-translate lane — the sibling coordinator invalidated whenever
     /// the live engine changes via explicit user intent (an Apple activation
@@ -118,18 +122,18 @@ final class TranslationSessionCoordinator {
     let queue: TranslationQueue
     let settings: TranslationSettings
     @ObservationIgnored let transport: HTTPTranslationTransport?
-    @ObservationIgnored let probe: @Sendable (String) async -> Bool
+    let tierAvailability: AppleTierAvailability
 
     init(
         queue: TranslationQueue,
         settings: TranslationSettings,
         transport: HTTPTranslationTransport?,
-        probe: @escaping @Sendable (String) async -> Bool
+        tierAvailability: AppleTierAvailability
     ) {
         self.queue = queue
         self.settings = settings
         self.transport = transport
-        self.probe = probe
+        self.tierAvailability = tierAvailability
     }
 
     /// The live session phase from the host; `.idle` when the host is gone
@@ -194,11 +198,11 @@ extension TranslationSessionCoordinator {
             // fact, not an engine one, and an external-live session is
             // exactly where a stale "unknown" would let a persisted Apple
             // Intelligence re-translate selection stamp fast-model output.
-            // `probeHighFidelity` invalidates any airborne probe via the
+            // `beginProbe` invalidates any airborne probe via the module's
             // sequence token (the fallback latch can re-enter Apple while a
             // pre-attach probe is still in flight, and that stale landing
             // must not re-mark the engine).
-            probeHighFidelity()
+            tierAvailability.beginProbe(for: settings.targetLanguage.code)
             translationConfig?.invalidate()
             translationWorker?.cancel()
             translationWorker = Task {
@@ -221,7 +225,7 @@ extension TranslationSessionCoordinator {
             assert(retranslate != nil, "the retranslate sibling is always wired by AppModel.init")
             retranslate?.teardown()
             refreshConfig()
-            probeHighFidelity()
+            tierAvailability.beginProbe(for: settings.targetLanguage.code)
         }
     }
 
@@ -393,7 +397,7 @@ extension TranslationSessionCoordinator {
         // card or re-latch the fallback over the cleared stack, and a
         // backlog the drain timed out on is dropped rather than carried.
         queue.resetForNewSession()
-        highFidelitySequence += 1
+        tierAvailability.supersedeInFlightProbe()
         translationStatus = .idle
     }
 }

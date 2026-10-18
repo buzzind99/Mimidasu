@@ -299,9 +299,8 @@ final class AppModel {
         favorites: FavoritesStore? = nil,
         archive: ArchiveStore? = nil,
         translationTransport: HTTPTranslationTransport? = nil,
-        highFidelityProbe: @escaping @Sendable (String) async -> Bool = { code in
-            await AppModel.checkHighFidelityAvailability(targetCode: code)
-        },
+        highFidelityProbe: @escaping @Sendable (String) async -> Bool =
+            AppleTierAvailability.check(targetCode:),
         jmDictLookup: JMDictLookup? = nil,
         dictionarySearch: DictionarySearchEngine? = nil,
         initialModelResolve: @escaping @Sendable (ASRModelChoice) -> URL? = { choice in
@@ -321,16 +320,18 @@ final class AppModel {
         modelResolve = initialModelResolve
         self.retireWarmEngine = retireWarmEngine
         self.willTerminateNotifications = willTerminateNotifications
+        let tierAvailability = AppleTierAvailability(check: highFidelityProbe)
         let translationSession = TranslationSessionCoordinator(
             queue: translationQueue,
             settings: self.translationSettings,
             transport: translationTransport,
-            probe: highFidelityProbe
+            tierAvailability: tierAvailability
         )
         let retranslate = RetranslateCoordinator(
             live: translationSession,
             queue: translationQueue,
-            settings: self.translationSettings
+            settings: self.translationSettings,
+            tierAvailability: tierAvailability
         )
         translationSession.retranslate = retranslate
         self.translationSession = translationSession

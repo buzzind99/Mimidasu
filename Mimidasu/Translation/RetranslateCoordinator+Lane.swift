@@ -154,7 +154,7 @@ extension RetranslateCoordinator {
     private func resolveAppleModelRoute(
         _ kind: TranslationEngineKind, target: TargetLanguage
     ) -> RetranslateRoute {
-        if #available(macOS 26.4, *) {
+        if AppleTierAvailability.supportsStrategySelection {
             // A live Apple session running the same model de facto would
             // return byte-identical text with no marker — a no-op that reads
             // as a broken button. The session engine serves instead. While
@@ -167,11 +167,11 @@ extension RetranslateCoordinator {
             }
             return armedRoute(kind, target: target)
         }
-        // Below 26.4 one Apple model exists (fast, no strategy API) and the
+        // Below the strategy API one Apple model exists (fast) and the
         // live Apple session already runs it. The high-fidelity arm is
         // unreachable via callers — `effectiveRetranslateSelection` degrades
-        // below 26.4 first — and stays as defense in depth; do not simplify
-        // it away with that degrade.
+        // below the strategy API first — and stays as defense in depth; do
+        // not simplify it away with that degrade.
         return kind == .appleHighFidelity || liveSessionRunsKind(.appleFast)
             ? .session : armedRoute(kind, target: target)
     }
@@ -345,7 +345,7 @@ extension RetranslateCoordinator {
         case .google, .deepl, .openrouter:
             return .proceed(kind)
         }
-        guard #available(macOS 26.4, *) else { return .proceed(kind) }
+        guard AppleTierAvailability.supportsStrategySelection else { return .proceed(kind) }
         switch await probeLanding(epoch: epoch) {
         case .cancelled:
             // The stop already cleared every toast; reporting here
@@ -378,7 +378,7 @@ extension RetranslateCoordinator {
             retireLaneMarker(sentence.index, epoch: epoch)
             return .done
         }
-        let laneKind = kindAfterProbeLanding(kind)
+        let laneKind = tierAvailability.effectiveKind(kind, targetCode: settings.targetLanguage.code)
         if liveSessionRunsKind(laneKind) {
             handRetranslateToSession(sentence)
             return .done
@@ -405,7 +405,7 @@ extension RetranslateCoordinator {
     /// wall-clock `Date` would skew on clock changes.
     private func probeLanding(epoch: Int) async -> ProbeLanding {
         let deadline = ContinuousClock.now + probeSettleTimeout
-        while !appleProbeLanded {
+        while !tierAvailability.probeLanded(for: settings.targetLanguage.code) {
             guard ContinuousClock.now < deadline else { return .timedOut }
             do {
                 try await Task.sleep(for: Duration.milliseconds(50))
@@ -415,16 +415,6 @@ extension RetranslateCoordinator {
             guard retranslateLaneCanDeliver(epoch: epoch) else { return .cancelled }
         }
         return .landed
-    }
-
-    /// The lane's Apple kind once the probe has landed (the live session's
-    /// identity, so the settings pair is the probed pair): the click-time
-    /// kind, unless a not-installed landing degrades a high-fidelity
-    /// selection to the fast model — the same resolution
-    /// `effectiveRetranslateSelection` applies once the probe has landed.
-    func kindAfterProbeLanding(_ kind: TranslationEngineKind) -> TranslationEngineKind {
-        guard kind == .appleHighFidelity, highFidelityKnownUnavailable else { return kind }
-        return .appleFast
     }
 
     /// Hands a deferred same-engine retry to the queue path — what the

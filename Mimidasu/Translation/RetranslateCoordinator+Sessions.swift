@@ -12,13 +12,15 @@ extension RetranslateCoordinator {
 
     /// ja→`target` configuration for one of the dedicated re-translate
     /// sessions. Mirrors the live session's config except the strategy,
-    /// which is set EXPLICITLY on 26.4+ — the property's default follows the
+    /// which `tierAvailability.applyPreferredStrategy(to:highFidelity:)` sets
+    /// EXPLICITLY above the strategy API — the property's default follows the
     /// SDK the app was built against, which would hand both lanes the same
     /// model as the live session and return byte-identical text, defeating
-    /// the feature. Below 26.4 the config stays plain (the session is the
-    /// fast model by definition). The target is passed in rather than read
-    /// from the settings: an archive retry runs to the archived session's
-    /// stored target, which can differ from the current selection.
+    /// the feature. Below the strategy API the config stays plain (the
+    /// session is the fast model by definition). The target is passed in
+    /// rather than read from the settings: an archive retry runs to the
+    /// archived session's stored target, which can differ from the current
+    /// selection.
     func makeRetranslateConfig(
         highFidelity: Bool, target: String
     ) -> TranslationSession.Configuration {
@@ -26,9 +28,7 @@ extension RetranslateCoordinator {
             source: Locale.Language(identifier: "ja"),
             target: Locale.Language(identifier: target)
         )
-        if #available(macOS 26.4, *) {
-            config.preferredStrategy = highFidelity ? .highFidelity : .lowLatency
-        }
+        tierAvailability.applyPreferredStrategy(to: &config, highFidelity: highFidelity)
         return config
     }
 

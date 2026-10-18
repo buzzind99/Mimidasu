@@ -130,9 +130,9 @@ extension AppModel {
     /// The run's engine: the picker's explicit selection, passed through —
     /// Apple high fidelity degrades to the fast model only on pair-scoped
     /// evidence that the strategy can't be served for the run's target
-    /// (below macOS 26.4, or the probe landed not-installed for exactly that
-    /// pair). The settings re-translate selection plays no part: the
-    /// picker's own row decides the tier.
+    /// (the OS lacks the strategy API, or the probe landed not-installed for
+    /// exactly that pair). The settings re-translate selection plays no part:
+    /// the picker's own row decides the tier.
     private func archiveJobSelection(
         for engine: RetranslateEngine, target: TargetLanguage
     ) -> RetranslateEngine {
@@ -140,13 +140,12 @@ extension AppModel {
     }
 
     /// Whether the archive engine picker offers — and defaults to — the
-    /// Apple Intelligence tier for `lang`: the strategy API exists (macOS
-    /// 26.4+) and the pair isn't known unavailable. Probe evidence is
-    /// pair-scoped, so an unprobed pair stays offered; the framework's
-    /// silent fast fallback covers the remainder.
+    /// Apple Intelligence tier for `lang`: the strategy API exists and the
+    /// pair isn't known unavailable. Probe evidence is pair-scoped, so an
+    /// unprobed pair stays offered; the framework's silent fast fallback
+    /// covers the remainder.
     func archiveHighFidelityOffered(for lang: String) -> Bool {
-        guard #available(macOS 26.4, *) else { return false }
-        return !highFidelityKnownUnavailable(for: lang)
+        translationSession.tierAvailability.offersHighFidelity(for: lang)
     }
 
     private static func translatedIndexes(

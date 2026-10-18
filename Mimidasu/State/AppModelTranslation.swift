@@ -135,14 +135,20 @@ extension AppModel {
         translationSession.appleHighFidelity
     }
 
+    /// Whether the settings pair can offer high fidelity: the strategy API
+    /// exists and no landing for this pair says it is unavailable.
+    var offersAppleHighFidelity: Bool {
+        translationSession.tierAvailability.offersHighFidelity(for: translationSettings.targetLanguage.code)
+    }
+
     /// The spawned external-engine worker (`queue.run(with:)`); Apple runs
     /// belong to SwiftUI's `.translationTask` instead. Get-only by intent:
     /// the worker lifecycle (attach in `activate`, park in `sessionDidEnd`)
     /// stays inside the coordinator; outsiders only read or cancel the
     /// current task. Non-observed seam (`@ObservationIgnored` storage) —
     /// views read `translationWorkerActive` / `translationStatus` instead.
-    /// The probe sequence token (`highFidelitySequence`) stays
-    /// coordinator-private with no facade: no test needs to reach it.
+    /// The probe's supersede token lives inside `AppleTierAvailability`;
+    /// no facade reaches it.
     var translationWorker: Task<Void, Never>? {
         translationSession.translationWorker
     }
@@ -188,11 +194,5 @@ extension AppModel {
     /// so tests can drive the queue's status callback directly.
     func handleTranslationStatus(_ status: TranslationStatus) {
         translationSession.handleStatus(status)
-    }
-
-    /// The real high-fidelity probe: whether `LanguageAvailability` reports
-    /// the Apple Intelligence strategy installed for ja→`targetCode`.
-    nonisolated static func checkHighFidelityAvailability(targetCode: String) async -> Bool {
-        await TranslationSessionCoordinator.checkHighFidelityAvailability(targetCode: targetCode)
     }
 }

@@ -1,10 +1,9 @@
 import Foundation
 import Translation
 
-// Status routing, toast reconciliation, the latched Apple fallback, the
-// config build, and the high-fidelity probe of
-// `TranslationSessionCoordinator` — split from the main file to keep it
-// under the lint file gate.
+// Status routing, toast reconciliation, the latched Apple fallback, and the
+// config build of `TranslationSessionCoordinator` — split from the main file
+// to keep it under the lint file gate.
 
 extension TranslationSessionCoordinator {
     /// Routes queue status updates to the published state, reconciles the
@@ -104,7 +103,7 @@ extension TranslationSessionCoordinator {
         // alone, so an in-flight lane result keeps its deliverer. The
         // external attach cleared the probe marker, so re-probe for the
         // ENGINES card to report what the fresh config actually requests.
-        probeHighFidelity()
+        tierAvailability.beginProbe(for: settings.targetLanguage.code)
     }
 
     /// Invalidates the live config (parking any attached Apple host) and
@@ -121,67 +120,25 @@ extension TranslationSessionCoordinator {
     /// so SwiftUI's `.translationTask` treats both paths the same way. The
     /// target reads current settings each time, so a picker change applies at
     /// the next build (session start / retry) — restart-only by design.
-    /// On macOS 26.4+ the config prefers the high-fidelity (Apple
-    /// Intelligence) strategy for more fluent output; where the device or
-    /// language pair can't serve it, the framework silently falls back to
+    /// Where the strategy API exists the config prefers the high-fidelity
+    /// (Apple Intelligence) strategy for more fluent output; where the device
+    /// or language pair can't serve it, the framework silently falls back to
     /// the fast model, so the request degrades to today's behavior.
     private func makeConfig() -> TranslationSession.Configuration {
         var config = TranslationSession.Configuration(
             source: Locale.Language(identifier: "ja"),
             target: Locale.Language(identifier: settings.targetLanguage.code)
         )
-        if #available(macOS 26.4, *) {
-            config.preferredStrategy = .highFidelity
-        }
+        tierAvailability.applyPreferredStrategy(to: &config, highFidelity: true)
         return config
     }
 
-    /// High fidelity for the pair the labels display: the last probe must
-    /// have landed installed for exactly the selected target. A marker
-    /// probed for an older pair never labels the current one — the target
-    /// is restart-only, so a mid-session picker change drops the marker
-    /// until the next Apple activation re-probes.
+    /// High fidelity for the pair the labels display: the strategy API
+    /// exists, the last probe landed installed for exactly the selected
+    /// target. A marker probed for an older pair never labels the current
+    /// one — the target is restart-only, so a mid-session picker change drops
+    /// the marker until the next Apple activation re-probes.
     var appleHighFidelity: Bool {
-        appleHighFidelityProbe.installed
-            && appleHighFidelityProbe.targetCode == settings.targetLanguage.code
-    }
-
-    /// Probes whether the OS can serve the high-fidelity (Apple
-    /// Intelligence) strategy for the current ja→target pair and records the
-    /// outcome (with the probed code) for the ENGINES card, the Settings
-    /// labels, and the re-translate hifi degrade. Fired on every activation
-    /// — Apple (session start, retry, provider change, the latched fallback)
-    /// or external. The sequence token drops a probe whose activation was
-    /// superseded before it landed; the landing does not check the live
-    /// engine, because the pair's availability does not depend on one.
-    /// Internal (not private): `activate` in
-    /// `TranslationSessionCoordinator.swift` fires it.
-    func probeHighFidelity() {
-        appleHighFidelityProbe = (false, nil)
-        highFidelitySequence += 1
-        let sequence = highFidelitySequence
-        let targetCode = settings.targetLanguage.code
-        let probe = probe
-        Task { @MainActor [weak self] in
-            let available = await probe(targetCode)
-            guard let self,
-                  sequence == highFidelitySequence
-            else { return }
-            appleHighFidelityProbe = (available, targetCode)
-        }
-    }
-
-    /// The real probe: on macOS 26.4+ asks `LanguageAvailability` whether
-    /// the high-fidelity (Apple Intelligence) strategy is installed for
-    /// ja→target — only `.installed` counts, since a merely downloadable
-    /// pair still runs the fast model. Older systems report false.
-    nonisolated static func checkHighFidelityAvailability(targetCode: String) async -> Bool {
-        guard #available(macOS 26.4, *) else { return false }
-        let availability = LanguageAvailability(preferredStrategy: .highFidelity)
-        let status = await availability.status(
-            from: Locale.Language(identifier: "ja"),
-            to: Locale.Language(identifier: targetCode)
-        )
-        return status == .installed
+        tierAvailability.available(for: settings.targetLanguage.code)
     }
 }

@@ -6,9 +6,10 @@ import Translation
 /// sentence through a chosen engine. Deep module behind one seam —
 /// `retranslateSentence` / `selectRetranslateEngine` — owning the lane's
 /// marker sets, epoch clock, dedicated Apple sessions, and the serialized
-/// one-at-a-time runner. Engine identity and the high-fidelity probe are
-/// read from the sibling `TranslationSessionCoordinator` (the live
-/// session); phase, entries, and toasts come from the host through
+/// one-at-a-time runner. Engine identity and the high-fidelity probe resolve
+/// through `AppleTierAvailability` — the pair-scoped probe evidence shared
+/// with the sibling `TranslationSessionCoordinator` (the live session);
+/// phase, entries, and toasts come from the host through
 /// `TranslationSessionPort`.
 ///
 /// File split: identity + selection + routing live here;
@@ -136,15 +137,18 @@ final class RetranslateCoordinator {
 
     let queue: TranslationQueue
     let settings: TranslationSettings
+    let tierAvailability: AppleTierAvailability
 
     init(
         live: TranslationSessionCoordinator,
         queue: TranslationQueue,
-        settings: TranslationSettings
+        settings: TranslationSettings,
+        tierAvailability: AppleTierAvailability
     ) {
         self.live = live
         self.queue = queue
         self.settings = settings
+        self.tierAvailability = tierAvailability
     }
 
     /// The live session phase from the host; `.idle` when the host is gone
@@ -184,13 +188,13 @@ final class RetranslateCoordinator {
 extension RetranslateCoordinator {
     /// Engine identity of the live caption path — the row marker's
     /// comparison target. Externals map from the attached provider; the
-    /// Apple branch reads the strategy probe (installed-for-pair semantics
-    /// of `appleHighFidelityProbe`). Below 26.4 the fast model is the only
-    /// model. Until a probe lands, every Apple activation holds the tuple at
-    /// `(false, nil)`, so the Apple branch reads `.appleFast` *provisionally*
-    /// — the marker rule compensates by not comparing against a provisional
-    /// identity, and `liveSessionRunsKind` refuses the provisional read
-    /// outright so routing never acts on it.
+    /// Apple branch asks `tierAvailability.available(for:)` — the pair-scoped
+    /// installed evidence. Below the strategy API the fast model is the only
+    /// model. Until a probe lands, every Apple activation holds the evidence
+    /// at `(false, nil)`, so the Apple branch reads `.appleFast`
+    /// *provisionally* — the marker rule compensates by not comparing against
+    /// a provisional identity, and `liveSessionRunsKind` refuses the
+    /// provisional read outright so routing never acts on it.
     var activeEngineKind: TranslationEngineKind {
         guard let live else { return .appleFast }
         if live.activeTranslationEngine == .external, let provider = live.activeExternalProvider {
@@ -198,52 +202,40 @@ extension RetranslateCoordinator {
             // maps to nil.
             return TranslationEngineKind(provider: provider) ?? .appleFast
         }
-        if #available(macOS 26.4, *),
-           live.appleHighFidelityProbe.installed,
-           live.appleHighFidelityProbe.targetCode == settings.targetLanguage.code
-        {
+        if tierAvailability.available(for: settings.targetLanguage.code) {
             return .appleHighFidelity
         }
         return .appleFast
     }
 
-    /// True when the live Apple session runs the given Apple kind. On 26.4+
-    /// the identity is UNKNOWN until the activation probe lands (every
-    /// activation resets the tuple to `(false, nil)`), and an unlanded
-    /// identity must not route: a provisional `.appleFast` read would send a
-    /// fast retry to a live high-fidelity session (unstamped wrong-engine
-    /// text) and a high-fidelity retry to a duplicate of the live session —
-    /// the byte-identical no-op that reads as a broken button. Callers
-    /// treat `false` as "not provably the same engine": the click defers to
-    /// the dedicated session and the lane re-routes on the landing. Below
-    /// 26.4 the identity never depends on the probe.
+    /// True when the live Apple session runs the given Apple kind. Above the
+    /// strategy API the identity is UNKNOWN until the activation probe lands
+    /// (every activation resets the evidence to `(false, nil)`), and an
+    /// unlanded identity must not route: a provisional `.appleFast` read
+    /// would send a fast retry to a live high-fidelity session (unstamped
+    /// wrong-engine text) and a high-fidelity retry to a duplicate of the
+    /// live session — the byte-identical no-op that reads as a broken
+    /// button. Callers treat `false` as "not provably the same engine": the
+    /// click defers to the dedicated session and the lane re-routes on the
+    /// landing. Below the strategy API the identity never depends on the
+    /// probe.
     func liveSessionRunsKind(_ kind: TranslationEngineKind) -> Bool {
         guard let live, live.activeTranslationEngine == .apple else { return false }
-        if #available(macOS 26.4, *) {
-            guard appleProbeLanded else { return false }
+        guard tierAvailability.identityKnown(for: settings.targetLanguage.code) else {
+            return false
         }
         return activeEngineKind == kind
     }
 
-    /// Whether the activation probe has landed FOR THE CURRENT TARGET — the
-    /// live Apple session's model identity is only knowable once it has.
-    /// Internal (not private): the lane runner polls it from
-    /// `RetranslateCoordinator+Lane.swift`.
-    var appleProbeLanded: Bool {
-        live?.appleHighFidelityProbe.targetCode == settings.targetLanguage.code
-    }
-
     /// High fidelity is *known* unavailable when the last probe landed for
     /// `targetCode` and reported it not installed. Deliberately narrower
-    /// than `appleHighFidelity == false`: a probe that never landed
-    /// (`targetCode == nil`) or one run for a different target is not evidence
-    /// of unavailability, and treating it as such would hide the feature on a
-    /// capable machine for the whole probe window. Probe evidence is scoped
-    /// to the pair it ran for, so a foreign archive target compares against
-    /// its own code, never the settings pair.
+    /// than "cannot serve": a probe that never landed or one run for a
+    /// different target is not evidence of unavailability. Delegates to
+    /// `tierAvailability.knownUnavailable(for:)`, which owns the pair-scoped
+    /// evidence — a foreign archive target compares against its own code,
+    /// never the settings pair.
     func highFidelityKnownUnavailable(for targetCode: String) -> Bool {
-        live?.appleHighFidelityProbe.targetCode == targetCode
-            && live?.appleHighFidelityProbe.installed == false
+        tierAvailability.knownUnavailable(for: targetCode)
     }
 
     /// The settings-pair spelling of `highFidelityKnownUnavailable(for:)`.
@@ -253,15 +245,17 @@ extension RetranslateCoordinator {
 
     /// The Apple tier `engine` can actually deliver for `targetCode`, which
     /// is not always the selected one. `.appleHighFidelity` names a strategy
-    /// the OS may not be able to serve: below 26.4 there is no strategy API
-    /// at all, and where the ja→target pair is not `.installed` the dedicated
-    /// config still requests high fidelity and the framework silently falls
-    /// back to the fast model (the same caveat `makeConfig` documents).
-    /// Requesting it anyway would return text byte-identical to a fast
-    /// session while stamping the row `.appleHighFidelity` — a "· via Apple
-    /// Intelligence" marker over fast-model output. So a *known*-unavailable
-    /// high-fidelity route degrades to the fast model, which is a genuine
-    /// alternate. Non-Apple selections pass through untouched.
+    /// the OS may not be able to serve: below the strategy API there is no
+    /// strategy selection at all, and where the ja→target pair is not
+    /// `.installed` the dedicated config still requests high fidelity and the
+    /// framework silently falls back to the fast model (the same caveat
+    /// `makeConfig` documents). Requesting it anyway would return text
+    /// byte-identical to a fast session while stamping the row
+    /// `.appleHighFidelity` — a "· via Apple Intelligence" marker over
+    /// fast-model output. So a *known*-unavailable high-fidelity route
+    /// degrades to the fast model, which is a genuine alternate. Delegates to
+    /// `tierAvailability.effectiveTier(_:targetCode:)`; non-Apple selections
+    /// pass through untouched.
     ///
     /// Accepted caveat: a foreign target (an archive whose viewing language
     /// differs from the settings target) has no probe evidence, so it keeps
@@ -269,9 +263,7 @@ extension RetranslateCoordinator {
     /// fast model — the same caveat the config builders document. No
     /// on-demand probe runs at archive-run start.
     func effectiveAppleTier(_ engine: RetranslateEngine, targetCode: String) -> RetranslateEngine {
-        guard engine == .appleHighFidelity else { return engine }
-        guard #available(macOS 26.4, *) else { return .appleFast }
-        return highFidelityKnownUnavailable(for: targetCode) ? .appleFast : .appleHighFidelity
+        tierAvailability.effectiveTier(engine, targetCode: targetCode)
     }
 
     /// The settings re-translate selection resolved for `targetCode` — the

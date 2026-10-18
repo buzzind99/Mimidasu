@@ -194,12 +194,9 @@ struct SettingsRetranslateCard: View {
         // the framework would silently fall back to fast, so offering it would
         // resolve the retry to the fast model while labelling the row "Apple
         // Intelligence". A probe that has not landed is not evidence either
-        // way, so the option stays listed until the probe says no. Below 26.4
-        // there is no strategy API at all, so it is never offered.
-        if #available(macOS 26.4, *),
-           !model.highFidelityKnownUnavailable,
-           !model.liveSessionRunsKind(.appleHighFidelity)
-        {
+        // way, so the option stays listed until the probe says no, and the OS
+        // never offers it without the strategy API at all.
+        if model.offersAppleHighFidelity, !model.liveSessionRunsKind(.appleHighFidelity) {
             options.append(appleIntelligenceOption)
         }
         options.append(
