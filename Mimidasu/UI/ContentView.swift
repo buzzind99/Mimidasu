@@ -257,49 +257,60 @@ struct ContentView: View {
                 if model.openArchive != nil {
                     ArchiveBannerView(model: model)
                 }
-                TranscriptView(
-                    model: model,
-                    onFavoriteRemovalRequest: requestFavoriteRemoval
-                )
-                // Archive mode: the live strip hides entirely (nothing is
-                // live; the banner carries the archived stats) and its
-                // strip-anchored popover has no anchor to mount on.
-                if model.openArchive == nil {
-                    LiveStripView(
-                        live: live,
-                        onCopy: { text in model.copySnippet(text) },
-                        onLookup: { token in model.handleLookupTap(token, source: .liveStrip) },
-                        isFavorite: model.favoriteSegmentMatcher
-                    )
-                    // Strip-anchored popover: single non-virtualized view, so
-                    // the strip owns it while the selection's anchor is the
-                    // live strip. Source-keyed so a strip retap swaps content
-                    // in place instead of a dismiss+replace.
-                    .popover(isPresented: liveStripLookupPresented) {
-                        if let selected = model.selectedLookup?.popoverItem(for: .liveStrip) {
-                            DictionaryPopoverView(
-                                model: model,
-                                selected: selected,
-                                onFavoriteRemovalRequest: requestFavoriteRemoval
-                            )
-                        }
-                    }
-                }
-            }
-            // Toast stack and the reference openers share one top-trailing
-            // column (see `TranscriptOverlayColumn`); it is a leaf so its
-            // toast observation stays local.
-            .overlay(alignment: .topTrailing) {
-                TranscriptOverlayColumn(
-                    toasts: model.toasts,
-                    hover: referenceButtonHover
-                )
-            }
-            .overlay(alignment: .top) {
-                NoticePillView(center: model.notices)
+                transcriptArea
             }
         }
         .background(Theme.window)
         .environment(\.referenceButtonHover, referenceButtonHover)
+    }
+
+    /// The transcript column below the banner (the whole pane live): the
+    /// transcript list, its live strip, and both top overlays. The overlays
+    /// attach here rather than to the banner's column so neither the toast
+    /// stack nor the notice pill covers the banner's trailing controls in
+    /// archive mode.
+    private var transcriptArea: some View {
+        VStack(spacing: 0) {
+            TranscriptView(
+                model: model,
+                onFavoriteRemovalRequest: requestFavoriteRemoval
+            )
+            // Archive mode: the live strip hides entirely (nothing is
+            // live; the banner carries the archived stats) and its
+            // strip-anchored popover has no anchor to mount on.
+            if model.openArchive == nil {
+                LiveStripView(
+                    live: live,
+                    onCopy: { text in model.copySnippet(text) },
+                    onLookup: { token in model.handleLookupTap(token, source: .liveStrip) },
+                    isFavorite: model.favoriteSegmentMatcher
+                )
+                // Strip-anchored popover: single non-virtualized view, so
+                // the strip owns it while the selection's anchor is the
+                // live strip. Source-keyed so a strip retap swaps content
+                // in place instead of a dismiss+replace.
+                .popover(isPresented: liveStripLookupPresented) {
+                    if let selected = model.selectedLookup?.popoverItem(for: .liveStrip) {
+                        DictionaryPopoverView(
+                            model: model,
+                            selected: selected,
+                            onFavoriteRemovalRequest: requestFavoriteRemoval
+                        )
+                    }
+                }
+            }
+        }
+        // Toast stack and the reference openers share one top-trailing
+        // column (see `TranscriptOverlayColumn`); it is a leaf so its
+        // toast observation stays local.
+        .overlay(alignment: .topTrailing) {
+            TranscriptOverlayColumn(
+                toasts: model.toasts,
+                hover: referenceButtonHover
+            )
+        }
+        .overlay(alignment: .top) {
+            NoticePillView(center: model.notices)
+        }
     }
 }

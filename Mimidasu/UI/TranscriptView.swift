@@ -177,11 +177,14 @@ struct TranscriptView: View {
     /// common case anyway — it simply comes back with the batch.
     private func retryEnabled(for entry: SessionEntry) -> Bool {
         // Archive mode: the opened session is the deliverer (the lane routes
-        // through its dedicated engines), so only an in-flight retry or a
-        // claimed bulk job (one translation at a time) holds the button back.
+        // through its dedicated engines), so the button is held back by an
+        // in-flight retry, a claimed bulk job (one translation at a time),
+        // and a retry selection that resolves to no engine (a key-less
+        // external pick would only report unavailable).
         if model.openArchive != nil {
             return !model.pendingRetranslations.contains(entry.sentence.index)
                 && !model.archiveTranslationRunning
+                && model.alternateRetranslateEngineActive
         }
         guard model.phase == .running || model.phase == .sourceLost || model.phase == .paused
         else { return false }
@@ -217,11 +220,12 @@ struct TranscriptView: View {
         }),
             let engine = translation.engine
         else { return nil }
-        // Once the probe has landed not-installed, a row stamped
-        // `.appleHighFidelity` actually holds the fast model's text — the
-        // framework silently falls back — so its marker must not claim
-        // Apple Intelligence. Applies in both modes.
-        if engine == .appleHighFidelity, model.highFidelityKnownUnavailable {
+        // Once the probe has landed not-installed for the row's target, a
+        // row stamped `.appleHighFidelity` actually holds the fast model's
+        // text — the framework silently falls back — so its marker must not
+        // claim Apple Intelligence. The probe is evidence only for the pair
+        // it ran for, so the comparison is scoped to the row's target.
+        if engine == .appleHighFidelity, model.highFidelityKnownUnavailable(for: targetCode) {
             return nil
         }
         // Archive mode: there is no live engine to differ from — every

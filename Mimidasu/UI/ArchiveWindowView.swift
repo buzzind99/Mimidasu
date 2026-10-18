@@ -221,14 +221,20 @@ struct ArchiveWindowView: View {
 
     private func row(_ summary: ArchivedSessionSummary) -> some View {
         let job = model.archiveTranslationJob
-        let runsHere = job.isRunning && job.currentRun?.sessionID == summary.id
+        // The claim counts from `prepare` onward: while the engine resolves
+        // the run lives in `pendingRequest`, and `currentRun` takes over
+        // when it starts.
+        let request = job.pendingRequest ?? job.currentRun
+        let runsHere = job.isActive && request?.sessionID == summary.id
         return ArchiveRow(
             model: model,
             summary: summary,
             canOpen: model.canOpenArchivedSession,
             isJobRunning: runsHere,
-            jobLang: runsHere ? job.currentRun?.lang : nil,
-            jobProgress: runsHere ? (job.processed, job.total) : nil,
+            jobLang: runsHere ? request?.lang : nil,
+            // Progress numbers belong to a started run; during resolution
+            // they still hold the previous run's values.
+            jobProgress: runsHere && job.isRunning ? (job.processed, job.total) : nil,
             chooserPresented: chooserPresented(summary),
             onOpen: { open(summary) },
             onDelete: { state.requestDelete(summary) },
@@ -249,14 +255,15 @@ struct ArchiveWindowView: View {
 /// One stored-session row: title (name or auto-title), meta line, the
 /// language chip line with its `+` add pill, Interrupted badge, the
 /// Delete/Rename/Save cluster, and the text-only Open button. While a bulk
-/// run walks this session a thin progress bar renders under the chips and
-/// the running language's chip reports it.
+/// run claims this session the running language's chip reports it, and a
+/// thin progress bar renders under the chips once the run itself starts.
 private struct ArchiveRow: View {
     var model: AppModel
     let summary: ArchivedSessionSummary
     let canOpen: Bool
-    /// The bulk job is running this session (the chip line's busy state and
-    /// the progress bar); `jobLang` names the language it walks.
+    /// The bulk job claims this session (the chip line's busy state, from
+    /// engine resolution onward); the progress bar renders once the run
+    /// starts. `jobLang` names the language it walks.
     let isJobRunning: Bool
     let jobLang: String?
     /// The run's `(processed, total)`, for the progress bar.

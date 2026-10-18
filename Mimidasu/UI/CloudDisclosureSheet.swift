@@ -68,7 +68,8 @@ struct CloudDisclosureSheet: View {
                 + "The live translation engine is unchanged. "
         case .archiveTranslation:
             if let sentenceCount {
-                "\(sentenceCount) sentences will be sent from your Mac to "
+                ArchivedSessionSummary.sentenceCountText(sentenceCount)
+                    + " will be sent from your Mac to "
                     + "\(provider.displayName) for translation."
             } else {
                 "Sentences will be sent from your Mac to \(provider.displayName) "

@@ -93,7 +93,7 @@ struct ArchiveBannerView: View {
                 ArchiveLanguageChip(
                     count: viewingCount,
                     total: archive.summary.sentenceCount,
-                    busy: jobIsRunning(on: archive, lang: busyLang),
+                    busy: jobIsActive(on: archive, lang: busyLang),
                     showsChevron: true
                 )
             } else {
@@ -168,22 +168,24 @@ struct ArchiveBannerView: View {
         }
     }
 
-    /// Routes the picker's start: Apple runs begin here; an external pick is
-    /// held for the cloud disclosure, whose confirm callback starts the run.
+    /// Routes the picker's start through the model: the request is refused
+    /// while another cloud-disclosure intent is held, an Apple pick starts
+    /// its run directly, and an external pick is parked for the disclosure
+    /// whose confirm callback starts the run.
     private func startTranslation(_ provider: TranslationProvider, lang: String) {
-        if provider == .apple {
-            model.beginArchiveTranslation(provider: .apple, lang: lang)
-        } else {
-            model.providerAwaitingDisclosure = .archiveTranslation(provider, lang: lang)
-        }
+        model.requestArchiveTranslation(provider: provider, lang: lang)
     }
 
-    /// Whether the bulk job is running for this session and language.
-    private func jobIsRunning(on archive: ArchivedSession, lang: String?) -> Bool {
-        guard let run = model.archiveTranslationJob.currentRun else { return false }
-        return model.archiveTranslationJob.isRunning
-            && run.sessionID == archive.id
-            && run.lang == lang
+    /// Whether the bulk job claims this session and language — from the
+    /// synchronous claim through engine resolution and the run itself. The
+    /// claimed-but-resolving window reads the job's pending request, since
+    /// `currentRun` moves only when the run starts.
+    private func jobIsActive(on archive: ArchivedSession, lang: String?) -> Bool {
+        let job = model.archiveTranslationJob
+        guard let request = job.pendingRequest ?? job.currentRun else { return false }
+        return job.isActive
+            && request.sessionID == archive.id
+            && request.lang == lang
     }
 
     @ViewBuilder

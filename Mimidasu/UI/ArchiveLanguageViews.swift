@@ -222,13 +222,25 @@ struct ArchiveSwitchLanguagePopover: View {
 
     /// Targets the session doesn't hold yet. Membership is the filter —
     /// an already-added language never appears here, translated or not.
+    /// The OS catalog lands asynchronously, so the probe's pending state
+    /// gets its own row instead of reading as "none available".
     @ViewBuilder
     private var chooserRows: some View {
         let held = Set(summary.langs.map(\.lang))
         let available = model.appleTranslationAvailability.targets.filter { target in
             !held.contains(target.code)
         }
-        if available.isEmpty {
+        if !model.appleTranslationAvailability.isLoaded {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Loading languages…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 8)
+        } else if available.isEmpty {
             Text("No other languages available")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.secondaryText)
@@ -245,9 +257,11 @@ struct ArchiveSwitchLanguagePopover: View {
         Button {
             // Membership persists from this moment; when this session is the
             // opened one the add also selects the language for viewing (the
-            // model's call). The chooser closes on the pick.
-            model.addArchiveLanguage(id: summary.id, lang: target.code)
-            dismiss()
+            // model's call). The chooser closes only on a landed write — a
+            // failed one keeps it open for another pick.
+            if model.addArchiveLanguage(id: summary.id, lang: target.code) {
+                dismiss()
+            }
         } label: {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 1) {
@@ -325,6 +339,13 @@ struct ArchiveTranslationProviderPicker: View {
 
     private var jobIsActive: Bool {
         model.archiveTranslationJob.isActive
+    }
+
+    /// The start action is held back while a run is claimed (one job at a
+    /// time) and while the shared disclosure slot holds an intent — a pick
+    /// then would be refused, so the button must not look live.
+    private var actionDisabled: Bool {
+        jobIsActive || model.providerAwaitingDisclosure != nil
     }
 
     var body: some View {
@@ -464,11 +485,11 @@ struct ArchiveTranslationProviderPicker: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(jobIsActive)
-        .opacity(jobIsActive ? 0.45 : 1)
+        .disabled(actionDisabled)
+        .opacity(actionDisabled ? 0.45 : 1)
         .hoverHighlight(
             RoundedRectangle(cornerRadius: 8, style: .continuous),
-            isEnabled: !jobIsActive,
+            isEnabled: !actionDisabled,
             tint: .white, opacity: 0.15
         )
         .accessibilityLabel(actionLabel)
