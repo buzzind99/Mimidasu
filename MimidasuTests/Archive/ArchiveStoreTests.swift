@@ -60,10 +60,11 @@ struct ArchiveStoreTests {
     /// A finalized recent with one sentence, dated `startedAt`.
     @discardableResult
     private func finalizeRecent(
-        _ store: ArchiveStore, startedAt: TimeInterval, durationS: Int = 5
+        _ store: ArchiveStore, startedAt: TimeInterval, durationS: Int = 5,
+        text: String = "こんにちは"
     ) -> Int64? {
         guard let id = store.append(
-            sentence: sentence(0), sessionID: nil, metadata: metadata(startedAt: startedAt)
+            sentence: sentence(0, text: text), sessionID: nil, metadata: metadata(startedAt: startedAt)
         ) else { return nil }
         store.finalize(session: id, durationMS: durationS * 1000, saved: false)
         return id
@@ -168,6 +169,9 @@ struct ArchiveStoreTests {
         #expect(entry?.translations.count == 1)
         #expect(entry?.translations.first?.text == "two")
         #expect(entry?.translations.first?.engine == .deepl)
+        // Back to the session engine: the engine is cleared, not carried over.
+        store.upsert(translation: SentenceTranslation(lang: "en", text: "three"), index: 0, session: id)
+        #expect(store.load(id: id)?.entries.first?.translations == [SentenceTranslation(lang: "en", text: "three")])
     }
 
     // MARK: - Finalize & the recents cap
@@ -197,12 +201,14 @@ struct ArchiveStoreTests {
         #expect(summary.chunkMS == 160)
     }
 
-    @Test("the 11th recent evicts the oldest, and Saved rows always survive")
-    func capEvictsOldestUnsaved() {
-        let (store, cleanup) = makeStore()
+    @Test("the 11th recent evicts the oldest, and Saved and recording rows always survive")
+    func capEvictsOldestUnsaved() throws {
+        let (location, cleanup) = makeLocation()
         defer { cleanup() }
+        let store = ArchiveStore(location: location)
 
-        // One Saved session older than everything, then 11 recents.
+        // One Saved session and one recording row, then 11 recents.
+        let recording = startSession(store, startedAt: 0)
         guard let saved = finalizeRecent(store, startedAt: 0) else {
             Issue.record("seed should succeed")
             return
@@ -216,15 +222,21 @@ struct ArchiveStoreTests {
                 return
             }
             recentIDs.append(id)
+            store.upsert(translation: SentenceTranslation(lang: "en", text: "x"), index: 0, session: id)
+            if offset == ArchiveStore.recentCap {
+                #expect(store.list().filter { summary in !summary.saved }.count == ArchiveStore.recentCap, "nothing evicted at ten")
+            }
         }
 
         let listed = store.list()
         let recents = listed.filter { summary in !summary.saved }
         #expect(recents.count == ArchiveStore.recentCap)
-        // The oldest recent (the first one, right after the Saved row) is gone.
         #expect(!recents.contains { summary in summary.id == recentIDs[0] })
         #expect(recents.contains { summary in summary.id == recentIDs[10] })
         #expect(listed.contains { summary in summary.id == saved })
+        #expect(try rawRowCount(at: location, table: "sentences", id: recentIDs[0]) == 0)
+        #expect(try rawRowCount(at: location, table: "translations", id: recentIDs[0]) == 0)
+        #expect(recording.flatMap { id in store.load(id: id)?.summary.status } == .recording)
     }
 
     @Test("promote moves a recent to the Saved tier")
@@ -261,19 +273,22 @@ struct ArchiveStoreTests {
         #expect(store.load(id: id + 999) == nil)
     }
 
-    @Test("delete removes the session and cascades to its sentences")
-    func deleteCascades() {
-        let (store, cleanup) = makeStore()
+    @Test("delete removes the session and cascades to its sentences and translations")
+    func deleteCascades() throws {
+        let (location, cleanup) = makeLocation()
         defer { cleanup() }
-
+        let store = ArchiveStore(location: location)
         guard let id = finalizeRecent(store, startedAt: 1000) else {
             Issue.record("seed should succeed")
             return
         }
+        store.upsert(translation: SentenceTranslation(lang: "en", text: "x"), index: 0, session: id)
         #expect(store.delete(id: id))
 
         #expect(store.list().isEmpty)
         #expect(store.load(id: id) == nil)
+        #expect(try rawRowCount(at: location, table: "sentences", id: id) == 0, "no orphan sentence survives")
+        #expect(try rawRowCount(at: location, table: "translations", id: id) == 0, "no orphan translation survives")
     }
 
     @Test("rename stores the trimmed name and clears to nil on empty")
@@ -330,6 +345,7 @@ struct ArchiveStoreTests {
         #expect(summary.id == id)
         #expect(summary.status == .interrupted)
         #expect(summary.durationS == 42)
+        #expect(second.load(id: id)?.entries.first?.sentence.text == "こんにちは", "a second store sees the text")
     }
 
     @Test("sweep never touches finalized sessions")
@@ -393,8 +409,12 @@ struct ArchiveStoreTests {
         #expect(store.append(sentence: sentence(0), sessionID: nil, metadata: metadata()) == nil)
         #expect(store.list().isEmpty)
         #expect(store.upsert(translation: SentenceTranslation(lang: "en", text: "x"), index: 0, session: 1) == false)
-        #expect(store.promote(id: 1) == false)
-        #expect(store.delete(id: 1) == false)
+        #expect(store.promote(id: 1) == false && store.delete(id: 1) == false)
+        #expect(store.finalize(session: 1, durationMS: 1, saved: false) == false
+            && store.syncPaused(session: 1, pausedMS: 1) == false
+            && store.addLanguage(id: 1, lang: "fr") == false
+            && store.rename(id: 1, name: "x") == false)
+        #expect(store.sweepInterrupted() == false && store.summary(id: 1) == nil && store.load(id: 1) == nil)
     }
 }
 
@@ -405,13 +425,12 @@ struct ArchiveStoreTests {
 /// declarations stay a readable size.
 extension ArchiveStoreTests {
 
-    /// Raw membership-row count for one session. A cascade leak is invisible
-    /// through the store's reads (a deleted session is never loaded), so the
-    /// one way to see the orphaned rows is the schema itself.
-    private func membershipRowCount(at location: URL, id: Int64) throws -> Int {
+    /// Raw row count for one session in one table — a cascade leak is invisible
+    /// through the store's reads, so the schema is the one place it shows.
+    private func rawRowCount(at location: URL, table: String, id: Int64) throws -> Int {
         let database = try SQLiteDatabase(path: location.path)
         let statement = try database.statement(
-            "SELECT COUNT(*) FROM session_languages WHERE session_id = :id"
+            "SELECT COUNT(*) FROM \(table) WHERE session_id = :id"
         )
         statement.bind(Int(id), at: 1)
         _ = try statement.step()
@@ -431,7 +450,7 @@ extension ArchiveStoreTests {
         #expect(store.addLanguage(id: id, lang: "fr"))
         #expect(store.addLanguage(id: id, lang: "fr"))
 
-        #expect(try membershipRowCount(at: location, id: id) == 1, "the repeat add inserts once")
+        #expect(try rawRowCount(at: location, table: "session_languages", id: id) == 1, "the repeat add inserts once")
         #expect(store.summary(id: id)?.langs.map { count in count.lang } == ["en", "fr"])
     }
 
@@ -487,7 +506,7 @@ extension ArchiveStoreTests {
         #expect(store.addLanguage(id: first, lang: "fr"))
         store.upsert(translation: SentenceTranslation(lang: "fr", text: "un"), index: 0, session: first)
 
-        guard let second = finalizeRecent(store, startedAt: 2000) else {
+        guard let second = finalizeRecent(store, startedAt: 2000, text: "二つ目") else {
             Issue.record("seed should succeed")
             return
         }
@@ -512,6 +531,11 @@ extension ArchiveStoreTests {
         #expect(listed.first { summary in summary.id == first }?.languageCount(for: "fr")?.translated == 1)
         #expect(listed.first { summary in summary.id == second }?.languageCount(for: "de")?.translated == 1)
         #expect(listed.first { summary in summary.id == second }?.languageCount(for: "it")?.translated == 0)
+
+        // A direct load scopes the same way: each session's translations come back alone.
+        #expect(store.load(id: first)?.entries.map { entry in entry.sentence.text } == ["こんにちは"])
+        #expect(store.load(id: first)?.entries.first?.translations.map { translation in translation.text } == ["un"])
+        #expect(store.load(id: second)?.entries.first?.translations.map { translation in translation.text } == ["eins"])
     }
 
     @Test("languages order target first, then membership, then translation-only")
@@ -561,7 +585,7 @@ extension ArchiveStoreTests {
 
         let reopened = ArchiveStore(location: location)
         #expect(reopened.summary(id: id) == nil, "the deleted id can't be queried")
-        #expect(try membershipRowCount(at: location, id: id) == 0, "no orphan membership row survives")
+        #expect(try rawRowCount(at: location, table: "session_languages", id: id) == 0, "no orphan membership row survives")
     }
 
     @Test("summary returns nil for an unknown id")
