@@ -103,7 +103,10 @@ struct ArchiveBannerView: View {
         .buttonStyle(.plain)
         .hoverHighlight(Capsule())
         .help("Switch the viewed language")
-        .accessibilityLabel("Viewed language")
+        .accessibilityLabel(viewedLanguageLabel(
+            viewingCount, total: archive.summary.sentenceCount,
+            busy: jobIsActive(on: archive, lang: busyLang)
+        ))
         .popover(isPresented: $isLanguagePopoverPresented, arrowEdge: .bottom) {
             ArchiveSwitchLanguagePopover(
                 model: model,
@@ -115,6 +118,14 @@ struct ArchiveBannerView: View {
                 }
             )
         }
+    }
+
+    /// The viewed-language chip's VoiceOver label: the chip's own counts
+    /// plus the viewed-language hint the button adds.
+    private func viewedLanguageLabel(_ count: ArchiveLanguageCount?, total: Int, busy: Bool) -> String {
+        guard let count else { return "Viewed language" }
+        let chip = count.chipText(of: total)
+        return "Viewed language: \(busy ? "\(chip), translating" : chip)"
     }
 
     private func plainCodeChip(_ code: String?) -> some View {

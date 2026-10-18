@@ -210,6 +210,7 @@ struct SidebarView: View {
         .buttonStyle(.plain)
         .hoverHighlight(Circle())
         .help(help)
+        .accessibilityLabel(help)
     }
 
     // MARK: - Annotation picker

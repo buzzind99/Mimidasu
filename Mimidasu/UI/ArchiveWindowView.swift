@@ -351,7 +351,9 @@ private struct ArchiveRow: View {
                 ArchiveLanguageChip(
                     count: count,
                     total: summary.sentenceCount,
-                    busy: isJobRunning && count.lang == jobLang
+                    busy: isJobRunning && count.lang == jobLang,
+                    selected: model.openArchive?.id == summary.id
+                        && count.lang == model.archiveViewingCode
                 )
             }
             ArchiveAddLanguagePill {
@@ -397,5 +399,6 @@ private struct ArchiveRow: View {
         .buttonStyle(.plain)
         .hoverHighlight(RoundedRectangle(cornerRadius: 7, style: .continuous))
         .help(help)
+        .accessibilityLabel(help)
     }
 }

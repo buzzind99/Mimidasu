@@ -415,6 +415,9 @@ struct ArchiveTranslationEnginePicker: View {
                 isPresented = false
             }
         }
+        // Every dismissal clears the pick: reopening always shows the
+        // offered default instead of the previous run's engine.
+        .onDisappear { selection = nil }
     }
 
     private var title: String {
@@ -425,8 +428,8 @@ struct ArchiveTranslationEnginePicker: View {
 
     private var countLine: String {
         isComplete
-            ? "All \(sendCount) sentences translated"
-            : "\(sendCount) untranslated sentences"
+            ? "All \(ArchivedSessionSummary.sentenceCountText(sendCount)) translated"
+            : "\(ArchivedSessionSummary.sentenceCountText(sendCount)) untranslated"
     }
 
     private var actionLabel: String {
