@@ -130,6 +130,11 @@ extension DictionarySearchEngine {
         var best: GlossMatch?
         fragment: for gloss in glossList(column) {
             let scalars = Array(gloss.lowercased().unicodeScalars)
+            // The offsets below index the folded scalars but slice the original
+            // gloss, so they line up only while the fold keeps the scalar count;
+            // a count-changing fold skips this gloss rather than emitting a
+            // shifted span.
+            guard scalars.count == gloss.unicodeScalars.count else { continue }
             var position = 0
             while let start = nextOccurrence(
                 of: needle, in: scalars, within: 0 ..< scalars.count, from: position

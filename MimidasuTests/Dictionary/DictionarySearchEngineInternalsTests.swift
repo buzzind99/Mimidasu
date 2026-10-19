@@ -521,3 +521,54 @@ final class DictionarySearchEngineInternalsTests {
         #expect(try statement.step())
     }
 }
+
+/// Fold-invariant grading pins, split out to keep the suite body small.
+extension DictionarySearchEngineInternalsTests {
+
+    @Test("a gloss whose fold changes the scalar count falls back instead of shifting the span")
+    func countChangingFoldFallsBack() {
+        // `İ` folds to `i` + U+0307, one scalar becoming two, so the folded
+        // array is longer than the gloss the offsets would slice: the naive
+        // span for `vur` would be 2 ..< 5 over a four-scalar gloss. The gloss
+        // is skipped, and with nothing else in the column the fallback spans
+        // the pattern's own length over the first gloss.
+        let single = DictionarySearchEngine.glossMatch(pattern: "vur", column: "İvur")
+
+        #expect(single.gloss == "İvur")
+        #expect(single.kind == .glossSubstring)
+        #expect(single.range == 0 ..< 3)
+
+        // A skipped gloss only drops out of the running: the second gloss's
+        // fold keeps its count, and `vur` grades as that gloss's whole text.
+        let multi = DictionarySearchEngine.glossMatch(
+            pattern: "vur", column: "İvur" + String(JMDictPin.glossJoiner) + "vur"
+        )
+
+        #expect(multi.gloss == "vur")
+        #expect(multi.kind == .glossWordBoundary)
+        #expect(multi.range == 0 ..< 3)
+    }
+
+    @Test("a non-ASCII column whose fold keeps the count still grades and slices exactly")
+    func countPreservingFoldSlicesExactly() throws {
+        // `é` is two UTF-8 bytes but one scalar, so this column takes the
+        // fragment path; the fold keeps the scalar count, so its offsets stay
+        // valid against the original text.
+        let match = DictionarySearchEngine.glossMatch(pattern: "café", column: "Grand Café")
+
+        #expect(match.gloss == "Grand Café")
+        #expect(match.kind == .glossWordBoundary)
+        #expect(match.range == 6 ..< 10)
+
+        // The span slices the original, not the fold: the highlight is `Café`.
+        let range = try #require(match.range)
+        #expect(MatchHighlight.split(match.gloss, at: range).match == "Café")
+
+        // Uppercase accented letters fold back without changing the count.
+        let shouted = DictionarySearchEngine.glossMatch(pattern: "été", column: "ÉTÉ")
+
+        #expect(shouted.gloss == "ÉTÉ")
+        #expect(shouted.kind == .glossWordBoundary)
+        #expect(shouted.range == 0 ..< 3)
+    }
+}
