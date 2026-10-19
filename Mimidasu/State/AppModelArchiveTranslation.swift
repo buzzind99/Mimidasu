@@ -160,18 +160,17 @@ extension AppModel {
         })
     }
 
-    /// Lands one bulk result: the store upsert keyed by the run's captured
-    /// session id (so an airborne result at close time still persists), the
-    /// row swap only when the write landed and the pane still shows that
-    /// archive, and the revision bump every archive surface re-reads through.
-    /// Returns whether the write landed; a lost write posts the run's archive
-    /// warning and makes the sentence a retryable failure in the job's
-    /// accounting — the row keeps its previous text, so the display never
-    /// claims a translation the store lacks.
+    /// Lands one bulk result through the one write-back seam, keyed by the
+    /// run's captured session id (so an airborne result at close time still
+    /// persists): the row swap happens only when the write landed and the
+    /// pane still shows that archive. Returns whether the write landed; a
+    /// lost write posts the run's archive warning and makes the sentence a
+    /// retryable failure in the job's accounting — the row keeps its
+    /// previous text, so the display never claims a translation the store
+    /// lacks.
     private func landArchiveTranslation(index: Int, translation: SentenceTranslation) -> Bool {
         guard let sessionID = archiveTranslationJob.activity.request?.sessionID else { return false }
-        let wrote = archive.upsert(translation: translation, index: index, session: sessionID)
-        guard wrote else {
+        guard writeBackTranslation(translation, index: index, session: sessionID) else {
             // The run's row vanishing mid-flight is expected when the run was
             // torn down (close/swap/delete); only a genuine fault reports.
             if !archiveTranslationJob.isCancelled {
@@ -182,10 +181,6 @@ extension AppModel {
         if openArchive?.id == sessionID, let at = entryPositionBySentence[index] {
             entries[at].replaceTranslation(translation)
         }
-        if openArchive?.id == sessionID {
-            refreshOpenArchiveLanguages()
-        }
-        archiveRevision &+= 1
         return true
     }
 
@@ -198,8 +193,7 @@ extension AppModel {
         }
         guard !warningVisible else { return }
         postArchiveWriteWarning(
-            body: "The session store couldn't be written to. "
-                + "This translation wasn't added to the archive.",
+            body: Self.lostTranslationWriteWarning,
             isClosable: true
         )
     }

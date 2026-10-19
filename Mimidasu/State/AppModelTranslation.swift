@@ -32,13 +32,14 @@ extension AppModel: TranslationSessionPort {
         archiveTranslationJob.activity != .idle
     }
 
-    /// Lands a delivered translation on its transcript row. Internal (not
-    /// private) so tests can exercise known/unknown indexes, and named
-    /// exactly like the port requirement it satisfies. Routing is the
-    /// entry's decision, not the caller's: it swaps the row's
-    /// same-language translation in place and appends only a genuinely new
-    /// language. So a repeat, an engine-swap replay, and a manual retry all
-    /// land as the fresh text — none of them can grow an `" / "` pileup.
+    /// Lands a delivered translation on its transcript row, writing the
+    /// store through the one write-back seam. Internal (not private) so
+    /// tests can exercise known/unknown indexes, and named exactly like the
+    /// port requirement it satisfies. Routing is the entry's decision, not
+    /// the caller's: it swaps the row's same-language translation in place
+    /// and appends only a genuinely new language. So a repeat, an
+    /// engine-swap replay, and a manual retry all land as the fresh text —
+    /// none of them can grow an `" / "` pileup.
     /// Returns whether the row took the translation: false when the
     /// transcript no longer contains the index, or when an archive-mode
     /// write failed. A failed archive write leaves the row on its previous
@@ -55,30 +56,23 @@ extension AppModel: TranslationSessionPort {
         // row update below renders it, and a reopen must find it again.
         // A live session's recording row is durable home too, but only
         // while its writes are trusted: once the per-session latch trips,
-        // sentence appends stop, so an upsert would leave an orphan row.
-        // Write-back precedes the row lookup so a result landing while the
-        // archive is closing still persists (its marker is retired either
-        // way).
+        // sentence appends stop, so a write-back would leave an orphan row.
+        // Both branches funnel through the one write-back seam, which
+        // precedes the row lookup so a result landing while the archive is
+        // closing still persists (its marker is retired either way).
         if let archiveID = archiveSessionID {
-            let stored = archive.upsert(translation: translation, index: index, session: archiveID)
-            if stored {
-                // The summary-derived surfaces (banner chip, picker counts,
-                // disclosure count) read the store's counts, not `entries`.
-                refreshOpenArchiveLanguages()
-                archiveRevision &+= 1
-            } else {
+            guard writeBackTranslation(translation, index: index, session: archiveID) else {
                 // The row keeps its previous text: a displayed translation
                 // the store lacks would make the next run's scope disagree
                 // with the summary-derived counts.
                 postArchiveWriteWarning(
-                    body: "The session store couldn't be written to. "
-                        + "This translation wasn't added to the archive.",
+                    body: Self.lostTranslationWriteWarning,
                     isClosable: true
                 )
                 return false
             }
         } else if let recordingID = recordingSessionID, !archiveWriteFailed {
-            if !archive.upsert(translation: translation, index: index, session: recordingID) {
+            if !writeBackTranslation(translation, index: index, session: recordingID) {
                 latchArchiveWriteFailure(
                     body: "The session store couldn't be written to. "
                         + "Sessions can't be saved or listed; transcription continues."
