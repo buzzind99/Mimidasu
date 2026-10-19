@@ -293,10 +293,11 @@ struct SessionControllerPauseTests {
         // test — continuing would await a gate nothing ever entered.
         try #require(await pollUntil { park.isEntered }, "the pause flush is airborne")
 
-        // stop()'s latch runs before its first suspension: the yield hands it
-        // the main actor while the flush is still parked, so pause() wakes to
-        // a latched `isStopping` and skips its delivery. stop() consumes the
-        // flush, and it cannot be awaited directly while the gate is held.
+        // stop()'s channel latch runs before its first suspension: the yield
+        // hands it the main actor while the flush is still parked, so pause()
+        // wakes to the stop owning the teardown and skips its delivery. The
+        // channel's finish consumes the pending flush, and it cannot be
+        // awaited directly while the gate is held.
         let stopTask = Task { await sut.controller.stop() }
         await Task.yield()
         park.open()
@@ -305,6 +306,49 @@ struct SessionControllerPauseTests {
 
         #expect(sut.sentences().map { sentence in sentence.text } == [flushTailSentence])
         #expect(park.callCount == 1, "the flush decode ran exactly once")
+    }
+
+    @Test("a pause after stop does not start another flush")
+    func pauseAfterStopDoesNotFlush() async throws {
+        let sut = makeSUT()
+        _ = try await sut.controller.begin(modelURL: nil, modelID: "test-model")
+        await sut.controller.stop()
+
+        await sut.controller.pause()
+
+        #expect(
+            sut.log.names.filter { name in name == "engine.flushUtterance" }.isEmpty,
+            "the stopped session must not decode a pause flush"
+        )
+        #expect(
+            sut.log.names.filter { name in name == "engine.finish" }.count == 1,
+            "only the stop's finish consumed the engine"
+        )
+    }
+
+    @Test("a second pause while the flush is airborne does not decode twice")
+    func doublePauseWhileFlushAirborneFlushesOnce() async throws {
+        let sut = makeSUT(flush: [
+            .final(text: flushTailSentence, startSample: 0, endSample: 16000, lang: "ja")
+        ])
+        let park = FlushPark()
+        sut.engine.flushPark = park
+        _ = try await sut.controller.begin(modelURL: nil, modelID: "test-model")
+
+        let firstPause = Task { await sut.controller.pause() }
+        // Registered before the gate wait: an aborted test still opens the
+        // park so the detached flush cannot block a thread forever.
+        defer { park.open() }
+        try #require(await pollUntil { park.isEntered }, "the pause flush is airborne")
+
+        let secondPause = Task { await sut.controller.pause() }
+        await Task.yield()
+        park.open()
+        await firstPause.value
+        await secondPause.value
+
+        #expect(park.callCount == 1, "the flush decode ran exactly once")
+        #expect(sut.sentences().map { sentence in sentence.text } == [flushTailSentence])
     }
 
     private final class WarningFlag: @unchecked Sendable {
@@ -321,11 +365,12 @@ struct SessionControllerPauseTests {
     }
 }
 
-/// A one-shot park for the scripted engine's flush: `park()` marks the flush
-/// entered and blocks until `open()`. Calls after the open pass straight
+/// A one-shot park for a scripted engine's flush/finish: `park()` marks the
+/// call entered and blocks until `open()`. Calls after the open pass straight
 /// through, so a regression that flushes twice cannot hang the suite; the
 /// wait is bounded so one that never opens surfaces as a failure, not a wedge.
-private final class FlushPark: @unchecked Sendable {
+/// Shared with the channel suite, which parks the same engine calls.
+final class FlushPark: @unchecked Sendable {
     private let condition = NSCondition()
     private var enteredValue = false
     private var openValue = false

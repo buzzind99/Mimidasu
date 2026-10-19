@@ -61,14 +61,22 @@ final class SessionController {
     /// One-shot silence watchdog for the current capture; cancelled on stop
     /// and re-armed by every `startCapture`.
     private var noAudioWatchdog: Task<Void, Never>?
-    /// The pause flush in flight, retained so `stop()` can await it: the
-    /// flush decode and `finish()`'s drain must never run concurrently on
-    /// one session (two concurrent `transcribe` calls are undefined).
-    private var pauseFlushTask: Task<[ASREvent], Never>?
-    /// Latch set for the whole of `stop()`: a pause that resumes after its
-    /// first await must not start a flush the teardown is already running
-    /// past (the mirror of `pauseFlushTask` for the opposite interleave).
-    private var isStopping = false
+    /// Serializes the engine's flush/finish calls for this session and owns
+    /// the exactly-once pause-flush handoff (see `SessionEngineChannel`).
+    private let engineChannel = SessionEngineChannel()
+    /// Serial tail of the capture transitions: `pause()`, `resume()`,
+    /// `restartCapture()`, and `stop()` enqueue behind it, so their capture
+    /// and engine calls run strictly in request order.
+    var transitionTail: Task<Void, Never>?
+    /// The task returned by the most recent `pause()` enqueue; the deferred
+    /// resume reads it through `awaitPauseCompletion()`.
+    var pauseCompletedTask: Task<Void, Never>?
+    /// Latched synchronously by `stop()` before its first suspension: an
+    /// airborne pause/resume/restart observes it after every await and sheds
+    /// the work the stop now owns.
+    var stopRequested = false
+    /// One-shot guard: the queued teardown runs at most once per session.
+    var hasStopped = false
     private let silenceGracePeriod: Duration
     /// Bound for `stop()`'s translation-tail drain; `Self.translationDrainTimeout`
     /// unless a test injects a shorter one.
@@ -148,9 +156,15 @@ final class SessionController {
     /// `modelID` is the active choice's id for session metadata; `targetLang`
     /// is the selected translation target's BCP-47 code for session metadata.
     func begin(modelURL: URL?, modelID: String, targetLang: String = "en") async throws -> Bool {
-        // A new session clears the previous one's teardown latch (a capture
-        // object is never restarted after `stop()`, but the controller is).
-        isStopping = false
+        // A new session starts only after any in-flight transition settled: a
+        // stop still tearing down must not interleave with this start.
+        await transitionTail?.value
+        stopRequested = false
+        hasStopped = false
+        pauseCompletedTask = nil
+        // A new session starts the engine channel clean (a capture object is
+        // never restarted after `stop()`, but the controller is).
+        engineChannel.reset()
         // No TCC preflight: the tap needs no Microphone permission — the
         // system prompts for audio-capture access at the aggregate's first
         // IO (driven by NSAudioCaptureUsageDescription). That first IO is the
@@ -185,6 +199,7 @@ final class SessionController {
         // main actor. `prepareLock` still serializes it against the warm-up.
         try await Task.detached(priority: .userInitiated) { try engine.prepare() }.value
         try engine.openStream()
+        engineChannel.started()
 
         sessionMetadata = SessionMetadata(
             startedAt: Date(),
@@ -260,40 +275,46 @@ final class SessionController {
         audioPresence.clear()
     }
 
-    /// Rebuilds the capture stream mid-session after the source died — the
-    /// `capture.lost` toast's Restart action. The
-    /// engine, timers, sentence buffer, and translation queue are untouched:
-    /// no model reload, and `onSessionBegin` does not re-fire. Timestamp
-    /// continuity is free — sentence timestamps derive from the engine's
-    /// sample counters, not the capture's. A no-op without a live engine
-    /// (the session is already down).
-    func restartCapture() async throws {
+    /// The queued body of `restartCapture()`: rebuilds the capture stream
+    /// mid-session after the source died — the `capture.lost` toast's Restart
+    /// action. The engine, timers, sentence buffer, and translation queue are
+    /// untouched: no model reload, and `onSessionBegin` does not re-fire.
+    /// Timestamp continuity is free — sentence timestamps derive from the
+    /// engine's sample counters, not the capture's. A no-op without a live
+    /// engine (the session is already down) or once a stop owns the teardown.
+    func performRestartCapture() async throws {
+        guard !stopRequested else { return }
         guard let engine else { return }
         // Defensive: fence any chunks still arriving from the dead stream.
         capture?.stop()
         try await startCapture(for: engine)
+        // A stop that arrived during the rebuilt start owns the teardown: it
+        // runs next in the queue and fences this freshly built capture.
+        guard !stopRequested else { return }
+        engineChannel.markLive()
     }
 
-    /// Suspends the live session without ending it: the capture stops at the
-    /// IOProc (no callbacks while paused), the in-flight utterance is flushed
-    /// through the engine so speech spoken just before pausing still lands as
-    /// a sentence, and the live surfaces clear. Timers keep running so the
-    /// flush final and the buffer tick close what the flush emits. The
-    /// translation queue is deliberately left alone — enqueued sentences
-    /// finish normally.
-    func pause() async {
+    /// The queued body of `pause()`: suspends the live session without
+    /// ending it — the capture stops at the IOProc (no callbacks while
+    /// paused), the in-flight utterance is flushed through the engine so
+    /// speech spoken just before pausing still lands as a sentence, and the
+    /// live surfaces clear. Timers keep running so the flush final and the
+    /// buffer tick close what the flush emits. The translation queue is
+    /// deliberately left alone — enqueued sentences finish normally.
+    func performPause() async {
+        guard !stopRequested else { return }
         await capture?.pause()
-        // A stop that raced this pause owns the teardown (and the engine's
-        // session): the flush must not decode concurrently with `finish()`.
-        guard !isStopping, let engine else { return }
+        // A stop that raced the capture pause owns the teardown: no flush
+        // starts here; the queued stop's `finish` performs the final flush.
+        guard !stopRequested else { return }
+        guard let engine else { return }
         disarmNoAudioWatchdog()
         // The flush decode is a multi-second C call whenever speech is in
-        // flight — keep it off the main actor (mirrors `stop`'s drain).
-        let flush = Task.detached(priority: .userInitiated) { engine.flushUtterance() }
-        pauseFlushTask = flush
-        let flushed = await flush.value
-        pauseFlushTask = nil
-        guard !isStopping else { return }
+        // flight — the channel keeps it off the main actor (mirrors
+        // `stop`'s drain) and reports the flush superseded when a stop
+        // claimed the engine first, so no decode ever overlaps `finish()`.
+        let outcome = await engineChannel.pauseFlush(engine: engine)
+        guard case let .delivered(flushed) = outcome else { return }
         for event in flushed {
             handleASREvent(event)
         }
@@ -304,47 +325,51 @@ final class SessionController {
         clearAudioStaging()
     }
 
-    /// Resumes the capture stopped by `pause()`: restarts the IOProc, arms a
-    /// fresh no-audio watchdog grace window, and resets the presence latch so
-    /// that grace restarts genuinely instead of counting the pre-pause
-    /// silence. Throws when the rig is gone or the HAL refuses the restart —
-    /// the owner then falls back to the capture-lost rebuild flow.
-    func resume() async throws {
+    /// The queued body of `resume()`: restarts the IOProc stopped by
+    /// `pause()`, arms a fresh no-audio watchdog grace window, and resets the
+    /// presence latch so that grace restarts genuinely instead of counting
+    /// the pre-pause silence. Throws when the rig is gone or the HAL refuses
+    /// the restart — the owner then falls back to the capture-lost rebuild
+    /// flow. A stop that arrived while the HAL start was airborne owns the
+    /// teardown: no watchdog and no channel reopening run afterwards.
+    func performResume() async throws {
+        guard !stopRequested else { return }
         guard let capture else { return }
         try await capture.resume()
+        guard !stopRequested else { return }
+        engineChannel.markLive()
         armNoAudioWatchdog()
         clearAudioStaging()
     }
 
-    /// Teardown, ordered so pending translations finish first: capture and
-    /// ASR are shut down immediately, the final flushed sentence is enqueued,
-    /// and only after the translation queue drains (bounded by a timeout)
-    /// does the session wind down. That keeps the tail of the session
-    /// exportable with translations intact.
+    /// Synchronous engine-channel latch for `stop()`: the queue entry point
+    /// runs it before enqueueing, so an airborne transition observes the stop
+    /// without waiting for the queued teardown.
+    func requestEngineStop() {
+        engineChannel.requestStop()
+    }
+
+    /// The queued body of `stop()`: one-shot teardown, ordered so pending
+    /// translations finish first — capture and ASR are shut down immediately,
+    /// the final flushed sentence is enqueued, and only after the translation
+    /// queue drains (bounded by a timeout) does the session wind down. That
+    /// keeps the tail of the session exportable with translations intact.
+    /// The channel hands over any airborne pause flush, so a pause waking
+    /// inside its own await skips its delivery and the flush lands once.
     ///
     /// The engine stays warm: the loaded model is reused by the next session.
-    func stop() async {
-        // Latch before the first await: a pause resuming from its own await
-        // must see the teardown and skip its flush (see `pause()`).
-        isStopping = true
-        // A pause flush in flight owns the engine's session — `finish()`
-        // must never decode concurrently with it. Consume its events here:
-        // a racing pause skipped delivery when it saw the latch, and a
-        // pause that did deliver has already nil'd the field, so exactly
-        // one consumer delivers the flushed sentence.
-        if let flush = pauseFlushTask {
-            for event in await flush.value {
-                handleASREvent(event)
-            }
-        }
+    func performStop() async {
+        guard !hasStopped else { return }
+        hasStopped = true
         // Strictly ordered teardown: capture stops first (synchronous fence),
-        // then the ASR finish → drain runs off-main — `finish` does a bounded
-        // drain wait plus a synchronous flush decode, a multi-second C call
-        // whenever speech is in flight at Stop.
+        // then the channel flushes out any airborne pause and runs the ASR
+        // finish → drain off-main — a bounded drain wait plus a synchronous
+        // flush decode, a multi-second C call whenever speech is in flight
+        // at Stop.
         capture?.stop()
         disarmNoAudioWatchdog()
         if let engine {
-            let drained = await Task.detached(priority: .userInitiated) { engine.finish() }.value
+            let drained = await engineChannel.finish(engine: engine)
             for event in drained {
                 handleASREvent(event)
             }

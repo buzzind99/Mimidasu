@@ -69,10 +69,10 @@ extension CrispASREngine {
         let drainedCleanly = awaitIdleJobs(timeout: drainTimeout)
 
         // Flush any open utterance synchronously — capture has already
-        // stopped, so nothing new can arrive. Skip speechless buffers
-        // (VAD-confirmed silence, or the RMS backstop in degraded mode); a
-        // loud buffer with no VAD pass yet still counts, since a word
-        // spoken just before a pause has had no pass to confirm it.
+        // stopped, so nothing new can arrive. Skip buffers with no decodable
+        // speech (`hasDecodableSpeech`): VAD-confirmed speech always counts,
+        // and so does loud audio the VAD has not analyzed yet — a word spoken
+        // just before a pause has had no pass to rule on it.
         // Snapshot under the state mutex: `close()` nils the session there.
         let (pcm, start, end, utteranceStart, hadSpeech, sessionHandle) = state.withLock { current in
             (
@@ -80,9 +80,7 @@ extension CrispASREngine {
                 current.vadFirstSpeechStartSample ?? current.utteranceStartSample,
                 current.vadLastSpeechEndSample ?? (current.utteranceStartSample + current.utterance.count),
                 current.utteranceStartSample,
-                current.utteranceHasSpeech
-                    || (current.utteranceHasLoudAudio
-                        && (!current.vadActive || current.vadAnalyzedThroughSample == 0)),
+                Self.hasDecodableSpeech(current),
                 current.session
             )
         }
@@ -103,13 +101,14 @@ extension CrispASREngine {
         // fresh utterance (the flush final covered the old one), and at
         // finish the reset is a no-op on a session that is going away. When
         // the flush decoded, capture is fenced and the whole snapshot was
-        // already consumed — close all of it, or the unanalyzed tail would
-        // come back as the next utterance and be transcribed again. Else
-        // the VAD end is the finalized span and the rest re-seeds.
+        // already consumed — close all of it (through the snapshot end, not
+        // a re-read of the live buffer), or the unanalyzed tail would come
+        // back as the next utterance and be transcribed again. Else the VAD
+        // end is the finalized span and the rest re-seeds.
         state.withLock { current in
             finalizeUtterance(
                 &current,
-                end: decodedSnapshot ? start + current.utterance.count : end
+                end: decodedSnapshot ? utteranceStart + pcm.count : end
             )
         }
     }

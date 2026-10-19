@@ -244,6 +244,11 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
         var utteranceHasSpeech = false
         /// RMS backstop: any chunk since the last final/discard was not silent.
         var utteranceHasLoudAudio = false
+        /// Absolute end sample of the last loud chunk since the last
+        /// final/discard (0 = none). Lets the speech predicate separate a
+        /// loud tail the VAD has not analyzed yet from loud audio it has
+        /// already judged speechless.
+        var lastLoudSample = 0
         /// Absolute sample of the end of the last VAD speech span (nil = none yet).
         var vadLastSpeechEndSample: Int?
         /// Absolute sample through which VAD results are valid for the current
@@ -355,6 +360,7 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
             current.lastVADDispatchSample = 0
             current.utteranceHasSpeech = false
             current.utteranceHasLoudAudio = false
+            current.lastLoudSample = 0
             current.vadLastSpeechEndSample = nil
             current.vadAnalyzedThroughSample = 0
             current.vadFirstSpeechStartSample = nil
@@ -383,6 +389,7 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
             // RMS backstop: track whether this buffer is not truly silent.
             if AudioLevels.rms(of: samples) > Self.speechRMS {
                 current.utteranceHasLoudAudio = true
+                current.lastLoudSample = current.totalSamples
             }
 
             maybeScheduleWork(&current)

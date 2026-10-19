@@ -9,16 +9,14 @@ extension AppModel {
     /// in-flight utterance flushes into a sentence, and the timeline and
     /// duration freeze (the duration math excludes paused spans, so the
     /// display freezes without any timer sleight of hand). Only `.running`
-    /// may pause; the transition task is chained through
-    /// `pauseTransitionTask` so a resume can never restart the IOProc before
-    /// the pause's HAL stop landed.
+    /// may pause; the session controller's transition queue runs the pause
+    /// and a later resume in request order, so a resume can never restart
+    /// the IOProc before the pause's HAL stop landed.
     func pause() {
         guard phase == .running else { return }
         phase = .paused
         pauseStartedAt = .now
-        let previous = pauseTransitionTask
-        pauseTransitionTask = Task { @MainActor [weak self] in
-            await previous?.value
+        Task { @MainActor [weak self] in
             guard let self, phase == .paused else { return }
             await sessionController.pause()
             syncPausedToArchive()
@@ -33,14 +31,13 @@ extension AppModel {
     func resume() {
         guard phase == .paused, !resumeInFlight else { return }
         resumeInFlight = true
-        let previous = pauseTransitionTask
         if deferredCaptureError != nil {
             deferredCaptureError = nil
-            pauseTransitionTask = Task { @MainActor [weak self] in
-                // Chain behind the pause transition like the normal branch:
-                // an airborne pause flush must not cut or clear the freshly
-                // restarted stream's first sentence.
-                await previous?.value
+            Task { @MainActor [weak self] in
+                // The rebuild waits for the controller's pause transition to
+                // land: an airborne pause flush must not cut or clear the
+                // freshly restarted stream's first sentence.
+                await self?.sessionController.awaitPauseCompletion()
                 guard let self else { return }
                 guard phase == .paused else {
                     resumeInFlight = false
@@ -51,8 +48,7 @@ extension AppModel {
                 resumeInFlight = false
             }
         } else {
-            pauseTransitionTask = Task { @MainActor [weak self] in
-                await previous?.value
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 do {
                     try await sessionController.resume()

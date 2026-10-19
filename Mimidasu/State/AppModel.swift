@@ -250,10 +250,6 @@ final class AppModel {
     /// rebuild path reports it). Mutated only by `AppModelPause.swift` and
     /// the capture-error wiring below.
     var deferredCaptureError: String?
-    /// The in-flight pause/resume transition, if any. Resumes chain on it so
-    /// a resume clicked before `pause()`'s HAL stop landed can never restart
-    /// the IOProc before the stop did. Mutated only by `AppModelPause.swift`.
-    @ObservationIgnored var pauseTransitionTask: Task<Void, Never>?
     /// True while a resume is airborne (the phase stays `.paused` until the
     /// IOProc is back, so the flag is the double-click guard). Mutated only
     /// by `AppModelPause.swift`.

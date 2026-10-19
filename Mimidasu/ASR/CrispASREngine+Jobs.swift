@@ -49,9 +49,9 @@ extension CrispASREngine {
         }
 
         // Forced-final cap: safety net under VAD, and the only endpoint in
-        // degraded mode. Never decodes a buffer the backstop knows is silent.
+        // degraded mode. Never decodes a buffer `hasDecodableSpeech` rejects.
         if state.utterance.count >= Self.utteranceCapSamples {
-            if state.utteranceHasLoudAudio || state.utteranceHasSpeech {
+            if Self.hasDecodableSpeech(state) {
                 #if DEBUG
                     print("[asr] endpoint: utterance cap reached")
                 #endif
@@ -65,6 +65,20 @@ extension CrispASREngine {
             return true
         }
         return false
+    }
+
+    /// The one rule for whether the open utterance holds anything worth
+    /// decoding. VAD-confirmed speech always counts; the RMS backstop counts
+    /// only while the VAD has not ruled on the loud audio yet — while it is
+    /// out of the loop, has analyzed nothing, or has not reached the last
+    /// loud chunk. A loud tail after a speechless VAD pass is speech the VAD
+    /// has simply not heard yet, so it must not be dropped.
+    static func hasDecodableSpeech(_ state: State) -> Bool {
+        state.utteranceHasSpeech
+            || (state.utteranceHasLoudAudio
+                && (!state.vadActive
+                    || state.vadAnalyzedThroughSample == 0
+                    || state.lastLoudSample > state.vadAnalyzedThroughSample))
     }
 
     /// Caller holds `state`. Re-runs the VAD over the utterance after
@@ -244,6 +258,7 @@ extension CrispASREngine {
         state.utteranceStartSample = 0
         resetEndpointState(&state)
         state.utteranceHasLoudAudio = false
+        state.lastLoudSample = 0
         trimWindow(&state, throughSample: state.totalSamples)
     }
 
@@ -390,10 +405,14 @@ extension CrispASREngine {
             if !state.utterance.isEmpty {
                 state.utteranceHasLoudAudio = true
             }
+            // The remainder re-seeds as a new utterance, so its loud position
+            // can never sit before its start (the first sample kept).
+            state.lastLoudSample = max(state.lastLoudSample, end)
         } else {
             state.utterance = []
             state.utteranceStartSample = 0
             state.utteranceHasLoudAudio = false
+            state.lastLoudSample = 0
         }
         resetEndpointState(&state)
         trimWindow(&state, throughSample: end)

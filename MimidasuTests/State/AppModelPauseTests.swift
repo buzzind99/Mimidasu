@@ -461,3 +461,37 @@ struct AppModelPauseTests {
         #expect(sut.log.names.contains("engine.retire"))
     }
 }
+
+extension AppModelPauseTests {
+    @Test("a normal resume waits for the airborne pause before restarting capture")
+    func normalResumeChainsBehindAirbornePause() async {
+        let gate = PermitGate()
+        let sut = await makeSUT(pauseGate: gate)
+        await startRunning(sut)
+        sut.model.pause()
+        #expect(
+            await pollUntil { sut.log.contains(inOrder: ["capture.pause"]) },
+            "the pause parks on its gate"
+        )
+        #expect(sut.model.phase == .paused)
+
+        sut.model.resume()
+
+        // The pause transition still holds the capture, so the resume must
+        // not reach the HAL; the phase stays `.paused` until the IOProc is
+        // actually back.
+        let resumedWhilePaused = await pollUntil(timeout: 0.05) {
+            sut.log.names.contains("capture.resume")
+        }
+        #expect(!resumedWhilePaused, "the resume waits behind the airborne pause")
+        #expect(sut.model.phase == .paused, "the phase does not flip while the resume is chained")
+
+        gate.release()
+
+        #expect(await pollUntil { sut.model.phase == .running })
+        #expect(sut.log.contains(inOrder: ["capture.pause", "capture.resume"]))
+
+        sut.model.stop()
+        #expect(await pollUntil { sut.model.phase == .idle })
+    }
+}

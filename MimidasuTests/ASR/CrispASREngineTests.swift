@@ -1,13 +1,24 @@
 import Foundation
 @testable import Mimidasu
+import Synchronization
 import Testing
+
+/// VAD cadence constant reused as the analyzed-through mark in the
+/// speech-predicate truth-table rows.
+private let analyzedPrefixSamples = CrispASREngine.vadCheckIntervalSamples
+/// One 0.1 s chunk past the analyzed prefix — the loud tail in the rows.
+private let loudTailEndSamples = analyzedPrefixSamples + CrispASREngine.sampleRate / 10
+/// Matches the fake library's VAD model path, so `vadActive` reads true.
+private let fakeVADModelPath = "/tmp/fake-firered-vad.gguf"
 
 /// Tests the `CrispASREngine` paths reachable without a loaded GGUF model or
 /// a Metal pipeline: the init bind-failure throw (assertable only when the
 /// dylib is absent), `prepare`'s missing-model guard, `openStream`'s state
 /// reset, `push`'s session guard, `poll` on an empty inbox, `close`
 /// idempotency, and `finish`'s sessionless drain (no in-flight jobs →
-/// immediate empty drain).
+/// immediate empty drain). The speech-presence predicate's truth table and
+/// the `lastLoudSample` lifecycle are covered here too — both are
+/// runtime-independent.
 ///
 /// Excluded: the decode/VAD/session internals — real transcription,
 /// endpointing, and the drain's in-flight waits need a bound native dylib +
@@ -17,6 +28,19 @@ import Testing
 /// cancels on the inverse condition.
 @Suite("CrispASREngine")
 struct CrispASREngineTests {
+
+    /// One row of `hasDecodableSpeech`'s truth table. The rule is
+    /// VAD-authoritative: confirmed speech always counts, and the RMS
+    /// backstop counts only for loud audio the VAD has not ruled on yet.
+    struct SpeechPredicateRow: Sendable {
+        let summary: String
+        let utteranceHasSpeech: Bool
+        let utteranceHasLoudAudio: Bool
+        let vadActive: Bool
+        let vadAnalyzedThroughSample: Int
+        let lastLoudSample: Int
+        let expected: Bool
+    }
 
     // MARK: - Fixtures
 
@@ -38,6 +62,21 @@ struct CrispASREngineTests {
             try Test.cancel("native runtime is not available in this environment")
         }
         return engine
+    }
+
+    // MARK: - Helpers
+
+    /// Reads engine state under its mutex — jobs mutate it on their queues.
+    private func state<T>(_ engine: CrispASREngine, _ read: (CrispASREngine.State) -> T) -> T {
+        engine.state.withLock { current in read(current) }
+    }
+
+    private func discardUtterance(in engine: CrispASREngine) {
+        engine.state.withLock { current in engine.discardUtterance(&current) }
+    }
+
+    private func finalizeUtterance(in engine: CrispASREngine, through end: Int) {
+        engine.state.withLock { current in engine.finalizeUtterance(&current, end: end) }
     }
 
     // MARK: - init / binding
@@ -221,5 +260,99 @@ struct CrispASREngineTests {
         #expect(try !CrispASREngine.isCJKSurface(#require("a".unicodeScalars.first)))
         #expect(try !CrispASREngine.isCJKSurface(#require("6".unicodeScalars.first)))
         #expect(try !CrispASREngine.isCJKSurface(#require(" ".unicodeScalars.first)))
+    }
+
+    // MARK: - hasDecodableSpeech
+
+    @Test("hasDecodableSpeech follows the VAD-authoritative truth table", arguments: [
+        SpeechPredicateRow(
+            summary: "VAD-confirmed speech always decodes",
+            utteranceHasSpeech: true, utteranceHasLoudAudio: false,
+            vadActive: true, vadAnalyzedThroughSample: analyzedPrefixSamples,
+            lastLoudSample: 0, expected: true
+        ),
+        SpeechPredicateRow(
+            summary: "silence with no VAD speech never decodes",
+            utteranceHasSpeech: false, utteranceHasLoudAudio: false,
+            vadActive: true, vadAnalyzedThroughSample: analyzedPrefixSamples,
+            lastLoudSample: 0, expected: false
+        ),
+        SpeechPredicateRow(
+            summary: "loud audio decodes while the VAD is out of the loop",
+            utteranceHasSpeech: false, utteranceHasLoudAudio: true,
+            vadActive: false, vadAnalyzedThroughSample: 0,
+            lastLoudSample: 0, expected: true
+        ),
+        SpeechPredicateRow(
+            summary: "loud audio decodes before any VAD pass landed",
+            utteranceHasSpeech: false, utteranceHasLoudAudio: true,
+            vadActive: true, vadAnalyzedThroughSample: 0,
+            lastLoudSample: loudTailEndSamples, expected: true
+        ),
+        SpeechPredicateRow(
+            summary: "a loud tail past the analyzed mark decodes",
+            utteranceHasSpeech: false, utteranceHasLoudAudio: true,
+            vadActive: true, vadAnalyzedThroughSample: analyzedPrefixSamples,
+            lastLoudSample: loudTailEndSamples, expected: true
+        ),
+        SpeechPredicateRow(
+            summary: "loud audio the VAD judged speechless does not decode",
+            utteranceHasSpeech: false, utteranceHasLoudAudio: true,
+            vadActive: true, vadAnalyzedThroughSample: analyzedPrefixSamples,
+            lastLoudSample: analyzedPrefixSamples, expected: false
+        )
+    ])
+    func hasDecodableSpeechFollowsTruthTable(row: SpeechPredicateRow) {
+        var state = CrispASREngine.State()
+        state.utteranceHasSpeech = row.utteranceHasSpeech
+        state.utteranceHasLoudAudio = row.utteranceHasLoudAudio
+        state.vadModelPath = row.vadActive ? fakeVADModelPath : nil
+        state.vadAnalyzedThroughSample = row.vadAnalyzedThroughSample
+        state.lastLoudSample = row.lastLoudSample
+
+        let decodable = CrispASREngine.hasDecodableSpeech(state)
+
+        #expect(decodable == row.expected, "\(row.summary)")
+    }
+
+    // MARK: - lastLoudSample lifecycle
+
+    @Test("lastLoudSample resets with the utterance lifecycle")
+    func lastLoudSampleResetsOnFinalizeDiscardAndOpenStream() throws {
+        let tmp = try TemporaryDirectory(prefix: "mimidasu-crisp-predicate")
+        let modelURL = try tmp.write(Data("gguf".utf8), named: "model.gguf")
+        let engine = try CrispASREngine(modelPath: modelURL, library: FakeCrispASRLibrary())
+        try engine.prepare()
+        try engine.openStream()
+
+        let loudChunk = [Float](repeating: 0.1, count: CrispASREngine.sampleRate / 10)
+        let halfChunk = loudChunk.count / 2
+
+        engine.push(loudChunk)
+        #expect(state(engine) { current in current.lastLoudSample } == loudChunk.count)
+
+        try engine.openStream()
+        #expect(state(engine) { current in current.lastLoudSample } == 0)
+
+        engine.push(loudChunk)
+        discardUtterance(in: engine)
+        #expect(state(engine) { current in current.lastLoudSample } == 0)
+
+        engine.push(loudChunk)
+        finalizeUtterance(in: engine, through: engine.pushedSamples)
+        #expect(state(engine) { current in current.lastLoudSample } == 0)
+
+        // A finalize that leaves a remainder re-seeds it, so the loud
+        // position never falls behind the new utterance's start.
+        engine.push(Array(loudChunk.prefix(halfChunk)))
+        engine.push([Float](repeating: 0, count: loudChunk.count))
+        let reseedEnd = engine.pushedSamples - halfChunk
+        finalizeUtterance(in: engine, through: reseedEnd)
+        #expect(state(engine) { current in current.lastLoudSample } == reseedEnd)
+
+        engine.push([Float](repeating: 0, count: halfChunk))
+        engine.push(loudChunk)
+        finalizeUtterance(in: engine, through: engine.pushedSamples - halfChunk)
+        #expect(state(engine) { current in current.lastLoudSample } == engine.pushedSamples)
     }
 }
