@@ -231,7 +231,7 @@ extension DictionarySearchEngine {
             // spelling) is dropped rather than badged LEMMA. Exact-only
             // probes are primary-key seeks, so no scan bound is at stake.
             let kept = scanned.rows.filter { row in
-                row.entryID < DictionaryContent.nameSeqOffset
+                row.entryID < JMDictNameEntries.ingestOffset
             }
             if isUnwrap {
                 state.rows += kept.map { row in
@@ -388,7 +388,7 @@ extension DictionarySearchEngine {
     ///
     /// Scope rides the rowid range rather than the `entry_id` predicate: with
     /// `rowid = entry_id * 128 + ord` the JMnedict boundary is exactly
-    /// `DictionaryContent.nameSeqOffset * 128`, so one statement covers all
+    /// `JMDictNameEntries.ingestOffset * 128`, so one statement covers all
     /// three scopes and the predicate still rides the scan. Filtering
     /// afterwards instead would pay the read-back for every out-of-scope row —
     /// a `.names` query streaming the entire word block — and `assemble` would
@@ -442,7 +442,7 @@ extension DictionarySearchEngine {
     static func glossRowIDBounds(
         for scope: DictionarySearchFilters.Scope
     ) -> (lower: Int, upper: Int) {
-        let boundary = DictionaryContent.nameSeqOffset * JMDictFTSIndex.ordStride
+        let boundary = JMDictNameEntries.ingestOffset * JMDictFTSIndex.ordStride
         return switch scope {
         case .all: (0, Int.max)
         case .words: (0, boundary)

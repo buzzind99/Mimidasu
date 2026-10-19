@@ -245,7 +245,7 @@ struct DictionaryEntryContentView: View {
     }
 
     private var headword: String {
-        DictionaryContent.headword(of: entry) ?? entry.reb ?? "—"
+        entry.headword ?? entry.reb ?? "—"
     }
 
     private var reading: String? {
@@ -345,7 +345,7 @@ struct DictionaryEntryContentView: View {
             displayOrigin.flatMap(DictionaryContent.joinedMatchBadge(for:)),
             entry.common ? "COMMON" : nil,
             DictionaryContent.jlptBadge(entry.jlpt)
-        ].compactMap(\.self) + DictionaryContent.nameTypeBadges(for: entry)
+        ].compactMap(\.self) + JMDictNameEntries.nameTypeBadges(for: entry)
         if !badges.isEmpty {
             // FlowLayout (the ruby text wrapping engine) keeps long badge
             // sets — name types in particular — inside the card instead of
@@ -429,7 +429,7 @@ struct DictionaryEntryContentView: View {
 
     @ViewBuilder
     private var senseRows: some View {
-        if DictionaryContent.isName(entry) {
+        if entry.isName {
             nameGlossRows
         } else {
             let truncated = DictionaryContent.truncated(entry.senses, limit: senseLimit)

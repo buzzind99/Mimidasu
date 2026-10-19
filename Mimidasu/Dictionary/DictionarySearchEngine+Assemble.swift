@@ -102,8 +102,8 @@ extension DictionarySearchEngine {
             guard let meta = fullMetadata[candidate.entryID] else { return false }
             guard filters.admits(jlpt: candidate.row.jlpt ?? meta.jlpt) else { return false }
             guard filters.admitsName(
-                isName: candidate.entryID >= DictionaryContent.nameSeqOffset,
-                badges: DictionaryContent.nameTypeBadges(
+                isName: JMDictNameEntries.isName(entSeq: candidate.entryID),
+                badges: JMDictNameEntries.nameTypeBadges(
                     posTokens: fullNameTokens[candidate.entryID] ?? []
                 )
             ) else { return false }
@@ -135,7 +135,7 @@ extension DictionarySearchEngine {
             // split for the two predicates — a second scan of the same name
             // rows would buy nothing.
             let all = try sensePosTokens(forEntryIDs: candidates.map(\.entryID), db: db)
-            return (all, all.filter { pair in pair.key >= DictionaryContent.nameSeqOffset })
+            return (all, all.filter { pair in JMDictNameEntries.isName(entSeq: pair.key) })
         } else if filters.filtersPOS {
             // Names carry entity types, never word POS, so they fail the POS
             // predicate through the missing key and need no fetch — this skips
@@ -144,7 +144,7 @@ extension DictionarySearchEngine {
             // POS, so hits carry no name tokens.
             let pos = try sensePosTokens(
                 forEntryIDs: candidates.map(\.entryID).filter { entryID in
-                    entryID < DictionaryContent.nameSeqOffset
+                    entryID < JMDictNameEntries.ingestOffset
                 },
                 db: db
             )
@@ -316,7 +316,7 @@ extension DictionarySearchEngine {
     }
 
     /// Every sense's raw `pos` column per name entry, in sense order — what
-    /// `DictionaryContent.nameTypeBadges(posTokens:)` maps to badges. Names
+    /// `JMDictNameEntries.nameTypeBadges(posTokens:)` maps to badges. Names
     /// only: a word search (the overwhelming majority) asks for nothing, and a
     /// name entry with no tagged sense contributes no key, so the UI renders
     /// no type badges rather than an empty claim.
@@ -333,7 +333,7 @@ extension DictionarySearchEngine {
     ) throws -> [Int: [String?]] {
         try sensePosTokens(
             forEntryIDs: entryIDs.filter { entryID in
-                entryID >= DictionaryContent.nameSeqOffset
+                entryID >= JMDictNameEntries.ingestOffset
             },
             db: db
         )
@@ -405,7 +405,7 @@ extension DictionarySearchEngine {
             // scan never touches `headwords` — the entry's level, so the
             // collapsed row and the expanded entry agree on the badge.
             jlpt: row.jlpt ?? metadata.jlpt,
-            isName: metadata.entSeq >= DictionaryContent.nameSeqOffset,
+            isName: JMDictNameEntries.isName(entSeq: metadata.entSeq),
             namePosTokens: nameTypes,
             matchKind: row.matchKind,
             matchedField: row.matchedField,

@@ -86,7 +86,7 @@ extension JMDictFixtureDatabase {
     /// Both suites that need the shape take it from here, because the defect
     /// this replaced was one of them drifting: the paging suite moved its start
     /// below the name boundary and the state suite kept the old one, which
-    /// straddled `DictionaryContent.nameSeqOffset` — 8,001 entries from
+    /// straddled `JMDictNameEntries.ingestOffset` — 8,001 entries from
     /// 9_994_000 put ~2,000 of them in the JMnedict range, where
     /// `filters.admits` classifies them as names and no `.all`-scope count
     /// notices. The start below leaves ~12,000 of headroom under the boundary.
@@ -105,7 +105,7 @@ extension JMDictFixtureDatabase {
     /// spellings reuse — harmless, because each entry is its own `ent_seq` and
     /// every count here is a count of entries, not of readings.
     ///
-    /// Every entry rides at/above `DictionaryContent.nameSeqOffset` with a
+    /// Every entry rides at/above `JMDictNameEntries.ingestOffset` with a
     /// `surname` sense, so the `SURNAME` badge filter keeps all of them — the
     /// NAME twin of the word headroom shape, in which a bounded scan would hide
     /// rows the post-join badge filter would have kept and turn the filtered
@@ -142,14 +142,14 @@ extension JMDictFixtureDatabase {
     /// `prefixFetchHeadroom + 1` name-range entries under `readingPrefix` — one
     /// row past what the prefix stage's own survivor bound keeps, the NAME twin
     /// of `headroomBoundWords`. The start sits safely above
-    /// `DictionaryContent.nameSeqOffset` with margin, so no entry straddles the
+    /// `JMDictNameEntries.ingestOffset` with margin, so no entry straddles the
     /// word/name boundary the way the old shared start did — see that
     /// factory's comment for the straddle this avoids.
     static func headroomBoundNames(readingPrefix: String = "かん") -> [FixtureWord] {
         bulkNames(
             count: DictionarySearchEngine.prefixFetchHeadroom + 1,
             readingPrefix: readingPrefix,
-            startingAt: DictionaryContent.nameSeqOffset + 20000
+            startingAt: JMDictNameEntries.ingestOffset + 20000
         )
     }
 

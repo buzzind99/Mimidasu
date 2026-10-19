@@ -79,7 +79,7 @@ struct DictionaryPopoverView: View {
                         favoriteStyle: .popover,
                         onToggleFavorite: { requestRemovalIfPending(entry) },
                         onCopy: {
-                            model.copySnippet(DictionaryContent.headword(of: entry) ?? "")
+                            model.copySnippet(entry.headword ?? "")
                         },
                         onSelectAlso: { result in model.selectAlsoPill(result) },
                         isFavoritePillLead: { result in model.isFavoriteLead(result) },
@@ -241,7 +241,7 @@ struct DictionaryCardView: View {
                     favoriteStyle: .card,
                     onToggleFavorite: { requestRemovalIfPending(entry) },
                     onCopy: {
-                        model.copySnippet(DictionaryContent.headword(of: entry) ?? "")
+                        model.copySnippet(entry.headword ?? "")
                     },
                     onSelectAlso: { result in model.selectAlsoPill(result) },
                     isFavoritePillLead: { result in model.isFavoriteLead(result) },

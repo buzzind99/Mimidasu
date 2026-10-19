@@ -66,7 +66,7 @@ struct JMDictGlossIndexScopeTests {
 
         // Names are the entire point of the uncapped scan: they used to be unreachable
         // through `.all`, and now they are not.
-        let offset = DictionaryContent.nameSeqOffset
+        let offset = JMDictNameEntries.ingestOffset
         #expect(names.allSatisfy { entryID in entryID >= offset })
         #expect(words.allSatisfy { entryID in entryID < offset })
         #expect(all.filter { entryID in entryID >= offset }.count == names.count)

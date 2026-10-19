@@ -308,7 +308,7 @@ final class DictionarySearchEngineTests {
     func scopePredicate() {
         // The predicate itself, at the ingest offset that separates the two
         // dictionaries: JMnedict ids arrive as `id + 10M`.
-        let boundary = DictionaryContent.nameSeqOffset
+        let boundary = JMDictNameEntries.ingestOffset
         #expect(boundary == 10_000_000)
 
         let all = DictionarySearchFilters()

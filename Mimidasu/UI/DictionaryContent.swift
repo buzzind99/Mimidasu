@@ -15,14 +15,6 @@ enum DictionaryContent {
     /// truncation happens after resolution (display only, no query cost).
     static let maxAlsoPills = 9
 
-    /// Headword row: the kanji writing when present, else the reading.
-    /// Owned by `FavoriteIdentity` — the identity starred, matched, and
-    /// removed on — kept here so both hosts keep reading it from the content
-    /// assembly they already share.
-    static func headword(of entry: JMDictEntry) -> String? {
-        FavoriteIdentity.headword(of: entry)
-    }
-
     /// Probe-fixed JLPT display: `≈N{value}` (5 → ≈N5 … 1 → ≈N1); nil
     /// omits the badge.
     static func jlptBadge(_ jlpt: Int?) -> String? {
@@ -66,7 +58,7 @@ enum DictionaryContent {
     /// unknown values render verbatim, and tags rendering to the same label
     /// collapse to one badge. Serves word sense rows only — name entries
     /// never reach the sense row, their entity types render in full via
-    /// `nameTypeBadges(for:)`.
+    /// `JMDictNameEntries.nameTypeBadges(for:)`.
     static func posLabels(_ pos: String?) -> [String] {
         guard let pos, !pos.isEmpty else { return [] }
         var seen: Set<String> = []
@@ -74,108 +66,11 @@ enum DictionaryContent {
         for token in pos.components(separatedBy: ",") {
             let tag = token.trimmingCharacters(in: .whitespaces)
             guard !tag.isEmpty else { continue }
-            let label = nameTypeLabels[tag] ?? tag
+            let label = JMDictNameEntries.typeLabel(for: tag) ?? tag
             guard seen.insert(label).inserted else { continue }
             labels.append(label)
         }
         return labels
-    }
-
-    /// JMnedict name type → badge label. The rows cover the pinned corpus's
-    /// full upstream vocabulary (its `tags` table, uppercased minus a
-    /// redundant "name" suffix); a tag the map lacks — a future or retired
-    /// upstream type, or a JMDict POS tag — falls through verbatim.
-    private static let nameTypeLabels = [
-        "surname": "SURNAME",
-        "given": "GIVEN NAME",
-        "fem": "GIVEN NAME",
-        "masc": "GIVEN NAME",
-        "person": "NAME",
-        "place": "PLACE NAME",
-        "organization": "ORGANIZATION",
-        "company": "COMPANY NAME",
-        "station": "STATION",
-        "product": "PRODUCT",
-        "work": "WORK",
-        "unclass": "NAME",
-        "serv": "SERVICE",
-        "char": "CHARACTER",
-        "fict": "FICTION",
-        "ev": "EVENT",
-        "group": "GROUP",
-        "dei": "DEITY",
-        "obj": "OBJECT",
-        "myth": "MYTHOLOGY",
-        "doc": "DOCUMENT",
-        "creat": "CREATURE",
-        "ship": "SHIP",
-        "leg": "LEGEND",
-        "relig": "RELIGION"
-    ]
-
-    /// Filter row's vocabulary: every `nameTypeLabels` value, alphabetical.
-    static let allNameTypeBadges: [String] = [
-        "CHARACTER", "COMPANY NAME", "CREATURE", "DEITY", "DOCUMENT", "EVENT",
-        "FICTION", "GIVEN NAME", "GROUP", "LEGEND", "MYTHOLOGY", "NAME",
-        "OBJECT", "ORGANIZATION", "PLACE NAME", "PRODUCT", "RELIGION",
-        "SERVICE", "SHIP", "STATION", "SURNAME", "WORK"
-    ]
-
-    /// JMnedict ingest offset: name entries ride `ent_seq + 10M`, above
-    /// every JMDict row.
-    static let nameSeqOffset = 10_000_000
-
-    /// True when the entry is a JMnedict name (person, place, company, …).
-    static func isName(_ entry: JMDictEntry) -> Bool {
-        entry.entSeq >= nameSeqOffset
-    }
-
-    /// Badge-row labels for a name entry: every comma-split pos token mapped
-    /// through the friendly labels, deduped in order (`fem`/`given` both land
-    /// on GIVEN NAME); rare unmapped types pass through verbatim. Word
-    /// entries contribute nothing — their POS tags stay in the sense row.
-    static func nameTypeBadges(for entry: JMDictEntry) -> [String] {
-        guard isName(entry) else { return [] }
-        return nameTypeBadges(posTokens: entry.senses.map(\.pos))
-    }
-
-    /// The same mapping over raw stored `pos` columns, for a host that has the
-    /// tags rather than a whole entry — the search row, which reads them
-    /// straight off `senses`. Sharing this entry point is what keeps a
-    /// collapsed search row and an expanded entry from labelling the same
-    /// name differently.
-    static func nameTypeBadges(posTokens: [String?]) -> [String] {
-        var badges: [String] = []
-        for column in posTokens {
-            for token in column?.components(separatedBy: ",") ?? [] {
-                let tag = token.trimmingCharacters(in: .whitespaces)
-                guard !tag.isEmpty else { continue }
-                let badge = nameTypeLabels[tag] ?? tag
-                if !badges.contains(badge) {
-                    badges.append(badge)
-                }
-            }
-        }
-        return badges
-    }
-
-    /// Raw stored `pos` columns → POS groups present (any-sense union), for a
-    /// host that has the tags rather than a whole entry. Word-side tags only;
-    /// name entity types map to nothing. The single home of the POS
-    /// token-split — `DictionarySearchFilters.admitsPOS` delegates here — so
-    /// the engine and any future badge UI read one mapping.
-    static func posGroupsPresent(posTokens: [String?]) -> Set<DictionarySearchFilters.POSGroup> {
-        var groups = Set<DictionarySearchFilters.POSGroup>()
-        for column in posTokens {
-            for token in column?.components(separatedBy: ",") ?? [] {
-                let tag = token.trimmingCharacters(in: .whitespaces)
-                guard !tag.isEmpty else { continue }
-                for group in DictionarySearchFilters.POSGroup.allCases where group.contains(tag: tag) {
-                    groups.insert(group)
-                }
-            }
-        }
-        return groups
     }
 
     /// A name entry's glosses minus the romanization echo: JMnedict stores
@@ -215,7 +110,7 @@ enum DictionaryContent {
     /// (promotion resets the pager to entry 0), falling back to the matched
     /// string when the result carries no entries.
     static func pillLabel(for result: LookupResult) -> String {
-        result.entries.first.flatMap { entry in headword(of: entry) } ?? result.matched
+        result.entries.first?.headword ?? result.matched
     }
 
     /// Badge naming a display result that came from a forward join — the

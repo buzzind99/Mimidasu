@@ -3,11 +3,12 @@ import Foundation
 /// One Favorite identity: the headword rule, the Highlight match, and the
 /// Promotion lead behind a single seam.
 ///
-/// Identity is the dictionary headword — the kanji writing when present,
-/// else the reading; an empty spelling counts as absent. Homographs sharing
-/// a `keb` share one row and one star. The store keeps one value current —
-/// rebuilt on load and removal, folded into on add — and Star, Highlight,
-/// and Promotion read that value instead of re-deriving the rule. The
+/// Identity is the dictionary headword — the entry's rule, read here: the
+/// kanji writing when present, else the reading; an empty spelling counts
+/// as absent. Homographs sharing a `keb` share one row and one star. The
+/// store keeps one value current — rebuilt on load and removal, folded
+/// into on add — and Star, Highlight, and Promotion read that value
+/// instead of re-deriving the rule. The
 /// bound-gate, kana-fold, and potential-unwrap arms live here, once, so
 /// inflection and kana-match fixes land in one place.
 ///
@@ -59,20 +60,16 @@ struct FavoriteIdentity: Equatable, Sendable {
 
     // MARK: - Headword
 
-    /// The written form a star keys on: the kanji writing when present, else
-    /// the reading. An empty kanji writing or reading counts as absent, so
-    /// both empty reads as nil. Every JMDict
-    /// row carries at least one `reb`, so nil only arrives from a hand-built
-    /// entry.
+    /// The written form a star keys on — the dictionary entry's headword
+    /// rule, read here so the identity keeps one spelling of it.
     static func headword(keb: String?, reb: String?) -> String? {
-        let cleanKeb = keb.flatMap { kebValue in kebValue.isEmpty ? nil : kebValue }
-        let cleanReb = reb.flatMap { rebValue in rebValue.isEmpty ? nil : rebValue }
-        return cleanKeb ?? cleanReb
+        JMDictEntry.headword(keb: keb, reb: reb)
     }
 
-    /// An entry's written form — the identity starred, matched, and removed on.
+    /// An entry's written form — the identity starred, matched, and
+    /// removed on.
     static func headword(of entry: JMDictEntry) -> String? {
-        headword(keb: entry.keb, reb: entry.reb)
+        entry.headword
     }
 
     // MARK: - Folds

@@ -386,10 +386,10 @@ private extension DictionarySearchView {
         if hit.isName {
             // The real type badges, not a generic NAME chip: this row's header is
             // the only place a name's types appear now that the expanded block
-            // drops its badge row, and `DictionaryContent` maps them exactly as
+            // drops its badge row, and `JMDictNameEntries` maps them exactly as
             // the entry view does. A name whose senses carry no tags adds
             // nothing rather than a chip that claims what it does not know.
-            for label in DictionaryContent.nameTypeBadges(posTokens: hit.namePosTokens) {
+            for label in JMDictNameEntries.nameTypeBadges(posTokens: hit.namePosTokens) {
                 badges.append(Badge(text: label, color: Theme.brandViolet))
             }
         }

@@ -44,7 +44,7 @@ struct DictionarySearchPagingTests {
     /// the prefix stage's own `prefixFetchHeadroom` keeps, so the survivors
     /// behind that bound are the whole of what this fixture can prove. `かん`
     /// prefixes nothing in the base fixture, so the count is exact. The rows
-    /// and the margin under `DictionaryContent.nameSeqOffset` are the shared
+    /// and the margin under `JMDictNameEntries.ingestOffset` are the shared
     /// `headroomBoundWords` factory's — see it for the straddle this replaced.
     private func makeHeadroomBoundFixture() throws -> DictionarySearchFixture {
         try DictionarySearchFixture(
@@ -55,7 +55,7 @@ struct DictionarySearchPagingTests {
     /// `headroom + 1` surname names under `かん`: the NAME twin of the word
     /// headroom shape, so a name-type-filtered search has a full factory count
     /// to prove exact. Shared from `headroomBoundNames`, whose start sits safely
-    /// above `DictionaryContent.nameSeqOffset` — see that factory for the
+    /// above `JMDictNameEntries.ingestOffset` — see that factory for the
     /// straddle the word twin's comment records.
     private func makeHeadroomBoundNamesFixture() throws -> DictionarySearchFixture {
         try DictionarySearchFixture(
@@ -229,7 +229,7 @@ struct DictionarySearchPagingTests {
         #expect(outcome.hits.count == min(outcome.matchedCount, DictionarySearchEngine.maxRows))
         #expect(outcome.hits.allSatisfy { hit in hit.isName })
         #expect(outcome.hits.allSatisfy { hit in
-            DictionaryContent.nameTypeBadges(posTokens: hit.namePosTokens).contains("SURNAME")
+            JMDictNameEntries.nameTypeBadges(posTokens: hit.namePosTokens).contains("SURNAME")
         })
         let dropped = try fixture.outcome("かん", scope: .names, nameTypes: ["GIVEN NAME"])
         #expect(dropped.matchedCount == 0)

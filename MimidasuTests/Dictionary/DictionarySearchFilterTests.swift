@@ -127,7 +127,7 @@ final class DictionarySearchFilterTests {
         #expect(outcome.isFloor == false)
         #expect(outcome.hits.allSatisfy { hit in hit.isName })
         #expect(outcome.hits.allSatisfy { hit in
-            DictionaryContent.nameTypeBadges(posTokens: hit.namePosTokens).contains("SURNAME")
+            JMDictNameEntries.nameTypeBadges(posTokens: hit.namePosTokens).contains("SURNAME")
         })
     }
 
@@ -202,12 +202,12 @@ final class DictionarySearchFilterTests {
         ]
     ))
     func posGroupMapping(tag: String, group: DictionarySearchFilters.POSGroup) {
-        #expect(DictionaryContent.posGroupsPresent(posTokens: [tag]) == [group])
+        #expect(DictionarySearchFilters.posGroupsPresent(posTokens: [tag]) == [group])
     }
 
     @Test("maps no name entity type to any POS group", arguments: ["surname", "given", "place"])
     func posGroupMappingIgnoresNameTypes(tag: String) {
-        #expect(DictionaryContent.posGroupsPresent(posTokens: [tag]).isEmpty)
+        #expect(DictionarySearchFilters.posGroupsPresent(posTokens: [tag]).isEmpty)
     }
 
     @Test("admitsPOS matches any sense and fails empty token sets while effective")
@@ -271,7 +271,7 @@ final class DictionarySearchFilterTests {
         while try statement.step() {
             verbColumns.append(statement.optionalText(0))
         }
-        #expect(!DictionaryContent.posGroupsPresent(posTokens: verbColumns).isDisjoint(with: [.verb]))
+        #expect(!DictionarySearchFilters.posGroupsPresent(posTokens: verbColumns).isDisjoint(with: [.verb]))
 
         let verbs = try posFixture.outcome("ぽすも", posGroups: [.verb])
 

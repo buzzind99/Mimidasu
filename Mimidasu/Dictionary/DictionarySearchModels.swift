@@ -125,12 +125,12 @@ struct DictionarySearchFilters: Equatable, Sendable {
     }
 
     /// Whether `entSeq` falls in this scope. The boundary is the JMnedict
-    /// ingest offset, the same one `DictionaryContent.nameSeqOffset` reads.
+    /// ingest offset, `JMDictNameEntries.ingestOffset`.
     func admits(entSeq: Int) -> Bool {
         switch scope {
         case .all: true
-        case .words: entSeq < DictionaryContent.nameSeqOffset
-        case .names: entSeq >= DictionaryContent.nameSeqOffset
+        case .words: entSeq < JMDictNameEntries.ingestOffset
+        case .names: entSeq >= JMDictNameEntries.ingestOffset
         }
     }
 
@@ -198,7 +198,25 @@ struct DictionarySearchFilters: Equatable, Sendable {
     /// JLPT nil-fails).
     func admitsPOS(tokens: [String?]) -> Bool {
         guard filtersPOS else { return true }
-        return !DictionaryContent.posGroupsPresent(posTokens: tokens).isDisjoint(with: posGroups)
+        return !Self.posGroupsPresent(posTokens: tokens).isDisjoint(with: posGroups)
+    }
+
+    /// Raw stored `pos` columns → POS groups present (any-sense union), for
+    /// a host that has the tags rather than a whole entry. Word-side tags
+    /// only; name entity types map to nothing. The single home of the POS
+    /// token-split — `admitsPOS` delegates here.
+    static func posGroupsPresent(posTokens: [String?]) -> Set<POSGroup> {
+        var groups = Set<POSGroup>()
+        for column in posTokens {
+            for token in column?.components(separatedBy: ",") ?? [] {
+                let tag = token.trimmingCharacters(in: .whitespaces)
+                guard !tag.isEmpty else { continue }
+                for group in POSGroup.allCases where group.contains(tag: tag) {
+                    groups.insert(group)
+                }
+            }
+        }
+        return groups
     }
 }
 
@@ -271,10 +289,10 @@ struct DictionarySearchHit: Identifiable, Equatable, Sendable {
     }
 
     /// The row's headword — the same identity the favorite star keys on, so
-    /// a search hit and a lookup of the same entry are one favorite. Owned
-    /// by `FavoriteIdentity`.
+    /// a search hit and a lookup of the same entry are one favorite. The
+    /// rule is the entry's, so every host reads one spelling of it.
     var headword: String? {
-        FavoriteIdentity.headword(keb: keb, reb: reb)
+        JMDictEntry.headword(keb: keb, reb: reb)
     }
 }
 

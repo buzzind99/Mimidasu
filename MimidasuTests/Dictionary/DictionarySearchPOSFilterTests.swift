@@ -20,22 +20,22 @@ struct DictionarySearchPOSFilterTests {
         // `aux-adj` is the load-bearing exact entry the `adj` prefix cannot
         // cover; `vi`/`vt`/`vs` pin the transitivity markers the `v` prefix
         // absorbs; the rest pin each closed-vocabulary member.
-        #expect(DictionaryContent.posGroupsPresent(posTokens: [tag]) == [group])
+        #expect(DictionarySearchFilters.posGroupsPresent(posTokens: [tag]) == [group])
     }
 
     @Test("maps no case variant to any POS group", arguments: ["V1", "N", "ADJ-I", "Exp", "PRT"])
     func posGroupMappingRejectsCaseVariants(tag: String) {
         // Upstream tags are lowercase; the match is case-sensitive by design.
-        #expect(DictionaryContent.posGroupsPresent(posTokens: [tag]).isEmpty)
+        #expect(DictionarySearchFilters.posGroupsPresent(posTokens: [tag]).isEmpty)
     }
 
     @Test("splits stored columns on commas and skips empties")
     func posGroupsPresentSplitsColumns() {
-        #expect(DictionaryContent.posGroupsPresent(posTokens: [""]).isEmpty)
-        #expect(DictionaryContent.posGroupsPresent(posTokens: [" "]).isEmpty)
-        #expect(DictionaryContent.posGroupsPresent(posTokens: ["n,,vs"]) == [.noun, .verb])
-        #expect(DictionaryContent.posGroupsPresent(posTokens: ["n", "v1"]) == [.noun, .verb])
-        #expect(DictionaryContent.posGroupsPresent(posTokens: [" v1 , vt "]) == [.verb])
+        #expect(DictionarySearchFilters.posGroupsPresent(posTokens: [""]).isEmpty)
+        #expect(DictionarySearchFilters.posGroupsPresent(posTokens: [" "]).isEmpty)
+        #expect(DictionarySearchFilters.posGroupsPresent(posTokens: ["n,,vs"]) == [.noun, .verb])
+        #expect(DictionarySearchFilters.posGroupsPresent(posTokens: ["n", "v1"]) == [.noun, .verb])
+        #expect(DictionarySearchFilters.posGroupsPresent(posTokens: [" v1 , vt "]) == [.verb])
     }
 
     @Test("admitsPOS unions a multi-select across groups")

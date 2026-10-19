@@ -445,7 +445,7 @@ private func randomElement<T>(_ values: [T], using generator: inout SplitMix64) 
 }
 
 private func randomNameTypeBadge(using generator: inout SplitMix64) -> String {
-    let badges = DictionaryContent.allNameTypeBadges
+    let badges = JMDictNameEntries.allBadges
     guard !badges.isEmpty else { return "SURNAME" }
     return randomElement(badges, using: &generator)
 }

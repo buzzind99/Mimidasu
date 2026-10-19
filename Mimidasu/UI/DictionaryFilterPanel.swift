@@ -278,12 +278,12 @@ struct DictionaryFilterPanel: View {
 
     /// The type chips on screen now. Collapsed: the pins in pinned order,
     /// plus any selected type the pins would otherwise hide — a live filter
-    /// must never vanish behind the disclosure — in `allNameTypeBadges`
+    /// must never vanish behind the disclosure — in `JMDictNameEntries.allBadges`
     /// order. Expanded: all.
     private var visibleNameBadges: [String] {
-        guard !namesExpanded else { return DictionaryContent.allNameTypeBadges }
+        guard !namesExpanded else { return JMDictNameEntries.allBadges }
         let selected = state.filters.nameTypes
-        let extras = DictionaryContent.allNameTypeBadges.filter { badge in
+        let extras = JMDictNameEntries.allBadges.filter { badge in
             selected.contains(badge) && !Self.pinnedNameBadges.contains(badge)
         }
         return Self.pinnedNameBadges + extras

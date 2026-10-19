@@ -199,7 +199,7 @@ final class DictionarySearchEngineInternalsTests {
         let words = (0 ..< 2000).map { entry in
             screenRow(kind: .prefix, entryID: entry + 1)
         }
-        let name = screenRow(kind: .prefix, entryID: DictionaryContent.nameSeqOffset + 1)
+        let name = screenRow(kind: .prefix, entryID: JMDictNameEntries.ingestOffset + 1)
         let all = words + [name]
 
         func saturated(_ rows: [DictionarySearchEngine.CandidateRow], _ scope: DictionarySearchFilters.Scope) -> Bool {
@@ -302,7 +302,7 @@ final class DictionarySearchEngineInternalsTests {
         // The boundary is the same predicate `admits(entSeq:)` applies, packed.
         // Words admits `ent_seq < 10_000_000`, which is exactly
         // `rowid < 10_000_000 * 128`.
-        let boundary = DictionaryContent.nameSeqOffset * JMDictFTSIndex.ordStride
+        let boundary = JMDictNameEntries.ingestOffset * JMDictFTSIndex.ordStride
         #expect(boundary == 1_280_000_000)
 
         let words = DictionarySearchEngine.glossRowIDBounds(for: .words)

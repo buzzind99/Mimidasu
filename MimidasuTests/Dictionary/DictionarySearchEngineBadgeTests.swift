@@ -119,7 +119,7 @@ final class DictionarySearchEngineBadgeTests {
 
         #expect(hit.namePosTokens == ["place,surname"])
         #expect(
-            DictionaryContent.nameTypeBadges(posTokens: hit.namePosTokens)
+            JMDictNameEntries.nameTypeBadges(posTokens: hit.namePosTokens)
                 == ["PLACE NAME", "SURNAME"]
         )
     }
@@ -133,7 +133,7 @@ final class DictionarySearchEngineBadgeTests {
 
         #expect(!hit.isName)
         #expect(hit.namePosTokens.isEmpty)
-        #expect(DictionaryContent.nameTypeBadges(posTokens: hit.namePosTokens).isEmpty)
+        #expect(JMDictNameEntries.nameTypeBadges(posTokens: hit.namePosTokens).isEmpty)
     }
 
     // MARK: Assembly seams

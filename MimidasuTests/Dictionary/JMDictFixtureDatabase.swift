@@ -397,7 +397,7 @@ private extension JMDictFixtureDatabase {
     private static func headwordRows(
         entSeq: Int, kanji: [FixtureKanji], kana: [FixtureKana]
     ) -> [Headword] {
-        if entSeq >= DictionaryContent.nameSeqOffset {
+        if entSeq >= JMDictNameEntries.ingestOffset {
             return kanji.map { object in
                 Headword(kind: "keb", text: nfkc(object.text), jlpt: nil, accent: noAccent)
             } + kana.map { object in

@@ -37,12 +37,6 @@ struct DictionaryContentTests {
 
     // MARK: - Headword, badges, romaji, POS
 
-    @Test("headword prefers the kanji writing and falls back to the reading")
-    func headword() {
-        #expect(DictionaryContent.headword(of: entry()) == "お土産")
-        #expect(DictionaryContent.headword(of: entry(keb: nil)) == "おみやけ")
-    }
-
     @Test("the JLPT badge uses the probe-fixed ≈N mapping and omits when null")
     func jlptBadge() {
         #expect(DictionaryContent.jlptBadge(nil) == nil)
@@ -130,58 +124,6 @@ struct DictionaryContentTests {
             entSeq: entSeq, keb: "木村", reb: reb, common: false, jlpt: nil,
             hatsuon: nil, accPatts: nil, zoPatts: nil,
             senses: senses ?? [sense(pos: pos, glosses: glosses)]
-        )
-    }
-
-    /// The raw-`pos` entry point the search row calls. It must produce exactly
-    /// what the entry overload produces for the same stored tags — that
-    /// equality is the whole reason it exists: a collapsed search row and an
-    /// expanded entry cannot label one name two different ways.
-    @Test("raw pos columns map to the same badges the entry overload does")
-    func nameTypeBadgesFromPosTokens() {
-        let columns: [String?] = ["place,surname"]
-        #expect(
-            DictionaryContent.nameTypeBadges(posTokens: columns)
-                == DictionaryContent.nameTypeBadges(for: nameEntry())
-        )
-        // Dedupe spans columns and a null column is skipped.
-        #expect(
-            DictionaryContent.nameTypeBadges(posTokens: ["surname", nil, "surname", "serv"])
-                == ["SURNAME", "SERVICE"]
-        )
-        #expect(DictionaryContent.nameTypeBadges(posTokens: []) == [])
-        #expect(DictionaryContent.nameTypeBadges(posTokens: [nil]) == [])
-    }
-
-    @Test("only the offset range counts as a name entry")
-    func isName() {
-        // Real data never touches this band (words stay well under the
-        // offset; ingest lands names at 15M+) — the pair pins the >=
-        // predicate itself.
-        #expect(!DictionaryContent.isName(entry()))
-        #expect(DictionaryContent.isName(nameEntry(entSeq: 10_000_000)))
-        #expect(!DictionaryContent.isName(nameEntry(entSeq: 9_999_999)))
-    }
-
-    @Test("name type badges map every stored token, deduped in order")
-    func nameTypeBadgeList() {
-        #expect(DictionaryContent.nameTypeBadges(for: nameEntry()) == ["PLACE NAME", "SURNAME"])
-        #expect(
-            DictionaryContent.nameTypeBadges(for: nameEntry(pos: "surname,place"))
-                == ["SURNAME", "PLACE NAME"]
-        )
-        #expect(DictionaryContent.nameTypeBadges(for: nameEntry(pos: "fem,given")) == ["GIVEN NAME"])
-        #expect(DictionaryContent.nameTypeBadges(for: nameEntry(pos: "char,surname")) == ["CHARACTER", "SURNAME"])
-        #expect(DictionaryContent.nameTypeBadges(for: nameEntry(pos: nil)) == [])
-        // Word entries contribute nothing — their POS tags stay in the sense row.
-        #expect(DictionaryContent.nameTypeBadges(for: entry()) == [])
-        // Dedupe also spans senses (ingest flattens names to one sense
-        // today; the mapper still guards the multi-sense shape).
-        #expect(
-            DictionaryContent.nameTypeBadges(for: nameEntry(senses: [
-                sense(pos: "surname", glosses: ["Kimura"]),
-                sense(pos: "fem,surname", glosses: ["Kimura"])
-            ])) == ["SURNAME", "GIVEN NAME"]
         )
     }
 
