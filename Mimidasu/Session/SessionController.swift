@@ -7,8 +7,10 @@ import Synchronization
 /// export delegation stay in `AppModel`, which plugs in via the callbacks.
 @MainActor
 final class SessionController {
-    /// Upper bound for the translation-tail drain in `stop()`. Also part of
-    /// the quit-time watchdog budget in `AppDelegate`.
+    /// Upper bound for the translation-tail drain in `stop()` — the instance
+    /// default; tests whose queue no worker will ever consume inject a shorter
+    /// `translationDrainTimeout`. Also part of the quit-time watchdog budget
+    /// in `AppDelegate`.
     static let translationDrainTimeout: TimeInterval = 5
 
     /// Grace window after capture start before the no-audio warning fires:
@@ -68,6 +70,9 @@ final class SessionController {
     /// past (the mirror of `pauseFlushTask` for the opposite interleave).
     private var isStopping = false
     private let silenceGracePeriod: Duration
+    /// Bound for `stop()`'s translation-tail drain; `Self.translationDrainTimeout`
+    /// unless a test injects a shorter one.
+    private let translationDrainTimeout: TimeInterval
     /// Path of the model the warm-up last loaded (nil = none yet). Keyed on
     /// path so the warm-up re-arms when the user switches models: the new
     /// GGUF gets prepared in the background instead of loading synchronously
@@ -99,7 +104,8 @@ final class SessionController {
         warmUpEnabled: @escaping () -> Bool = {
             ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
         },
-        silenceGracePeriod: Duration = SessionController.noAudioWarningDelay
+        silenceGracePeriod: Duration = SessionController.noAudioWarningDelay,
+        translationDrainTimeout: TimeInterval = SessionController.translationDrainTimeout
     ) {
         self.live = live
         self.latency = latency
@@ -109,6 +115,7 @@ final class SessionController {
         self.makeCapture = makeCapture
         self.warmUpEnabled = warmUpEnabled
         self.silenceGracePeriod = silenceGracePeriod
+        self.translationDrainTimeout = translationDrainTimeout
     }
 
     // MARK: - Warm-up
@@ -350,7 +357,7 @@ final class SessionController {
         // below), then let the translation worker finish its tail.
         sentenceBuffer?.flush()
         sentenceBuffer = nil
-        _ = await translationQueue.drain(timeout: Self.translationDrainTimeout)
+        _ = await translationQueue.drain(timeout: translationDrainTimeout)
         live.partial = ""
         audioLevel.reset()
         clearAudioStaging()

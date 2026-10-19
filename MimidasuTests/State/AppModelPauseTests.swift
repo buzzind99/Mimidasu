@@ -160,7 +160,11 @@ struct AppModelPauseTests {
                     live: live, latency: latency, translationQueue: translationQueue,
                     makeEngine: { _, _ in engine },
                     makeCapture: { capture },
-                    warmUpEnabled: { false }
+                    warmUpEnabled: { false },
+                    // No `.translationTask` host exists in tests, so a landed
+                    // sentence never drains; the short bound keeps `stop` from
+                    // waiting out the production 5 s window.
+                    translationDrainTimeout: 0.05
                 )
             },
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelPause"),

@@ -82,7 +82,11 @@ struct AppModelArchivePersistenceTests {
                     live: live, latency: latency, translationQueue: translationQueue,
                     makeEngine: { _, _ in engine },
                     makeCapture: { capture },
-                    warmUpEnabled: { false }
+                    warmUpEnabled: { false },
+                    // No `.translationTask` host exists in tests, so a landed
+                    // sentence never drains; the short bound keeps `stop` from
+                    // waiting out the production 5 s window in every case.
+                    translationDrainTimeout: 0.05
                 )
             },
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelArchivePersistence"),
@@ -107,9 +111,10 @@ struct AppModelArchivePersistenceTests {
 
     private func stop(_ sut: SUT) async {
         sut.model.stop()
-        // Stop's queue drain is bounded by `SessionController.translationDrainTimeout`
+        // Stop's queue drain is normally bounded by `translationDrainTimeout`
         // (5 s): with a landed sentence and no hosted `.translationTask` in
-        // tests, nothing consumes the backlog, so the stop waits it out.
+        // tests, nothing consumes the backlog. `makeSUT` injects a short bound;
+        // the stop still winds down through the same drain-expiry path.
         #expect(await pollUntil(timeout: 8) { sut.model.phase == .idle }, "stop winds down")
     }
 
