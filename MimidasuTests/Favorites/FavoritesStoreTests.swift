@@ -451,15 +451,17 @@ struct FavoritesStoreTests {
 
     // MARK: - Cap
 
+    /// A store seeded to the cap through `seededFavorites` — one transaction
+    /// for the fixture rows; the deciding press still runs through the
+    /// production `toggle`/`remove` cap paths.
+    private func makeFullStore() -> (FavoritesStore, () -> Void) {
+        seededFavorites(count: FavoritesStore.limit)
+    }
+
     @Test("the 8193rd distinct add is refused instead of evicting anything")
     func refusesPastTheCap() {
-        let (store, cleanup) = makeStore()
+        let (store, cleanup) = makeFullStore()
         defer { cleanup() }
-        for index in 0 ..< FavoritesStore.limit {
-            store.toggle(FavoriteWord(
-                headword: "語\(index)", reading: nil, romaji: nil, addedAt: index
-            ))
-        }
 
         let outcome = store.toggle(
             FavoriteWord(headword: "overflow", reading: nil, romaji: nil, addedAt: 99999)
@@ -471,13 +473,8 @@ struct FavoritesStoreTests {
 
     @Test("a refused add leaves the list at the cap and nothing evicted")
     func refusalKeepsTheList() {
-        let (store, cleanup) = makeStore()
+        let (store, cleanup) = makeFullStore()
         defer { cleanup() }
-        for index in 0 ..< FavoritesStore.limit {
-            store.toggle(FavoriteWord(
-                headword: "語\(index)", reading: nil, romaji: nil, addedAt: index
-            ))
-        }
         let before = store.revision
 
         store.toggle(
@@ -561,13 +558,8 @@ extension FavoritesStoreTests {
 
     @Test("a removal at the cap still removes")
     func removeAtCapRemoves() {
-        let (store, cleanup) = makeStore()
+        let (store, cleanup) = makeFullStore()
         defer { cleanup() }
-        for index in 0 ..< FavoritesStore.limit {
-            store.toggle(FavoriteWord(
-                headword: "語\(index)", reading: nil, romaji: nil, addedAt: index
-            ))
-        }
 
         let outcome = store.remove(headword: "語0")
 

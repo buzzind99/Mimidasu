@@ -143,12 +143,8 @@ struct AppModelFavoritesTests {
 
     @Test("a full list is refused with the warning pill, never by evicting")
     func fullListWarns() async {
-        let store = isolatedFavorites()
-        for index in 0 ..< FavoritesStore.limit {
-            store.toggle(FavoriteWord(
-                headword: "語\(index)", reading: nil, romaji: nil, addedAt: index
-            ))
-        }
+        let (store, cleanup) = seededFavorites(count: FavoritesStore.limit)
+        defer { cleanup() }
         let model = await makeSUT(favorites: store)
 
         let outcome = model.toggleFavorite(entry())
