@@ -129,7 +129,7 @@ final class ArchiveStore: Sendable {
     /// Every stored session (finalized + interrupted), newest first; Saved
     /// rows carry their flag for the window's section split.
     func list() -> [ArchivedSessionSummary] {
-        (try? database.summaries()) ?? []
+        (try? loadSummaries().get()) ?? []
     }
 
     /// One session with its reconstructed rows; nil when unknown or unreadable.
@@ -146,7 +146,7 @@ final class ArchiveStore: Sendable {
     /// One session's list-row summary without loading its sentences — the
     /// opened banner's refresh read after a landed result.
     func summary(id: Int64) -> ArchivedSessionSummary? {
-        (try? database.summary(id: id)) ?? nil
+        (try? summaryResult(id: id).get()) ?? nil
     }
 
     /// Registers a language on the session (idempotent). Membership persists
@@ -193,5 +193,38 @@ final class ArchiveStore: Sendable {
         } catch {
             return false
         }
+    }
+}
+
+// MARK: - Typed reads
+
+extension ArchiveStore {
+    /// Why a read produced no rows: the file never opened (terminal) versus a
+    /// read that failed after the handle was healthy (transient).
+    enum ReadFailure: Error, Equatable {
+        case openFailed
+        case readFailed
+    }
+
+    /// Every stored session, newest first; typed so a failed read is not
+    /// mistaken for an empty archive.
+    func loadSummaries() -> Result<[ArchivedSessionSummary], ReadFailure> {
+        Self.mapReadFailure({ try database.summaries() }, isDegraded: database.isDegraded)
+    }
+
+    /// One session's list-row summary, typed on the same terms.
+    func summaryResult(id: Int64) -> Result<ArchivedSessionSummary?, ReadFailure> {
+        Self.mapReadFailure({ try database.summary(id: id) }, isDegraded: database.isDegraded)
+    }
+
+    /// The one mapping: a terminal open is `openFailed`; any throw on a
+    /// healthy handle is the transient `readFailed`.
+    static func mapReadFailure<T>(
+        _ body: () throws -> T, isDegraded: Bool
+    ) -> Result<T, ReadFailure> {
+        if isDegraded {
+            return .failure(.openFailed)
+        }
+        do { return try .success(body()) } catch { return .failure(.readFailed) }
     }
 }

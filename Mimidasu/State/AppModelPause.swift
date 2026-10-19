@@ -86,7 +86,7 @@ extension AppModel {
     /// no-op before the first sentence created it).
     func syncPausedToArchive() {
         guard let sessionID = recordingSessionID else { return }
-        archive.syncPaused(session: sessionID, pausedMS: Self.milliseconds(of: sessionPausedTotal))
+        archiveRead.syncPaused(session: sessionID, pausedMS: Self.milliseconds(of: sessionPausedTotal))
     }
 
     /// The effective session start with paused spans excluded: advancing the

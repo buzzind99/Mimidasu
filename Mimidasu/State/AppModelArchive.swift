@@ -17,7 +17,7 @@ extension AppModel {
         // The metadata is assigned by `SessionController.begin` before any
         // chunk can flow, so it is always present when a sentence lands.
         guard let metadata = sessionController.sessionMetadata else { return }
-        guard let id = archive.append(
+        guard let id = archiveRead.append(
             sentence: sentence, sessionID: recordingSessionID, metadata: metadata
         ) else {
             latchArchiveWriteFailure(
@@ -37,7 +37,7 @@ extension AppModel {
         guard let id = recordingSessionID else { return false }
         recordingSessionID = nil
         guard !archiveWriteFailed, !archive.isDegraded,
-              archive.finalize(session: id, durationMS: durationMS, saved: false)
+              archiveRead.finalize(session: id, durationMS: durationMS, saved: false)
         else {
             if !archiveWriteFailed {
                 latchArchiveWriteFailure(
@@ -47,15 +47,13 @@ extension AppModel {
             }
             return false
         }
-        archiveRevision &+= 1
         return true
     }
 
     /// Launch sweep: a `recording` row left by an unclean exit becomes an
     /// Interrupted recent before anything can list the archive.
     func sweepArchivesOnLaunch() {
-        guard archive.sweepInterrupted() else { return }
-        archiveRevision &+= 1
+        guard archiveRead.sweepInterrupted() else { return }
     }
 
     /// Whether session persistence can be trusted this session: the terminal
@@ -191,12 +189,11 @@ extension AppModel {
     /// language. Returns whether the membership write landed.
     @discardableResult
     func addArchiveLanguage(id: Int64, lang: String) -> Bool {
-        guard archive.addLanguage(id: id, lang: lang) else { return false }
+        guard archiveRead.addLanguage(id: id, lang: lang) else { return false }
         if openArchive?.id == id {
             archiveViewingLanguage = lang
             refreshOpenArchiveLanguages()
         }
-        archiveRevision &+= 1
         return true
     }
 
@@ -213,7 +210,7 @@ extension AppModel {
     /// confirmation; updates the opened banner in place when it is the same
     /// session.
     func promoteArchive(id: Int64) {
-        guard archive.promote(id: id) else {
+        guard archiveRead.promote(id: id) else {
             postArchiveWriteWarning(
                 body: "The session store couldn't be written to. This session wasn't saved.",
                 isClosable: true
@@ -223,7 +220,6 @@ extension AppModel {
         if openArchive?.id == id {
             openArchive?.summary.saved = true
         }
-        archiveRevision &+= 1
     }
 
     /// The opened banner's save icon: promotes whatever it displays, when it
@@ -237,7 +233,7 @@ extension AppModel {
     /// clears back to the auto-title. Tier, eviction, ordering, and
     /// timestamps are unaffected.
     func renameArchive(id: Int64, name: String?) {
-        guard archive.rename(id: id, name: name) else {
+        guard archiveRead.rename(id: id, name: name) else {
             postArchiveWriteWarning(
                 body: "The session store couldn't be written to. This rename wasn't applied.",
                 isClosable: true
@@ -247,7 +243,6 @@ extension AppModel {
         if openArchive?.id == id {
             openArchive?.summary.name = ArchiveStore.normalizedName(name)
         }
-        archiveRevision &+= 1
     }
 
     /// Deletes a stored session, closing it first when it is the one open.
@@ -255,13 +250,12 @@ extension AppModel {
         if openArchive?.id == id {
             closeArchive()
         }
-        guard archive.delete(id: id) else {
+        guard archiveRead.delete(id: id) else {
             postArchiveWriteWarning(
                 body: "The session store couldn't be written to. This session wasn't deleted.",
                 isClosable: true
             )
             return
         }
-        archiveRevision &+= 1
     }
 }

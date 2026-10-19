@@ -10,8 +10,9 @@ enum ArchiveWindow {
 
 /// The archive window: the stored sessions split Recent/Saved, newest first.
 /// Rows are browsable and manageable at any time; only opening a transcript
-/// waits for a non-live phase (the inline hint). Degraded store shows the
-/// unavailable state — the window still opens and explains itself.
+/// waits for a non-live phase (the inline hint). The read model's typed
+/// availability drives the unavailable state — the window still opens and
+/// explains itself, and retries a faulted read when it appears again.
 ///
 /// The window owns its delete/rename confirmations through
 /// `ArchiveWindowState` (one slot each); a row never presents an alert of its
@@ -26,7 +27,7 @@ struct ArchiveWindowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            if !model.canOpenArchivedSession, !model.archive.isDegraded {
+            if !model.canOpenArchivedSession, model.archiveRead.isAvailable {
                 liveHint
             }
             content
@@ -34,6 +35,7 @@ struct ArchiveWindowView: View {
         .frame(width: 640, height: 720, alignment: .top)
         .background(Theme.window)
         .preferredColorScheme($appearance.resolvedColorScheme)
+        .onAppear { model.archiveRead.reloadIfUnavailable() }
         .alert("Delete this session?", isPresented: deletePresented, presenting: state.pendingDelete) { summary in
             Button("Cancel", role: .cancel) { state.pendingDelete = nil }
             Button("Delete", role: .destructive) {
@@ -119,22 +121,17 @@ struct ArchiveWindowView: View {
 
     // MARK: - Body
 
-    /// Revision-observing read of the store: `archiveRevision` gates the
-    /// re-evaluation, `list()` is the small sync read.
-    private var sessions: [ArchivedSessionSummary] {
-        _ = model.archiveRevision
-        return model.archive.list()
-    }
-
     private var recentCount: Int {
-        sessions.reduce(0) { count, summary in count + (summary.saved ? 0 : 1) }
+        model.archiveRead.summaries.reduce(0) { count, summary in
+            count + (summary.saved ? 0 : 1)
+        }
     }
 
     @ViewBuilder
     private var content: some View {
-        if model.archive.isDegraded {
+        if !model.archiveRead.isAvailable {
             unavailableState
-        } else if sessions.isEmpty {
+        } else if model.archiveRead.summaries.isEmpty {
             emptyState
         } else {
             sessionList
@@ -191,11 +188,11 @@ struct ArchiveWindowView: View {
     }
 
     private var recents: [ArchivedSessionSummary] {
-        sessions.filter { summary in !summary.saved }
+        model.archiveRead.summaries.filter { summary in !summary.saved }
     }
 
     private var savedSessions: [ArchivedSessionSummary] {
-        sessions.filter { summary in summary.saved }
+        model.archiveRead.summaries.filter { summary in summary.saved }
     }
 
     private func sectionLabel(_ text: String) -> some View {

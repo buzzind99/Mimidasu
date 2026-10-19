@@ -151,6 +151,11 @@ final class AppModel {
     /// default opens the production Application Support file.
     let archive: ArchiveStore
 
+    /// The archive window's cached read surface over `archive`: it owns the
+    /// listed summaries, the typed availability, and the revision every
+    /// landed archive mutation bumps. UI reads only this, never the store.
+    let archiveRead: ArchiveReadModel
+
     /// The stored row of the live recording, created lazily with the first
     /// finalized sentence. Nil before that (and when the archive is
     /// unavailable). Mutated from the persistence path in
@@ -179,11 +184,12 @@ final class AppModel {
     /// in `AppModelArchiveTranslation.swift`.
     let archiveTranslationJob = ArchiveTranslationJob()
 
-    /// Bumped by every archive mutation (persist, finalize, sweep, promote,
-    /// rename, delete): the archive window reloads its rows when it changes.
-    /// Internal setter: mutated from `AppModelArchive.swift` (file split for
-    /// the lint gate).
-    var archiveRevision = 0
+    /// Forwards the archive read model's revision, which bumps once per
+    /// landed archive mutation so the archive window reloads its rows when
+    /// it changes.
+    var archiveRevision: Int {
+        archiveRead.revision
+    }
 
     /// Latest resolve result per choice (bundled → downloaded → dev, SHA-256
     /// verified). The Settings Model section reads it to enable selection;
@@ -311,6 +317,7 @@ final class AppModel {
         self.asrModelSettings = asrModelSettings ?? ASRModelSettings()
         self.favorites = favorites ?? FavoritesStore()
         self.archive = archive ?? ArchiveStore()
+        archiveRead = ArchiveReadModel(store: self.archive)
         self.jmDictLookup = jmDictLookup ?? JMDictLookup()
         self.dictionarySearch = dictionarySearch ?? DictionarySearchEngine()
         modelResolve = initialModelResolve
