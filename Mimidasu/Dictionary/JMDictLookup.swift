@@ -65,22 +65,12 @@ final class JMDictLookup: Sendable {
 
     // MARK: - Queries
 
-    /// Looks up a single candidate; nil when nothing matches.
+    /// Looks up a single candidate as the tapped word itself; nil when
+    /// nothing matches.
     func lookup(_ candidate: LookupCandidate) throws -> LookupResult? {
-        try lookup([candidate])?.display
-    }
-
-    /// Looks up candidates in order; the first hit is the display result and
-    /// later hits adding entries are kept as "also". The expansion-aware
-    /// typed variant (`lookup(_ candidates: [ExpansionCandidate])`)
-    /// additionally classifies a split-only tap as not-found; this untyped
-    /// entry treats every candidate as the tapped word itself, so its
-    /// outcome's `displayOrigin` is always `.tappedSurface`.
-    func lookup(_ candidates: [LookupCandidate]) throws -> LookupOutcome? {
-        guard case let .found(outcome) = try lookup(candidates.map { candidate in
-            ExpansionCandidate(candidate: candidate, origin: .tappedSurface)
-        }) else { return nil }
-        return outcome
+        let expansion = ExpansionCandidate(candidate: candidate, origin: .tappedSurface)
+        guard case let .found(outcome) = try lookup([expansion]) else { return nil }
+        return outcome.display
     }
 
     /// Resolves expansion candidates in order, classifying by origin: the

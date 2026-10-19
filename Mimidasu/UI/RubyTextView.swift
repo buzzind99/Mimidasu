@@ -131,11 +131,12 @@ struct RubyTextView: View, Equatable {
         return .flow(segmentedUnits(for: segments, annotation: annotation))
     }
 
-    /// The tap payload for segment `index`: surface, best-known reading,
-    /// lemma, segment index, and the full sentence text. Pure over the
-    /// given segments; the tap path passes the segments the body rendered,
-    /// so the payload describes the unit the user actually tapped even
-    /// when the host's tap-time re-resolution drifted.
+    /// The tap payload for segment `index`: surface, segment index, and the
+    /// full sentence text. Pure over the given segments; the tap path
+    /// passes the segments the body rendered, so the payload describes the
+    /// unit the user actually tapped even when the host's tap-time
+    /// re-resolution drifted. Annotation is not carried — the host
+    /// re-resolves it from the sentence at tap time.
     static func lookupToken(
         at index: Int, text: String, segments: [ReadingSegment]?
     ) -> LookupToken? {
@@ -143,8 +144,6 @@ struct RubyTextView: View, Equatable {
         let segment = segments[index]
         return LookupToken(
             surface: segment.surface,
-            reading: segment.furigana,
-            lemma: segment.lemma,
             tokenIndex: index,
             sentenceText: text
         )

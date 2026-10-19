@@ -70,8 +70,7 @@ final class AppModelLookupTests {
         // surfaces the annotator-unavailable error instead.
         model.handleLookupTap(
             LookupToken(
-                surface: "xyz", reading: nil, lemma: nil,
-                tokenIndex: 0, sentenceText: "xyz"
+                surface: "xyz", tokenIndex: 0, sentenceText: "xyz"
             ),
             source: .transcript(sentenceIndex: 0, tokenIndex: 0)
         )
@@ -157,7 +156,7 @@ final class AppModelLookupTests {
         let bumpModel = makeModel()
         let before = bumpModel.lookupGeneration
         bumpModel.handleLookupTap(
-            LookupToken(surface: "お", reading: nil, lemma: nil, tokenIndex: 0, sentenceText: "お土産"),
+            LookupToken(surface: "お", tokenIndex: 0, sentenceText: "お土産"),
             source: .liveStrip
         )
         #expect(bumpModel.lookupGeneration == before + 1)

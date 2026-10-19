@@ -271,7 +271,7 @@ struct RubyTextViewTests {
 
     // MARK: - Tap payload
 
-    @Test("lookupToken carries surface, furigana reading, lemma, index, and sentence text")
+    @Test("lookupToken carries surface, index, and sentence text")
     func payloadFields() {
         let segments = [
             segment("食べました", furigana: "たべました", lemma: "食べる"),
@@ -284,8 +284,6 @@ struct RubyTextViewTests {
 
         #expect(token == LookupToken(
             surface: "食べました",
-            reading: "たべました",
-            lemma: "食べる",
             tokenIndex: 0,
             sentenceText: "食べました。"
         ))

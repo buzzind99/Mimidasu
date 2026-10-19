@@ -22,6 +22,16 @@ final class JMDictLookupTests {
         JMDictFixtureDatabase.Built(url: databaseURL).remove()
     }
 
+    /// Runs the typed expansion entry point with every candidate treated as
+    /// the tapped word, unwrapping a found resolution; nil for a miss.
+    private func lookupOutcome(_ candidates: [LookupCandidate]) throws -> LookupOutcome? {
+        let resolution = try engine.lookup(candidates.map { candidate in
+            ExpansionCandidate(candidate: candidate, origin: .tappedSurface)
+        })
+        guard case let .found(outcome) = resolution else { return nil }
+        return outcome
+    }
+
     // MARK: Hits
 
     @Test("hits the lemma candidate with pitch and JLPT from the matched headword row")
@@ -169,14 +179,14 @@ final class JMDictLookupTests {
 
     @Test("returns nil for an empty candidate list")
     func emptyCandidateListReturnsNil() throws {
-        #expect(try engine.lookup([]) == nil)
+        #expect(try lookupOutcome([]) == nil)
     }
 
     // MARK: Candidate ordering
 
     @Test("first hit wins for display; later hits adding entries are kept as also")
     func orderedCandidates() throws {
-        let outcome = try #require(try engine.lookup([
+        let outcome = try #require(try lookupOutcome([
             LookupCandidate(text: "飴"),
             LookupCandidate(text: "あめ")
         ]))
@@ -189,7 +199,7 @@ final class JMDictLookupTests {
 
     @Test("skips a later candidate that only re-hits already-returned entries")
     func duplicateEntryCandidateSkipped() throws {
-        let outcome = try #require(try engine.lookup([
+        let outcome = try #require(try lookupOutcome([
             LookupCandidate(text: "食べる"),
             LookupCandidate(text: "たべる")
         ]))
@@ -200,7 +210,7 @@ final class JMDictLookupTests {
 
     @Test("sorts also results longest match first")
     func alsoOrderLongestFirst() throws {
-        let outcome = try #require(try engine.lookup([
+        let outcome = try #require(try lookupOutcome([
             LookupCandidate(text: "橋"),
             LookupCandidate(text: "たべる"),
             LookupCandidate(text: "アルバイト"),
@@ -215,7 +225,7 @@ final class JMDictLookupTests {
 
     @Test("equal-length also results keep candidate order")
     func alsoEqualLengthKeepsCandidateOrder() throws {
-        let outcome = try #require(try engine.lookup([
+        let outcome = try #require(try lookupOutcome([
             LookupCandidate(text: "橋"),
             LookupCandidate(text: "飴"),
             LookupCandidate(text: "雨")
