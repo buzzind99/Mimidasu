@@ -129,6 +129,7 @@ struct SidebarView: View {
         }
         .buttonStyle(.plain)
         .hoverHighlight(iconButtonShape)
+        .pointerStyle(.link)
         .help("Open the session archive")
         .accessibilityLabel("Open the session archive")
     }
@@ -178,8 +179,7 @@ struct SidebarView: View {
         } label: {
             Label(status.sessionTitle, systemImage: status.sessionIcon)
                 .font(.system(size: 14, weight: .semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, minHeight: 40)
                 .background(
                     Capsule().fill(status.isLiveSession ? Theme.Gradients.stop : Theme.Gradients.start)
                 )
@@ -209,6 +209,7 @@ struct SidebarView: View {
         }
         .buttonStyle(.plain)
         .hoverHighlight(Circle())
+        .pointerStyle(.link)
         .help(help)
         .accessibilityLabel(help)
     }
