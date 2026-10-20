@@ -177,8 +177,9 @@ struct ContentView: View {
         model.lookupPopoverBinding(for: .liveStrip)
     }
 
-    /// The shared disclosure slot, filtered to the archive bulk-run intent:
-    /// the settings intents present in the Settings scene's own sheet, this
+    /// The shared disclosure slot, filtered to the main window's archive
+    /// bulk-run intent: the settings intents present in the Settings scene's
+    /// own sheet and the archive window presents its own intents, so this
     /// one never sees them. Writing nil — the sheet's dismissal — declines
     /// the held slot; decline is idempotent, so a dismissal after an
     /// explicit Decline's clear changes nothing.
@@ -186,7 +187,7 @@ struct ContentView: View {
         Binding(
             get: {
                 guard let pending = model.providerAwaitingDisclosure,
-                      case .archiveTranslation = pending
+                      case .archiveTranslation(_, _, _, .mainWindow) = pending
                 else { return nil }
                 return pending
             },
@@ -199,9 +200,10 @@ struct ContentView: View {
     }
 
     /// The sentences the intent's run would send — the disclosure body's
-    /// count line. Nil for the settings intents (their copy carries none).
+    /// count line. Nil for the settings intents and the archive window's
+    /// intents (their copy carries none here).
     private func disclosureSentenceCount(_ disclosure: PendingCloudDisclosure) -> Int? {
-        if case let .archiveTranslation(_, lang) = disclosure {
+        if case let .archiveTranslation(_, lang, _, .mainWindow) = disclosure {
             return model.archiveTranslationSendCount(lang: lang)
         }
         return nil
@@ -225,10 +227,11 @@ struct ContentView: View {
         }
     }
 
-    /// The capsule's Start path: an open archive never refuses outright — it
-    /// asks to close first; otherwise start is direct.
+    /// The capsule's Start path: an open archive or a running bulk
+    /// translation never refuses outright — it asks first; otherwise start
+    /// is direct.
     private func requestStart() {
-        if model.openArchive != nil {
+        if model.openArchive != nil || model.archiveTranslationRunning {
             pendingArchiveStart = true
         } else {
             model.start()

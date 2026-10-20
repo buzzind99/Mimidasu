@@ -39,7 +39,8 @@ protocol TranslationSessionPort: AnyObject {
     func applyTranslation(index: Int, translation: SentenceTranslation) -> Bool
 
     /// Starts the bulk archive-translation run the cloud disclosure just
-    /// confirmed (the held external selection, mapped to its engine). A no-op
-    /// while a run is claimed or no archive is open.
-    func beginArchiveTranslation(engine: RetranslateEngine, lang: String)
+    /// confirmed (the held external selection, mapped to its engine and
+    /// session). The claim refuses while a run is active; a session no
+    /// longer in the archive posts the unavailable card instead of claiming.
+    func beginArchiveTranslation(engine: RetranslateEngine, lang: String, sessionID: Int64)
 }

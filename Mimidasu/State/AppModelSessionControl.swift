@@ -24,6 +24,10 @@ extension AppModel {
         // "Cleared on next Start": a previous session's failure card must
         // not outlive the user pressing Start again.
         toasts.dismiss(key: ToastKey.sessionFailed)
+        // A bulk translation never outlives a session start: the open-archive
+        // confirmation cancels a running one first, and a completed run's
+        // card clears here so no stale retry survives into live capture.
+        cancelArchiveTranslation()
 
         Task { @MainActor in
             do {

@@ -270,7 +270,8 @@ struct AppModelCloudDisclosureTests {
         sut.model.requestArchiveTranslation(engine: .google, lang: "fr")
 
         #expect(
-            sut.model.providerAwaitingDisclosure == .archiveTranslation(.google, lang: "fr"),
+            sut.model.providerAwaitingDisclosure
+                == .archiveTranslation(.google, lang: "fr", session: sut.id, presenter: .mainWindow),
             "the external pick stages its own disclosure intent"
         )
         #expect(!sut.model.archiveTranslationRunning)

@@ -7,7 +7,7 @@ import Testing
 /// anchors, HUD), the availability gate against live phases, the
 /// promote/rename/delete commands, the banner-update-in-place behavior, and
 /// the bulk-run boundaries (a same-id reopen is a no-op; another id or a
-/// close cancels).
+/// close keeps the run and its card).
 ///
 /// No session machinery involved — these tests seed the store directly and
 /// poke `phase`; the begin-driven persistence lives in
@@ -199,8 +199,8 @@ struct AppModelArchiveTests {
         )
     }
 
-    @Test("opening another archive cancels the run over the previous one")
-    func openAnotherArchiveCancelsRunningRun() async {
+    @Test("opening another archive keeps the run over the previous one")
+    func openAnotherArchiveKeepsRunningRun() async {
         let sut = await makeSUT()
         let secondID = appendArchive(to: sut.store)
         let gate = PermitGate()
@@ -214,43 +214,74 @@ struct AppModelArchiveTests {
             },
             "the run starts and parks on its first sentence"
         )
+        let cardID = archiveToast(sut.model)?.id
+        #expect(cardID != nil, "the started event posts the progress card")
 
         sut.model.openArchiveSession(id: secondID)
 
         #expect(sut.model.openArchive?.id == secondID)
-        #expect(archiveToast(sut.model) == nil, "the swap cancels and clears the card")
+        #expect(sut.model.archiveTranslationRunning, "the swap keeps the run claimed")
+        #expect(archiveToast(sut.model)?.id == cardID, "the swap keeps the run's card")
+        gate.release()
+        gate.release()
         gate.release()
         #expect(
-            await pollUntil { !sut.model.archiveTranslationRunning },
-            "the released run winds down canceled"
+            await pollUntil {
+                archiveToast(sut.model)?.title == "Archive translation finished"
+                    && !sut.model.archiveTranslationRunning
+            },
+            "the released run walks every sentence"
         )
-        #expect(engine.recordedBatches == [["こんにちは"]], "no new sentence starts after the cancel")
         #expect(
-            sut.store.load(id: sut.id)?.entries.first?.translations
-                == [SentenceTranslation(lang: "fr", text: "T:こんにちは", engine: .google)],
-            "the airborne result still persists under the first archive"
+            engine.recordedBatches == [["こんにちは"], ["さようなら"], ["おはよう"]],
+            "no sentence is dropped by the swap"
+        )
+        #expect(
+            sut.store.load(id: sut.id)?.entries.compactMap { entry in entry.translation(for: "fr")?.text }
+                == ["T:こんにちは", "T:さようなら", "T:おはよう"],
+            "every landing persists under the first archive"
         )
     }
 
-    @Test("archive boundaries clear a pending archive-translation intent")
-    func boundariesClearPendingArchiveIntent() async {
+    @Test("archive boundaries clear only main-window intents")
+    func boundariesClearOnlyMainWindowIntents() async {
         let (model, first) = await makeModel()
         let secondID = appendArchive(to: model.archive)
+        let mainWindowIntent = PendingCloudDisclosure.archiveTranslation(
+            .deepl, lang: "fr", session: first, presenter: .mainWindow
+        )
+        let archiveWindowIntent = PendingCloudDisclosure.archiveTranslation(
+            .google, lang: "de", session: secondID, presenter: .archiveWindow
+        )
 
         model.openArchiveSession(id: first)
-        model.providerAwaitingDisclosure = .archiveTranslation(.deepl, lang: "fr")
+        model.providerAwaitingDisclosure = mainWindowIntent
         model.openArchiveSession(id: first)
         #expect(
-            model.providerAwaitingDisclosure == .archiveTranslation(.deepl, lang: "fr"),
+            model.providerAwaitingDisclosure == mainWindowIntent,
             "a same-id reopen swaps nothing and keeps the intent"
         )
 
         model.openArchiveSession(id: secondID)
-        #expect(model.providerAwaitingDisclosure == nil, "the swap clears the archive intent")
+        #expect(model.providerAwaitingDisclosure == nil, "the swap clears the main window's intent")
 
-        model.providerAwaitingDisclosure = .archiveTranslation(.google, lang: "de")
+        model.providerAwaitingDisclosure = mainWindowIntent
         model.closeArchive()
-        #expect(model.providerAwaitingDisclosure == nil, "closing clears it")
+        #expect(model.providerAwaitingDisclosure == nil, "closing clears the main window's intent")
+
+        model.openArchiveSession(id: first)
+        model.providerAwaitingDisclosure = archiveWindowIntent
+        model.openArchiveSession(id: secondID)
+        #expect(
+            model.providerAwaitingDisclosure == archiveWindowIntent,
+            "the swap keeps the archive window's own intent"
+        )
+
+        model.closeArchive()
+        #expect(
+            model.providerAwaitingDisclosure == archiveWindowIntent,
+            "closing the archive keeps the archive window's own intent"
+        )
 
         model.openArchiveSession(id: first)
         model.providerAwaitingDisclosure = .retranslateEngine(.deepl)

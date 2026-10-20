@@ -80,10 +80,12 @@ extension AppModel {
         retranslate.retranslateHifiSessionArrived(engine)
     }
 
-    /// Drops both armed-session states and invalidates in-flight lane work.
+    /// Ends any bulk run resolving against the dedicated sessions, then
+    /// drops both armed-session states and invalidates in-flight lane work.
     /// Test seam over `RetranslateCoordinator.teardown` (the live Apple
     /// branch reaches the coordinator directly).
     func teardownRetranslateSession() {
+        cancelArchiveTranslation()
         retranslate.teardown()
     }
 

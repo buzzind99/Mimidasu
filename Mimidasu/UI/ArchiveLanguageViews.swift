@@ -3,7 +3,7 @@ import SwiftUI
 // The language surfaces of archive mode, kept in one cluster: the capsule
 // chip shared by the banner and the archive rows, the row's `+` pill, the
 // switch-language popover with its in-popover add chooser, and the engine
-// picker behind the banner's Translate button.
+// picker behind the banner's Translate button and each row language chip.
 
 /// One language's count chip (`FR 40/183`): the badge code in the plain
 /// secondary font, the counts in a monospaced emphasis. A value view with no
@@ -87,6 +87,7 @@ struct ArchiveAddLanguagePill: View {
         }
         .buttonStyle(.plain)
         .hoverHighlight(Capsule(), tint: Theme.accentPink, opacity: 0.12)
+        .pointerStyle(.link)
         .help("Add a language")
         .accessibilityLabel("Add a language")
     }
@@ -313,21 +314,26 @@ struct ArchiveSwitchLanguagePopover: View {
     }
 }
 
-/// The engine picker behind the banner's Translate button, for the viewed
-/// language: the two on-device Apple tiers — Apple Intelligence offered and
-/// defaulted to whenever the OS can serve the pair, Apple (NMT) otherwise —
-/// plus every external provider (configured ones selectable), a count line,
-/// and the start action — fill-missing ("Translate N") or a fresh full pass
-/// over a complete language ("Retranslate N").
+/// The engine picker behind the banner's Translate button and each archive
+/// row's language chip, for one stored session and language: the two on-device
+/// Apple tiers — Apple Intelligence offered and defaulted to whenever the OS
+/// can serve the pair, Apple (NMT) otherwise — plus every external provider
+/// (configured ones selectable), a count line, and the start action —
+/// fill-missing ("Translate N") or a fresh full pass over a complete language
+/// ("Retranslate N").
 struct ArchiveTranslationEnginePicker: View {
     var model: AppModel
+    let summary: ArchivedSessionSummary
     let lang: String
-    let language: TargetLanguage
     let onStart: (RetranslateEngine) -> Void
     @Binding var isPresented: Bool
 
     /// The user's pick; nil until they choose — the offered default applies.
     @State private var selection: RetranslateEngine?
+
+    private var language: TargetLanguage {
+        TargetLanguage(code: lang)
+    }
 
     /// Whether the OS can serve the high-fidelity tier for this language.
     private var hifiOffered: Bool {
@@ -361,11 +367,11 @@ struct ArchiveTranslationEnginePicker: View {
     /// The sentences a run would send: missing count, or the full sentence
     /// count when the language is complete.
     private var sendCount: Int {
-        model.archiveTranslationSendCount(lang: lang) ?? 0
+        model.archiveTranslationSendCount(summary: summary, lang: lang)
     }
 
     private var isComplete: Bool {
-        model.archiveLanguageIsComplete(lang)
+        model.archiveLanguageIsComplete(summary: summary, lang: lang)
     }
 
     private var jobIsActive: Bool {
@@ -373,10 +379,12 @@ struct ArchiveTranslationEnginePicker: View {
     }
 
     /// The start action is held back while a run is claimed (one job at a
-    /// time) and while the shared disclosure slot holds an intent — a pick
-    /// then would be refused, so the button must not look live.
+    /// time), while the shared disclosure slot holds an intent, and while a
+    /// live session blocks archive starts — a pick then would be refused, so
+    /// the button must not look live.
     private var actionDisabled: Bool {
         jobIsActive || model.providerAwaitingDisclosure != nil
+            || !model.canOpenArchivedSession
     }
 
     var body: some View {
@@ -531,6 +539,7 @@ struct ArchiveTranslationEnginePicker: View {
             isEnabled: !actionDisabled,
             tint: .white, opacity: 0.15
         )
+        .pointerStyle(actionDisabled ? nil : .link)
         .accessibilityLabel(actionLabel)
     }
 }

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Archive-scene identity, shared by the scene declaration, the openers
@@ -14,10 +15,11 @@ enum ArchiveWindow {
 /// availability drives the unavailable state — the window still opens and
 /// explains itself, and retries a faulted read when it appears again.
 ///
-/// The window owns its delete/rename confirmations through
-/// `ArchiveWindowState` (one slot each); a row never presents an alert of its
-/// own. Opening a session closes this window and leaves the transcript in the
-/// main window.
+/// The window owns its delete/rename confirmations, the row add-language
+/// chooser, and the row translate picker through `ArchiveWindowState` (one
+/// slot each); the popovers attach to row controls but read that shared
+/// state. Opening a session closes this window and leaves the transcript in
+/// the main window.
 struct ArchiveWindowView: View {
     var model: AppModel
     @State private var state = ArchiveWindowState()
@@ -54,6 +56,27 @@ struct ArchiveWindowView: View {
                 }
                 state.pendingRename = nil
             }
+        }
+        // The bulk run's cloud disclosure: this window presents only the
+        // intents raised from its own rows, and the sheet's dismissal
+        // declines the held slot.
+        .sheet(item: archiveDisclosure) { disclosure in
+            CloudDisclosureSheet(
+                intent: disclosure,
+                sentenceCount: disclosureSentenceCount(disclosure),
+                onConfirm: { model.confirmCloudDisclosure(disclosure) },
+                onDecline: { model.declineCloudDisclosure() }
+            )
+        }
+        // A SwiftUI scene close does not reliably reach `onDisappear`, so the
+        // AppKit close notification owns the decline. A sheet's close is not
+        // the window's close; the sheet-parent guard rejects it.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
+            guard let window = note.object as? NSWindow,
+                  window.sheetParent == nil,
+                  window.title == ArchiveWindow.title
+            else { return }
+            model.declineArchiveWindowDisclosure()
         }
     }
 
@@ -218,6 +241,60 @@ struct ArchiveWindowView: View {
         )
     }
 
+    /// The per-row binding for the translate picker: true while this row and
+    /// language own the window's one picker slot.
+    private func translationPickerPresented(
+        summary: ArchivedSessionSummary, lang: String
+    ) -> Binding<Bool> {
+        Binding(
+            get: {
+                state.translationPicker
+                    == ArchiveWindowState.TranslationPickerTarget(
+                        sessionID: summary.id, lang: lang
+                    )
+            },
+            set: { isPresented in
+                if isPresented {
+                    state.requestTranslationPicker(summary, lang: lang)
+                } else {
+                    state.clearTranslationPicker(sessionID: summary.id, lang: lang)
+                }
+            }
+        )
+    }
+
+    /// The shared disclosure slot, filtered to this window's bulk-run
+    /// intents: the main window and Settings present their own. Writing nil —
+    /// the sheet's dismissal — declines the held slot; decline is idempotent,
+    /// so a dismissal after an explicit Decline changes nothing.
+    private var archiveDisclosure: Binding<PendingCloudDisclosure?> {
+        Binding(
+            get: {
+                guard let pending = model.providerAwaitingDisclosure,
+                      case .archiveTranslation(_, _, _, .archiveWindow) = pending
+                else { return nil }
+                return pending
+            },
+            set: { newValue in
+                if newValue == nil {
+                    model.declineCloudDisclosure()
+                }
+            }
+        )
+    }
+
+    /// The sentences the row-started run would send — the disclosure body's
+    /// count line, read from the pending session's summary. Nil when the
+    /// summary is no longer listed.
+    private func disclosureSentenceCount(_ disclosure: PendingCloudDisclosure) -> Int? {
+        guard case let .archiveTranslation(_, lang, session, .archiveWindow) = disclosure,
+              let summary = model.archiveRead.summaries.first(where: { summary in
+                  summary.id == session
+              })
+        else { return nil }
+        return model.archiveTranslationSendCount(summary: summary, lang: lang)
+    }
+
     private func row(_ summary: ArchivedSessionSummary) -> some View {
         let job = model.archiveTranslationJob
         // The scoped activity: this session's claim is visible from the
@@ -232,6 +309,9 @@ struct ArchiveWindowView: View {
             jobLang: request?.lang,
             jobProgress: activity.progress.map { progress in (progress.processed, progress.total) },
             chooserPresented: chooserPresented(summary),
+            translationPickerPresented: { lang in
+                translationPickerPresented(summary: summary, lang: lang)
+            },
             onOpen: { open(summary) },
             onDelete: { state.requestDelete(summary) },
             onRename: { state.requestRename(summary) },
@@ -266,6 +346,9 @@ private struct ArchiveRow: View {
     let jobProgress: (Int, Int)?
     /// The add-language chooser's presentation, anchored on the `+` pill.
     @Binding var chooserPresented: Bool
+    /// The translate picker's presentation for one row language, anchored on
+    /// its chip.
+    let translationPickerPresented: (String) -> Binding<Bool>
     let onOpen: () -> Void
     let onDelete: () -> Void
     let onRename: () -> Void
@@ -307,13 +390,7 @@ private struct ArchiveRow: View {
                 }
             }
             VStack(alignment: .trailing, spacing: 10) {
-                HStack(spacing: 6) {
-                    actionButton("trash", help: "Delete", action: onDelete)
-                    actionButton("pencil", help: "Rename", action: onRename)
-                    if !summary.saved {
-                        actionButton("bookmark", help: "Save permanently", action: onSave)
-                    }
-                }
+                actionButtons
                 Button(action: onOpen) {
                     Text("Open")
                         .font(.system(size: 11, weight: .bold))
@@ -329,6 +406,8 @@ private struct ArchiveRow: View {
                 .disabled(!canOpen)
                 .opacity(canOpen ? 1 : 0.45)
                 .help(canOpen ? "Open this transcript" : "Stop the session to open transcripts")
+                .onHover { _ in }
+                .pointerStyle(canOpen ? .link : nil)
             }
         }
         .padding(.horizontal, 12)
@@ -336,19 +415,33 @@ private struct ArchiveRow: View {
         .cardSurface(radius: 12)
     }
 
-    /// The row's language chips, display-only, with the `+` pill that opens
-    /// the add-language chooser for this session — the only interactive
-    /// element on the line.
+    /// The Delete/Rename/Save cluster. Delete is refused while this session's
+    /// run is walking it: no click, no link cursor, and the help says why.
+    private var actionButtons: some View {
+        HStack(spacing: 6) {
+            actionButton(
+                "trash",
+                help: isJobRunning
+                    ? "Can't delete while this session is translating"
+                    : "Delete",
+                isEnabled: !isJobRunning,
+                showsLink: !isJobRunning,
+                action: onDelete
+            )
+            actionButton("pencil", help: "Rename", action: onRename)
+            if !summary.saved {
+                actionButton("bookmark", help: "Save permanently", action: onSave)
+            }
+        }
+    }
+
+    /// The row's language chips, each a button opening the translate picker
+    /// for its language, with the `+` pill that opens the add-language
+    /// chooser for this session.
     private var chipLine: some View {
         HStack(spacing: 6) {
             ForEach(summary.langs) { count in
-                ArchiveLanguageChip(
-                    count: count,
-                    total: summary.sentenceCount,
-                    busy: isJobRunning && count.lang == jobLang,
-                    selected: model.openArchive?.id == summary.id
-                        && count.lang == model.archiveViewingCode
-                )
+                languageChipButton(count)
             }
             ArchiveAddLanguagePill {
                 chooserPresented = true
@@ -372,8 +465,48 @@ private struct ArchiveRow: View {
         .padding(.top, 4)
     }
 
+    /// One language chip as a button: opens the translate/re-translate
+    /// picker for this session and language. No chevron — the hover
+    /// highlight and link cursor advertise the click.
+    private func languageChipButton(_ count: ArchiveLanguageCount) -> some View {
+        let isPresented = translationPickerPresented(count.lang)
+        return Button {
+            isPresented.wrappedValue = true
+        } label: {
+            ArchiveLanguageChip(
+                count: count,
+                total: summary.sentenceCount,
+                busy: isJobRunning && count.lang == jobLang,
+                selected: model.openArchive?.id == summary.id
+                    && count.lang == model.archiveViewingCode
+            )
+        }
+        .buttonStyle(.plain)
+        .hoverHighlight(Capsule())
+        .pointerStyle(.link)
+        .help("Translate or re-translate this language")
+        .popover(isPresented: isPresented, arrowEdge: .bottom) {
+            ArchiveTranslationEnginePicker(
+                model: model,
+                summary: summary,
+                lang: count.lang,
+                onStart: { engine in
+                    model.requestArchiveTranslation(
+                        engine: engine, lang: count.lang, sessionID: summary.id,
+                        presenter: .archiveWindow
+                    )
+                },
+                isPresented: isPresented
+            )
+        }
+    }
+
     private func actionButton(
-        _ systemImage: String, help: String, action: @escaping () -> Void
+        _ systemImage: String,
+        help: String,
+        isEnabled: Bool = true,
+        showsLink: Bool = true,
+        action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
@@ -391,7 +524,13 @@ private struct ArchiveRow: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .hoverHighlight(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.45)
+        .hoverHighlight(
+            RoundedRectangle(cornerRadius: 7, style: .continuous),
+            isEnabled: isEnabled
+        )
+        .pointerStyle(showsLink ? .link : nil)
         .help(help)
         .accessibilityLabel(help)
     }

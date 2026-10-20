@@ -356,10 +356,10 @@ struct ArchiveTranslationResolutionTests {
 }
 
 /// The lane-chain half of the archive-translation coverage: the job's claim
-/// over airborne lane work and its release when the surface goes away, plus
-/// the target-gated adoption of dedicated-session engines by the per-row
-/// lane, the bulk run, and the external engine factory. Split into its own
-/// suite to keep both type bodies under the lint gate.
+/// over airborne lane work and its survival across a close during
+/// resolution, plus the target-gated adoption of dedicated-session engines
+/// by the per-row lane, the bulk run, and the external engine factory.
+/// Split into its own suite to keep both type bodies under the lint gate.
 @MainActor
 @Suite("AppModelArchiveTranslationAdoption")
 struct ArchiveTranslationAdoptionTests {
@@ -426,8 +426,8 @@ struct ArchiveTranslationAdoptionTests {
         )
     }
 
-    @Test("a close during resolution releases the job claim behind an airborne lane")
-    func closeDuringResolutionReleasesClaimBehindAirborneLane() async {
+    @Test("a close during resolution keeps the job claim and the run finishes")
+    func closeDuringResolutionKeepsClaimBehindAirborneLane() async {
         let sut = await makeSUT()
         let engine = ScriptedArchiveEngine()
         sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "fr")
@@ -453,22 +453,31 @@ struct ArchiveTranslationAdoptionTests {
             "the run reaches resolution behind the airborne lane"
         )
 
-        // Close before the lane is released: the epoch turns over, so the
-        // resolution's deliverability poll must release the job's claim
-        // instead of parking behind the airborne link until it drains.
+        // Close before the lane is released: the boundary retires lane work
+        // but leaves the job claimed, so the resolution waits out the
+        // airborne link and then flies the stored session.
         sut.model.closeArchive()
-        #expect(
-            await pollUntil(timeout: resultTimeout) { !sut.model.archiveTranslationRunning },
-            "the close releases the job claim"
-        )
+        #expect(sut.model.archiveTranslationRunning, "the close keeps the job claim")
 
         gate.release()
         await laneTask?.value
 
-        #expect(sut.model.archiveTranslationJob.lastRun == nil, "no run ever starts")
-        #expect(sut.model.archiveTranslationJob.activity == .idle, "the claim is fully released")
-        #expect(engine.recordedBatches.isEmpty, "the run's engine is never flown")
-        #expect(archiveToast(sut.model) == nil, "a cancelled resolution posts no card")
+        #expect(
+            await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
+            "the resolution proceeds once the airborne lane drains"
+        )
+        #expect(
+            engine.recordedBatches == [["こんにちは"], ["さようなら"], ["おはよう"]],
+            "the run's engine flies every sentence after the close"
+        )
+        #expect(
+            sut.model.archiveTranslationJob.lastRun?.request.sessionID == sut.id,
+            "the run stays on its archive"
+        )
+        #expect(
+            archiveToast(sut.model)?.title == "Archive translation finished",
+            "the finished run posts its summary card"
+        )
     }
 
     // MARK: - Target-gated engine adoption

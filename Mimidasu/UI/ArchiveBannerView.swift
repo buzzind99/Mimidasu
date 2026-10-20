@@ -38,6 +38,7 @@ struct ArchiveBannerView: View {
                     }
                     .buttonStyle(.plain)
                     .hoverHighlight(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .pointerStyle(.link)
                     .help("Rename this session")
                     .accessibilityLabel("Rename this session")
                 }
@@ -71,7 +72,7 @@ struct ArchiveBannerView: View {
     private func trailingCluster(_ archive: ArchivedSession) -> some View {
         HStack(spacing: 10) {
             languageChip(archive)
-            translateButton
+            translateButton(archive)
             saveButton(archive.summary)
         }
     }
@@ -102,6 +103,7 @@ struct ArchiveBannerView: View {
         }
         .buttonStyle(.plain)
         .hoverHighlight(Capsule())
+        .pointerStyle(.link)
         .help("Switch the viewed language")
         .accessibilityLabel(viewedLanguageLabel(
             viewingCount, total: archive.summary.sentenceCount,
@@ -140,7 +142,7 @@ struct ArchiveBannerView: View {
     /// The Translate button: opens the engine picker for the viewed
     /// language. Held back while a bulk run is claimed (one job at a time)
     /// and without a viewed language to translate.
-    private var translateButton: some View {
+    private func translateButton(_ archive: ArchivedSession) -> some View {
         let disabled = model.archiveTranslationJob.activity != .idle || model.archiveViewingCode == nil
         return Button {
             isTranslatePopoverPresented = true
@@ -164,14 +166,15 @@ struct ArchiveBannerView: View {
             isEnabled: !disabled,
             tint: .white, opacity: 0.15
         )
+        .pointerStyle(disabled ? nil : .link)
         .help("Translate this archive's viewed language")
         .accessibilityLabel("Translate the viewed language")
         .popover(isPresented: $isTranslatePopoverPresented, arrowEdge: .bottom) {
             if let code = model.archiveViewingCode {
                 ArchiveTranslationEnginePicker(
                     model: model,
+                    summary: archive.summary,
                     lang: code,
-                    language: TargetLanguage(code: code),
                     onStart: { engine in startTranslation(engine, lang: code) },
                     isPresented: $isTranslatePopoverPresented
                 )
@@ -184,7 +187,10 @@ struct ArchiveBannerView: View {
     /// starts its run directly, and an external pick is parked for the
     /// disclosure whose confirm callback starts the run.
     private func startTranslation(_ engine: RetranslateEngine, lang: String) {
-        model.requestArchiveTranslation(engine: engine, lang: lang)
+        guard let sessionID = model.openArchive?.id else { return }
+        model.requestArchiveTranslation(
+            engine: engine, lang: lang, sessionID: sessionID, presenter: .mainWindow
+        )
     }
 
     /// Whether the bulk job claims or runs for this session and language —
@@ -216,6 +222,7 @@ struct ArchiveBannerView: View {
             }
             .buttonStyle(.plain)
             .hoverHighlight(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .pointerStyle(.link)
             .help("Save permanently")
             .accessibilityLabel("Save permanently")
         }

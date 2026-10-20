@@ -11,6 +11,14 @@ enum ActiveTranslationEngine: Equatable {
     case external
 }
 
+/// The window that raised an archive bulk-run disclosure. The intent is
+/// staged and confirmed within that window, so each window presents only its
+/// own intents and clears only its own intents on a pane boundary.
+enum ArchiveDisclosurePresenter: String, Equatable, Sendable {
+    case mainWindow
+    case archiveWindow
+}
+
 /// The intent held behind the cloud disclosure sheet: completing a provider
 /// switch (the live translation engine), a re-translate engine selection, or
 /// a bulk archive-translation start. All raise the same sheet with the same
@@ -18,15 +26,19 @@ enum ActiveTranslationEngine: Equatable {
 enum PendingCloudDisclosure: Equatable, Identifiable {
     case providerSwitch(TranslationProvider)
     case retranslateEngine(TranslationProvider)
-    /// A bulk run's external provider pick, paired with the run's language;
-    /// unlike the settings intents this is job-local (never persisted).
-    case archiveTranslation(TranslationProvider, lang: String)
+    /// A bulk run's external provider pick, paired with the run's session,
+    /// language, and owning window; unlike the settings intents this is
+    /// job-local (never persisted).
+    case archiveTranslation(
+        TranslationProvider, lang: String, session: Int64, presenter: ArchiveDisclosurePresenter
+    )
 
     var id: String {
         switch self {
         case let .providerSwitch(provider): "switch.\(provider.rawValue)"
         case let .retranslateEngine(provider): "retranslate.\(provider.rawValue)"
-        case let .archiveTranslation(provider, lang): "archive.\(provider.rawValue).\(lang)"
+        case let .archiveTranslation(provider, lang, session, presenter):
+            "archive.\(provider.rawValue).\(lang).\(session).\(presenter.rawValue)"
         }
     }
 
@@ -34,7 +46,7 @@ enum PendingCloudDisclosure: Equatable, Identifiable {
         switch self {
         case let .providerSwitch(provider): provider
         case let .retranslateEngine(provider): provider
-        case let .archiveTranslation(provider, _): provider
+        case let .archiveTranslation(provider, _, _, _): provider
         }
     }
 }
@@ -320,14 +332,14 @@ extension TranslationSessionCoordinator {
             guard let engine = RetranslateEngine(provider: provider) else { return }
             providerAwaitingDisclosure = nil
             settings.selectRetranslate(engine)
-        case let .archiveTranslation(provider, lang):
+        case let .archiveTranslation(provider, lang, session, _):
             // Validate the mapping BEFORE clearing the slot: a failed
             // mapping must not close the sheet having applied nothing
             // (defense in depth — archive intents are only built for
             // external providers, where the mapping is total).
             guard let engine = RetranslateEngine(provider: provider) else { return }
             providerAwaitingDisclosure = nil
-            host?.beginArchiveTranslation(engine: engine, lang: lang)
+            host?.beginArchiveTranslation(engine: engine, lang: lang, sessionID: session)
         }
     }
 

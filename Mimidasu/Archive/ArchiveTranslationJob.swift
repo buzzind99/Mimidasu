@@ -38,9 +38,9 @@ final class ArchiveTranslationJob {
     enum EngineResolution: Sendable {
         case ready(engine: any TranslationEngine, kind: TranslationEngineKind)
         case unavailable(reason: String)
-        /// The arm window was cut short by a lane teardown (the archive
-        /// closed): no job starts and nothing reports — the surface that
-        /// would have shown it is gone.
+        /// The wait was cut short by the run's own cancellation: no job
+        /// starts and nothing reports — the surface that would have shown
+        /// it is gone.
         case cancelled
     }
 

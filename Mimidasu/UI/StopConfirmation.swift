@@ -23,21 +23,42 @@ struct StopConfirmation: ViewModifier {
 }
 
 /// The close-the-archive-and-start confirmation. Start is never refused
-/// outright while an archived session is open — it asks first; confirm closes
-/// the archive and starts, Cancel keeps the archive open.
+/// outright while an archived session is open or a bulk translation is
+/// running — it asks first; confirm stops any run, closes the archive, and
+/// starts; Cancel changes nothing.
 struct ArchiveStartConfirmation: ViewModifier {
     let model: AppModel
     @Binding var isPresented: Bool
 
     func body(content: Content) -> some View {
-        content.alert("Close the archive and start a new session?", isPresented: $isPresented) {
+        let jobRunning = model.archiveTranslationRunning
+        content.alert(
+            Text(
+                jobRunning
+                    ? "Stop the translation and start a new session?"
+                    : "Close the archive and start a new session?"
+            ),
+            isPresented: $isPresented
+        ) {
             Button("Cancel", role: .cancel) {}
-            Button("Start session") {
-                model.closeArchive()
-                model.start()
+            if jobRunning {
+                Button("Stop translation and start") {
+                    model.cancelArchiveTranslation()
+                    model.closeArchive()
+                    model.start()
+                }
+            } else {
+                Button("Start session") {
+                    model.closeArchive()
+                    model.start()
+                }
             }
         } message: {
-            Text("The archived session stays in the archive; the transcript pane empties.")
+            Text(
+                jobRunning
+                    ? "A batch translation is still running. Starting a new session stops it — translations already finished are kept."
+                    : "The archived session stays in the archive; the transcript pane empties."
+            )
         }
     }
 }

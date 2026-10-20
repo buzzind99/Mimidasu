@@ -14,7 +14,8 @@ extension AppModel {
         archiveTranslationJob.resolveEngine = { [weak self] engine, target in
             guard let self else { return .cancelled }
             return await retranslate.resolveArchiveJobEngine(
-                selection: archiveJobSelection(for: engine, target: target), target: target
+                selection: archiveJobSelection(for: engine, target: target), target: target,
+                shouldAbort: { self.archiveTranslationJob.isCancelled }
             )
         }
         archiveTranslationJob.land = { [weak self] index, translation in
@@ -32,49 +33,107 @@ extension AppModel {
     /// engine picker's action and the cloud disclosure's confirm callback.
     /// The scope derives from the language's completeness: missing sentences
     /// fill, a complete language re-translates every sentence as a fresh
-    /// full pass. A no-op while a run is claimed or no archive is open.
+    /// full pass. The claim refuses while a run is active; a session no
+    /// longer in the archive reports that instead of claiming.
+    func beginArchiveTranslation(engine: RetranslateEngine, lang: String, sessionID: Int64) {
+        let entries: [SessionEntry]
+        if let openArchive, openArchive.id == sessionID {
+            entries = openArchive.entries
+        } else if let stored = archive.load(id: sessionID) {
+            entries = stored.entries
+        } else {
+            toasts.post(
+                key: ToastKey.archiveTranslation, style: .yellowAuto,
+                title: "Archive translation unavailable",
+                body: "This session is no longer in the archive."
+            )
+            return
+        }
+        let translated = Self.translatedIndexes(in: entries, lang: lang)
+        let scope: ArchiveTranslationJob.Scope =
+            translated.count >= entries.count && !entries.isEmpty ? .all : .missing
+        claimAndRunArchiveTranslation(
+            ArchiveTranslationJob.Request(
+                sessionID: sessionID,
+                lang: lang,
+                engine: engine,
+                sentences: entries.map(\.sentence),
+                translated: translated,
+                scope: scope
+            )
+        )
+    }
+
+    /// The open archive's spelling, for the banner and existing callers.
     func beginArchiveTranslation(engine: RetranslateEngine, lang: String) {
-        beginArchiveTranslation(engine: engine, lang: lang, scope: nil)
+        guard let sessionID = openArchive?.id else { return }
+        beginArchiveTranslation(engine: engine, lang: lang, sessionID: sessionID)
     }
 
     /// The failure summary's Retry action: re-runs the same language and
     /// engine over exactly the failed sentences, in index order, without
-    /// re-raising the cloud disclosure. Refused when the archive moved on:
-    /// the run is built from the currently open archive, so retrying the
-    /// previous archive's failure set would silently modify a session the
-    /// result was never reported for.
+    /// re-raising the cloud disclosure. Rebuilt from the previous run's
+    /// captured request, so it works whether or not that session is still
+    /// open.
     func retryFailedArchiveTranslation() {
         guard archiveTranslationJob.activity == .idle,
-              let previous = archiveTranslationJob.lastRun,
-              previous.request.sessionID == openArchive?.id,
+              let run = archiveTranslationJob.lastRun,
               !archiveTranslationJob.failureIndexes.isEmpty
         else { return }
-        beginArchiveTranslation(
-            engine: previous.request.engine,
-            lang: previous.request.lang,
-            scope: .failedOnly(Set(archiveTranslationJob.failureIndexes))
+        guard archive.load(id: run.request.sessionID) != nil else {
+            toasts.post(
+                key: ToastKey.archiveTranslation, style: .yellowAuto,
+                title: "Archive translation unavailable",
+                body: "This session is no longer in the archive."
+            )
+            return
+        }
+        claimAndRunArchiveTranslation(
+            ArchiveTranslationJob.Request(
+                sessionID: run.request.sessionID,
+                lang: run.request.lang,
+                engine: run.request.engine,
+                sentences: run.request.sentences,
+                translated: run.request.translated,
+                scope: .failedOnly(Set(archiveTranslationJob.failureIndexes))
+            )
         )
     }
 
-    /// The archive picker's start request: refused while another
-    /// cloud-disclosure intent is held (the raise would clobber it and swap
-    /// the presented sheet's content mid-flight); an Apple-tier engine pick
-    /// starts its run directly, and an external engine pick stages the run
-    /// for the disclosure whose confirm callback starts it.
-    func requestArchiveTranslation(engine: RetranslateEngine, lang: String) {
-        guard providerAwaitingDisclosure == nil else { return }
-        if let provider = engine.provider {
-            providerAwaitingDisclosure = .archiveTranslation(provider, lang: lang)
-        } else {
-            beginArchiveTranslation(engine: engine, lang: lang)
+    /// The archive picker's start request: refused while a run is claimed or
+    /// another cloud-disclosure intent is held (the raise would clobber it
+    /// and swap the presented sheet's content mid-flight). An Apple-tier
+    /// engine pick starts its run directly, and an external engine pick
+    /// stages the run for the disclosure whose confirm callback starts it.
+    func requestArchiveTranslation(
+        engine: RetranslateEngine, lang: String, sessionID: Int64,
+        presenter: ArchiveDisclosurePresenter
+    ) {
+        guard archiveTranslationJob.activity == .idle, providerAwaitingDisclosure == nil else {
+            return
         }
+        if let provider = engine.provider {
+            providerAwaitingDisclosure = .archiveTranslation(
+                provider, lang: lang, session: sessionID, presenter: presenter
+            )
+        } else {
+            beginArchiveTranslation(engine: engine, lang: lang, sessionID: sessionID)
+        }
+    }
+
+    /// The open archive's spelling at the main window, for the banner.
+    func requestArchiveTranslation(engine: RetranslateEngine, lang: String) {
+        guard let sessionID = openArchive?.id else { return }
+        requestArchiveTranslation(
+            engine: engine, lang: lang, sessionID: sessionID, presenter: .mainWindow
+        )
     }
 
     /// Stops the run in flight — no new sentence starts, whatever is
     /// airborne still lands (partial results stay stored) — and dismisses
     /// the run's card: a canceled run posts no summary. The dismissal is
     /// unconditional, because the failure summary card outlives the finished
-    /// run; the archive boundaries route through here to clear it.
+    /// run.
     func cancelArchiveTranslation() {
         if archiveTranslationJob.activity != .idle {
             archiveTranslationJob.cancel()
@@ -82,50 +141,56 @@ extension AppModel {
         toasts.dismiss(key: ToastKey.archiveTranslation)
     }
 
-    /// The sentences a run for `lang` would send — the engine picker's
-    /// count line and the pending disclosure's body: the missing count, or
-    /// the full sentence count when the language is complete (a Retranslate
-    /// re-sends every sentence). Nil with no archive open.
-    func archiveTranslationSendCount(lang: String) -> Int? {
-        guard let summary = openArchive?.summary else { return nil }
+    /// The sentences a run for `lang` would send in `summary` — the engine
+    /// picker's count line and the pending disclosure's body: the missing
+    /// count, or the full sentence count when the language is complete (a
+    /// Retranslate re-sends every sentence).
+    func archiveTranslationSendCount(summary: ArchivedSessionSummary, lang: String) -> Int {
         let total = summary.sentenceCount
         let translated = summary.languageCount(for: lang)?.translated ?? 0
         return translated >= total && total > 0 ? total : max(total - translated, 0)
     }
 
-    /// True when the opened archive's `lang` has a translation on every
-    /// sentence — the picker's Retranslate mode.
-    func archiveLanguageIsComplete(_ lang: String) -> Bool {
-        guard let summary = openArchive?.summary, summary.sentenceCount > 0 else { return false }
+    /// The opened archive's spelling: nil with no archive open.
+    func archiveTranslationSendCount(lang: String) -> Int? {
+        guard let summary = openArchive?.summary else { return nil }
+        return archiveTranslationSendCount(summary: summary, lang: lang)
+    }
+
+    /// True when `summary`'s `lang` has a translation on every sentence —
+    /// the picker's Retranslate mode.
+    func archiveLanguageIsComplete(summary: ArchivedSessionSummary, lang: String) -> Bool {
+        guard summary.sentenceCount > 0 else { return false }
         let translated = summary.languageCount(for: lang)?.translated ?? 0
         return translated >= summary.sentenceCount
+    }
+
+    /// The opened archive's spelling: false with no archive open.
+    func archiveLanguageIsComplete(_ lang: String) -> Bool {
+        guard let summary = openArchive?.summary else { return false }
+        return archiveLanguageIsComplete(summary: summary, lang: lang)
     }
 
     // MARK: - Internals
 
     /// The one start path: begin (the derived scope) and retry-failed (the
-    /// explicit failure set) both land here. The request is built first,
-    /// then claimed synchronously — the run reads as claimed from this
-    /// instant — and finally the async walk starts.
-    private func beginArchiveTranslation(
-        engine: RetranslateEngine, lang: String, scope: ArchiveTranslationJob.Scope?
-    ) {
-        guard let archive = openArchive else { return }
-        let translated = Self.translatedIndexes(in: archive.entries, lang: lang)
-        let resolvedScope = scope
-            ?? (translated.count >= archive.entries.count && !archive.entries.isEmpty
-                ? .all : .missing)
-        let request = ArchiveTranslationJob.Request(
-            sessionID: archive.id,
-            lang: lang,
-            engine: engine,
-            sentences: archive.entries.map { entry in entry.sentence },
-            translated: translated,
-            scope: resolvedScope
-        )
-        guard archiveTranslationJob.claim(request) else { return }
+    /// explicit failure set) both land here. A live capture refuses: the
+    /// run's writes belong to stored rows, and the archive surfaces are
+    /// blocked anyway. The request is built first, then claimed
+    /// synchronously — the run reads as claimed from this instant — and
+    /// finally the async walk starts.
+    private func claimAndRunArchiveTranslation(_ request: ArchiveTranslationJob.Request) {
+        guard canOpenArchivedSession, archiveTranslationJob.claim(request) else { return }
         Task { [archiveTranslationJob] in
             await archiveTranslationJob.run()
+        }
+    }
+
+    /// The archive window's close declines only the intents its own rows
+    /// staged; a main-window intent stays for its sheet.
+    func declineArchiveWindowDisclosure() {
+        if case .archiveTranslation(_, _, _, .archiveWindow) = providerAwaitingDisclosure {
+            declineCloudDisclosure()
         }
     }
 
@@ -172,7 +237,7 @@ extension AppModel {
         guard let sessionID = archiveTranslationJob.activity.request?.sessionID else { return false }
         guard writeBackTranslation(translation, index: index, session: sessionID) else {
             // The run's row vanishing mid-flight is expected when the run was
-            // torn down (close/swap/delete); only a genuine fault reports.
+            // cancelled; only a genuine fault reports.
             if !archiveTranslationJob.isCancelled {
                 reportArchiveWriteFailure()
             }

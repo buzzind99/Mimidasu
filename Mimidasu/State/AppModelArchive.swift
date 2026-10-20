@@ -112,8 +112,8 @@ extension AppModel {
     /// session-clock anchors clear, and the re-translate lane generation
     /// turns over. Re-opening the session already in the pane is a no-op —
     /// its bulk run (and card) stays untouched. A bulk run over a different
-    /// archive is canceled first (its airborne result still persists under
-    /// its own id), and a pending external pick for the previous archive
+    /// archive keeps running (its airborne result still persists under its
+    /// own id), and a pending main-window pick for the previous archive
     /// clears with the swap.
     func openArchiveSession(id: Int64) {
         guard canOpenArchivedSession else { return }
@@ -123,10 +123,9 @@ extension AppModel {
             return
         }
         guard let loaded = archive.load(id: id) else { return }
-        cancelArchiveTranslation()
-        // The sheet a pending archive-translation pick belongs to is leaving
-        // the pane with the previous archive; other intent kinds stay.
-        if case .archiveTranslation = providerAwaitingDisclosure {
+        // The main window's sheet is leaving the pane with the previous
+        // archive; the archive window's own intents and other kinds stay.
+        if case .archiveTranslation(_, _, _, .mainWindow) = providerAwaitingDisclosure {
             providerAwaitingDisclosure = nil
         }
         openArchive = loaded
@@ -156,13 +155,12 @@ extension AppModel {
 
     /// Closes the opened archive: the pane empties (no restore) and the
     /// lane generation turns over again so no straggler lands on the next
-    /// archive's rows. A bulk run in flight is canceled (its landed rows
-    /// stay stored); the viewing language and any pending archive-translation
-    /// pick clear with the archive.
+    /// archive's rows. A bulk run in flight keeps running (its landed rows
+    /// stay stored); the viewing language and a pending main-window
+    /// archive-translation pick clear with the archive.
     func closeArchive() {
         guard openArchive != nil else { return }
-        cancelArchiveTranslation()
-        if case .archiveTranslation = providerAwaitingDisclosure {
+        if case .archiveTranslation(_, _, _, .mainWindow) = providerAwaitingDisclosure {
             providerAwaitingDisclosure = nil
         }
         openArchive = nil
@@ -246,7 +244,10 @@ extension AppModel {
     }
 
     /// Deletes a stored session, closing it first when it is the one open.
+    /// Refused while that session is the run's target: the walk would lose
+    /// its rows mid-flight.
     func deleteArchive(id: Int64) {
+        guard archiveTranslationJob.activity.request?.sessionID != id else { return }
         if openArchive?.id == id {
             closeArchive()
         }

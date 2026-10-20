@@ -216,9 +216,12 @@ extension RetranslateCoordinator {
     /// externals come from their stored key. The selection arrives already
     /// resolved against the run's target (the caller's archive-job mapping
     /// applied `effectiveAppleTier(_:targetCode:)`), so it is passed through
-    /// verbatim — no settings-pair degrade is re-applied.
+    /// verbatim — no settings-pair degrade is re-applied. The wait aborts on
+    /// the run's own cancellation probe, so an archive boundary never
+    /// discards a run.
     func resolveArchiveJobEngine(
-        selection: RetranslateEngine, target: TargetLanguage
+        selection: RetranslateEngine, target: TargetLanguage,
+        shouldAbort: @escaping @MainActor () -> Bool
     ) async -> ArchiveTranslationJob.EngineResolution {
         if let provider = selection.provider {
             return archiveExternalResolution(for: provider, target: target)
@@ -226,7 +229,9 @@ extension RetranslateCoordinator {
         let kind: TranslationEngineKind = selection == .appleHighFidelity
             ? .appleHighFidelity
             : .appleFast
-        return await resolveJobAppleEngine(kind: kind, target: target)
+        return await resolveJobAppleEngine(
+            kind: kind, target: target, shouldAbort: shouldAbort
+        )
     }
 
     /// The external half of the job resolution: the provider's stored key
@@ -249,31 +254,31 @@ extension RetranslateCoordinator {
     /// row retries are refused from the job's claim onward, so the chain is
     /// already being cut off — but a link airborne before the claim may
     /// still be flying, and a session-backed engine never sees concurrent
-    /// calls), then waits for the hand-over. The chain wait polls
-    /// deliverability too: a close/swap turns the epoch over, which releases
-    /// the job's claim immediately instead of parking it behind a link whose
-    /// result is already undeliverable. A timeout reports the still-starting
-    /// copy and keeps the config armed, so the next attempt is instant once
-    /// the session (or its language pack) lands; a cancellation is a
-    /// teardown, whose surface is already gone. A teardown can land after
-    /// the wait resolved — the rebuilt `.translationTask` host hands over a
-    /// fresh engine and the wait's storage read can adopt it — so
-    /// deliverability is re-checked before the engine is handed to the run.
+    /// calls), then waits for the hand-over. Both waits abort on the run's
+    /// own cancellation probe, so a close/swap releases the claim promptly
+    /// only when the run itself was cancelled. A timeout reports the
+    /// still-starting copy and keeps the config armed, so the next attempt is
+    /// instant once the session (or its language pack) lands; an abort is a
+    /// cancellation whose surface is already gone. A cancellation can land
+    /// after the wait resolved — the storage read can adopt an engine handed
+    /// over in the meantime — so the probe is re-checked before the engine is
+    /// handed to the run.
     private func resolveJobAppleEngine(
-        kind: TranslationEngineKind, target: TargetLanguage
+        kind: TranslationEngineKind, target: TargetLanguage,
+        shouldAbort: @escaping @MainActor () -> Bool
     ) async -> ArchiveTranslationJob.EngineResolution {
         let epoch = retranslateSessionEpoch
         armRetranslateSessionIfNeeded(for: kind, target: target.code)
         while !laneChainIdle {
-            guard retranslateLaneCanDeliver(epoch: epoch) else { return .cancelled }
+            guard !shouldAbort() else { return .cancelled }
             try? await Task.sleep(for: .milliseconds(50))
         }
         switch await laneEngine(
             laneEngineStorage(for: kind, target: target.code),
-            kind: kind, epoch: epoch, target: target.code
+            kind: kind, epoch: epoch, target: target.code, shouldAbort: shouldAbort
         ) {
         case let .ready(engine):
-            guard retranslateLaneCanDeliver(epoch: epoch) else { return .cancelled }
+            guard !shouldAbort() else { return .cancelled }
             return .ready(engine: engine, kind: kind)
         case .timedOut:
             return .unavailable(
@@ -304,11 +309,13 @@ extension RetranslateCoordinator {
     /// pathological cases. Storage is read for `target` only: a config
     /// re-armed for another target never serves this wait. The deadline is
     /// monotonic (`ContinuousClock`) — wall-clock `Date` would skew on clock
-    /// changes. A lane or job that dies mid-wait (stop, teardown) exits
-    /// promptly instead of polling its nilled storage out the whole arm
-    /// window.
+    /// changes. A lane whose epoch turns over, or a job whose run is
+    /// cancelled through its probe, exits promptly instead of polling its
+    /// nilled storage out the whole arm window. Without a probe the epoch
+    /// guard stays in force, so lane callers keep their existing contract.
     func laneEngine(
-        _ engine: (any TranslationEngine)?, kind: TranslationEngineKind, epoch: Int, target: String
+        _ engine: (any TranslationEngine)?, kind: TranslationEngineKind, epoch: Int, target: String,
+        shouldAbort: (@MainActor () -> Bool)? = nil
     ) async -> LaneEngineResolution {
         if let engine {
             return .ready(engine)
@@ -319,7 +326,9 @@ extension RetranslateCoordinator {
         // timeout.
         var resolved = laneEngineStorage(for: kind, target: target)
         while resolved == nil, ContinuousClock.now < deadline {
-            guard retranslateLaneCanDeliver(epoch: epoch) else { return .cancelled }
+            let aborted = shouldAbort.map { probe in probe() }
+                ?? !retranslateLaneCanDeliver(epoch: epoch)
+            guard !aborted else { return .cancelled }
             do {
                 try await Task.sleep(for: Duration.milliseconds(50))
             } catch {
@@ -363,20 +372,32 @@ extension RetranslateCoordinator {
 
     /// Archive boundary — an archived session was opened into the pane. Its
     /// rows replace the live transcript's wholesale, so every marker
-    /// (queue-owned included) has lost its deliverer, and the lane teardown
-    /// cancels in-flight work and bumps the epoch: a straggler from the
-    /// live session (or the previously opened archive, whose indexes are
-    /// unrelated) must never land on the new rows.
+    /// (queue-owned included) has lost its deliverer, and the lane work is
+    /// retired: a straggler from the live session (or the previously opened
+    /// archive, whose indexes are unrelated) must never land on the new
+    /// rows. The dedicated Apple sessions stay armed — a running bulk job
+    /// holds one, and arming plus target-gated storage reads make a stale
+    /// config inert.
     func archiveWillOpen() {
-        pendingRetranslations.removeAll()
-        teardown()
+        retireLaneWork()
     }
 
     /// Archive boundary — the opened archive closed and the pane emptied.
     /// Same retirement: nothing the lane could deliver to remains on screen.
     func archiveWillClose() {
+        retireLaneWork()
+    }
+
+    /// Lane work and markers only: cancels the in-flight lane generation,
+    /// drops every marker, and bumps the epoch so nothing still airborne can
+    /// deliver. The dedicated Apple configs and stored engines are left
+    /// untouched — they are target-scoped, not archive-scoped.
+    private func retireLaneWork() {
         pendingRetranslations.removeAll()
-        teardown()
+        lanePendingRetranslations.removeAll()
+        retranslateLaneTask?.cancel()
+        retranslateLaneTask = nil
+        retranslateSessionEpoch += 1
     }
 
     /// Retires the row's re-translation marker for a landed result. Cleared
