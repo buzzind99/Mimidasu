@@ -41,10 +41,11 @@ a verb, because every definition popup is a little *mimidasu*.
 ## Quick start (from source)
 
 ```bash
-scripts/bootstrap.sh      # one-time setup
-brew install cmake ninja  # build dependencies
-scripts/build_all.sh      # builds the ASR runtime, tokenizer, and dictionaries
-open Mimidasu.xcodeproj   # then ⌘R
+xcode-select --install                        # if not installed
+brew install xcodegen cmake ninja zstd rust   # build dependencies
+scripts/bootstrap.sh                          # one-time setup
+scripts/build_all.sh                          # ASR runtime, tokenizer, dictionaries
+open Mimidasu.xcodeproj                       # then ⌘R
 ```
 
 On first launch you pick a speech model and it downloads automatically; press
