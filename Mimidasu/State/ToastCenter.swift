@@ -99,7 +99,7 @@ final class ToastCenter {
 
     /// Auto-dismiss delay for `.yellowAuto` cards (timer resets when the
     /// same key re-fires).
-    static let autoDismissDelay: Duration = .seconds(3)
+    static let autoDismissDelay: Duration = .seconds(6)
     /// Stack cap; the oldest card is dropped beyond this.
     static let maxVisible = 3
 
