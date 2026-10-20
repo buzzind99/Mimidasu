@@ -229,7 +229,8 @@ struct DictionaryCardView: View {
                     senseLimit: nil,
                     glossLimit: nil,
                     // The card is the narrow host — a multi-tag sense
-                    // stacks its tags above the gloss (see the flag).
+                    // stacks its tags above the gloss only when the inline
+                    // row doesn't fit (see the flag).
                     wrapsSensePOS: true,
                     sensesViewportHeight: sensesViewport(freeHeight: freeHeight),
                     onTopSectionHeightChange: { height in topSectionHeight = height },

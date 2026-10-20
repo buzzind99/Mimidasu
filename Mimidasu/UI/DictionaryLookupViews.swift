@@ -165,8 +165,9 @@ struct DictionaryCopyButton: View {
 /// The full dictionary entry composition — headword (+ reading), romaji,
 /// badge row, pitch pill, numbered POS-labeled senses, "also:" pills, entry
 /// pager — rendered by the popover, the sidebar card, and the two list
-/// hosts; `wrapsSensePOS` is the card's one divergence, stacking a
-/// multi-tag sense's tags above its gloss. The card host scrolls only the
+/// hosts; `wrapsSensePOS` is the card's one divergence: a multi-tag sense
+/// keeps its tags inline while the whole row fits one line, and stacks them
+/// above the wrapping gloss otherwise. The card host scrolls only the
 /// sense rows (see `sensesViewportHeight`); everything above them and the
 /// "also:" row below stay fixed.
 struct DictionaryEntryContentView: View {
@@ -183,13 +184,14 @@ struct DictionaryEntryContentView: View {
     var senseLimit: Int? = DictionaryContent.maxSenses
     /// Glosses per sense (nil = every gloss); same host story as `senseLimit`.
     var glossLimit: Int? = DictionaryContent.maxGlossesPerSense
-    /// When true, a sense carrying more than one POS tag puts its tags on a
-    /// line of their own and the gloss spans the row beneath them; with a
-    /// single tag — or false — the number, tags, and gloss share a baseline.
-    /// The sidebar card opts in: its 254pt of content is the narrowest a
-    /// sense row is ever drawn, and three tags beside a gloss leave the
-    /// gloss a column too thin to read. The popover and the two list hosts
-    /// are wide enough for both on one line, so the tags stay inline.
+    /// When true, a sense carrying more than one POS tag keeps the number,
+    /// tags, and gloss on one baseline while that whole row fits; when it
+    /// doesn't, the tags move to a line of their own and the gloss spans the
+    /// row beneath them. With a single tag — or false — the number, tags,
+    /// and gloss always share a baseline. The sidebar card opts in: its 254pt
+    /// of content is the narrowest a sense row is ever drawn, so an inline
+    /// row that overflows would leave the gloss a column too thin to read.
+    /// The popover and the two list hosts stay inline.
     var wrapsSensePOS = false
     /// When set, the sense rows render inside a vertical ScrollView framed
     /// to exactly this height — they scroll only when taller than it. The
@@ -480,8 +482,9 @@ struct DictionaryEntryContentView: View {
     private func senseRow(number: Int, sense: JMDictSense) -> some View {
         let labels = DictionaryContent.posLabels(sense.pos)
         let glosses = DictionaryContent.truncated(sense.glosses, limit: glossLimit)
-        // Visible glosses join into one wrapping line; a hidden tail
-        // closes with an ellipsis.
+        // Visible glosses join into one text; a hidden tail closes with an
+        // ellipsis. The inline form holds it to one line, the stacked form
+        // lets it wrap beneath the tags.
         let gloss = Text(
             glosses.visible.joined(separator: "; ")
                 + (glosses.hidden > 0 ? "; …" : "")
@@ -490,22 +493,31 @@ struct DictionaryEntryContentView: View {
         .foregroundStyle(Theme.primaryText)
         .textSelection(.disabled)
         if wrapsSensePOS, labels.count > 1 {
-            // The number leads the tag line only; the gloss starts at the
-            // tags' leading edge — after the number column, not back under
-            // the number — and keeps that inset on every wrapped line.
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                senseNumber(number)
-                VStack(alignment: .leading, spacing: 3) {
-                    // FlowLayout for the reason the badge row uses it: a
-                    // long tag set wraps inside the card instead of
-                    // clipping at its trailing edge.
-                    FlowLayout(
-                        spacing: 6, lineSpacing: 4,
-                        fingerprint: labels.joined(separator: "\n")
-                    ) {
-                        posBadges(labels)
+            // Inline while the number, tags, and whole gloss fit one line;
+            // only then does the row fall back to the stacked form. The
+            // number leads the tag line only; the gloss starts at the tags'
+            // leading edge — after the number column, not back under the
+            // number — and keeps that inset on every wrapped line.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    senseNumber(number)
+                    posBadges(labels)
+                    gloss.lineLimit(1)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    senseNumber(number)
+                    VStack(alignment: .leading, spacing: 3) {
+                        // FlowLayout for the reason the badge row uses it: a
+                        // long tag set wraps inside the card instead of
+                        // clipping at its trailing edge.
+                        FlowLayout(
+                            spacing: 6, lineSpacing: 4,
+                            fingerprint: labels.joined(separator: "\n")
+                        ) {
+                            posBadges(labels)
+                        }
+                        gloss
                     }
-                    gloss
                 }
             }
         } else {
