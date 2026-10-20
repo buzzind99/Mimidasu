@@ -33,13 +33,19 @@ struct ArchiveLanguageChip: View {
             Text(count.badgeCode)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(tint ?? Theme.secondaryText)
+                .lineLimit(1)
+                .fixedSize()
             Text("\(count.translated)/\(total)")
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundStyle(tint ?? Theme.primaryText)
+                .lineLimit(1)
+                .fixedSize()
             if busy {
                 Text("· translating…")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Theme.accentPink)
+                    .lineLimit(1)
+                    .fixedSize()
             }
             if showsChevron {
                 Image(systemName: "chevron.down")
@@ -96,8 +102,9 @@ struct ArchiveAddLanguagePill: View {
 /// The switch-language popover of one stored session: one row per language
 /// the archive holds (the stored target first), the viewed one checkmarked,
 /// and an "Add language…" row that swaps the popover to the chooser of
-/// targets not yet held. The chooser can also be the initial screen — the
-/// archive row's `+` pill opens it directly.
+/// targets not yet held. The add row drops out once the session holds every
+/// language the app can target. The chooser can also be the initial screen —
+/// the archive row's `+` pill opens it directly.
 struct ArchiveSwitchLanguagePopover: View {
     var model: AppModel
     let summary: ArchivedSessionSummary
@@ -144,7 +151,11 @@ struct ArchiveSwitchLanguagePopover: View {
             ForEach(summary.langs) { count in
                 languageRow(count)
             }
-            addLanguageRow
+            // The add path disappears once the session holds every language
+            // the app can target.
+            if !summary.holdsEveryTargetLanguage {
+                addLanguageRow
+            }
         }
     }
 
@@ -393,9 +404,7 @@ struct ArchiveTranslationEnginePicker: View {
                 Text(title)
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(Theme.primaryText)
-                Text(isComplete
-                    ? "Pick an engine, then press Retranslate"
-                    : "Pick an engine, then press Translate")
+                Text("Pick a translation provider")
                     .font(.system(size: 10.5))
                     .foregroundStyle(Theme.secondaryText)
             }

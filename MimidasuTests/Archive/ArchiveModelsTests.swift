@@ -66,6 +66,33 @@ struct ArchiveModelsTests {
         #expect(ArchiveLanguageCount(lang: "en", translated: 3).isComplete(of: 3))
     }
 
+    // MARK: - Language coverage
+
+    @Test("a session holding every target language needs no add affordance")
+    func holdsEveryTargetLanguage() {
+        var sut = summary()
+        sut.langs = TargetLanguage.known.map { known in
+            ArchiveLanguageCount(lang: known.code, translated: 0)
+        }
+
+        #expect(sut.holdsEveryTargetLanguage)
+    }
+
+    @Test("a session missing one target language still offers the add affordance")
+    func missingTargetLanguage() {
+        var sut = summary()
+        sut.langs = TargetLanguage.known.dropLast().map { known in
+            ArchiveLanguageCount(lang: known.code, translated: 0)
+        }
+
+        #expect(!sut.holdsEveryTargetLanguage)
+    }
+
+    @Test("a session holding no language offers the add affordance")
+    func noLanguageHolds() {
+        #expect(!summary().holdsEveryTargetLanguage)
+    }
+
     // MARK: - Auto title
 
     @Test("the auto-title snippet clips past 30 characters and collapses newlines")

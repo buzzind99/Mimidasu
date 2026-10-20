@@ -79,6 +79,13 @@ struct ArchivedSessionSummary: Identifiable, Equatable, Sendable {
         langs.first { count in count.lang == lang }
     }
 
+    /// True when the session already holds every language the app can
+    /// target — the add-language affordance has nothing left to offer.
+    var holdsEveryTargetLanguage: Bool {
+        let held = Set(langs.map(\.lang))
+        return TargetLanguage.known.allSatisfy { known in held.contains(known.code) }
+    }
+
     /// The language the pane shows when nothing overrides it.
     var defaultViewingLang: String? {
         targetLang

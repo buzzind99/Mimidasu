@@ -1,11 +1,11 @@
 import SwiftUI
 
 /// The opened archive's banner at the top of the transcript pane: title with
-/// the rename pencil, the meta line (start datetime, duration, sentences,
+/// the rename button, the meta line (start datetime, duration, sentences,
 /// characters), and the trailing cluster — the viewed-language chip (the
-/// switch-language popover), the Translate button (the engine picker), and
-/// the save icon — an outline bookmark that promotes a Recent, a filled
-/// accent bookmark once Saved (display only, no demotion).
+/// switch-language popover), the Translate/Retranslate button (the engine
+/// picker), and the save icon — an outline bookmark that promotes a Recent, a
+/// filled accent bookmark once Saved (display only, no demotion).
 struct ArchiveBannerView: View {
     var model: AppModel
     @State private var isRenaming = false
@@ -31,8 +31,8 @@ struct ArchiveBannerView: View {
                         renameDraft = archive.summary.name ?? ""
                         isRenaming = true
                     } label: {
-                        Image(systemName: "pencil")
-                            .font(.system(size: 12))
+                        Image(systemName: "square.and.pencil")
+                            .font(.system(size: 13))
                             .foregroundStyle(Theme.secondaryText)
                             .contentShape(Rectangle())
                     }
@@ -139,15 +139,17 @@ struct ArchiveBannerView: View {
             .background(Capsule().fill(Theme.tileFill))
     }
 
-    /// The Translate button: opens the engine picker for the viewed
-    /// language. Held back while a bulk run is claimed (one job at a time)
-    /// and without a viewed language to translate.
+    /// The Translate/Retranslate button: opens the engine picker for the
+    /// viewed language. Held back while a bulk run is claimed (one job at a
+    /// time) and without a viewed language to translate.
     private func translateButton(_ archive: ArchivedSession) -> some View {
         let disabled = model.archiveTranslationJob.activity != .idle || model.archiveViewingCode == nil
+        let isComplete = viewedLanguageIsComplete(archive)
+        let title = isComplete ? "Retranslate" : "Translate"
         return Button {
             isTranslatePopoverPresented = true
         } label: {
-            Text("Translate")
+            Text(title)
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 12)
@@ -167,8 +169,14 @@ struct ArchiveBannerView: View {
             tint: .white, opacity: 0.15
         )
         .pointerStyle(disabled ? nil : .link)
-        .help("Translate this archive's viewed language")
-        .accessibilityLabel("Translate the viewed language")
+        .help(
+            isComplete
+                ? "Retranslate this archive's viewed language"
+                : "Translate this archive's viewed language"
+        )
+        .accessibilityLabel(
+            isComplete ? "Retranslate the viewed language" : "Translate the viewed language"
+        )
         .popover(isPresented: $isTranslatePopoverPresented, arrowEdge: .bottom) {
             if let code = model.archiveViewingCode {
                 ArchiveTranslationEnginePicker(
@@ -180,6 +188,13 @@ struct ArchiveBannerView: View {
                 )
             }
         }
+    }
+
+    /// Whether the viewed language has a translation on every sentence — the
+    /// button then reads Retranslate, mirroring the picker's action.
+    private func viewedLanguageIsComplete(_ archive: ArchivedSession) -> Bool {
+        guard let code = model.archiveViewingCode else { return false }
+        return model.archiveLanguageIsComplete(summary: archive.summary, lang: code)
     }
 
     /// Routes the picker's start through the model: the request is refused

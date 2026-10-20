@@ -409,6 +409,9 @@ private struct ArchiveRow: View {
                 .onHover { _ in }
                 .pointerStyle(canOpen ? .link : nil)
             }
+            // The action cluster keeps its natural width; the chip line
+            // takes the rest of the row and wraps its pills.
+            .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 11)
@@ -428,7 +431,7 @@ private struct ArchiveRow: View {
                 showsLink: !isJobRunning,
                 action: onDelete
             )
-            actionButton("pencil", help: "Rename", action: onRename)
+            actionButton("square.and.pencil", help: "Rename", action: onRename)
             if !summary.saved {
                 actionButton("bookmark", help: "Save permanently", action: onSave)
             }
@@ -437,32 +440,51 @@ private struct ArchiveRow: View {
 
     /// The row's language chips, each a button opening the translate picker
     /// for its language, with the `+` pill that opens the add-language
-    /// chooser for this session.
+    /// chooser for this session. The chips flow: a long language list wraps
+    /// to a second row instead of squeezing the pills. The `+` pill drops
+    /// out once the session holds every language the app can target.
     private var chipLine: some View {
-        HStack(spacing: 6) {
+        FlowLayout(spacing: 6, lineSpacing: 4, fingerprint: chipFingerprint) {
             ForEach(summary.langs) { count in
                 languageChipButton(count)
             }
-            ArchiveAddLanguagePill {
-                chooserPresented = true
-            }
-            .popover(isPresented: $chooserPresented, arrowEdge: .bottom) {
-                ArchiveSwitchLanguagePopover(
-                    model: model,
-                    summary: summary,
-                    viewingCode: model.openArchive?.id == summary.id
-                        ? model.archiveViewingCode : nil,
-                    onSelect: { lang in
-                        // Never mutates another archive's viewing language:
-                        // a row picker only serves its own (opened) session.
-                        guard model.openArchive?.id == summary.id else { return }
-                        model.selectArchiveViewingLanguage(lang)
-                    },
-                    initiallyShowingChooser: true
-                )
+            if !summary.holdsEveryTargetLanguage {
+                ArchiveAddLanguagePill {
+                    chooserPresented = true
+                }
+                .popover(isPresented: $chooserPresented, arrowEdge: .bottom) {
+                    ArchiveSwitchLanguagePopover(
+                        model: model,
+                        summary: summary,
+                        viewingCode: model.openArchive?.id == summary.id
+                            ? model.archiveViewingCode : nil,
+                        onSelect: { lang in
+                            // Never mutates another archive's viewing
+                            // language: a row picker only serves its own
+                            // (opened) session.
+                            guard model.openArchive?.id == summary.id else { return }
+                            model.selectArchiveViewingLanguage(lang)
+                        },
+                        initiallyShowingChooser: true
+                    )
+                }
             }
         }
         .padding(.top, 4)
+    }
+
+    /// The flow layout's cache key: the chips' content and state. Counts
+    /// change as translations land and the busy/selected flags change the
+    /// chip's own width, so both ride the fingerprint.
+    private var chipFingerprint: String {
+        var parts = ["total:\(summary.sentenceCount)"]
+        for count in summary.langs {
+            let busy = isJobRunning && count.lang == jobLang
+            let selected = model.openArchive?.id == summary.id
+                && count.lang == model.archiveViewingCode
+            parts.append("\(count.lang):\(count.translated):\(busy ? 1 : 0):\(selected ? 1 : 0)")
+        }
+        return parts.joined(separator: "|")
     }
 
     /// One language chip as a button: opens the translate/re-translate
