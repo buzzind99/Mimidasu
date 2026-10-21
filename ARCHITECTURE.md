@@ -732,8 +732,12 @@ packaged apps in `Contents/Frameworks/`.
   resolved per appearance); `AppearanceSetting` (system/light/dark,
   a `DynamicProperty` wrapper with a system-scheme observer) applies via
   `.preferredColorScheme`; reading-annotation and cursor modes are plain
-  `@AppStorage` enums read per-view. `UIScale` (75–200 %) scales
-  transcript, live-strip, and HUD text together from one persisted value.
+  `@AppStorage` enums read per-view. `UIScale` (75–200 %) scales the
+  transcript pane (its rows and the archive banner above them), the live
+  strip, the HUD and the translation overlay together from one persisted
+  value; the sidebar column, the archive list window, the archive banner's
+  popovers and rename alert, and the settings/reference windows keep fixed
+  metrics at every scale.
   `RubyTextView` renders inline romaji or furigana; in dictionary mode
   with a host lookup handler it renders one tappable unit per segment.
 
