@@ -106,6 +106,7 @@ prefixes = [
     ("Audio/",       "Mimidasu/Audio/"),
     ("FFI/",         "Mimidasu/FFI/"),
     ("Security/",    "Mimidasu/Security/"),
+    ("Archive/",     "Mimidasu/Archive/"),
     ("App/",         "Mimidasu/App/"),
     ("UI/",          "Mimidasu/UI/"),
 ]
@@ -121,8 +122,9 @@ floors = {
     "Model/":       98.3,
     "ASR/":         97.2,
     "Audio/":       54.1,
-    "FFI/":        100.0,
+    "FFI/":         100.0,
     "Security/":   100.0,
+    "Archive/":    100.0,
 }
 
 if failures:
