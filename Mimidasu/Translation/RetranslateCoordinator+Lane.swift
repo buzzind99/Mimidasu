@@ -27,8 +27,7 @@ extension RetranslateCoordinator {
     /// what a user reaches for then. An open archive is the second gate: no
     /// live session, but the pane's rows are just as retryable.
     func retranslateSentence(_ sentence: Sentence) {
-        let livePhase = sessionPhase == .running || sessionPhase == .sourceLost
-            || sessionPhase == .paused
+        let livePhase = SessionPhaseMachine.isLive(sessionPhase)
         guard livePhase || archiveOpen else { return }
         // The bulk job owns the archive's engines while a run is claimed
         // (resolution included): a session-backed Apple engine must never
@@ -301,9 +300,7 @@ extension RetranslateCoordinator {
             // cleared stack.
             guard retranslateLaneCanDeliver(epoch: epoch) else { return }
             postRetranslateUnavailableToast(
-                laneKind == .appleHighFidelity
-                    ? "Apple Intelligence session is still starting — try again in a moment."
-                    : "Apple (NMT) session is still starting — try again in a moment."
+                "\(laneKind.tier.name) session is still starting — try again in a moment."
             )
             return
         case let .ready(engine):
@@ -358,7 +355,8 @@ extension RetranslateCoordinator {
             // not repost over the cleared stack.
             guard retranslateLaneCanDeliver(epoch: epoch) else { return .done }
             postRetranslateUnavailableToast(
-                "Still checking Apple Intelligence availability — try again in a moment."
+                "Still checking \(TranslationTier.appleHighFidelity.name) availability "
+                    + "— try again in a moment."
             )
             return .done
         case .landed:
@@ -500,7 +498,7 @@ extension RetranslateCoordinator {
         if archiveOpen {
             return true
         }
-        return sessionPhase == .running || sessionPhase == .sourceLost || sessionPhase == .paused
+        return SessionPhaseMachine.isLive(sessionPhase)
     }
 
     /// Retires the dim cue for a lane-owned index. Every exit that will not

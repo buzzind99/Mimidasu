@@ -21,18 +21,25 @@ enum RetranslateEngine: String, Codable, CaseIterable, Sendable, Equatable, Hash
         }
     }
 
-    /// Display label for surfaces that pick an engine (the archive engine
-    /// picker's rows, the bulk run's progress card). `.session` names no
-    /// engine of its own — only the settings card offers it.
-    var displayName: String {
+    /// The engine identity this selection names; nil for `.session`, which
+    /// names no engine of its own.
+    var kind: TranslationEngineKind? {
         switch self {
-        case .session: "Session engine"
-        case .appleFast: "Apple (NMT)"
-        case .appleHighFidelity: "Apple Intelligence"
-        case .google: "Google Translate"
-        case .deepl: "DeepL"
-        case .openrouter: "OpenRouter"
+        case .session: nil
+        case .appleFast: .appleFast
+        case .appleHighFidelity: .appleHighFidelity
+        case .google: .google
+        case .deepl: .deepl
+        case .openrouter: .openrouter
         }
+    }
+
+    /// Display label for surfaces that pick an engine (the archive engine
+    /// picker's rows, the bulk run's progress card). The name comes from
+    /// the shared tier vocabulary; `.session` names no engine of its own —
+    /// only the settings card offers it.
+    var displayName: String {
+        kind?.tier.name ?? "Session engine"
     }
 
     /// The selection behind a Settings provider row; nil for Apple, which
@@ -69,14 +76,19 @@ enum TranslationEngineKind: String, Codable, Sendable, Equatable {
         }
     }
 
+    /// The tier this kind names — the one vocabulary of engine names.
+    var tier: TranslationTier {
+        switch self {
+        case .appleFast: .appleOnDevice
+        case .appleHighFidelity: .appleHighFidelity
+        case .google: .google
+        case .deepl: .deepL(.unknown)
+        case .openrouter: .openRouter
+        }
+    }
+
     /// Marker suffix shown on retried rows ("· via Apple (NMT)").
     var markerName: String {
-        switch self {
-        case .appleHighFidelity: "Apple Intelligence"
-        case .appleFast: "Apple (NMT)"
-        case .google: "Google Translate"
-        case .deepl: "DeepL"
-        case .openrouter: "OpenRouter"
-        }
+        tier.name
     }
 }

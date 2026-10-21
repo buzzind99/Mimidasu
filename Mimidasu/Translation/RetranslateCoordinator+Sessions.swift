@@ -282,9 +282,7 @@ extension RetranslateCoordinator {
             return .ready(engine: engine, kind: kind)
         case .timedOut:
             return .unavailable(
-                reason: kind == .appleHighFidelity
-                    ? "Apple Intelligence session is still starting — try again in a moment."
-                    : "Apple (NMT) session is still starting — try again in a moment."
+                reason: "\(kind.tier.name) session is still starting — try again in a moment."
             )
         case .cancelled:
             return .cancelled

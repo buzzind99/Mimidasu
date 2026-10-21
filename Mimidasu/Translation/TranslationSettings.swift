@@ -13,13 +13,12 @@ enum TranslationProvider: String, CaseIterable, Codable, Identifiable {
         rawValue
     }
 
+    /// The provider's canonical name at the default tier facts: Apple's
+    /// on-device model, DeepL at an unknown tier (the tier is only known
+    /// once a key is stored). Every provider or tier name in the app comes
+    /// from `TranslationTier`.
     var displayName: String {
-        switch self {
-        case .apple: "Apple (on-device)"
-        case .google: "Google Translate"
-        case .deepl: "DeepL"
-        case .openrouter: "OpenRouter"
-        }
+        tier().name
     }
 
     /// Cloud providers send transcript sentences off the machine.
@@ -51,20 +50,38 @@ extension TranslationProvider {
         }
     }
 
-    /// Provider picker row label. Apple names the capability tier only when
-    /// the OS reported the high-fidelity strategy installed for the current
-    /// pair (`appleHighFidelity`), matching the sidebar and status rows;
-    /// DeepL appends its free-tier marker.
-    func settingsName(deeplIsFreeTier: Bool, appleHighFidelity: Bool = false) -> String {
+    /// The tier this provider sits at, given the tier facts the app knows.
+    /// Apple has two tiers — the on-device NMT model and the high-fidelity
+    /// one — and DeepL's tier is the subscription behind the stored key.
+    func tier(
+        appleHighFidelity: Bool = false,
+        deepLTier: TranslationTier.DeepLTier = .unknown
+    ) -> TranslationTier {
         switch self {
-        case .apple: appleHighFidelity ? "Apple Intelligence (high fidelity)" : "Apple"
-        case .google: "Google Translate"
-        case .deepl: deeplIsFreeTier ? "DeepL (Free)" : "DeepL"
-        case .openrouter: "OpenRouter"
+        case .apple: appleHighFidelity ? .appleHighFidelity : .appleOnDevice
+        case .google: .google
+        case .deepl: .deepL(deepLTier)
+        case .openrouter: .openRouter
         }
     }
 
-    /// Compact engine label for the sidebar ENGINES card.
+    /// Provider picker row label. Apple names the capability tier only when
+    /// the OS reported the high-fidelity strategy installed for the current
+    /// pair (`appleHighFidelity`), matching the sidebar and status rows;
+    /// DeepL names its subscription tier, which stays unknown while no key
+    /// is stored.
+    func settingsName(
+        deepLTier: TranslationTier.DeepLTier,
+        appleHighFidelity: Bool = false
+    ) -> String {
+        tier(appleHighFidelity: appleHighFidelity, deepLTier: deepLTier).name
+    }
+
+    /// Compact engine label for the sidebar ENGINES card and the cloud
+    /// disclosure sheet. Deliberately shorter than the canonical tier name
+    /// — only the external providers reach it (the sidebar's Apple row is
+    /// spelled by `SidebarStatus.translationEngineName`, which knows the
+    /// Apple tier), so the Apple case is never rendered.
     var shortName: String {
         switch self {
         case .apple: "Apple"
@@ -109,6 +126,14 @@ final class TranslationSettings {
     /// suffix) — drives the "DeepL (Free)" label. Non-secret.
     private(set) var deeplIsFreeTier: Bool {
         didSet { defaults.set(deeplIsFreeTier, forKey: Self.deeplFreeKey) }
+    }
+
+    /// The DeepL subscription tier behind the stored key. It stays unknown
+    /// while no key is stored — the tier cannot be known until one is — so
+    /// the provider row reads plain "DeepL" until then.
+    var deepLTier: TranslationTier.DeepLTier {
+        guard hasKey(for: .deepl) else { return .unknown }
+        return deeplIsFreeTier ? .free : .pro
     }
 
     /// Selected translation target (the source stays fixed `ja`). Persisted
@@ -314,11 +339,11 @@ final class TranslationSettings {
 
     /// Truthful description of the engine currently in use, including the
     /// Apple-fallback latch ("DeepL (Free) — fallback active") and the
-    /// selected target ("Apple (on-device) → English"; "Apple Intelligence
-    /// (high fidelity) → English" once the probe reports the strategy
-    /// installed). The Apple label names Apple Intelligence only while the
-    /// OS reported the high-fidelity strategy installed for the current pair
-    /// (`appleHighFidelity`); otherwise it stays "Apple (on-device)". The
+    /// selected target ("Apple (NMT) → English"; "Apple Intelligence →
+    /// English" once the probe reports the strategy installed). The Apple
+    /// label names Apple Intelligence only while the OS reported the
+    /// high-fidelity strategy installed for the current pair
+    /// (`appleHighFidelity`); otherwise it names the on-device model. The
     /// base label prefers the attached provider (`attachedProvider`) over
     /// the picker so it never names an engine that isn't actually running;
     /// nil (nothing external attached, or no session yet) falls back to the
@@ -333,13 +358,18 @@ final class TranslationSettings {
         let provider = attachedProvider ?? selectedProvider
         var label: String = switch provider {
         case .apple:
-            appleHighFidelity ? "Apple Intelligence (high fidelity)" : "Apple (on-device)"
+            appleHighFidelity
+                ? TranslationTier.appleHighFidelity.name
+                : TranslationTier.appleOnDevice.name
         case .google:
-            "Google Translate"
+            TranslationTier.google.name
         case .deepl:
-            deeplIsFreeTier ? "DeepL (Free)" : "DeepL (Pro)"
+            // The running engine always has a key, so its tier is known
+            // here — unlike the provider row, which must stay "DeepL"
+            // until a key is stored.
+            TranslationTier.deepL(deeplIsFreeTier ? .free : .pro).name
         case .openrouter:
-            "OpenRouter · \(effectiveOpenRouterModel)"
+            "\(TranslationTier.openRouter.name) · \(effectiveOpenRouterModel)"
         }
         label += " → \(targetLanguage.displayName)"
         if fallbackActive, provider.isExternal {

@@ -95,6 +95,9 @@ extension TranslationSessionCoordinator {
     private func fallBackToApple(severity: TranslationFailureSeverity) {
         activeTranslationEngine = .apple
         activeExternalProvider = nil
+        // The body is prose, not a tier name: it explains the switch to the
+        // user, so it keeps its own wording rather than borrowing the
+        // canonical tier vocabulary.
         translationStatus = .degraded("External translation failed — using Apple on-device", severity)
         reconcileToasts(translationStatus)
         refreshConfig()

@@ -255,7 +255,7 @@ struct TranslationSettingsTests {
 
         #expect(
             settings.activeEngineDescription(fallbackActive: false)
-                == "Apple (on-device) → \(TargetLanguage.english.displayName)"
+                == "Apple (NMT) → \(TargetLanguage.english.displayName)"
         )
 
         settings.select(TargetLanguage(code: "zh-Hans"))
@@ -263,7 +263,7 @@ struct TranslationSettingsTests {
         let zhHans = TargetLanguage(code: "zh-Hans")
         #expect(
             settings.activeEngineDescription(fallbackActive: false)
-                == "Apple (on-device) → \(zhHans.displayName)"
+                == "Apple (NMT) → \(zhHans.displayName)"
         )
     }
 
@@ -288,7 +288,7 @@ struct TranslationSettingsTests {
         let (settings, _) = makeSUT()
         let target = TargetLanguage.english.displayName
 
-        #expect(settings.activeEngineDescription(fallbackActive: false) == "Apple (on-device) → \(target)")
+        #expect(settings.activeEngineDescription(fallbackActive: false) == "Apple (NMT) → \(target)")
 
         try settings.saveKey("sk-openrouter", for: .openrouter)
         settings.select(.openrouter)
@@ -305,10 +305,10 @@ struct TranslationSettingsTests {
         let (settings, _) = makeSUT()
         let target = TargetLanguage.english.displayName
 
-        #expect(settings.activeEngineDescription(fallbackActive: false) == "Apple (on-device) → \(target)")
+        #expect(settings.activeEngineDescription(fallbackActive: false) == "Apple (NMT) → \(target)")
         #expect(
             settings.activeEngineDescription(fallbackActive: false, appleHighFidelity: true)
-                == "Apple Intelligence (high fidelity) → \(target)"
+                == "Apple Intelligence → \(target)"
         )
     }
 
@@ -405,7 +405,7 @@ struct TranslationSettingsTests {
     @Test("provider raw values and display names stay stable")
     func providerIdentityAndDisplayNames() {
         #expect(TranslationProvider.allCases.map(\.id) == ["apple", "google", "deepl", "openrouter"])
-        #expect(TranslationProvider.apple.displayName == "Apple (on-device)")
+        #expect(TranslationProvider.apple.displayName == "Apple (NMT)")
         #expect(TranslationProvider.google.displayName == "Google Translate")
         #expect(TranslationProvider.deepl.displayName == "DeepL")
         #expect(TranslationProvider.openrouter.displayName == "OpenRouter")
@@ -424,15 +424,16 @@ struct TranslationSettingsTests {
         #expect(TranslationProvider.deepl.settingsDetail(hasKey: true) == "External · API key · Configured")
         #expect(TranslationProvider.openrouter.settingsDetail(hasKey: false) == "External · API key + model")
         #expect(TranslationProvider.openrouter.settingsDetail(hasKey: true) == "External · API key + model · Configured")
-        #expect(TranslationProvider.apple.settingsName(deeplIsFreeTier: false) == "Apple")
+        #expect(TranslationProvider.apple.settingsName(deepLTier: .unknown) == "Apple (NMT)")
         #expect(
-            TranslationProvider.apple.settingsName(deeplIsFreeTier: false, appleHighFidelity: true)
-                == "Apple Intelligence (high fidelity)"
+            TranslationProvider.apple.settingsName(deepLTier: .unknown, appleHighFidelity: true)
+                == "Apple Intelligence"
         )
-        #expect(TranslationProvider.google.settingsName(deeplIsFreeTier: false) == "Google Translate")
-        #expect(TranslationProvider.deepl.settingsName(deeplIsFreeTier: false) == "DeepL")
-        #expect(TranslationProvider.deepl.settingsName(deeplIsFreeTier: true) == "DeepL (Free)")
-        #expect(TranslationProvider.openrouter.settingsName(deeplIsFreeTier: false) == "OpenRouter")
+        #expect(TranslationProvider.google.settingsName(deepLTier: .unknown) == "Google Translate")
+        #expect(TranslationProvider.deepl.settingsName(deepLTier: .unknown) == "DeepL")
+        #expect(TranslationProvider.deepl.settingsName(deepLTier: .free) == "DeepL (Free)")
+        #expect(TranslationProvider.deepl.settingsName(deepLTier: .pro) == "DeepL (Pro)")
+        #expect(TranslationProvider.openrouter.settingsName(deepLTier: .unknown) == "OpenRouter")
         #expect(TranslationProvider.apple.shortName == "Apple")
         #expect(TranslationProvider.google.shortName == "Google")
         #expect(TranslationProvider.deepl.shortName == "DeepL")

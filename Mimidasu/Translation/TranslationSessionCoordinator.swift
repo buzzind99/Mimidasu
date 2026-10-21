@@ -254,8 +254,7 @@ extension TranslationSessionCoordinator {
     func providerDidChange() {
         // Nil-host reads `.idle` through `sessionPhase`, so an unwired
         // coordinator no-ops here by contract.
-        guard sessionPhase == .running || sessionPhase == .sourceLost || sessionPhase == .paused
-        else { return }
+        guard SessionPhaseMachine.isLive(sessionPhase) else { return }
         let provider = settings.selectedProvider
         if provider.isExternal, settings.key(for: provider) == nil {
             return
