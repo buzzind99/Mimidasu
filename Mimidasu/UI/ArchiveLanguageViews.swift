@@ -22,6 +22,13 @@ struct ArchiveLanguageChip: View {
     /// Trailing chevron for the interactive form (the banner's chip
     /// advertises its popover); rows keep the plain capsule.
     var showsChevron = false
+    /// The text scale the chip's type and glyphs render at: the banner's
+    /// chip follows the transcript pane's scale, the archive window's rows
+    /// keep the default. The archive window's chips must stay at the
+    /// default — its flow layout caches the chip measurements under a
+    /// fingerprint that does not carry the scale, so a scaled chip there
+    /// would be laid out at the wrong width.
+    var scale: UIScale = .default
 
     /// The accent both label runs take while busy or selected; nil keeps the
     /// default secondary/primary pair.
@@ -32,25 +39,25 @@ struct ArchiveLanguageChip: View {
     var body: some View {
         HStack(spacing: 5) {
             Text(count.badgeCode)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 10 * scale.factor, weight: .semibold))
                 .foregroundStyle(tint ?? Theme.secondaryText)
                 .lineLimit(1)
                 .fixedSize()
             Text("\(count.translated)/\(total)")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.system(size: 10 * scale.factor, weight: .semibold, design: .monospaced))
                 .foregroundStyle(tint ?? Theme.primaryText)
                 .lineLimit(1)
                 .fixedSize()
             if busy {
                 Text("· translating…")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 10 * scale.factor, weight: .semibold))
                     .foregroundStyle(Theme.accentPink)
                     .lineLimit(1)
                     .fixedSize()
             }
             if showsChevron {
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(.system(size: 8 * scale.factor, weight: .semibold))
                     .foregroundStyle(Theme.secondaryText)
             }
         }

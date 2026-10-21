@@ -501,7 +501,7 @@ extension SidebarView {
                 .foregroundStyle(Theme.secondaryText)
                 .frame(width: 40, height: 32)
                 .background(Theme.tileFill)
-                .help("Text size for the transcript and HUD")
+                .help("Text size for the transcript pane, live strip and floating overlays")
 
             stepButton("plus", isLeading: false, isEnabled: uiScale != .percent200) {
                 uiScale = uiScale.step(1)

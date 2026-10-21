@@ -1,8 +1,14 @@
 import SwiftUI
 
-/// UI text scale, applied as a font-size multiplier to content text in the
-/// main window and the HUD. Persisted under one shared `UserDefaults` key
-/// so both surfaces always scale together.
+/// UI text scale, applied as a font-size multiplier to content text and
+/// glyphs. Persisted under one shared `UserDefaults` key so every scaling
+/// surface always scales together.
+///
+/// The scaling surfaces are the transcript pane (its rows, the archive
+/// banner above them) and the live strip, plus the HUD and the translation
+/// overlay. The fixed-metric surfaces are the sidebar column, the archive
+/// list window, the archive banner's popovers and rename alert, and the
+/// settings/reference windows — they keep their own sizes at every scale.
 enum UIScale: Int, CaseIterable, Identifiable {
     case percent75 = 75
     case percent100 = 100

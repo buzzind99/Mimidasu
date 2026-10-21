@@ -6,6 +6,12 @@ import SwiftUI
 /// switch-language popover), the Translate/Retranslate button (the engine
 /// picker), and the save icon — an outline bookmark that promotes a Recent, a
 /// filled accent bookmark once Saved (display only, no demotion).
+///
+/// The banner belongs to the transcript pane, so its type follows the pane's
+/// UI scale: the same factor the transcript rows render at, applied to the
+/// banner's own sizes. The other archive surfaces — the popovers this banner
+/// opens and the archive list window — are separate and keep their own fixed
+/// metrics.
 struct ArchiveBannerView: View {
     var model: AppModel
     /// The rename question's slot, draft and store value — the same state
@@ -14,6 +20,8 @@ struct ArchiveBannerView: View {
     @State private var renameState = ArchiveWindowState()
     @State private var isLanguagePopoverPresented = false
     @State private var isTranslatePopoverPresented = false
+    /// The pane's text scale: the banner's type and glyphs multiply by it.
+    @AppStorage(UIScale.storageKey) private var uiScale = UIScale.default
 
     /// The rename button's help and its VoiceOver label — one string, so
     /// the two cannot drift.
@@ -30,15 +38,17 @@ struct ArchiveBannerView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
                     Text(archive.summary.displayTitle)
-                        .font(.system(size: 15, weight: .bold))
+                        .font(.system(size: 15 * uiScale.factor, weight: .bold))
                         .foregroundStyle(Theme.primaryText)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                     Button {
                         renameState.requestRename(archive.summary)
                     } label: {
                         Image(systemName: "square.and.pencil")
-                            .font(.system(size: 13))
+                            .font(.system(size: 13 * uiScale.factor))
                             .foregroundStyle(Theme.secondaryText)
+                            .frame(minWidth: 22, minHeight: 22)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -48,7 +58,7 @@ struct ArchiveBannerView: View {
                     .accessibilityLabel(Self.renameHelp)
                 }
                 Text(archive.metaLine)
-                    .font(.system(size: 11))
+                    .font(.system(size: 11 * uiScale.factor))
                     .foregroundStyle(Theme.secondaryText)
                     .monospacedDigit()
             }
@@ -96,7 +106,8 @@ struct ArchiveBannerView: View {
                     count: viewingCount,
                     total: archive.summary.sentenceCount,
                     busy: jobIsActive(on: archive, lang: busyLang),
-                    showsChevron: true
+                    showsChevron: true,
+                    scale: uiScale
                 )
             } else {
                 plainCodeChip(viewedCode)
@@ -132,7 +143,7 @@ struct ArchiveBannerView: View {
 
     private func plainCodeChip(_ code: String?) -> some View {
         Text((code ?? "—").uppercased())
-            .font(.system(size: 10, weight: .semibold))
+            .font(.system(size: 10 * uiScale.factor, weight: .semibold))
             .foregroundStyle(Theme.secondaryText)
             .padding(.horizontal, 9)
             .padding(.vertical, 3)
@@ -150,7 +161,7 @@ struct ArchiveBannerView: View {
             isTranslatePopoverPresented = true
         } label: {
             Text(title)
-                .font(.system(size: 11, weight: .bold))
+                .font(.system(size: 11 * uiScale.factor, weight: .bold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 5)
@@ -221,14 +232,15 @@ struct ArchiveBannerView: View {
     @ViewBuilder
     private func saveButton(_ summary: ArchivedSessionSummary) -> some View {
         if summary.saved {
-            ArchiveSaveGlyph(size: 14, isFilled: true)
+            ArchiveSaveGlyph(size: 14 * uiScale.factor, isFilled: true)
                 .help(ArchiveSaveGlyph.savedHelp)
                 .accessibilityLabel(ArchiveSaveGlyph.savedHelp)
         } else {
             Button {
                 model.saveOpenArchive()
             } label: {
-                ArchiveSaveGlyph(size: 14)
+                ArchiveSaveGlyph(size: 14 * uiScale.factor)
+                    .frame(minWidth: 22, minHeight: 22)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -245,8 +257,9 @@ struct ArchiveBannerView: View {
 /// accent colour once the session is saved — and the archive window's row
 /// shows it in the action cluster's card; the wording is one copy.
 struct ArchiveSaveGlyph: View {
-    /// The glyph's point size: the banner's bare bookmark is larger than
-    /// the archive window row's carded icon.
+    /// The glyph's point size: the banner's bare bookmark scales with the
+    /// UI scale and stays at least as large as the archive window row's
+    /// carded icon at 100% and above; the row passes its own fixed size.
     var size: CGFloat
     /// The saved state: a filled bookmark in the accent colour.
     var isFilled = false
