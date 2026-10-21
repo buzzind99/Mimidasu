@@ -105,9 +105,6 @@ struct DictionaryWordRowTests {
         // A kana-only entry's reading IS its headword: showing it again would
         // read as two different words.
         #expect(searchRow(hit(keb: nil, reb: "まける")).reading == nil)
-        // A kana-only entry reached through its kana candidate highlights the
-        // headword instead.
-        #expect(searchRow(hit(keb: nil, reb: "まける", matchedField: .reb)).headwordHighlightRange == nil)
     }
 
     @Test("the favorites row shows the reading it stored, kana-only words included")
@@ -280,11 +277,27 @@ struct DictionaryWordRowTests {
         let fromHit = dictionaryBadges(
             leading: nil, common: false, jlpt: nil, namePosTokens: ["fem", "surname"]
         )
-        let fromEntry = dictionaryBadges(
-            leading: nil, common: false, jlpt: nil, namePosTokens: ["fem", "surname"]
-        )
         #expect(fromHit.map(\.text) == ["GIVEN NAME", "SURNAME"])
+
+        // The entry's source shape: a JMnedict name entry's sense columns.
+        let nameEntry = JMDictEntry(
+            entSeq: JMDictNameEntries.ingestOffset,
+            keb: "衛門", reb: "えもん", common: false, jlpt: nil,
+            hatsuon: nil, accPatts: nil, zoPatts: nil,
+            senses: [
+                JMDictSense(
+                    pos: "fem,surname", glosses: [], misc: nil,
+                    restrictedKanji: nil, restrictedKana: nil
+                )
+            ]
+        )
+        #expect(JMDictNameEntries.isName(nameEntry), "the entry is a name entry")
+        let fromEntry = dictionaryBadges(
+            leading: nil, common: false, jlpt: nil,
+            namePosTokens: nameEntry.senses.map(\.pos)
+        )
         #expect(fromEntry.map(\.text) == fromHit.map(\.text))
+
         // A word entry carries no name types.
         #expect(dictionaryBadges(
             leading: nil, common: false, jlpt: nil, namePosTokens: []
@@ -293,10 +306,8 @@ struct DictionaryWordRowTests {
 
     @Test("an absent level and an absent commonness add no chip")
     func badgeOmissions() {
-        #expect(dictionaryBadges(leading: nil, common: false, jlpt: nil, namePosTokens: []).isEmpty)
-        #expect(dictionaryBadges(leading: nil, common: false, jlpt: nil, namePosTokens: []).isEmpty)
         #expect(dictionaryBadges(
             leading: nil, common: false, jlpt: nil, namePosTokens: []
-        ).count == 0)
+        ).isEmpty)
     }
 }

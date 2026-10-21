@@ -71,9 +71,11 @@ struct DictionaryWordRowBindings {
     /// The lookup phase behind the expanded block.
     var phase: FavoritesLookupState.Phase
     /// The headword the trailing controls act on; nil hides the copy and the
-    /// star — a search hit with no headword has nothing to key them on.
+    /// star — a search hit with no headword has nothing to key them on. The
+    /// row reads this value; the caller does not re-derive it.
     var trailingHeadword: String?
-    /// Whether the trailing star reads as filled.
+    /// Whether the trailing star reads as filled. The Favorites mode hands
+    /// over `true` — every row in that list is starred by construction.
     var isFavorite: Bool
     /// Opens or closes the row.
     var onToggle: () -> Void

@@ -263,9 +263,10 @@ func favoritesWordRow<Extras: View, ResolvedContent: View>(
         accessibilityHeadword: word.headword,
         isExpanded: bindings.isExpanded,
         onToggle: bindings.onToggle,
-        trailingHeadword: word.headword,
-        // Every row in this list is starred by construction.
-        isFavorite: true,
+        trailingHeadword: bindings.trailingHeadword,
+        // Every row in this list is starred by construction, and the
+        // bindings say so.
+        isFavorite: bindings.isFavorite,
         onToggleFavorite: bindings.onToggleFavorite,
         onCopy: bindings.onCopy,
         phase: bindings.phase,

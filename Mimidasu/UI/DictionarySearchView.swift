@@ -429,7 +429,7 @@ func searchWordRow<Extras: View, ResolvedContent: View>(
         accessibilityHeadword: hit.rowHeadword,
         isExpanded: bindings.isExpanded,
         onToggle: bindings.onToggle,
-        trailingHeadword: hit.headword,
+        trailingHeadword: bindings.trailingHeadword,
         isFavorite: bindings.isFavorite,
         onToggleFavorite: bindings.onToggleFavorite,
         onCopy: bindings.onCopy,
