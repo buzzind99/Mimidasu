@@ -1,0 +1,124 @@
+import Foundation
+@testable import Mimidasu
+import Testing
+
+/// `AppModel`'s wiring to the session-phase machine.
+///
+/// The model no longer owns the phase: the machine does, and the model's
+/// `phase` is a view of it. These tests pin that wiring — the model and the
+/// machine never diverge, the test seam clears the machine's latches, and the
+/// latches that used to live on the model now guard the start and the
+/// resume.
+@MainActor
+@Suite("AppModel phase-machine wiring")
+struct AppModelPhaseMachineWiringTests {
+
+    /// A thread-safe one-shot flag: the observation callback runs outside
+    /// the test's actor.
+    private final class Flag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+
+        var isSet: Bool {
+            lock.withLock { value }
+        }
+
+        func set() {
+            lock.withLock { value = true }
+        }
+    }
+
+    private func makeModel() async -> AppModel {
+        let model = AppModel(
+            favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
+            initialModelResolve: { _ in nil }
+        )
+        await model.initialModelCheck?.value
+        return model
+    }
+
+    @Test("the model's phase is the machine's phase")
+    func modelPhaseIsTheMachinePhase() async {
+        let model = await makeModel()
+        #expect(model.phase == model.phaseMachine.phase)
+
+        model.phase = .running
+        #expect(model.phase == .running)
+        #expect(model.phaseMachine.phase == .running)
+    }
+
+    @Test("a production phase write moves the machine too")
+    func productionWriteMovesTheMachine() async {
+        let model = await makeModel()
+        model.phase = .running
+
+        model.stop()
+
+        #expect(model.phase == .stopping)
+        #expect(model.phaseMachine.phase == .stopping)
+        #expect(await pollUntil { model.phase == .idle }, "stop winds down to idle")
+        #expect(model.phaseMachine.phase == .idle)
+    }
+
+    @Test("the test seam clears the machine's resume latch")
+    func seamClearsTheResumeLatch() async {
+        let model = await makeModel()
+        model.phase = .paused
+        #expect(model.reducePhase(.resumeRequested).isLegal)
+        #expect(model.phaseMachine.isResuming, "the resume latch is armed")
+
+        model.phase = .paused
+        #expect(!model.phaseMachine.isResuming, "the seam must not leave the resume guard closed")
+    }
+
+    @Test("the terminating latch refuses a new session")
+    func terminatingLatchRefusesStart() async {
+        let model = await makeModel()
+        #expect(model.reducePhase(.terminationStarted).isLegal)
+        #expect(model.phaseMachine.isTerminating)
+
+        #expect(
+            !model.reducePhase(.startRequested).isLegal,
+            "a terminating app never begins a new session"
+        )
+    }
+
+    @Test("a phase change notifies observers — the views that read the phase still re-render")
+    func phaseChangeNotifiesObservers() async {
+        let model = await makeModel()
+        let observed = Flag()
+        withObservationTracking {
+            _ = model.phase
+        } onChange: {
+            observed.set()
+        }
+
+        model.phase = .running
+
+        #expect(
+            observed.isSet,
+            "the machine's phase change must invalidate the views that read it"
+        )
+    }
+
+    @Test("the machine's predicates answer for every phase")
+    func predicatesCoverEveryPhase() async {
+        let model = await makeModel()
+        for phase in SessionPhaseFixtures.all {
+            model.phase = phase
+            #expect(
+                model.phaseMachine.isLive == SessionPhaseMachine.isLive(phase),
+                "\(phase)"
+            )
+            #expect(
+                model.phaseMachine.isLiveOrStarting == SessionPhaseMachine.isLiveOrStarting(phase),
+                "\(phase)"
+            )
+            #expect(
+                model.phaseMachine.isLiveOrStopping == SessionPhaseMachine.isLiveOrStopping(phase),
+                "\(phase)"
+            )
+        }
+    }
+}
