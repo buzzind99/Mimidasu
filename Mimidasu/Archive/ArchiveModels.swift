@@ -12,6 +12,21 @@ enum ArchiveStatus: String, Sendable {
     case interrupted
 }
 
+/// The uppercase primary subtag of a language code — the badge an archive
+/// chip and the target-language picker show ("en" → "EN", "zh-Hans" → "ZH").
+///
+/// The raw code, never a `TargetLanguage`: an unknown code falls back to
+/// English there, and a badge reading "EN" for an unknown language would
+/// name the wrong one.
+enum LanguageBadge {
+    static func code(for rawCode: String) -> String {
+        guard let primary = rawCode.split(separator: "-").first else {
+            return rawCode.uppercased()
+        }
+        return primary.uppercased()
+    }
+}
+
 /// One language an archive holds with its translated-sentence count — the
 /// data behind a language chip (`FR 40/183`, badge = uppercase primary
 /// subtag). Membership languages with nothing translated yet appear at
@@ -27,15 +42,19 @@ struct ArchiveLanguageCount: Equatable, Sendable, Identifiable {
     /// Uppercase primary subtag for the chip badge ("en" → "EN",
     /// "zh-Hans" → "ZH"), matching the target-language picker's rows.
     var badgeCode: String {
-        guard let primary = lang.split(separator: "-").first else {
-            return lang.uppercased()
-        }
-        return primary.uppercased()
+        LanguageBadge.code(for: lang)
     }
 
     /// The chip label for a session of `total` sentences: `FR 40/183`.
     func chipText(of total: Int) -> String {
         "\(badgeCode) \(translated)/\(total)"
+    }
+
+    /// The chip's VoiceOver text: the counts, plus the "translating" note
+    /// while a bulk run claims this language.
+    func accessibilityText(of total: Int, busy: Bool) -> String {
+        let chip = chipText(of: total)
+        return busy ? "\(chip), translating" : chip
     }
 
     /// True when this language's chip reads as complete (`N/N` with a

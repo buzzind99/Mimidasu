@@ -47,16 +47,12 @@ struct ArchiveWindowView: View {
         } message: { _ in
             Text("The transcript and its translations will be deleted permanently.")
         }
-        .alert("Rename session", isPresented: renamePresented) {
-            TextField("Name", text: $state.renameDraft)
-            Button("Cancel", role: .cancel) { state.pendingRename = nil }
-            Button("Save") {
-                if let summary = state.pendingRename {
-                    model.renameArchive(id: summary.id, name: state.renameValue)
-                }
-                state.pendingRename = nil
-            }
-        }
+        .archiveRenameConfirmation(
+            model,
+            pendingRename: $state.pendingRename,
+            draft: $state.renameDraft,
+            renamedName: { state.renameValue }
+        )
         // The bulk run's cloud disclosure: this window presents only the
         // intents raised from its own rows, and the sheet's dismissal
         // declines the held slot.
@@ -88,17 +84,6 @@ struct ArchiveWindowView: View {
             set: { isPresented in
                 if !isPresented {
                     state.pendingDelete = nil
-                }
-            }
-        )
-    }
-
-    private var renamePresented: Binding<Bool> {
-        Binding(
-            get: { state.pendingRename != nil },
-            set: { isPresented in
-                if !isPresented {
-                    state.pendingRename = nil
                 }
             }
         )
@@ -433,7 +418,9 @@ private struct ArchiveRow: View {
             )
             actionButton("square.and.pencil", help: "Rename", action: onRename)
             if !summary.saved {
-                actionButton("bookmark", help: "Save permanently", action: onSave)
+                ArchiveActionButton(help: ArchiveSaveGlyph.saveHelp, action: onSave) {
+                    ArchiveSaveGlyph(size: 11)
+                }
             }
         }
     }
@@ -523,6 +510,9 @@ private struct ArchiveRow: View {
         }
     }
 
+    /// The action cluster's button: an icon in a small card. The delete and
+    /// rename buttons pass a system image; the save button passes the
+    /// shared archive glyph.
     private func actionButton(
         _ systemImage: String,
         help: String,
@@ -530,10 +520,31 @@ private struct ArchiveRow: View {
         showsLink: Bool = true,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        ArchiveActionButton(
+            help: help,
+            isEnabled: isEnabled,
+            showsLink: showsLink,
+            action: action
+        ) {
             Image(systemName: systemImage)
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.secondaryText)
+        }
+    }
+}
+
+/// The carded icon button behind the archive row's action cluster: the
+/// delete, rename and save controls, each an icon in its own small card.
+private struct ArchiveActionButton<Label: View>: View {
+    let help: String
+    var isEnabled = true
+    var showsLink = true
+    let action: () -> Void
+    @ViewBuilder var label: () -> Label
+
+    var body: some View {
+        Button(action: action) {
+            label()
                 .frame(width: 26, height: 26)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)

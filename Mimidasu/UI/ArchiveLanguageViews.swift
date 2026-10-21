@@ -2,8 +2,9 @@ import SwiftUI
 
 // The language surfaces of archive mode, kept in one cluster: the capsule
 // chip shared by the banner and the archive rows, the row's `+` pill, the
-// switch-language popover with its in-popover add chooser, and the engine
-// picker behind the banner's Translate button and each row language chip.
+// switch-language popover with its in-popover add chooser, the engine
+// picker behind the banner's Translate button and each row language chip,
+// and the loading row the Settings target-language card shares.
 
 /// One language's count chip (`FR 40/183`): the badge code in the plain
 /// secondary font, the counts in a monospaced emphasis. A value view with no
@@ -66,7 +67,26 @@ struct ArchiveLanguageChip: View {
     }
 
     private var accessibilityText: String {
-        busy ? "\(count.chipText(of: total)), translating" : count.chipText(of: total)
+        count.accessibilityText(of: total, busy: busy)
+    }
+}
+
+/// The "Loading languages…" row the language surfaces show while the OS
+/// catalog is still being probed: a mini spinner beside the label. The
+/// surfaces grey the label differently — the Settings card's muted token,
+/// the archive popover's secondary — so the caller passes the colour in.
+struct LanguagesLoadingRow: View {
+    /// The label's colour.
+    var tint: Color
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.mini)
+            Text("Loading languages…")
+                .font(.system(size: 11))
+                .foregroundStyle(tint)
+        }
     }
 }
 
@@ -243,15 +263,9 @@ struct ArchiveSwitchLanguagePopover: View {
             !held.contains(target.code)
         }
         if !model.appleTranslationAvailability.isLoaded {
-            HStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.mini)
-                Text("Loading languages…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 8)
+            LanguagesLoadingRow(tint: Theme.secondaryText)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 8)
         } else if available.isEmpty {
             Text("No other languages available")
                 .font(.system(size: 11))

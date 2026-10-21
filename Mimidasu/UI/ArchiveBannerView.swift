@@ -8,10 +8,16 @@ import SwiftUI
 /// filled accent bookmark once Saved (display only, no demotion).
 struct ArchiveBannerView: View {
     var model: AppModel
-    @State private var isRenaming = false
-    @State private var renameDraft = ""
+    /// The rename question's slot, draft and store value — the same state
+    /// the archive window's rows use, so both surfaces apply one rename
+    /// rule.
+    @State private var renameState = ArchiveWindowState()
     @State private var isLanguagePopoverPresented = false
     @State private var isTranslatePopoverPresented = false
+
+    /// The rename button's help and its VoiceOver label — one string, so
+    /// the two cannot drift.
+    private static let renameHelp = "Rename this session"
 
     var body: some View {
         if let archive = model.openArchive {
@@ -28,8 +34,7 @@ struct ArchiveBannerView: View {
                         .foregroundStyle(Theme.primaryText)
                         .lineLimit(1)
                     Button {
-                        renameDraft = archive.summary.name ?? ""
-                        isRenaming = true
+                        renameState.requestRename(archive.summary)
                     } label: {
                         Image(systemName: "square.and.pencil")
                             .font(.system(size: 13))
@@ -39,8 +44,8 @@ struct ArchiveBannerView: View {
                     .buttonStyle(.plain)
                     .hoverHighlight(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     .pointerStyle(.link)
-                    .help("Rename this session")
-                    .accessibilityLabel("Rename this session")
+                    .help(Self.renameHelp)
+                    .accessibilityLabel(Self.renameHelp)
                 }
                 Text(archive.metaLine)
                     .font(.system(size: 11))
@@ -55,16 +60,12 @@ struct ArchiveBannerView: View {
         .cardSurface(radius: 12)
         .padding(.horizontal, 26)
         .padding(.top, 20)
-        .alert("Rename session", isPresented: $isRenaming) {
-            TextField("Name", text: $renameDraft)
-            Button("Cancel", role: .cancel) {}
-            Button("Save") {
-                let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-                model.renameArchive(
-                    id: archive.summary.id, name: trimmed.isEmpty ? nil : trimmed
-                )
-            }
-        }
+        .archiveRenameConfirmation(
+            model,
+            pendingRename: $renameState.pendingRename,
+            draft: $renameState.renameDraft,
+            renamedName: { renameState.renameValue }
+        )
     }
 
     /// The trailing cluster, left to right: the viewed-language chip, the
@@ -126,8 +127,7 @@ struct ArchiveBannerView: View {
     /// plus the viewed-language hint the button adds.
     private func viewedLanguageLabel(_ count: ArchiveLanguageCount?, total: Int, busy: Bool) -> String {
         guard let count else { return "Viewed language" }
-        let chip = count.chipText(of: total)
-        return "Viewed language: \(busy ? "\(chip), translating" : chip)"
+        return "Viewed language: \(count.accessibilityText(of: total, busy: busy))"
     }
 
     private func plainCodeChip(_ code: String?) -> some View {
@@ -221,25 +221,44 @@ struct ArchiveBannerView: View {
     @ViewBuilder
     private func saveButton(_ summary: ArchivedSessionSummary) -> some View {
         if summary.saved {
-            Image(systemName: "bookmark.fill")
-                .font(.system(size: 14))
-                .foregroundStyle(Theme.accentPink)
-                .help("Saved — kept permanently")
-                .accessibilityLabel("Saved — kept permanently")
+            ArchiveSaveGlyph(size: 14, isFilled: true)
+                .help(ArchiveSaveGlyph.savedHelp)
+                .accessibilityLabel(ArchiveSaveGlyph.savedHelp)
         } else {
             Button {
                 model.saveOpenArchive()
             } label: {
-                Image(systemName: "bookmark")
-                    .font(.system(size: 14))
-                    .foregroundStyle(Theme.secondaryText)
+                ArchiveSaveGlyph(size: 14)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .hoverHighlight(RoundedRectangle(cornerRadius: 6, style: .continuous))
             .pointerStyle(.link)
-            .help("Save permanently")
-            .accessibilityLabel("Save permanently")
+            .help(ArchiveSaveGlyph.saveHelp)
+            .accessibilityLabel(ArchiveSaveGlyph.saveHelp)
         }
+    }
+}
+
+/// The archive save affordance: the bookmark that promotes a stored session
+/// to the permanent tier. The opened banner shows it bare — filled in the
+/// accent colour once the session is saved — and the archive window's row
+/// shows it in the action cluster's card; the wording is one copy.
+struct ArchiveSaveGlyph: View {
+    /// The glyph's point size: the banner's bare bookmark is larger than
+    /// the archive window row's carded icon.
+    var size: CGFloat
+    /// The saved state: a filled bookmark in the accent colour.
+    var isFilled = false
+
+    /// The save button's help and VoiceOver label.
+    static let saveHelp = "Save permanently"
+    /// The saved session's help and VoiceOver label.
+    static let savedHelp = "Saved — kept permanently"
+
+    var body: some View {
+        Image(systemName: isFilled ? "bookmark.fill" : "bookmark")
+            .font(.system(size: size))
+            .foregroundStyle(isFilled ? Theme.accentPink : Theme.secondaryText)
     }
 }
