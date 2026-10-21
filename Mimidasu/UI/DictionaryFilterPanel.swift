@@ -1,5 +1,92 @@
 import SwiftUI
 
+// The dictionary's badge vocabulary lives here, with the filter panel that
+// filters on it: one chip literal, one colour rule, one builder, and one
+// badge row, shared by the search row, the lookup popover, and the COMMON
+// toggle below.
+
+/// The badge vocabulary the dictionary's chip surfaces share: the search
+/// row's badge line, the lookup popover's badge row, and the filter panel's
+/// COMMON toggle. One literal and one colour rule, so the toggle that
+/// *filters* on commonness cannot drift away from the chip that *shows* it.
+enum DictionaryBadgeChip {
+    /// The commonness chip's text.
+    static let common = "COMMON"
+    /// The colour a commonness chip wears — green marks commonness wherever
+    /// it appears, in the badge rows and in the filter toggle alike.
+    static let commonColor = Theme.dotGreen
+    /// The colour the other chips wear: the JLPT level and the name types.
+    static let metaColor = Theme.brandViolet
+}
+
+/// One chip in a dictionary badge row: the text, the colour it wears, and an
+/// optional icon. The icon marks the chip as the row's *reason for being
+/// here* rather than as one more fact about the word — which is why it is a
+/// parameter and not a rule of the chip itself.
+struct DictionaryBadge {
+    let text: String
+    let color: Color
+    /// The chip's leading glyph, or nil for none. A search row's match badge
+    /// carries a magnifying glass; the popover's joined-match badge does not.
+    var icon: String?
+}
+
+/// The one badge set builder: the leading chip — the row's reason for being
+/// here — followed by the shared tail: commonness, the JLPT level, and the
+/// name types. The tail is one code path for every host; only the leading
+/// chip and the name-type tokens differ, and both are parameters.
+///
+/// The name-type *source* differs by host (a search hit's stored tokens, an
+/// entry's sense columns) but the mapper is this one, so a collapsed search
+/// row and an expanded entry can never label the same name differently.
+func dictionaryBadges(
+    leading: DictionaryBadge?,
+    common: Bool,
+    jlpt: Int?,
+    namePosTokens: [String?]
+) -> [DictionaryBadge] {
+    var badges: [DictionaryBadge] = []
+    if let leading {
+        badges.append(leading)
+    }
+    if common {
+        badges.append(
+            DictionaryBadge(text: DictionaryBadgeChip.common, color: DictionaryBadgeChip.commonColor)
+        )
+    }
+    if let level = DictionaryContent.jlptBadge(jlpt) {
+        badges.append(DictionaryBadge(text: level, color: DictionaryBadgeChip.metaColor))
+    }
+    for label in JMDictNameEntries.nameTypeBadges(posTokens: namePosTokens) {
+        badges.append(DictionaryBadge(text: label, color: DictionaryBadgeChip.metaColor))
+    }
+    return badges
+}
+
+/// The badge line every dictionary badge row renders through: the chips
+/// wrapped by `FlowLayout` (the ruby text wrapping engine), which keeps long
+/// badge sets — name types in particular — inside the card instead of
+/// clipping at its trailing edge.
+///
+/// The chips are keyed by position rather than by text: a badge set grows and
+/// shrinks at its tail, and a text key would renumber every chip behind it
+/// on each change and re-animate the row.
+struct DictionaryBadgeRow: View {
+    let badges: [DictionaryBadge]
+
+    var body: some View {
+        if !badges.isEmpty {
+            FlowLayout(
+                spacing: 6, lineSpacing: 6, fingerprint: badges.map(\.text).joined(separator: "\n")
+            ) {
+                ForEach(Array(badges.enumerated()), id: \.offset) { _, badge in
+                    DictionaryBadgeView(text: badge.text, color: badge.color, icon: badge.icon)
+                }
+            }
+        }
+    }
+}
+
 /// The collapsible filter panel behind the dictionary search field's funnel
 /// button: scope + reset, then the match, JLPT (+ COMMON), POS, and name-type
 /// rows. Gone entirely while `filtersExpanded` is false, so the
@@ -393,9 +480,9 @@ struct DictionaryFilterPanel: View {
     private var commonOnlyToggle: some View {
         let disabled = !state.filters.scope.answersCommon
         return FilterBadgeButton(
-            text: "COMMON",
+            text: DictionaryBadgeChip.common,
             selected: state.filters.commonOnly,
-            selectedColor: Theme.dotGreen,
+            selectedColor: DictionaryBadgeChip.commonColor,
             disabled: disabled,
             help: disabled
                 ? "Name entries are never marked common"

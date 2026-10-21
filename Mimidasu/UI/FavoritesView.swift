@@ -163,208 +163,137 @@ struct FavoritesView: View {
 
     // MARK: - Rows
 
+    /// The row: the shared list row, with this mode's values. Favorites
+    /// differs from search in four places — the label spacing, the reading
+    /// gate, the romaji's source, and the star's meaning — and every one of
+    /// them is an argument here rather than a second copy of the row.
     private func favoriteCard(_ word: FavoriteWord) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            favoriteHeader(word)
-            if state.lookupState.isExpanded(word) {
-                favoriteDefinition(word)
+        favoritesWordRow(
+            word: word,
+            bindings: DictionaryWordRowBindings(
+                isExpanded: state.lookupState.isExpanded(word),
+                phase: state.lookupState.phase(for: word),
+                trailingHeadword: word.headword,
+                isFavorite: true,
+                onToggle: { state.lookupState.toggle(word) },
+                onToggleFavorite: { unstar(word) },
+                onCopy: { headword in model.copySnippet(headword) }
+            ),
+            extras: { EmptyView() },
+            resolvedContent: { result in
+                favoriteEntry(word, result: result)
             }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface()
+        )
     }
 
-    /// Card header block: headword + inline kana with the romaji below — one
-    /// button down to the divider, so the whole block toggles. The label is
-    /// greedy (`maxWidth: .infinity`) so that button claims every pixel the
-    /// three trailing controls do not, which is both what keeps the controls
-    /// trailing and what makes the full header width tappable. The controls
-    /// are siblings rather than part of that button, so the chevron can read
-    /// last.
-    private func favoriteHeader(_ word: FavoriteWord) -> some View {
-        let helpText = expansionHelp(state.lookupState.isExpanded(word))
-        return HStack(alignment: .top, spacing: 8) {
-            Button {
-                state.lookupState.toggle(word)
-            } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    headwordBlock(word)
-                    if let romaji = word.romaji {
-                        Text(verbatim: romaji)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(Theme.secondaryText)
-                            .lineLimit(1)
-                            .textSelection(.disabled)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .pointerStyle(.link)
-            .help(helpText)
-            .accessibilityLabel("\(word.headword), \(helpText)")
-            trailingControls(word)
-        }
-    }
-
-    /// The headword and its kana: inline while the pair fits the row, stacked
-    /// with the kana above the word when it does not. Both texts are
-    /// `fixedSize` inline, so a long entry would otherwise draw past the card's
-    /// stroke and push the trailing controls off a window that cannot resize —
-    /// the same reason the shared dictionary header carries this fallback.
-    /// The stacked form drops `fixedSize` from the headword, so it truncates on
-    /// its own line rather than competing with the kana.
-    private func headwordBlock(_ word: FavoriteWord) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                headwordText(word.headword)
-                    .fixedSize(horizontal: true, vertical: false)
-                if let reading = word.reading {
-                    readingText(reading, size: 14)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-            }
-            VStack(alignment: .leading, spacing: 1) {
-                if let reading = word.reading {
-                    readingText(reading, size: 12)
-                }
-                headwordText(word.headword)
-            }
-        }
-    }
-
-    private func headwordText(_ headword: String) -> some View {
-        Text(verbatim: headword)
-            .font(.system(size: 26))
-            .foregroundStyle(Theme.primaryText)
-            .lineLimit(1)
-            .textSelection(.disabled)
-    }
-
-    private func readingText(_ reading: String, size: CGFloat) -> some View {
-        Text(verbatim: reading)
-            .font(.system(size: size, weight: .medium))
-            .foregroundStyle(Theme.annotationPink)
-            .lineLimit(1)
-            .textSelection(.disabled)
-    }
-
-    /// Copy, unstar, and the disclosure chevron — the same order the shared
-    /// dictionary header row leads with (copy, then the star), with the
-    /// chevron last because it belongs to the row rather than to the word.
-    ///
-    /// One drop for the whole group, not per control: the boxes are all 22pt
-    /// and centered on each other here, so a single offset puts all three on
-    /// the headword's line. The row's type is fixed, so this cannot drift
-    /// with the UI scale.
-    private func trailingControls(_ word: FavoriteWord) -> some View {
-        HStack(alignment: .center, spacing: 4) {
-            DictionaryCopyButton(
-                placement: .icon, help: "Copy the headword",
-                action: { model.copySnippet(word.headword) }
+    /// What a resolved lookup shows under an open Favorites row: 1pt divider
+    /// over the shared entry view, so a row's definition is pixel-identical to
+    /// the popover's. The headword block is suppressed — this row already
+    /// shows the word, its kana, and its romaji two lines above — leaving
+    /// badges, pitch, and senses. No sense viewport (this is a scrolling
+    /// column) and no pager: nothing pages a window row.
+    @ViewBuilder
+    private func favoriteEntry(_ word: FavoriteWord, result: LookupResult) -> some View {
+        // Favorite-first: a starred entry leads, so the row opens on the word
+        // the user kept. Entry order only — the pager stays off and the
+        // "also:" pills stay empty, as below.
+        let promoted = FavoritesPromotion.promotingFavorites(
+            in: result, identity: model.favorites.identity
+        )
+        if let entry = promoted.entries.first {
+            // No favorite or copy arguments: `showsHeadword: false` drops the
+            // header row, which is the only place either is rendered, so
+            // passing them would assert a control the expanded block cannot
+            // show. The row's own header above carries both. `also: []` is the
+            // same kind of empty: the pager and the "also:" pills both live in
+            // the header row, and nothing may promote a window row's lookup —
+            // threading real hits through would render pills whose taps do
+            // nothing.
+            DictionaryEntryContentView(
+                entry: entry,
+                entryCount: promoted.entries.count,
+                entryIndex: 0,
+                also: [],
+                senseLimit: nil,
+                glossLimit: nil,
+                showsEntryPager: false,
+                showsHeadword: false
             )
-            unstarButton(word)
-            chevronButton(word)
+        } else {
+            dictionaryUnavailableText(surface: word.headword)
         }
-        .padding(.top, Theme.dictionaryTrailingLineDrop)
-    }
-
-    private func chevronButton(_ word: FavoriteWord) -> some View {
-        let expanded = state.lookupState.isExpanded(word)
-        let helpText = expansionHelp(expanded)
-        return Button {
-            state.lookupState.toggle(word)
-        } label: {
-            Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Theme.secondaryText)
-                .frame(width: 22, height: 22)
-        }
-        .buttonStyle(.plain)
-        .pointerStyle(.link)
-        .help(helpText)
-        .accessibilityLabel(helpText)
-    }
-
-    /// Expanded definition block: 1pt divider over the shared entry view, so
-    /// a row's definition is pixel-identical to the popover's. The headword
-    /// block is suppressed — this row already shows the word, its kana, and
-    /// its romaji two lines above — leaving badges, pitch, and senses. No
-    /// sense viewport (this is a scrolling column) and no pager: nothing
-    /// pages a window row.
-    private func favoriteDefinition(_ word: FavoriteWord) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Rectangle().fill(Theme.divider).frame(height: 1)
-            switch state.lookupState.phase(for: word) {
-            case .idle, .loading:
-                ProgressView()
-                    .controlSize(.small)
-            case let .resolved(result):
-                // Favorite-first: a starred entry leads, so the row opens on
-                // the word the user kept. Entry order only — the pager stays
-                // off and the "also:" pills stay empty, as below.
-                let promoted = FavoritesPromotion.promotingFavorites(
-                    in: result, identity: model.favorites.identity
-                )
-                if let entry = promoted.entries.first {
-                    // No favorite or copy arguments: `showsHeadword: false`
-                    // drops the header row, which is the only place either is
-                    // rendered, so passing them would assert a control the
-                    // expanded block cannot show. The row's own header above
-                    // carries both. `also: []` is the same kind of empty: the
-                    // pager and the "also:" pills both live in the header row,
-                    // and nothing may promote a window row's lookup — threading
-                    // real hits through would render pills whose taps do
-                    // nothing.
-                    DictionaryEntryContentView(
-                        entry: entry,
-                        entryCount: promoted.entries.count,
-                        entryIndex: 0,
-                        also: [],
-                        senseLimit: nil,
-                        glossLimit: nil,
-                        showsEntryPager: false,
-                        showsHeadword: false
-                    )
-                } else {
-                    lookupUnavailable(word)
-                }
-            case .notFound:
-                DictionaryNotFoundView(
-                    surface: word.headword, related: [], copyPlacement: .icon,
-                    onCopy: { model.copySnippet(word.headword) }
-                )
-            case let .failed(message):
-                lookupUnavailable(word, message: message)
-            }
-        }
-    }
-
-    private func lookupUnavailable(_ word: FavoriteWord, message: String = "") -> some View {
-        Text(message.isEmpty ? "No definition for “\(word.headword)”." : message)
-            .font(.system(size: 12))
-            .foregroundStyle(Theme.secondaryText)
-            .fixedSize(horizontal: false, vertical: true)
     }
 
     /// Unstar control: the shared favorite star, always filled here — every
     /// row in this list is starred by construction. Asks first — the shared
     /// alert commits the removal.
-    private func unstarButton(_ word: FavoriteWord) -> some View {
-        DictionaryFavoriteButton(
-            isFavorite: true,
-            subject: word.headword,
-            style: .popover,
-            action: {
-                // A filled star asserts membership; re-check so a row that vanished cannot be re-added by the removal press.
-                guard model.favorites.isFavorite(headword: word.headword) else { return }
-                forwardRemovalRequest(
-                    model.toggleFavorite(headword: word.headword, reading: word.reading),
-                    to: onFavoriteRemoval
-                )
-            }
+    private func unstar(_ word: FavoriteWord) {
+        // A filled star asserts membership; re-check so a row that vanished cannot be re-added by the removal press.
+        guard model.favorites.isFavorite(headword: word.headword) else { return }
+        forwardRemovalRequest(
+            model.toggleFavorite(headword: word.headword, reading: word.reading),
+            to: onFavoriteRemoval
         )
+    }
+}
+
+// MARK: - The favorites row's values
+
+/// The Favorites row for a starred word — the shared row with this mode's
+/// values.
+///
+/// Split from the view so the mapping can be read, and pinned by a test,
+/// without a window: the values below are the whole difference between the
+/// two modes, and the owner reviews them as a table.
+@MainActor
+func favoritesWordRow<Extras: View, ResolvedContent: View>(
+    word: FavoriteWord,
+    bindings: DictionaryWordRowBindings,
+    @ViewBuilder extras: @escaping () -> Extras,
+    @ViewBuilder resolvedContent: @escaping (LookupResult) -> ResolvedContent
+) -> DictionaryWordRow<Extras, ResolvedContent> {
+    DictionaryWordRow(
+        headword: word.headword,
+        reading: word.rowReading,
+        romaji: word.rowRomaji,
+        // A starred word carries no match to light up.
+        headwordHighlightRange: nil,
+        readingHighlightRange: nil,
+        labelSpacing: DictionaryWordRowLayout.favoritesLabelSpacing,
+        accessibilityHeadword: word.headword,
+        isExpanded: bindings.isExpanded,
+        onToggle: bindings.onToggle,
+        trailingHeadword: word.headword,
+        // Every row in this list is starred by construction.
+        isFavorite: true,
+        onToggleFavorite: bindings.onToggleFavorite,
+        onCopy: bindings.onCopy,
+        phase: bindings.phase,
+        surface: word.headword,
+        extras: extras,
+        resolvedContent: resolvedContent
+    )
+}
+
+/// The Favorites row's readings of a starred word — the divergences from the
+/// search row, spelled out once and shared by the view and its tests.
+///
+/// The Favorites row reads a *stored* word, so every one of these is the
+/// stored truth rather than a derivation: the romaji is the snapshot taken
+/// when the word was starred, not a live transliteration.
+extension FavoriteWord {
+    /// The reading the row shows, or nil when the word carries none. There
+    /// is **no** kanji gate here: a kana-only favorite stores its reading as
+    /// its headword, and the row shows both — the stored truth. The search
+    /// row keeps its own gate, and sharing the rule would render a kana-only
+    /// favorite's kana twice.
+    var rowReading: String? {
+        reading
+    }
+
+    /// The romaji line the row shows: the snapshot stored when the word was
+    /// starred. The search row derives its romaji live instead.
+    var rowRomaji: String? {
+        romaji
     }
 }

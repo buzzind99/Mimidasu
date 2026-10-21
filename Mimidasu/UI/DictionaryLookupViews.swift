@@ -341,23 +341,30 @@ struct DictionaryEntryContentView: View {
         )
     }
 
-    @ViewBuilder
+    /// The badge row: the joined-match badge (when the displayed result came
+    /// from a forward join) leading the shared tail — commonness, the JLPT
+    /// level, and the name types. The joined-match badge wears the popover's
+    /// own violet and carries no match icon: it names where the *result*
+    /// came from, which is not the same claim a search row's match badge
+    /// makes.
     private var badgeRow: some View {
-        let badges = [
-            displayOrigin.flatMap(DictionaryContent.joinedMatchBadge(for:)),
-            entry.common ? "COMMON" : nil,
-            DictionaryContent.jlptBadge(entry.jlpt)
-        ].compactMap(\.self) + JMDictNameEntries.nameTypeBadges(for: entry)
-        if !badges.isEmpty {
-            // FlowLayout (the ruby text wrapping engine) keeps long badge
-            // sets — name types in particular — inside the card instead of
-            // clipping at its trailing edge.
-            FlowLayout(spacing: 6, lineSpacing: 6, fingerprint: badges.joined(separator: "\n")) {
-                ForEach(badges, id: \.self) { badge in
-                    DictionaryBadgeView(text: badge, color: badge == "COMMON" ? Theme.dotGreen : Theme.brandViolet)
-                }
-            }
+        DictionaryBadgeRow(
+            badges: dictionaryBadges(
+                leading: joinedMatchBadge,
+                common: entry.common,
+                jlpt: entry.jlpt,
+                namePosTokens: JMDictNameEntries.isName(entry) ? entry.senses.map(\.pos) : []
+            )
+        )
+    }
+
+    /// The joined-match chip the display result carries, or nil for a result
+    /// that matched the tapped word's own surface or lemma.
+    private var joinedMatchBadge: DictionaryBadge? {
+        guard let text = displayOrigin.flatMap(DictionaryContent.joinedMatchBadge(for:)) else {
+            return nil
         }
+        return DictionaryBadge(text: text, color: DictionaryBadgeChip.metaColor)
     }
 
     private func pitchPill(_ pitch: DictionaryContent.PitchPill) -> some View {

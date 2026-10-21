@@ -30,6 +30,300 @@ func expansionHelp(_ isExpanded: Bool) -> String {
     isExpanded ? "Hide definition" : "Show definition"
 }
 
+// MARK: - Shared row text
+
+/// Splits a field into before/match/after and tints the match. Nothing is
+/// emitted for a nil range — a lemma row, or a field that did not match —
+/// which is exactly the "no highlight" the badge then has to explain.
+///
+/// The base color is applied *per part* rather than to the composed text:
+/// a `foregroundStyle` on the whole concatenation would override the accent
+/// on the middle segment and the highlight would simply not show.
+func dictionaryHighlighted(_ text: String, range: Range<Int>?, base: Color) -> Text {
+    guard let range else { return Text(verbatim: text).foregroundStyle(base) }
+    let parts = MatchHighlight.split(text, at: range)
+    return Text(verbatim: parts.before).foregroundStyle(base)
+        + Text(verbatim: parts.match).foregroundStyle(Theme.accentPink)
+        + Text(verbatim: parts.after).foregroundStyle(base)
+}
+
+/// The "no definition" line an expanded row falls back to: the word's own
+/// surface when the lookup simply found nothing, or the failure's own
+/// message when it could not answer.
+func dictionaryUnavailableText(surface: String, message: String = "") -> some View {
+    Text(message.isEmpty ? "No definition for “\(surface)”." : message)
+        .font(.system(size: 12))
+        .foregroundStyle(Theme.secondaryText)
+        .fixedSize(horizontal: false, vertical: true)
+}
+
+// MARK: - Shared list row
+
+/// A dictionary row's state and its controls: what the row knows about its
+/// own expansion and lookup, and what its buttons do.
+///
+/// The two modes hand the row the same shape of state and differ only in the
+/// values — which is what makes the difference between them a table rather
+/// than a second row.
+struct DictionaryWordRowBindings {
+    /// Whether the row is open.
+    var isExpanded: Bool
+    /// The lookup phase behind the expanded block.
+    var phase: FavoritesLookupState.Phase
+    /// The headword the trailing controls act on; nil hides the copy and the
+    /// star — a search hit with no headword has nothing to key them on.
+    var trailingHeadword: String?
+    /// Whether the trailing star reads as filled.
+    var isFavorite: Bool
+    /// Opens or closes the row.
+    var onToggle: () -> Void
+    /// The trailing star's action. The Favorites mode's un-star-with-recheck
+    /// lives in the caller's closure, not in the row.
+    var onToggleFavorite: () -> Void
+    /// Copies a headword.
+    var onCopy: (String) -> Void
+}
+
+/// One dictionary list row, shared by the reference window's two modes: the
+/// search results and the favorites. A search result and a starred word are
+/// the same object to this app — the dictionary is where a word is defined,
+/// the favorite list is where the user decided to keep it — so the two modes
+/// render through one row, and every difference between them is an explicit
+/// parameter here rather than a copy.
+///
+/// The row owns the chrome: the card frame, the header, the headword block,
+/// the romaji line, the trailing controls, the chevron, and the expansion
+/// frame. What the two modes disagree about is *content*, and content
+/// arrives through two closures — `extras` adds what search adds under the
+/// headword (its badge row and gloss preview), and `resolvedContent` renders
+/// what the row expanded into (the two modes pick different entries and show
+/// different chrome there).
+///
+/// The row reads no store and no model: the star's filled state and the
+/// lookup's phase are handed in, so the same row serves a mode whose star is
+/// live and a mode whose star is always filled.
+struct DictionaryWordRow<Extras: View, ResolvedContent: View>: View {
+    /// The word the row shows.
+    let headword: String
+    /// The kana reading, or nil when the row shows no reading line. *Whether*
+    /// a word has one is the caller's decision: search shows a reading only
+    /// for a kanji-written entry, Favorites shows the one it stored —
+    /// sharing the rule would render a kana-only favorite's kana twice.
+    let reading: String?
+    /// The romaji line's text, or nil for no line. Search derives it live
+    /// from the entry's reading; Favorites renders the snapshot it stored
+    /// when the word was starred.
+    let romaji: String?
+    /// The span lit up in the headword, or nil for none.
+    let headwordHighlightRange: Range<Int>?
+    /// The span lit up in the reading, or nil for none.
+    let readingHighlightRange: Range<Int>?
+    /// The gap between the header label's lines.
+    let labelSpacing: CGFloat
+    /// What the header's expand button reads as.
+    let accessibilityHeadword: String
+    /// Whether the row is open.
+    let isExpanded: Bool
+    /// Opens or closes the row.
+    let onToggle: () -> Void
+    /// The headword the trailing controls act on; nil hides the copy and the
+    /// star — a search hit with no headword has nothing to key them on.
+    let trailingHeadword: String?
+    /// Whether the trailing star reads as filled.
+    let isFavorite: Bool
+    /// The trailing star's action. The Favorites mode's un-star-with-recheck
+    /// lives in the caller's closure, not here.
+    let onToggleFavorite: () -> Void
+    /// Copies a headword.
+    let onCopy: (String) -> Void
+    /// The lookup phase behind the expanded block.
+    let phase: FavoritesLookupState.Phase
+    /// The word the expanded block's not-found state names.
+    let surface: String
+    /// What the row adds under the headword and the romaji.
+    @ViewBuilder let extras: () -> Extras
+    /// What the row shows once its lookup resolved.
+    @ViewBuilder let resolvedContent: (LookupResult) -> ResolvedContent
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            header
+            if isExpanded {
+                expandedBlock
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface()
+    }
+
+    /// The header: the headword block, the romaji line, and whatever the
+    /// mode adds below them, all one button down to the divider. The label
+    /// is greedy so it claims every pixel the trailing controls do not —
+    /// which both keeps them trailing and makes the whole header width the
+    /// expand button. The controls are siblings rather than part of that
+    /// button, so the chevron can read last.
+    private var header: some View {
+        let helpText = expansionHelp(isExpanded)
+        return HStack(alignment: .top, spacing: 8) {
+            Button {
+                onToggle()
+            } label: {
+                VStack(alignment: .leading, spacing: labelSpacing) {
+                    headwordBlock
+                    romajiLine
+                    extras()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .pointerStyle(.link)
+            .help(helpText)
+            .accessibilityLabel("\(accessibilityHeadword), \(helpText)")
+            trailingControls
+        }
+    }
+
+    /// The headword and its kana: inline while the pair fits the row, stacked
+    /// with the kana above the word when it does not. Both texts are
+    /// `fixedSize` inline, so a long entry would otherwise draw past the
+    /// card's stroke on a window that cannot resize.
+    private var headwordBlock: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                headwordText
+                    .fixedSize(horizontal: true, vertical: false)
+                if let reading {
+                    readingText(reading, size: 14)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                if let reading {
+                    readingText(reading, size: 12)
+                }
+                headwordText
+            }
+        }
+    }
+
+    /// The 26pt headword, highlighted when it is the field that matched. The
+    /// span is **scalar**-indexed into the rendered string (see
+    /// `MatchHighlight`), so a katakana headword reached through its hiragana
+    /// candidate lights up the right morae rather than the same offsets of a
+    /// different script.
+    private var headwordText: some View {
+        dictionaryHighlighted(headword, range: headwordHighlightRange, base: Theme.primaryText)
+            .font(.system(size: 26))
+            .lineLimit(1)
+            .textSelection(.disabled)
+    }
+
+    private func readingText(_ reading: String, size: CGFloat) -> some View {
+        dictionaryHighlighted(reading, range: readingHighlightRange, base: Theme.annotationPink)
+            .font(.system(size: size, weight: .medium))
+            .lineLimit(1)
+            .textSelection(.disabled)
+    }
+
+    /// The reading transliterated — the same mono line every Favorites row
+    /// carries, and the reason a romaji query and a kana query land on a row
+    /// that looks the same.
+    @ViewBuilder
+    private var romajiLine: some View {
+        if let romaji {
+            Text(verbatim: romaji)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Theme.secondaryText)
+                .lineLimit(1)
+                .textSelection(.disabled)
+        }
+    }
+
+    /// Copy, star, and the disclosure chevron — the same control order both
+    /// modes use, so the two lists share one gesture vocabulary. One drop for
+    /// the whole group: all three boxes are 22pt and centered on each other
+    /// here, so a single offset puts them on the headword's line.
+    private var trailingControls: some View {
+        HStack(alignment: .center, spacing: 4) {
+            if let trailingHeadword {
+                DictionaryCopyButton(
+                    placement: .icon, help: "Copy the headword",
+                    action: { onCopy(trailingHeadword) }
+                )
+                DictionaryFavoriteButton(
+                    isFavorite: isFavorite,
+                    subject: trailingHeadword,
+                    style: .popover,
+                    action: onToggleFavorite
+                )
+            }
+            chevronButton
+        }
+        .padding(.top, Theme.dictionaryTrailingLineDrop)
+    }
+
+    private var chevronButton: some View {
+        let helpText = expansionHelp(isExpanded)
+        return Button {
+            onToggle()
+        } label: {
+            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.secondaryText)
+                .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
+        .help(helpText)
+        .accessibilityLabel(helpText)
+    }
+
+    /// Expanded block: a divider over the row's own lookup, so a row's full
+    /// entry is pixel-identical to the popover's and the sidebar card's. The
+    /// headword block is suppressed — this row already shows the word, its
+    /// kana, its romaji, and (in search) its badges two lines above.
+    ///
+    /// The frame is shared; what a resolved lookup *shows* is not, and stays
+    /// with the caller.
+    private var expandedBlock: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Rectangle().fill(Theme.divider).frame(height: 1)
+            switch phase {
+            case .idle, .loading:
+                ProgressView()
+                    .controlSize(.small)
+            case let .resolved(result):
+                resolvedContent(result)
+            case .notFound:
+                DictionaryNotFoundView(
+                    surface: surface, related: [], copyPlacement: .icon,
+                    onCopy: { onCopy(surface) }
+                )
+            case let .failed(message):
+                dictionaryUnavailableText(surface: surface, message: message)
+            }
+        }
+    }
+}
+
+// MARK: - Row spacing
+
+/// The shared row's per-mode constants: the header label's line spacing,
+/// which differs between the two modes — the search label carries a badge
+/// row and a gloss preview under the headword and the romaji, the Favorites
+/// label carries nothing else.
+enum DictionaryWordRowLayout {
+    /// The search mode's spacing: the badge row and the gloss preview sit
+    /// under the headword and the romaji with a wider gap than those two
+    /// lines alone need.
+    static let searchLabelSpacing: CGFloat = 4
+    /// The Favorites mode's spacing: the headword and the romaji are the
+    /// label's whole content, and sit closer together.
+    static let favoritesLabelSpacing: CGFloat = 2
+}
+
 // MARK: - Hosts
 
 /// The un-star step every star site runs: the model has already decided whether

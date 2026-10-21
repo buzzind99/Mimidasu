@@ -21,14 +21,6 @@ struct DictionarySearchView: View {
 
     /// The field card's measured height; the funnel circle frames to this.
     @State private var fieldHeight: CGFloat = 34
-    /// One chip in a row's badge line. `isMatch` chips carry the leading
-    /// magnifier that marks them as the row's *reason for being here*, rather
-    /// than as one more fact about the word.
-    private struct Badge {
-        let text: String
-        let color: Color
-        var isMatch = false
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -251,149 +243,57 @@ private extension DictionarySearchView {
 
     // MARK: - Rows
 
+    /// The row: the shared list row, with this mode's values. Search differs
+    /// from Favorites in four places — the label spacing, the reading gate,
+    /// the highlight spans, and the extras (the badge row and the gloss
+    /// preview) — and every one of them is an argument here rather than a
+    /// second copy of the row.
     private func hitCard(_ hit: DictionarySearchHit) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            hitHeader(hit)
-            if isExpanded(hit) {
-                expandedEntry(hit)
+        searchWordRow(
+            hit: hit,
+            bindings: DictionaryWordRowBindings(
+                isExpanded: isExpanded(hit),
+                phase: state.lookupState.phase(forKey: DictionarySearchState.lookupKey(for: hit)),
+                trailingHeadword: hit.headword,
+                isFavorite: isFavorite(hit),
+                onToggle: { toggle(hit) },
+                onToggleFavorite: { toggleFavorite(hit) },
+                onCopy: { headword in model.copySnippet(headword) }
+            ),
+            extras: {
+                badgeRow(hit)
+                glossPreview(hit)
+            },
+            resolvedContent: { result in
+                entryBlock(hit, result: result)
             }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface()
-    }
-
-    /// Card header: headword + inline kana, the romaji line, the badge row, and
-    /// the gloss preview. The label is greedy so it claims every pixel the
-    /// trailing controls do not — which both keeps them trailing and makes the
-    /// whole header width the expand button. The controls are siblings rather
-    /// than part of that button, so the chevron can read last.
-    private func hitHeader(_ hit: DictionarySearchHit) -> some View {
-        let helpText = expansionHelp(isExpanded(hit))
-        return HStack(alignment: .top, spacing: 8) {
-            Button {
-                toggle(hit)
-            } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    headwordBlock(hit)
-                    romajiLine(hit)
-                    badgeRow(hit)
-                    glossPreview(hit)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .pointerStyle(.link)
-            .help(helpText)
-            .accessibilityLabel("\(hit.headword ?? hit.reb ?? "—"), \(helpText)")
-            trailingControls(hit)
-        }
-    }
-
-    /// The headword and its kana: inline while the pair fits the row, stacked
-    /// with the kana above the word when it does not. Both texts are
-    /// `fixedSize` inline, so a long entry would otherwise draw past the card's
-    /// stroke on a window that cannot resize.
-    private func headwordBlock(_ hit: DictionarySearchHit) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                headwordText(hit)
-                    .fixedSize(horizontal: true, vertical: false)
-                if hit.keb != nil, let reading = hit.reb {
-                    readingText(hit, reading, size: 14)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-            }
-            VStack(alignment: .leading, spacing: 1) {
-                if hit.keb != nil, let reading = hit.reb {
-                    readingText(hit, reading, size: 12)
-                }
-                headwordText(hit)
-            }
-        }
-    }
-
-    /// The 26pt headword, highlighted when it is the field that matched. The
-    /// span is **scalar**-indexed into the rendered string (see
-    /// `MatchHighlight`), so a katakana headword reached through its hiragana
-    /// candidate lights up the right morae rather than the same offsets of a
-    /// different script.
-    private func headwordText(_ hit: DictionarySearchHit) -> some View {
-        highlighted(
-            hit.headword ?? hit.reb ?? "—",
-            range: (hit.matchedField == .keb || (hit.matchedField == .reb && hit.keb == nil)) ? hit.highlightRange : nil,
-            base: Theme.primaryText
         )
-        .font(.system(size: 26))
-        .lineLimit(1)
-        .textSelection(.disabled)
-    }
-
-    private func readingText(
-        _ hit: DictionarySearchHit, _ reading: String, size: CGFloat
-    ) -> some View {
-        highlighted(
-            reading,
-            range: hit.matchedField == .reb ? hit.highlightRange : nil,
-            base: Theme.annotationPink
-        )
-        .font(.system(size: size, weight: .medium))
-        .lineLimit(1)
-        .textSelection(.disabled)
-    }
-
-    /// The reading transliterated — the same mono line every Favorites row
-    /// carries, and the reason a romaji query and a kana query land on a row
-    /// that looks the same.
-    @ViewBuilder
-    private func romajiLine(_ hit: DictionarySearchHit) -> some View {
-        if let romaji = hit.reb.flatMap({ reb in KanaRomaji.romaji(fromKana: reb) }) {
-            Text(verbatim: romaji)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Theme.secondaryText)
-                .lineLimit(1)
-                .textSelection(.disabled)
-        }
     }
 
     /// The match badge first, then the entry's own metadata. The match badge
     /// leads because it is the part with no counterpart on a Favorites row: it
-    /// is what tells the user whether this row answered what they typed.
+    /// is what tells the user whether this row answered what they typed —
+    /// which is why it wears the magnifying glass that marks a chip as the
+    /// row's reason for being here.
     private func badgeRow(_ hit: DictionarySearchHit) -> some View {
-        let rowBadges = badges(for: hit)
-        return FlowLayout(
-            spacing: 6, lineSpacing: 6, fingerprint: rowBadges.map(\.text).joined(separator: "\n")
-        ) {
-            ForEach(Array(rowBadges.enumerated()), id: \.offset) { _, badge in
-                DictionaryBadgeView(
-                    text: badge.text,
-                    color: badge.color,
-                    icon: badge.isMatch ? "magnifyingglass" : nil
-                )
-            }
-        }
-    }
-
-    private func badges(for hit: DictionarySearchHit) -> [Badge] {
-        var badges = [Badge(text: hit.matchKind.badgeLabel, color: Theme.accentPink, isMatch: true)]
-        if hit.common {
-            badges.append(Badge(text: "COMMON", color: Theme.dotGreen))
-        }
-        if let jlpt = DictionaryContent.jlptBadge(hit.jlpt) {
-            badges.append(Badge(text: jlpt, color: Theme.brandViolet))
-        }
-        if hit.isName {
-            // The real type badges, not a generic NAME chip: this row's header is
-            // the only place a name's types appear now that the expanded block
-            // drops its badge row, and `JMDictNameEntries` maps them exactly as
-            // the entry view does. A name whose senses carry no tags adds
-            // nothing rather than a chip that claims what it does not know.
-            for label in JMDictNameEntries.nameTypeBadges(posTokens: hit.namePosTokens) {
-                badges.append(Badge(text: label, color: Theme.brandViolet))
-            }
-        }
-        return badges
+        DictionaryBadgeRow(
+            badges: dictionaryBadges(
+                leading: DictionaryBadge(
+                    text: hit.matchKind.badgeLabel,
+                    color: Theme.accentPink,
+                    icon: "magnifyingglass"
+                ),
+                common: hit.common,
+                jlpt: hit.jlpt,
+                // The real type badges, not a generic NAME chip: this row's
+                // header is the only place a name's types appear now that the
+                // expanded block drops its badge row, and `JMDictNameEntries`
+                // maps them exactly as the entry view does. A name whose
+                // senses carry no tags adds nothing rather than a chip that
+                // claims what it does not know.
+                namePosTokens: hit.isName ? hit.namePosTokens : []
+            )
+        )
     }
 
     /// One or two lines of meaning, with the matched run lit up for a gloss
@@ -419,85 +319,8 @@ private extension DictionarySearchView {
                 .foregroundStyle(Theme.secondaryText)
         }
         let tail = glosses.count > 1 ? "; " + glosses.dropFirst().joined(separator: "; ") : ""
-        return highlighted(first, range: hit.highlightRange, base: Theme.secondaryText)
+        return dictionaryHighlighted(first, range: hit.highlightRange, base: Theme.secondaryText)
             + Text(verbatim: tail).foregroundStyle(Theme.secondaryText)
-    }
-
-    /// Copy, star, and the disclosure chevron — the same control order the
-    /// Favorites rows use, so the two lists share one gesture vocabulary. One
-    /// drop for the whole group: all three boxes are 22pt and centered on each
-    /// other here, so a single offset puts them on the headword's line.
-    private func trailingControls(_ hit: DictionarySearchHit) -> some View {
-        HStack(alignment: .center, spacing: 4) {
-            if let headword = hit.headword {
-                DictionaryCopyButton(
-                    placement: .icon, help: "Copy the headword",
-                    action: { model.copySnippet(headword) }
-                )
-                starButton(hit, headword: headword)
-            }
-            chevronButton(hit)
-        }
-        .padding(.top, Theme.dictionaryTrailingLineDrop)
-    }
-
-    /// The star for a row that has a headword — the caller unwraps it once
-    /// for copy and star together, since a hit with no headword at all can
-    /// carry neither control: there is nothing to key the favorite on.
-    private func starButton(_ hit: DictionarySearchHit, headword: String) -> some View {
-        let starred = model.favorites.isFavorite(headword: headword)
-        return DictionaryFavoriteButton(
-            isFavorite: starred,
-            subject: headword,
-            style: .popover,
-            action: { toggleFavorite(hit) }
-        )
-    }
-
-    private func chevronButton(_ hit: DictionarySearchHit) -> some View {
-        let isExpanded = isExpanded(hit)
-        let helpText = expansionHelp(isExpanded)
-        return Button {
-            toggle(hit)
-        } label: {
-            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Theme.secondaryText)
-                .frame(width: 22, height: 22)
-        }
-        .buttonStyle(.plain)
-        .pointerStyle(.link)
-        .help(helpText)
-        .accessibilityLabel(helpText)
-    }
-
-    /// Expanded block: a divider over the shared entry view, so a row's full
-    /// entry is pixel-identical to the popover's and the sidebar card's. The
-    /// headword block is suppressed — this row already shows the word, its
-    /// kana, its romaji, and its badges two lines above.
-    @ViewBuilder
-    private func expandedEntry(_ hit: DictionarySearchHit) -> some View {
-        // A hit with no headword has nothing to look up, so no expansion ever
-        // started for its key.
-        if lookupWord(for: hit) != nil {
-            VStack(alignment: .leading, spacing: 8) {
-                Rectangle().fill(Theme.divider).frame(height: 1)
-                switch state.lookupState.phase(forKey: DictionarySearchState.lookupKey(for: hit)) {
-                case .idle, .loading:
-                    ProgressView()
-                        .controlSize(.small)
-                case let .resolved(result):
-                    entryBlock(hit, result: result)
-                case .notFound:
-                    DictionaryNotFoundView(
-                        surface: hit.headword ?? "", related: [], copyPlacement: .icon,
-                        onCopy: { model.copySnippet(hit.headword ?? "") }
-                    )
-                case let .failed(message):
-                    lookupUnavailable(hit, message: message)
-                }
-            }
-        }
     }
 
     @ViewBuilder
@@ -531,16 +354,8 @@ private extension DictionarySearchView {
                 }
             )
         } else {
-            lookupUnavailable(hit)
+            dictionaryUnavailableText(surface: hit.headword ?? "")
         }
-    }
-
-    private func lookupUnavailable(_ hit: DictionarySearchHit, message: String = "") -> some View {
-        let headword = hit.headword ?? ""
-        return Text(message.isEmpty ? "No definition for “\(headword)”." : message)
-            .font(.system(size: 12))
-            .foregroundStyle(Theme.secondaryText)
-            .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Actions
@@ -581,20 +396,91 @@ private extension DictionarySearchView {
         )
     }
 
-    // MARK: - Highlight
+    /// The row's star state, read only when the row has a headword to key it
+    /// on — a hit with no headword carries neither the copy nor the star, so
+    /// there is nothing to ask the store about.
+    private func isFavorite(_ hit: DictionarySearchHit) -> Bool {
+        guard let headword = hit.headword else { return false }
+        return model.favorites.isFavorite(headword: headword)
+    }
+}
 
-    /// Splits a field into before/match/after and tints the match. Nothing is
-    /// emitted for a nil range — a lemma row, or a field that did not match —
-    /// which is exactly the "no highlight" the badge then has to explain.
-    ///
-    /// The base color is applied *per part* rather than to the composed text:
-    /// a `foregroundStyle` on the whole concatenation would override the
-    /// accent on the middle segment and the highlight would simply not show.
-    private func highlighted(_ text: String, range: Range<Int>?, base: Color) -> Text {
-        guard let range else { return Text(verbatim: text).foregroundStyle(base) }
-        let parts = MatchHighlight.split(text, at: range)
-        return Text(verbatim: parts.before).foregroundStyle(base)
-            + Text(verbatim: parts.match).foregroundStyle(Theme.accentPink)
-            + Text(verbatim: parts.after).foregroundStyle(base)
+// MARK: - The search row's values
+
+/// The search row for a hit — the shared row with this mode's values.
+///
+/// Split from the view so the mapping can be read, and pinned by a test,
+/// without a window: the values below are the whole difference between the
+/// two modes, and the owner reviews them as a table.
+@MainActor
+func searchWordRow<Extras: View, ResolvedContent: View>(
+    hit: DictionarySearchHit,
+    bindings: DictionaryWordRowBindings,
+    @ViewBuilder extras: @escaping () -> Extras,
+    @ViewBuilder resolvedContent: @escaping (LookupResult) -> ResolvedContent
+) -> DictionaryWordRow<Extras, ResolvedContent> {
+    DictionaryWordRow(
+        headword: hit.rowHeadword,
+        reading: hit.rowReading,
+        romaji: hit.rowRomaji,
+        headwordHighlightRange: hit.rowHeadwordHighlight,
+        readingHighlightRange: hit.rowReadingHighlight,
+        labelSpacing: DictionaryWordRowLayout.searchLabelSpacing,
+        accessibilityHeadword: hit.rowHeadword,
+        isExpanded: bindings.isExpanded,
+        onToggle: bindings.onToggle,
+        trailingHeadword: hit.headword,
+        isFavorite: bindings.isFavorite,
+        onToggleFavorite: bindings.onToggleFavorite,
+        onCopy: bindings.onCopy,
+        phase: bindings.phase,
+        surface: hit.headword ?? "",
+        extras: extras,
+        resolvedContent: resolvedContent
+    )
+}
+
+/// The search row's readings of a hit — the divergences from the Favorites
+/// row, spelled out once and shared by the view and its tests.
+///
+/// The Favorites row reads a *stored* word; the search row reads the entry
+/// the engine ranked, so every one of these is a derivation rather than a
+/// stored snapshot.
+extension DictionarySearchHit {
+    /// The word the row shows: the entry's kanji writing, else its reading,
+    /// else a dash for an entry that carries neither.
+    var rowHeadword: String {
+        headword ?? reb ?? "—"
+    }
+
+    /// The reading the row shows, or nil when it shows no reading line: a
+    /// kanji-written entry carries one, a kana-only entry does not — its
+    /// reading *is* the headword, and showing it twice would read as two
+    /// different words. This gate is the caller's, and the Favorites row
+    /// keeps its own.
+    var rowReading: String? {
+        keb != nil ? reb : nil
+    }
+
+    /// The romaji line, derived live from the entry's reading — the reason a
+    /// romaji query and a kana query land on a row that looks the same. The
+    /// Favorites row renders a stored snapshot instead.
+    var rowRomaji: String? {
+        reb.flatMap { reading in KanaRomaji.romaji(fromKana: reading) }
+    }
+
+    /// The span lit up in the headword: the kanji writing when the kanji
+    /// matched, or the reading when a kana-only entry matched on it. The span
+    /// is **scalar**-indexed into the rendered string (see `MatchHighlight`),
+    /// so a katakana headword reached through its hiragana candidate lights up
+    /// the right morae rather than the same offsets of a different script.
+    var rowHeadwordHighlight: Range<Int>? {
+        (matchedField == .keb || (matchedField == .reb && keb == nil)) ? highlightRange : nil
+    }
+
+    /// The span lit up in the reading line: the reading when the reading
+    /// matched.
+    var rowReadingHighlight: Range<Int>? {
+        matchedField == .reb ? highlightRange : nil
     }
 }
