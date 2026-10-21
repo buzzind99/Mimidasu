@@ -237,11 +237,12 @@ struct SettingsRetranslateCard: View {
 
     private func externalOption(for provider: TranslationProvider) -> Option? {
         guard let engine = RetranslateEngine(provider: provider) else { return nil }
-        // Only providers with a stored key are listed here, so the DeepL
-        // subscription tier is known and the title can carry it.
+        // The title names the **engine**, like every other row in this list
+        // (and like the archive engine picker): the DeepL subscription tier
+        // is a provider fact, and an engine row must not wear it.
         return Option(
             engine: engine,
-            title: provider.tier(deepLTier: settings.deepLTier).name,
+            title: engine.displayName,
             subtitle: "External — retranslates the sentence over the internet"
         )
     }

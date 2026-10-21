@@ -97,15 +97,17 @@ struct TierVocabularyTests {
         #expect(TranslationEngineKind.google.tier == .google)
         #expect(TranslationEngineKind.deepl.tier == .deepL(.unknown))
         #expect(TranslationEngineKind.openrouter.tier == .openRouter)
+    }
 
-        #expect(RetranslateEngine.appleFast.displayName == TranslationEngineKind.appleFast.tier.name)
-        #expect(
-            RetranslateEngine.appleHighFidelity.displayName
-                == TranslationEngineKind.appleHighFidelity.tier.name
-        )
-        #expect(RetranslateEngine.google.displayName == TranslationEngineKind.google.tier.name)
-        #expect(RetranslateEngine.deepl.displayName == TranslationEngineKind.deepl.tier.name)
-        #expect(RetranslateEngine.openrouter.displayName == TranslationEngineKind.openrouter.tier.name)
+    @Test("an engine's name never wears a provider's subscription tier")
+    func engineNamesCarryNoProviderTier() {
+        // The DeepL subscription tier is a **provider** fact. Every engine
+        // surface — the archive engine picker, the re-translate card, the
+        // transcript marker — names the engine "DeepL"; only the provider
+        // rows name the tier.
+        #expect(RetranslateEngine.deepl.displayName == "DeepL")
+        #expect(TranslationEngineKind.deepl.markerName == "DeepL")
+        #expect(TranslationProvider.deepl.settingsName(deepLTier: .pro) == "DeepL (Pro)")
     }
 
     @Test("the marker suffix is the tier's canonical name")

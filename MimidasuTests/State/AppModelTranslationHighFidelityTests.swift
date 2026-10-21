@@ -91,7 +91,8 @@ struct AppModelTranslationHighFidelityTests {
         await stopTranslation(model)
     }
 
-    /// A negative probe keeps the marker off — the Apple row stays "Apple".
+    /// A negative probe keeps the marker off — the Apple row stays
+    /// "Apple (NMT)".
     /// The marker is reset synchronously at activation, so the negative
     /// assertion only pins the wiring once a probe has actually landed: a
     /// call-counting probe answers `true` on the first activation, `false`

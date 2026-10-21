@@ -364,10 +364,11 @@ final class TranslationSettings {
         case .google:
             TranslationTier.google.name
         case .deepl:
-            // The running engine always has a key, so its tier is known
-            // here — unlike the provider row, which must stay "DeepL"
-            // until a key is stored.
-            TranslationTier.deepL(deeplIsFreeTier ? .free : .pro).name
+            // The subscription tier is a **provider** fact, and it stays
+            // unknown while no key is stored — the row must never claim a
+            // tier the app cannot know. (`deeplIsFreeTier` alone cannot
+            // tell "no key" from "a pro key": both are false.)
+            TranslationTier.deepL(deepLTier).name
         case .openrouter:
             "\(TranslationTier.openRouter.name) · \(effectiveOpenRouterModel)"
         }

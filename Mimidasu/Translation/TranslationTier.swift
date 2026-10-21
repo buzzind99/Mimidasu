@@ -3,10 +3,12 @@ import Foundation
 /// The translation tiers the app names — and the single owner of their
 /// names.
 ///
-/// Every provider or tier name that reaches the UI derives from `name`;
-/// nothing else spells a provider or a tier. The tiers are finer than the
-/// providers: `TranslationProvider.apple` covers two Apple tiers, and
-/// DeepL's name depends on the subscription tier behind the stored key.
+/// Every **canonical** provider or tier name that reaches the UI derives
+/// from `name`. (`TranslationProvider.shortName` is a deliberate
+/// abbreviation table for the narrow sidebar card, not a second naming
+/// authority.) The tiers are finer than the providers:
+/// `TranslationProvider.apple` covers two Apple tiers, and DeepL's name
+/// depends on the subscription tier behind the stored key.
 enum TranslationTier: Equatable, Sendable {
     /// Apple's on-device neural machine translation model.
     case appleOnDevice
