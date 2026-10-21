@@ -23,14 +23,29 @@ enum SessionPhase: Equatable {
 @Observable
 @MainActor
 final class AppModel {
-    // Observed UI state
-    var phase: SessionPhase = .idle
+    /// The session-phase owner: **every** production phase write goes through
+    /// it. The machine is a pure value type, so it is observed like any other
+    /// stored state — a phase change invalidates the views that read it.
+    private(set) var phaseMachine = SessionPhaseMachine()
+
+    /// The session phase.
+    ///
+    /// The setter is a **test seam**: production writes go through
+    /// `reducePhase(_:)`, never through this setter. A test that forces a
+    /// phase resets the machine's internal latches with it
+    /// (`setPhaseForTesting`), so the latches stay coherent with the phase
+    /// they describe.
+    var phase: SessionPhase {
+        get { phaseMachine.phase }
+        set { phaseMachine.setPhaseForTesting(newValue) }
+    }
+
+    /// Observed UI state
     var entries: [SessionEntry] = []
     /// SESSION-card character total: Σ sentence text lengths (translations
     /// excluded), maintained incrementally on sentence append / session
     /// clear / archive swap instead of re-summing the transcript per render.
-    /// Internal setter: the archive swap lives in `AppModelArchive.swift`
-    /// (file split for the lint gate).
+    /// Internal setter: the archive swap lives in the archive surface.
     var sessionCharacterCount = 0
     /// Observable mirror of `translationQueue.hasWorker` for the retry gate
     /// (the queue is not `@Observable`). An Apple run stays parked across a
@@ -70,13 +85,13 @@ final class AppModel {
     var hudPinnedIndex: Int?
     /// True while a session start is blocked on a missing dictionary build
     /// (see `ensureDictionaryReady`). Mutated only by the preparation
-    /// surface in `AppModelDictionary.swift`.
+    /// surface in the dictionary surface.
     var isPreparingDictionary = false
     /// True while model discovery (resolve + SHA-256 verify) is in flight —
     /// at launch and on a Settings re-check. Start is gated on it: the
     /// verify hashes up to ~1.2 GB and must never run on the main thread.
-    /// Internal setter: driven from `AppModelModelSelection.swift` (the
-    /// availability refresh lives there, file split for the lint gate).
+    /// Internal setter: driven from the model-selection surface (the
+    /// availability refresh lives there).
     var isCheckingModel = true
 
     /// The popover's current anchor: the surface (transcript row or live
@@ -86,13 +101,13 @@ final class AppModel {
     /// The pinned sidebar DICTIONARY card content: the last lookup of the
     /// session — found or not-found — with the paged entry index.
     /// Persists after the popover dismisses; cleared on session clear.
-    /// Mutated by the lookup lifecycle in `AppModelLookup.swift` and the
+    /// Mutated by the lookup lifecycle in the dictionary surface and the
     /// session-begin reset below.
     var pinnedLookup: PinnedLookup?
     /// Staleness token for in-flight lookups: each new tap invalidates the
     /// previous one, so a slow lookup that lands after a newer tap (or a
     /// session clear) never presents stale state. Mutated by the lookup
-    /// lifecycle in `AppModelLookup.swift` and the session-begin bump below.
+    /// lifecycle in the dictionary surface and the session-begin bump below.
     var lookupGeneration = 0
     /// The JMDict lookup engine behind dictionary taps; injectable so tests
     /// drive a fixture database (the default resolves the prepared store).
@@ -111,8 +126,8 @@ final class AppModel {
 
     /// The model resolver driving every availability refresh (launch check,
     /// selection re-resolve, Settings re-check). Injectable for tests; the
-    /// default drives the real locator. Internal: invoked from
-    /// `AppModelModelSelection.swift`.
+    /// default drives the real locator. Internal: invoked from the
+    /// model-selection surface.
     let modelResolve: @Sendable (ASRModelChoice) -> URL?
 
     let live = LivePartialState()
@@ -158,30 +173,30 @@ final class AppModel {
 
     /// The stored row of the live recording, created lazily with the first
     /// finalized sentence. Nil before that (and when the archive is
-    /// unavailable). Mutated from the persistence path in
-    /// `AppModelArchive.swift`; reset at session begin.
+    /// unavailable). Mutated from the persistence path in the archive
+    /// surface; reset at session begin.
     var recordingSessionID: Int64?
 
     /// Latched by the first failed archive write of a session: writes stop
     /// being attempted, one warning toast is posted, and stop persists
     /// nothing (and skips its prompt) for the rest of the session. Reset at
-    /// session begin. Mutated from `AppModelArchive.swift`.
+    /// session begin. Mutated from the archive surface.
     var archiveWriteFailed = false
 
     /// The stored session opened read-only in the transcript pane, or nil
-    /// when the pane shows live-session state. Mutated from
-    /// `AppModelArchive.swift`.
+    /// when the pane shows live-session state. Mutated from the archive
+    /// surface.
     var openArchive: ArchivedSession?
 
     /// The opened archive's viewing-language override (BCP-47 code): nil =
     /// the archive's stored target. View-only state — switching never
     /// mutates stored translations. Reset on open, cleared on close;
-    /// mutated from `AppModelArchive.swift` and the bulk job's add flows.
+    /// mutated from the archive surface and the bulk job's add flows.
     var archiveViewingLanguage: String?
 
     /// The bulk archive-translation job: one run at a time over the opened
     /// archive's sentences, with its engine resolver and landing sink wired
-    /// in `AppModelArchiveTranslation.swift`.
+    /// in the bulk archive-translation surface.
     let archiveTranslationJob = ArchiveTranslationJob()
 
     /// Forwards the archive read model's revision, which bumps once per
@@ -194,37 +209,37 @@ final class AppModel {
     /// Latest resolve result per choice (bundled → downloaded → dev, SHA-256
     /// verified). The Settings Model section reads it to enable selection;
     /// `modelURL` is the active choice's entry. Internal setter: written by
-    /// the availability refresh in `AppModelModelSelection.swift`.
+    /// the availability refresh in the model-selection surface.
     var modelAvailability: [ASRModelChoice: URL] = [:]
 
     /// The live translation session — engine attach, manual retry, the
     /// one-way Apple fallback latch, the high-fidelity probe, and the
-    /// provider-selection machinery — behind the forwarding façade in
-    /// `AppModelTranslation.swift`. Test seam: UI must use the facades,
-    /// never reach through to the coordinator.
+    /// provider-selection machinery — behind the forwarding façade in the
+    /// translation surface. Test seam: UI must use the facades, never reach
+    /// through to the coordinator.
     let translationSession: TranslationSessionCoordinator
 
     /// The re-translate lane — route resolution, dedicated Apple sessions,
     /// marker sets, and the serialized runner — behind the forwarding
-    /// façade in `AppModelRetranslate.swift`. Test seam: UI must use the
+    /// façade in the translation surface. Test seam: UI must use the
     /// facades, never reach through to the coordinator.
     let retranslate: RetranslateCoordinator
 
     /// The refresh spawned by the most recent `selectModel` (tracked so
     /// `adoptDownloadedModel` can await it instead of stacking passes).
-    /// Internal: managed from `AppModelModelSelection.swift`.
+    /// Internal: managed from the model-selection surface.
     var modelSelectionRefresh: Task<Void, Never>?
 
     /// The in-flight teardown task from `stop()`. `shutdownForTermination`
     /// awaits it so quit never runs a second teardown concurrently with a
-    /// user-initiated one. Internal: managed from `AppModelTermination.swift`.
+    /// user-initiated one. Internal: managed from the termination surface.
     var stopTask: Task<Void, Never>?
 
     /// Latched by `shutdownForTermination`: once quit-time teardown begins,
     /// `start` is refused — a session begun during the `.terminateLater`
     /// window would race the engine retirement that follows the drain.
-    /// Internal: managed from `AppModelTermination.swift`.
-    var isTerminating = false
+    /// The latch lives in the phase machine (`phaseMachine.isTerminating`),
+    /// which owns it with the rest of the session phase.
     /// SESSION-card duration anchors: set when a session's chunks start
     /// flowing (`onSessionBegin`) and when teardown completes
     /// (`performStop`); both nil before the first session and while an
@@ -232,37 +247,31 @@ final class AppModel {
     /// reads now − startedAt while running, endedAt − startedAt after stop.
     /// Monotonic instants: a wall-clock change mid-session must not distort
     /// the elapsed display. Internal setter: the archive open/close swaps
-    /// live in `AppModelArchive.swift` (file split for the lint gate).
+    /// live in the archive surface.
     var sessionStartedAt: ContinuousClock.Instant?
-    /// Internal setter: `performStop` lives in `AppModelTermination.swift`
-    /// (file split for the lint gate).
+    /// Internal setter: `performStop` lives in the termination surface.
     var sessionEndedAt: ContinuousClock.Instant?
     /// When the capture source died mid-session (`.sourceLost`). The SESSION
     /// card freezes at it during the outage — the session clock itself
     /// survives a successful restart, so duration resumes counting then.
-    /// Internal setter: `restartCapture` lives in this file while the resume
-    /// fallback lives in `AppModelPause.swift` (file split for the lint
-    /// gate).
+    /// Internal setter: `restartCapture` lives in the session surface while
+    /// the resume fallback lives in the same surface's pause path.
     var captureLostAt: ContinuousClock.Instant?
     /// Completed paused spans of the current session, excluded from the
-    /// displayed and stored duration. Mutated only by `AppModelPause.swift`
-    /// (file split for the lint gate); reset at session begin.
+    /// displayed and stored duration. Mutated only by the pause path; reset
+    /// at session begin.
     var sessionPausedTotal: Duration = .zero
     /// When the current pause began; nil outside `.paused`. Mutated only by
-    /// `AppModelPause.swift`.
+    /// the pause path.
     var pauseStartedAt: ContinuousClock.Instant?
     /// A capture error observed while paused — the capture-lost deferral.
     /// Surfaced only when a resume cannot bring the capture back (the
-    /// rebuild path reports it). Mutated only by `AppModelPause.swift` and
-    /// the capture-error wiring below.
+    /// rebuild path reports it). Mutated only by the pause path and the
+    /// capture-error wiring below.
     var deferredCaptureError: String?
-    /// True while a resume is airborne (the phase stays `.paused` until the
-    /// IOProc is back, so the flag is the double-click guard). Mutated only
-    /// by `AppModelPause.swift`.
-    @ObservationIgnored var resumeInFlight = false
     /// Injectable so tests can observe (and fake) the quit-time release of
     /// the process-warm ASR engine; the default drives the real factory.
-    /// Internal: invoked from `AppModelTermination.swift`.
+    /// Internal: invoked from the termination surface.
     let retireWarmEngine: @Sendable () -> Void
 
     /// Sentence index → position in `entries`. Entries are append-only within
@@ -388,6 +397,19 @@ final class AppModel {
         }
     }
 
+    // MARK: - Session phase
+
+    /// Applies a phase action to the machine and returns what the host must
+    /// do about it.
+    ///
+    /// The machine **decides**; the host **executes**. A refused transition
+    /// changed nothing, so the host must do nothing either — that is the
+    /// whole point of moving the decision into the machine.
+    @discardableResult
+    func reducePhase(_ action: SessionAction) -> SessionTransition {
+        phaseMachine.reduce(action)
+    }
+
     private func wireSessionController() {
         sessionController.onSessionBegin = { [weak self] in
             guard let self else { return }
@@ -445,12 +467,12 @@ final class AppModel {
             // While paused it is DEFERRED: the resume path rebuilds the
             // capture, and only a failed resume reports capture lost.
             guard let self else { return }
-            if phase == .paused {
+            let transition = reducePhase(.captureLost(message))
+            if transition.effects.contains(.deferCaptureError(message)) {
                 deferredCaptureError = message
                 return
             }
-            guard phase == .running || phase == .starting else { return }
-            phase = .sourceLost
+            guard transition.isLegal else { return }
             captureLostAt = .now
             toasts.dismiss(key: ToastKey.noAudio)
             postCaptureLost(body: message)
@@ -466,23 +488,22 @@ final class AppModel {
 
     // MARK: - Model / app discovery
 
-    // Availability refresh lives in `AppModelModelSelection.swift` (file
-    // split for the lint gate).
+    // The availability refresh lives in the model-selection surface.
 
     // MARK: - Model selection
 
-    // Switching the active ASR model and adopting a downloaded model live
-    // in `AppModelModelSelection.swift` (file split for the lint gate).
+    // Switching the active ASR model and adopting a downloaded model live in
+    // the model-selection surface.
 
     // MARK: - Dictionary preparation
 
-    // The first-launch dictionary kick-off and the session-start gate live
-    // in `AppModelDictionary.swift` (file split for the lint gate).
+    // The first-launch dictionary kick-off and the session-start gate live in
+    // the dictionary surface.
 
     // MARK: - Session control
 
-    // Starting a session and bringing it up to `.running` live in
-    // `AppModelSessionControl.swift` (file split for the lint gate).
+    // Starting a session and bringing it up to `.running` live in the
+    // session surface.
 
     /// Restarts the capture stream mid-session — the `capture.lost` toast's
     /// fix action. Guarded on `.sourceLost`: a
@@ -496,20 +517,19 @@ final class AppModel {
     }
 
     /// The shared capture-rebuild flow: the `.sourceLost` fix action above,
-    /// and the resume of a pause that found the capture dead (its caller sets
-    /// `.starting` first). A `stop()` during the rebuild wins the race — the
-    /// phase checks refuse to resurrect a stopped session. Internal: driven
-    /// from `AppModelPause.swift` (file split for the lint gate).
+    /// and the resume of a pause that found the capture dead (its caller
+    /// hands the machine the restart request). A `stop()` during the rebuild
+    /// wins the race — the machine refuses to resurrect a stopped session.
+    /// Internal: driven from the pause path.
     func performCaptureRestart() {
-        phase = .starting
+        guard reducePhase(.captureRestartRequested).isLegal else { return }
         Task { @MainActor in
             do {
                 try await sessionController.restartCapture()
                 // A stop() interleaved while the restart was in flight: the
                 // session is gone (engine nil, restartCapture no-oped) and
                 // must not come back up.
-                guard phase == .starting else { return }
-                phase = .running
+                guard reducePhase(.captureRestartSucceeded).isLegal else { return }
                 captureLostAt = nil
                 // A fresh capture is up: any error observed while the old one
                 // was down must not force another rebuild later.
@@ -517,9 +537,9 @@ final class AppModel {
                 toasts.dismiss(key: ToastKey.captureLost)
                 sessionController.armNoAudioWatchdog()
             } catch {
-                guard phase == .starting else { return }
-                phase = .sourceLost
-                postCaptureLost(body: "Restart failed: \(error.localizedDescription)")
+                let message = "Restart failed: \(error.localizedDescription)"
+                guard reducePhase(.captureRestartFailed(message)).isLegal else { return }
+                postCaptureLost(body: message)
             }
         }
     }

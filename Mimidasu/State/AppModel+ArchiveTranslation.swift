@@ -1,5 +1,12 @@
 import Foundation
 
+// The bulk archive-translation surface of `AppModel`: the job, its engine
+// resolver and landing sink, and the archiving toast card.
+//
+// **Seam rule:** a feature file that outgrows 600 **code** lines splits at the
+// next feature boundary — never mid-feature, never because it grew more
+// documentation.
+
 // Bulk archive-translation surface of `AppModel`: owns the job, wires its
 // engine resolver and landing sink, and turns the job's events into the
 // archiving toast card (progress that morphs into the run's summary) and

@@ -1,9 +1,18 @@
 import Foundation
 
-/// Archive surface of `AppModel` (file split for the lint gate): the live
-/// session's continuous persistence, the launch sweep, archive mode
-/// (open/close in the transcript pane), and the promote/rename/delete
-/// commands behind the archive window and the opened banner.
+// The archive surface of `AppModel`: the live session's continuous persistence,
+// the launch sweep, archive mode (open/close in the transcript pane), the
+// promote/rename/delete commands, and the single write-back seam every landed
+// translation funnels through.
+//
+// **Seam rule:** a feature file that outgrows 600 **code** lines splits at the
+// next feature boundary — never mid-feature, never because it grew more
+// documentation.
+
+/// Archive surface of `AppModel`: the live session's continuous persistence,
+/// the launch sweep, archive mode (open/close in the transcript pane), and
+/// the promote/rename/delete commands behind the archive window and the
+/// opened banner.
 extension AppModel {
 
     // MARK: - Continuous persistence (live session)
@@ -101,10 +110,7 @@ extension AppModel {
     /// managing always work, but opening a transcript is blocked while any
     /// session is live-ish (the archive window shows an inline hint then).
     var canOpenArchivedSession: Bool {
-        switch phase {
-        case .idle, .needsModel, .failed: true
-        case .starting, .running, .paused, .sourceLost, .stopping: false
-        }
+        !SessionPhaseMachine.isLiveOrStopping(phase)
     }
 
     /// Opens a stored session read-only into the transcript pane: rows and
@@ -258,5 +264,40 @@ extension AppModel {
             )
             return
         }
+    }
+}
+
+// The single write-back seam every landed translation funnels through —
+// per-row re-translate, bulk runs, and the live recording alike: one upsert
+// through the archive read model, whose landed write bumps the revision,
+// plus one conditional refresh of the opened archive's languages and one
+// landed report. Callers keep their row swaps and their own warning
+// policies (archive-mode cards closable; the live latch persistent).
+
+extension AppModel {
+    /// The one shared body for a translation whose store write was lost —
+    /// the archive-mode card's copy. The live latch names its own, wider
+    /// consequence instead.
+    static let lostTranslationWriteWarning =
+        "The session store couldn't be written to. "
+            + "This translation wasn't added to the archive."
+
+    /// Writes one landed translation through to `session` via the archive
+    /// read model: its upsert first, whose landed write bumps the revision,
+    /// then the opened archive's language payload refreshes when the write
+    /// targeted it. Reports whether the write landed — a lost write changes
+    /// nothing (no refresh, no bump), and the caller's policy decides the
+    /// warning and whether its row keeps its previous text.
+    @discardableResult
+    func writeBackTranslation(
+        _ translation: SentenceTranslation, index: Int, session: Int64
+    ) -> Bool {
+        guard archiveRead.upsert(translation: translation, index: index, session: session) else {
+            return false
+        }
+        if openArchive?.id == session {
+            refreshOpenArchiveLanguages()
+        }
+        return true
     }
 }
