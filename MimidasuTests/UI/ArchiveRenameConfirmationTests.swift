@@ -1,5 +1,6 @@
 import Foundation
 @testable import Mimidasu
+import SwiftUI
 import Testing
 
 /// The rename question both archive surfaces raise — the archive window's
@@ -63,15 +64,112 @@ struct ArchiveRenameConfirmationTests {
 
         #expect(state.renameValue == nil)
     }
+}
 
-    @Test("cancelling clears the slot")
-    func cancellingClearsTheSlot() {
-        let state = ArchiveWindowState()
-        state.requestRename(summary(name: "Lecture"))
+/// The shared rename question's own decisions: what Save stores, what Cancel
+/// leaves alone, and what a dismissal does.
+@MainActor
+@Suite("Archive rename confirmation actions")
+struct ArchiveRenameConfirmationActionTests {
 
-        state.pendingRename = nil
+    private func metadata() -> SessionMetadata {
+        SessionMetadata(
+            startedAt: Date(timeIntervalSince1970: 1_000_000),
+            sourceLang: "ja",
+            targetLang: "en",
+            model: "test-model",
+            chunkMS: 160
+        )
+    }
 
-        #expect(state.pendingRename == nil)
+    private func sentence(_ index: Int, text: String) -> Sentence {
+        Sentence(index: index, startS: Double(index), endS: Double(index) + 1.5, lang: "ja", text: text)
+    }
+
+    /// A stored session, so a rename has something to land on.
+    private func makeModel() async throws -> (AppModel, Int64) {
+        let store = isolatedArchive()
+        let id = try #require(
+            store.append(
+                sentence: sentence(0, text: "こんにちは"), sessionID: nil, metadata: metadata()
+            )
+        )
+        store.finalize(session: id, durationMS: 90000, saved: false)
+        let model = AppModel(
+            favorites: isolatedFavorites(), archive: store,
+            initialModelResolve: { _ in nil }
+        )
+        await model.initialModelCheck?.value
+        return (model, id)
+    }
+
+    private func summary(id: Int64) -> ArchivedSessionSummary {
+        ArchivedSessionSummary(
+            id: id,
+            status: .complete,
+            saved: false,
+            startedAt: Date(timeIntervalSince1970: 1_000_000),
+            durationS: 90,
+            pausedMS: 0,
+            sentenceCount: 1,
+            targetLang: "en",
+            model: "test-model",
+            chunkMS: 160,
+            name: "Lecture",
+            firstSentence: "こんにちは"
+        )
+    }
+
+    @Test("Save stores the name under the pending session and clears the slot")
+    func saveStoresTheName() async throws {
+        let (model, id) = try await makeModel()
+        var pending: ArchivedSessionSummary? = summary(id: id)
+        let confirmation = ArchiveRenameConfirmation(
+            model: model,
+            pendingRename: Binding(get: { pending }, set: { newValue in pending = newValue }),
+            draft: .constant("  Lecture 3  "),
+            renamedName: { "Lecture 3" }
+        )
+
+        confirmation.save()
+
+        #expect(model.archive.list().first?.name == "Lecture 3")
+        #expect(pending == nil)
+    }
+
+    @Test("Save reads the name when it runs, not when the question was built")
+    func saveReadsTheNameLate() async throws {
+        let (model, id) = try await makeModel()
+        var pending: ArchivedSessionSummary? = summary(id: id)
+        var name = "First"
+        let confirmation = ArchiveRenameConfirmation(
+            model: model,
+            pendingRename: Binding(get: { pending }, set: { newValue in pending = newValue }),
+            draft: .constant(""),
+            renamedName: { name }
+        )
+        name = "Second"
+
+        confirmation.save()
+
+        #expect(model.archive.list().first?.name == "Second")
+    }
+
+    @Test("Cancel clears the slot and stores nothing")
+    func cancelStoresNothing() async throws {
+        let (model, id) = try await makeModel()
+        var pending: ArchivedSessionSummary? = summary(id: id)
+        let confirmation = ArchiveRenameConfirmation(
+            model: model,
+            pendingRename: Binding(get: { pending }, set: { newValue in pending = newValue }),
+            draft: .constant("Renamed"),
+            renamedName: { "Renamed" }
+        )
+
+        confirmation.cancel()
+
+        #expect(pending == nil)
+        #expect(model.archive.list().first?.name == nil)
     }
 }
 

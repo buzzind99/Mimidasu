@@ -24,14 +24,25 @@ struct ArchiveRenameConfirmation: ViewModifier {
     func body(content: Content) -> some View {
         content.alert("Rename session", isPresented: isPresented) {
             TextField("Name", text: $draft)
-            Button("Cancel", role: .cancel) { pendingRename = nil }
-            Button("Save") {
-                if let summary = pendingRename {
-                    model.renameArchive(id: summary.id, name: renamedName())
-                }
-                pendingRename = nil
-            }
+            Button("Cancel", role: .cancel) { cancel() }
+            Button("Save") { save() }
         }
+    }
+
+    /// The Save action: store the name under the pending session's id, then
+    /// clear the slot. The name is read **now** — `renamedName()` is a
+    /// closure, not a captured value, so a keystroke that lands after the
+    /// question was built still counts.
+    func save() {
+        if let summary = pendingRename {
+            model.renameArchive(id: summary.id, name: renamedName())
+        }
+        pendingRename = nil
+    }
+
+    /// The Cancel action: clear the slot and store nothing.
+    func cancel() {
+        pendingRename = nil
     }
 
     /// Dismissal — Escape, or the window going away — must clear the slot
@@ -41,7 +52,7 @@ struct ArchiveRenameConfirmation: ViewModifier {
             get: { pendingRename != nil },
             set: { isPresented in
                 if !isPresented {
-                    pendingRename = nil
+                    cancel()
                 }
             }
         )
