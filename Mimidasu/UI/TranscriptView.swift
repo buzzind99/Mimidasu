@@ -24,6 +24,14 @@ import SwiftUI
 /// Re-anchoring then chases the bottom marker on every geometry tick until
 /// the content sits flush: a single scrollTo can land short while List's
 /// estimated layout is still settling, so the chase converges quietly.
+///
+/// A finished archive record is the exception: it is a transcript of
+/// something that already happened, so it opens at its oldest sentence and
+/// the pin is released — nothing moves the viewport while the reader reads
+/// it. The record's identity is what decides that: a record change (the
+/// first record, a second record over the first, or the return to the live
+/// feed) is made once, and the pin decision follows the mode the record
+/// leaves behind.
 struct TranscriptView: View {
     var model: AppModel
     /// Raises the main window's un-star question for a word popover. Forwarded
@@ -134,11 +142,23 @@ struct TranscriptView: View {
             }
             .onChange(of: model.entries) { _, _ in
                 // Covers appends and rows growing when a translation lands.
+                // Only the live feed follows its tail: a finished record
+                // stays where the reader put it.
+                guard TranscriptScrollPin.followsTail(in: scrollMode) else { return }
                 scroll.reAnchor(proxy)
+            }
+            .onChange(of: model.openArchive?.id) { _, newID in
+                // A record opens at its oldest sentence; the live feed
+                // resumes following its tail. A second record is a change
+                // too: the mode does not move, the content does.
+                scroll.applyRecord(newID, proxy: proxy)
             }
             .onAppear {
                 // List has no `.initialOffset` anchor (ScrollView-only);
-                // start pinned at the newest sentence.
+                // start pinned at the newest sentence — unless a record is
+                // already open, which starts at its oldest.
+                scroll.applyRecord(model.openArchive?.id, proxy: proxy)
+                guard TranscriptScrollPin.followsTail(in: scrollMode) else { return }
                 scroll.reAnchor(proxy)
             }
             .onChange(of: readingAnnotation) { _, _ in
@@ -156,6 +176,15 @@ struct TranscriptView: View {
                 scroll.reAnchor(proxy)
             }
         }
+    }
+
+    /// The transcript the pane holds: the live feed, or a finished archive
+    /// record. Read from the archive state rather than from the scroll
+    /// model, so the mode and the content change that comes with it are
+    /// decided from one source — the record is already open when its rows
+    /// land, and a content change must not be read as a live append.
+    private var scrollMode: TranscriptScrollPin.Mode {
+        model.openArchive == nil ? .live : .archive
     }
 
     /// Whether this row's retry affordance may be shown. Every clause is a
@@ -350,9 +379,120 @@ enum TranscriptScrollPin {
         var pinnedAfter: Bool
     }
 
+    /// Which transcript the pane holds: the live session's growing feed, or
+    /// a finished archive record.
+    enum Mode: Equatable {
+        /// The live feed: the newest sentence sits at the bottom and the
+        /// view follows it.
+        case live
+        /// A finished record: it opens at its oldest sentence, and the
+        /// viewport stays where the reader leaves it.
+        case archive
+    }
+
+    /// What a mode flip asks the scroll owner to do: whether the viewport
+    /// jumps to the content top, and what the pin flag becomes.
+    struct ModeChange: Equatable {
+        var jumpsToTop: Bool
+        var pinnedAfter: Bool
+    }
+
+    /// Maps a mode flip onto the scroll owner's two decisions. The live feed
+    /// keeps following its tail; a finished record opens at its oldest
+    /// sentence with the pin released, so nothing moves the viewport
+    /// afterwards.
+    static func modeChange(to mode: Mode) -> ModeChange {
+        switch mode {
+        case .live:
+            ModeChange(jumpsToTop: false, pinnedAfter: true)
+        case .archive:
+            ModeChange(jumpsToTop: true, pinnedAfter: false)
+        }
+    }
+
+    /// Whether a content change (a new entry, a landed translation) pulls
+    /// the viewport to the bottom. The live feed follows its tail; a
+    /// finished record is left where the reader put it.
+    static func followsTail(in mode: Mode) -> Bool {
+        mode == .live
+    }
+
+    /// Whether the down button re-engages the bottom pin. The live feed
+    /// re-pins and chases its tail; a finished record has no tail to follow,
+    /// so its down button is a one-shot jump to the newest sentence.
+    static func downButtonRepins(in mode: Mode) -> Bool {
+        mode == .live
+    }
+
+    /// What one geometry tick says about a record's pending top jump.
+    enum TopJump: Equatable {
+        /// The viewport sits flush with the content top: the jump landed.
+        case settled
+        /// The reader scrolled away from the top: their place wins over
+        /// the pending jump.
+        case cancelled
+        /// The jump is still owed: its landing came up short, or the
+        /// content grew under a reader who has not moved.
+        case retry
+        /// Nothing to do.
+        case none
+    }
+
+    /// Maps one geometry tick onto the pending top jump's fate.
+    ///
+    /// The reader's own scroll outranks the jump: once the jump has run,
+    /// their move is theirs and the pending retry is dropped — so a later
+    /// content growth cannot pull them back to the top. A movement before
+    /// the jump runs is ambiguous (it can still carry the outgoing
+    /// transcript's geometry), so the caller keeps the jump owed for that
+    /// tick.
+    ///
+    /// The one movement that is not the reader's is the content swap's
+    /// own clamping: a shorter record pulls the offset up, and a swap is
+    /// not a scroll. A shrinking content is what tells the two apart —
+    /// growing content never pulls the offset up.
+    ///
+    /// Once the jump has fired, the next tick is its landing: flush with
+    /// the content top settles it, short of it leaves the retry owed. An
+    /// upward move in that same tick cannot be told apart from the
+    /// landing, so the retry wins once.
+    static func topJump(old: Snapshot, new: Snapshot, jumpInFlight: Bool) -> TopJump {
+        if new.distanceToTop <= settleEpsilon {
+            return .settled
+        }
+        let contentMoved = abs(new.contentHeight - old.contentHeight) > settleEpsilon
+        let contentShrank = new.contentHeight < old.contentHeight - settleEpsilon
+        let offsetDelta = new.offsetY - old.offsetY
+        if offsetDelta > settleEpsilon {
+            // The reader scrolled down: nothing else moves the offset that
+            // way, and their place wins over the jump.
+            return .cancelled
+        }
+        if jumpInFlight {
+            // The jump's own landing, short of the top: the retry is owed.
+            return .retry
+        }
+        if offsetDelta < -settleEpsilon, !contentShrank {
+            // The reader scrolled up with the content holding its size (or
+            // growing): their place wins over the jump.
+            return .cancelled
+        }
+        if contentMoved {
+            return .retry
+        }
+        return .none
+    }
+
     /// Maps one geometry tick onto the pin rules; `pinned` is the flag
     /// before the tick.
-    static func tick(old: Snapshot, new: Snapshot, pinned: Bool) -> Tick {
+    ///
+    /// A finished record is the exception: it never follows its tail, so
+    /// its pin stays released and nothing re-anchors its viewport — not
+    /// when the reader scrolls, and not when the content grows under them.
+    static func tick(old: Snapshot, new: Snapshot, pinned: Bool, mode: Mode) -> Tick {
+        guard mode == .live else {
+            return Tick(reanchors: false, pinnedAfter: false)
+        }
         if new.offsetY > old.offsetY {
             // The offset moved toward the bottom: our own re-anchor
             // landing (which can come up short of flush), or the user
@@ -397,13 +537,21 @@ enum TranscriptScrollPin {
     /// down button tracks the pin flag, the up button the distance from
     /// the content top. Before the first tick lands (`nil` snapshot) both
     /// hide.
+    ///
+    /// A finished record is the exception: its down button is a one-shot
+    /// jump to the newest sentence rather than a re-pin, so it is offered
+    /// only while there is something below the viewport.
     static func visibility(
-        pinned: Bool, snapshot: Snapshot?
+        pinned: Bool, snapshot: Snapshot?, mode: Mode
     ) -> (up: Bool, down: Bool) {
-        (
-            up: snapshot.map { snap in snap.distanceToTop > pinTolerance } ?? false,
-            down: !pinned
-        )
+        let up = snapshot.map { snap in snap.distanceToTop > pinTolerance } ?? false
+        switch mode {
+        case .live:
+            return (up: up, down: !pinned)
+        case .archive:
+            let hasBelow = snapshot.map { snap in snap.distanceToBottom > pinTolerance } ?? false
+            return (up: up, down: hasBelow)
+        }
     }
 }
 
@@ -421,6 +569,22 @@ final class PinnedScrollModel {
     private var pinnedToBottom = true
     /// Coalesces bursts of re-anchor requests into a single scrollTo.
     private var reAnchorScheduled = false
+    /// The open record's id; nil for the live feed. The transcript the
+    /// pane holds follows from it, so the two can never disagree.
+    private var recordID: Int64?
+    /// The record's opening jump: pending until the viewport sits flush
+    /// with the content top.
+    private var topJumpPending = false
+    /// The jump's scroll has been issued and its landing has not been seen
+    /// yet: the next tick tells whether it landed flush or short.
+    private var topJumpInFlight = false
+    /// How many jumps the pending record has been given.
+    private var topJumpsIssued = 0
+    /// Coalesces bursts of top-jump requests into a single scrollTo.
+    private var topJumpScheduled = false
+    /// Identifies the transcript a queued jump belongs to: a block from an
+    /// older record must not scroll the current one.
+    private var topJumpGeneration = 0
 
     private(set) var showUpButton = false
     private(set) var showDownButton = false
@@ -433,6 +597,43 @@ final class PinnedScrollModel {
         self.bottomAnchorID = bottomAnchorID
     }
 
+    /// The transcript the pane holds: the live feed, or the open record. A
+    /// record is a finished transcript; the live feed is a growing one.
+    private var mode: TranscriptScrollPin.Mode {
+        recordID == nil ? .live : .archive
+    }
+
+    /// Applies a record change: the live feed follows its tail, a finished
+    /// record opens at its oldest sentence with the pin released, so no
+    /// content change moves the viewport afterwards.
+    ///
+    /// A second record is a change too: the mode does not move, but the
+    /// content does, so the new record still opens at its oldest sentence.
+    ///
+    /// The jump to the top is scheduled rather than immediate: the
+    /// record's rows are not laid out when the record opens, and the
+    /// scroll range is not final until they are.
+    func applyRecord(_ recordID: Int64?, proxy: ScrollViewProxy) {
+        guard recordID != self.recordID else { return }
+        self.recordID = recordID
+        let change = TranscriptScrollPin.modeChange(to: mode)
+        pinnedToBottom = change.pinnedAfter
+        topJumpPending = change.jumpsToTop
+        topJumpInFlight = false
+        topJumpsIssued = 0
+        // A jump queued for the previous transcript belongs to it: abandon
+        // it so its block cannot serve (or spend the budget of) this one.
+        topJumpGeneration &+= 1
+        topJumpScheduled = false
+        // The previous transcript's geometry says nothing about this one's
+        // buttons; hide them until the new layout ticks.
+        snapshot = nil
+        refreshVisibility()
+        if change.jumpsToTop {
+            issueTopJump(proxy)
+        }
+    }
+
     /// Consumes one geometry tick: re-evaluates the pin decision, refreshes
     /// jump-button visibility, and chases the bottom marker as decided. A
     /// tick that flips nothing and re-anchors nowhere touches no observed
@@ -443,7 +644,10 @@ final class PinnedScrollModel {
         proxy: ScrollViewProxy
     ) {
         snapshot = new
-        let tick = TranscriptScrollPin.tick(old: old, new: new, pinned: pinnedToBottom)
+        settleTopJump(old: old, new: new, proxy: proxy)
+        let tick = TranscriptScrollPin.tick(
+            old: old, new: new, pinned: pinnedToBottom, mode: mode
+        )
         pinnedToBottom = tick.pinnedAfter
         refreshVisibility()
         if tick.reanchors {
@@ -453,15 +657,29 @@ final class PinnedScrollModel {
 
     /// Up button: release the pin and jump to the oldest sentence (no
     /// chase: the pin is off, so nothing re-fires until the user scrolls
-    /// back down).
+    /// back down). The reader has taken over the position, so a pending
+    /// record jump is dropped.
     func unpinAndScrollToTop(_ proxy: ScrollViewProxy) {
         pinnedToBottom = false
+        topJumpPending = false
+        topJumpInFlight = false
         refreshVisibility()
         scrollToTop(proxy)
     }
 
-    /// Down button: re-engage the pin and chase the bottom marker.
+    /// Down button: re-engage the pin and chase the bottom marker. A
+    /// finished record has no tail to follow, so its down button is a
+    /// one-shot jump to the newest sentence: the pin stays released and
+    /// nothing chases the marker afterwards.
     func repinAndChase(_ proxy: ScrollViewProxy) {
+        // The reader has taken over the position: a pending opening or
+        // retry jump must not undo their move.
+        topJumpPending = false
+        topJumpInFlight = false
+        guard TranscriptScrollPin.downButtonRepins(in: mode) else {
+            scrollToBottom(proxy)
+            return
+        }
         pinnedToBottom = true
         refreshVisibility()
         reAnchor(proxy)
@@ -495,8 +713,96 @@ final class PinnedScrollModel {
         }
     }
 
+    /// Scrolls to the bottom marker once, without a chase: a finished
+    /// record's one-shot jump to its newest sentence.
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+        }
+    }
+
+    /// The record's opening jump: settled when the viewport sits flush with
+    /// the content top. A jump that landed short of the top — the record's
+    /// rows were not laid out when it was issued — is given a second chance
+    /// once the content height moves.
+    ///
+    /// It is never chased: once the jump has run, a reader who scrolls away
+    /// keeps their place and the pending retry is dropped with it. While the
+    /// jump is still queued, a movement cannot be attributed to the reader,
+    /// so it does not cancel the jump.
+    private func settleTopJump(
+        old: TranscriptScrollPin.Snapshot,
+        new: TranscriptScrollPin.Snapshot,
+        proxy: ScrollViewProxy
+    ) {
+        guard topJumpPending else { return }
+        let decision = TranscriptScrollPin.topJump(
+            old: old, new: new, jumpInFlight: topJumpInFlight
+        )
+        switch decision {
+        case .settled:
+            topJumpPending = false
+            topJumpInFlight = false
+        case .cancelled where topJumpScheduled:
+            // The opening jump has not run yet, so this movement can still
+            // carry the outgoing transcript's geometry. Keep the jump owed;
+            // the next tick, after the jump has run, decides for the new
+            // content.
+            break
+        case .cancelled:
+            topJumpPending = false
+            topJumpInFlight = false
+        case .retry:
+            // The landing has been seen: the next tick is the reader's.
+            topJumpInFlight = false
+            guard topJumpsIssued < Self.maxTopJumps else {
+                // The budget is spent: the record keeps the offset it
+                // landed on, and the pending jump is dropped rather than
+                // left armed for the rest of the record's life.
+                topJumpPending = false
+                return
+            }
+            issueTopJump(proxy)
+        case .none:
+            break
+        }
+    }
+
+    /// Issues the jump to the content top, at most a couple of times per
+    /// record: the first lands on the rows once they are there, the second
+    /// covers the jump that came too early. Past that the jump is dropped.
+    private func issueTopJump(_ proxy: ScrollViewProxy) {
+        guard topJumpsIssued < Self.maxTopJumps, !topJumpScheduled else { return }
+        topJumpsIssued += 1
+        topJumpScheduled = true
+        let generation = topJumpGeneration
+        DispatchQueue.main.async { @MainActor [self] in
+            // A record change abandoned this jump: it must not clear the
+            // new record's scheduled flag or scroll its pane.
+            guard generation == topJumpGeneration else { return }
+            topJumpScheduled = false
+            guard topJumpPending else { return }
+            // The jump is ours: the next tick is its landing, not the
+            // reader's move.
+            topJumpInFlight = true
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                proxy.scrollTo(topAnchorID, anchor: .top)
+            }
+        }
+    }
+
+    /// The jumps one record may be given: the opening jump, and the retry
+    /// that covers a jump issued before the rows were laid out.
+    private static let maxTopJumps = 2
+
     private func refreshVisibility() {
-        let next = TranscriptScrollPin.visibility(pinned: pinnedToBottom, snapshot: snapshot)
+        let next = TranscriptScrollPin.visibility(
+            pinned: pinnedToBottom, snapshot: snapshot, mode: mode
+        )
         if showUpButton != next.up {
             showUpButton = next.up
         }
