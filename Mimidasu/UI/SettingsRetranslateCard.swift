@@ -214,7 +214,7 @@ struct SettingsRetranslateCard: View {
     private var sessionOption: Option {
         Option(
             engine: .session,
-            title: "Session engine",
+            title: RetranslateEngine.session.displayName,
             subtitle: "Same as active engine"
         )
     }
@@ -222,7 +222,7 @@ struct SettingsRetranslateCard: View {
     private var appleFastOption: Option {
         Option(
             engine: .appleFast,
-            title: "Apple (NMT)",
+            title: RetranslateEngine.appleFast.displayName,
             subtitle: "Traditional machine translation — may need to download a language pack on first use"
         )
     }
@@ -230,16 +230,18 @@ struct SettingsRetranslateCard: View {
     private var appleIntelligenceOption: Option {
         Option(
             engine: .appleHighFidelity,
-            title: "Apple Intelligence",
-            subtitle: "Apple Intelligence translation — high fidelity LLM based translation engine using Apple Foundation Model"
+            title: RetranslateEngine.appleHighFidelity.displayName,
+            subtitle: "\(RetranslateEngine.appleHighFidelity.displayName) translation — high fidelity LLM based translation engine using Apple Foundation Model"
         )
     }
 
     private func externalOption(for provider: TranslationProvider) -> Option? {
         guard let engine = RetranslateEngine(provider: provider) else { return nil }
+        // Only providers with a stored key are listed here, so the DeepL
+        // subscription tier is known and the title can carry it.
         return Option(
             engine: engine,
-            title: provider.displayName,
+            title: provider.tier(deepLTier: settings.deepLTier).name,
             subtitle: "External — retranslates the sentence over the internet"
         )
     }

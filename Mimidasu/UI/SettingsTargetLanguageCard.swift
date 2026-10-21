@@ -72,13 +72,7 @@ struct SettingsTargetLanguageCard: View {
                     .opacity(sessionIsLive ? 0.45 : 1)
                 }
             } else {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.mini)
-                    Text("Loading languages…")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Palette.mutedText)
-                }
+                LanguagesLoadingRow(tint: Palette.mutedText)
             }
             Text(
                 "On-device languages depend on your macOS version; selecting one may "
@@ -102,10 +96,7 @@ struct SettingsTargetLanguageCard: View {
     /// the target-language control is disabled there — restart-only by
     /// design, the new target applies at the next session start.
     private var sessionIsLive: Bool {
-        switch model.phase {
-        case .running, .paused, .starting, .stopping, .sourceLost: true
-        case .needsModel, .idle, .failed: false
-        }
+        SessionPhaseMachine.isLiveOrStopping(model.phase)
     }
 
     private var languagesCountLabel: String {
@@ -139,7 +130,7 @@ struct SettingsTargetLanguageCard: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 12)
-                Text(Self.badgeCode(for: target))
+                Text(LanguageBadge.code(for: target.code))
                     .font(.system(size: 9.5, weight: .bold))
                     .tracking(0.5)
                     .foregroundStyle(selected ? Palette.accent : Palette.secondaryText)
@@ -172,15 +163,6 @@ struct SettingsTargetLanguageCard: View {
             isEnabled: !selected,
             tint: Palette.primaryText, opacity: 0.05
         )
-    }
-
-    /// Uppercase primary subtag for the row badge ("en" → "EN",
-    /// "zh-Hans" → "ZH").
-    private static func badgeCode(for target: TargetLanguage) -> String {
-        guard let primary = target.code.split(separator: "-").first else {
-            return target.code.uppercased()
-        }
-        return primary.uppercased()
     }
 }
 

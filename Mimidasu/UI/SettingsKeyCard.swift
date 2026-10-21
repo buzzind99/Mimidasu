@@ -20,6 +20,8 @@ struct SettingsKeyCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // The card is only rendered for external providers, so the
+            // kicker can only ever read an external provider's name.
             KickerLabel(provider.displayName.uppercased(), color: Palette.label)
             if settings.hasKey(for: provider) {
                 savedKeyRows()

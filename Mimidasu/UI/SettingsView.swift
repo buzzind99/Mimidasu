@@ -281,7 +281,7 @@ struct SettingsView: View {
                     )
                 VStack(alignment: .leading, spacing: 1) {
                     Text(provider.settingsName(
-                        deeplIsFreeTier: settings.deeplIsFreeTier,
+                        deepLTier: settings.deepLTier,
                         appleHighFidelity: model.appleHighFidelity
                     ))
                     .font(.system(size: 13, weight: .semibold))
