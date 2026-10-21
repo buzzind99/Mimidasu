@@ -197,7 +197,7 @@ struct SidebarStatusTests {
             SidebarStatus.translationEngineName(
                 activeEngine: .apple, externalProvider: nil,
                 selectedProvider: .apple, appleHighFidelity: false
-            ) == "Apple"
+            ) == "Apple (NMT)"
         )
     }
 
@@ -221,9 +221,9 @@ struct SidebarStatusTests {
 
     @Test("DotTone mirrors TranslationPill.Tone one-to-one")
     func pillToneBridge() {
-        #expect(SidebarStatus.DotTone(TranslationPill.Tone.green) == .green)
-        #expect(SidebarStatus.DotTone(TranslationPill.Tone.yellow) == .yellow)
-        #expect(SidebarStatus.DotTone(TranslationPill.Tone.red) == .red)
-        #expect(SidebarStatus.DotTone(TranslationPill.Tone.neutral) == .neutral)
+        #expect(SidebarStatus.DotTone.green == TranslationPill.Tone.green)
+        #expect(SidebarStatus.DotTone.yellow == TranslationPill.Tone.yellow)
+        #expect(SidebarStatus.DotTone.red == TranslationPill.Tone.red)
+        #expect(SidebarStatus.DotTone.neutral == TranslationPill.Tone.neutral)
     }
 }

@@ -186,8 +186,7 @@ struct TranscriptView: View {
                 && !model.archiveTranslationRunning
                 && model.alternateRetranslateEngineActive
         }
-        guard model.phase == .running || model.phase == .sourceLost || model.phase == .paused
-        else { return false }
+        guard SessionPhaseMachine.isLive(model.phase) else { return false }
         if !model.alternateRetranslateEngineActive {
             guard model.translationWorkerActive else { return false }
             if case .unavailable = model.translationStatus {

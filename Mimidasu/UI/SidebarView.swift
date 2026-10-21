@@ -76,12 +76,18 @@ struct SidebarView: View {
             defaultFilename: "\(model.exportFilenameBase).\(exportFormat.fileExtension)"
         ) { result in
             if case let .failure(error) = result {
-                model.toasts.post(
-                    key: ToastKey.exportFailed, style: .yellowAuto,
-                    title: "Export failed", body: error.localizedDescription
-                )
+                postExportFailure(error)
             }
         }
+    }
+
+    /// The one export-failure toast: the exporter's own failure and the
+    /// export build's failure report the same way.
+    private func postExportFailure(_ error: Error) {
+        model.toasts.post(
+            key: ToastKey.exportFailed, style: .yellowAuto,
+            title: "Export failed", body: error.localizedDescription
+        )
     }
 
     // MARK: - Brand header
@@ -337,11 +343,11 @@ extension SidebarView {
     }
 
     private var translationDotColor: Color {
-        dotColor(SidebarStatus.DotTone(TranslationPill.map(
+        dotColor(TranslationPill.map(
             status: model.translationStatus,
             activeEngine: model.activeTranslationEngine,
             fallbackActive: translationFallbackLatched
-        ).tone))
+        ).tone)
     }
 
     private func dotColor(_ tone: SidebarStatus.DotTone) -> Color {
@@ -541,10 +547,7 @@ extension SidebarView {
             exportData = try model.export(format: format)
             exportPresented = true
         } catch {
-            model.toasts.post(
-                key: ToastKey.exportFailed, style: .yellowAuto,
-                title: "Export failed", body: error.localizedDescription
-            )
+            postExportFailure(error)
         }
     }
 }

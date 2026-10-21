@@ -5,21 +5,10 @@ import SwiftUI
 /// ASR engine dot's tone. Mirrors the `TranslationPill.map` precedent: the
 /// view renders the mapping, tests pin it.
 struct SidebarStatus: Equatable {
-    /// Status-dot tone, shared by the ASR and translation rows.
-    enum DotTone: Equatable {
-        case green, yellow, red, neutral
-
-        /// Same scale as `TranslationPill.Tone` — the translation row reads
-        /// the pill mapping and converts.
-        init(_ tone: TranslationPill.Tone) {
-            switch tone {
-            case .green: self = .green
-            case .yellow: self = .yellow
-            case .red: self = .red
-            case .neutral: self = .neutral
-            }
-        }
-    }
+    /// Status-dot tone, shared by the ASR and translation rows. The pill
+    /// mapping already owns the scale, so the sidebar reads it directly
+    /// instead of keeping a second copy of the case set.
+    typealias DotTone = TranslationPill.Tone
 
     /// Stop-capsule states: a live session (or one whose capture source was
     /// lost, or a paused one) offers Stop; everything else offers Start.
@@ -40,7 +29,7 @@ struct SidebarStatus: Equatable {
     static func map(
         phase: SessionPhase, isCheckingModel: Bool, archiveOpen: Bool = false
     ) -> SidebarStatus {
-        let isLive = phase == .running || phase == .sourceLost || phase == .paused
+        let isLive = SessionPhaseMachine.isLive(phase)
         let title = switch phase {
         case .running, .sourceLost, .paused: "Stop session"
         case .starting: "Starting…"
@@ -94,10 +83,10 @@ struct SidebarStatus: Equatable {
 
     /// Names the translation engine for the ENGINES card's row title. The
     /// Apple row names Apple Intelligence when the OS reported the strategy
-    /// installed for the current pair; otherwise it stays "Apple". External
-    /// runs name `externalProvider` (recorded at attachment time), never the
-    /// picker — a mid-session selection change must not relabel an engine
-    /// the queue isn't using.
+    /// installed for the current pair; otherwise it names the on-device
+    /// model. External runs name `externalProvider` (recorded at attachment
+    /// time), never the picker — a mid-session selection change must not
+    /// relabel an engine the queue isn't using.
     static func translationEngineName(
         activeEngine: ActiveTranslationEngine,
         externalProvider: TranslationProvider?,
@@ -105,7 +94,9 @@ struct SidebarStatus: Equatable {
         appleHighFidelity: Bool
     ) -> String {
         guard activeEngine == .external else {
-            return appleHighFidelity ? "Apple Intelligence" : "Apple"
+            return appleHighFidelity
+                ? TranslationTier.appleHighFidelity.name
+                : TranslationTier.appleOnDevice.name
         }
         return (externalProvider ?? selectedProvider).shortName
     }

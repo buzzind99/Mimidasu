@@ -5,12 +5,17 @@ import SwiftUI
 /// sidebar's ENGINES translation row consumes `map`'s tone for its status
 /// dot (via `SidebarStatus.DotTone`); unit tests pin the mapping.
 struct TranslationPill: Equatable {
+    /// The status-dot scale. The sidebar's dot reads it directly — see
+    /// `SidebarStatus.DotTone`.
     enum Tone: Equatable {
         case green, yellow, red, neutral
     }
 
     let tone: Tone
-    /// "On-device" or "External" — the engine label for every status.
+    /// "On-device" or "External" — the engine label for every status. Not
+    /// rendered in production: the sidebar's row reads the tone only, and
+    /// the sidebar's own detail line words the states differently. The
+    /// label survives for the mapping's own sake and for its tests.
     let label: String
 
     static func map(
