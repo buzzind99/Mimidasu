@@ -219,11 +219,26 @@ struct SidebarStatusTests {
 
     // MARK: - Dot tone bridge
 
-    @Test("DotTone mirrors TranslationPill.Tone one-to-one")
-    func pillToneBridge() {
-        #expect(SidebarStatus.DotTone.green == TranslationPill.Tone.green)
-        #expect(SidebarStatus.DotTone.yellow == TranslationPill.Tone.yellow)
-        #expect(SidebarStatus.DotTone.red == TranslationPill.Tone.red)
-        #expect(SidebarStatus.DotTone.neutral == TranslationPill.Tone.neutral)
+    @Test("the sidebar's two dots share one tone scale")
+    func dotToneScaleIsShared() {
+        // The ASR row and the translation row are dots on the same scale: the
+        // sidebar reads the pill's tone directly, so "healthy" in one row
+        // must mean "healthy" in the other.
+        #expect(
+            SidebarStatus.map(phase: .running, isCheckingModel: false).asrDot
+                == TranslationPill.map(status: .ready, activeEngine: .apple, fallbackActive: false).tone
+        )
+        #expect(
+            SidebarStatus.map(phase: .sourceLost, isCheckingModel: false).asrDot
+                == TranslationPill.map(
+                    status: .unavailable("", .transient),
+                    activeEngine: .apple,
+                    fallbackActive: false
+                ).tone
+        )
+        #expect(
+            SidebarStatus.map(phase: .idle, isCheckingModel: false).asrDot
+                == TranslationPill.map(status: .idle, activeEngine: .apple, fallbackActive: false).tone
+        )
     }
 }
