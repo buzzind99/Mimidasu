@@ -114,14 +114,15 @@ struct ModelChoiceCardTests {
     @Test("the Settings resting footer reads the size and the downloaded state")
     func settingsRestingFooter() {
         let url = URL(fileURLWithPath: "/tmp/lite.gguf")
+        let size = ASRModelChoice.lite.approximateSize
 
         #expect(
             makeCard(resolvedURL: nil, footerStyle: .sizeAndStatus).chrome.footer
-                == .sizeAndStatus(size: "~250 MB", downloaded: false)
+                == .sizeAndStatus(size: size, downloaded: false)
         )
         #expect(
             makeCard(resolvedURL: url, footerStyle: .sizeAndStatus).chrome.footer
-                == .sizeAndStatus(size: "~250 MB", downloaded: true)
+                == .sizeAndStatus(size: size, downloaded: true)
         )
     }
 
@@ -167,7 +168,14 @@ struct ModelChoiceCardTests {
 
         let card = makeCard(downloader: downloader, footerStyle: .sizeAndStatus)
 
-        #expect(card.chrome.footer == .error(message: ModelDownloader.downloadFailureMessage(error)))
+        guard case let .error(message) = card.chrome.footer else {
+            Issue.record("a failed download must replace the resting line with the error")
+            return
+        }
+        #expect(
+            message.hasPrefix("Download failed: offline."),
+            "the card surfaces the downloader's own failure copy"
+        )
     }
 
     @Test("the download status reaches the footer on the selected card only")
@@ -192,25 +200,105 @@ struct ModelChoiceCardTests {
             statusOnlyWhenSelected: true, footerStyle: .sizeOnly
         )
 
-        #expect(unpicked.chrome.footer == .sizeOnly(size: "~250 MB"))
+        #expect(unpicked.chrome.footer == .sizeOnly(size: ASRModelChoice.lite.approximateSize))
         #expect(picked.chrome.footer == .progress(bytes: 250, total: 1000))
+    }
+
+    @Test("a stale completed download falls back to the resting line")
+    func staleDoneFallsBackToTheRestingLine() {
+        // The file was deleted after the download completed: the footer must
+        // read the resolved URL, not the downloader's stale "done".
+        let footer = ModelChoiceCard.footerPlan(
+            state: .done(URL(fileURLWithPath: "/tmp/lite.gguf")),
+            showsDownloadStatus: true,
+            footerStyle: .sizeAndStatus,
+            size: ASRModelChoice.lite.approximateSize,
+            downloaded: false
+        )
+
+        #expect(
+            footer == .sizeAndStatus(size: ASRModelChoice.lite.approximateSize, downloaded: false),
+            "a deleted model must not read as downloaded"
+        )
     }
 
     // MARK: - Surface flag tables
 
     @Test("the Settings card badges the model in use and always shows the download overlay")
-    func settingsFlagTable() {
-        #expect(SettingsModelRow.showsSelectionBadge)
-        #expect(SettingsModelRow.showsDownloadControls)
-        #expect(SettingsModelRow.statusOnlyWhenSelected == false)
-        #expect(SettingsModelRow.footerStyle == .sizeAndStatus)
+    func settingsFlagTable() async {
+        let model = await makeSUT()
+        let row = SettingsModelRow(choice: .lite, model: model)
+        let card = row.makeCard()
+
+        #expect(card.chrome.showsSelectionBadge, "the model in use is badged")
+        #expect(card.chrome.showsDownloadOverlay, "the Settings card always offers the download")
+        #expect(card.chrome.usesAccentSurface, "the model in use wears the accent surface")
+        #expect(
+            card.chrome.footer == .sizeAndStatus(
+                size: ASRModelChoice.lite.approximateSize, downloaded: false
+            ),
+            "the Settings footer reads the size and the downloaded state"
+        )
     }
 
     @Test("the onboarding card shows no badge and gates the download status on the picked card")
-    func onboardingFlagTable() {
-        #expect(OnboardingModelRow.showsSelectionBadge == false)
-        #expect(OnboardingModelRow.statusOnlyWhenSelected)
-        #expect(OnboardingModelRow.footerStyle == .sizeOnly)
+    func onboardingFlagTable() async {
+        let model = await makeSUT()
+        let row = OnboardingModelRow(choice: .lite, model: model, downloader: makeDownloader())
+        let card = row.makeCard()
+
+        #expect(card.chrome.showsSelectionBadge == false, "the onboarding card never badges")
+        #expect(
+            card.chrome.footer == .sizeOnly(size: ASRModelChoice.lite.approximateSize),
+            "the onboarding footer is the size alone"
+        )
+    }
+
+    // MARK: - The selection action
+
+    @Test("the selection action runs only on a card that may be selected")
+    func selectionActionIsGuarded() {
+        var selections = 0
+        let card = ModelChoiceCard(
+            choice: .lite,
+            resolvedURL: nil,
+            downloader: makeDownloader(),
+            isSelected: false,
+            selectionDisabled: false,
+            onSelect: { selections += 1 },
+            showsSelectionBadge: true,
+            showsDownloadControls: true,
+            statusOnlyWhenSelected: false,
+            footerStyle: .sizeAndStatus
+        )
+
+        card.select()
+        #expect(selections == 1, "an enabled, unselected card selects")
+
+        card.select()
+        #expect(selections == 2, "the card stays selectable until it is selected")
+    }
+
+    @Test("a disabled card and the model in use never fire the selection action")
+    func blockedCardsDoNotSelect() {
+        var selections = 0
+        let card = ModelChoiceCard(
+            choice: .lite,
+            resolvedURL: nil,
+            downloader: makeDownloader(),
+            isSelected: true,
+            selectionDisabled: false,
+            onSelect: { selections += 1 },
+            showsSelectionBadge: true,
+            showsDownloadControls: true,
+            statusOnlyWhenSelected: false,
+            footerStyle: .sizeAndStatus
+        )
+
+        card.select()
+
+        #expect(card.chrome.actionIsBlocked, "the model in use does not re-select")
+        #expect(selections == 0, "the model in use never re-resolves and re-warms")
     }
 
     // MARK: - Surface state

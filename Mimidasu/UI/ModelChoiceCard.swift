@@ -42,6 +42,11 @@ struct ModelChoiceCard: View {
         var showsSelectionBadge: Bool
         /// The card's button is unpressable.
         var isDisabled: Bool
+        /// The selected card wears the accent surface.
+        var usesAccentSurface: Bool
+        /// The selection action is blocked: the card is disabled, or it is
+        /// already the selected one.
+        var actionIsBlocked: Bool
         /// The hover wash shows.
         var showsHover: Bool
         /// The download overlay renders.
@@ -116,16 +121,56 @@ struct ModelChoiceCard: View {
         Chrome(
             showsSelectionBadge: showsBadge,
             isDisabled: selectionDisabled,
+            usesAccentSurface: isSelected,
+            actionIsBlocked: blocksSelection,
             showsHover: showsHover,
             showsDownloadOverlay: showsDownloadControls,
             footer: footerPlan
         )
     }
 
+    /// The selection action is blocked when the card may not be selected, or
+    /// when it already is the selected one — pressing the model in use must
+    /// not re-resolve and re-warm it.
+    ///
+    /// This is the source of the fact; the chrome carries it, and the button
+    /// reads the chrome, so the two can never disagree.
+    private var blocksSelection: Bool {
+        selectionDisabled || isSelected
+    }
+
+    /// The card's selection action. Internal so the rule is testable without
+    /// pressing a button.
+    func select() {
+        guard !chrome.actionIsBlocked else { return }
+        onSelect()
+    }
+
     /// The footer's content, as data.
     private var footerPlan: Footer {
-        guard showsDownloadStatus else { return restingFooter }
-        switch downloader.state {
+        Self.footerPlan(
+            state: downloader.state,
+            showsDownloadStatus: showsDownloadStatus,
+            footerStyle: footerStyle,
+            size: choice.approximateSize,
+            downloaded: resolvedURL != nil
+        )
+    }
+
+    /// The footer's content, as a pure function of the downloader's state.
+    /// The rules — the selection gate, the stale-`.done` fall-through — are
+    /// rules, and a rule is testable when it is a function of its inputs.
+    static func footerPlan(
+        state: ModelDownloader.State,
+        showsDownloadStatus: Bool,
+        footerStyle: FooterStyle,
+        size: String,
+        downloaded: Bool
+    ) -> Footer {
+        guard showsDownloadStatus else {
+            return restingFooter(footerStyle: footerStyle, size: size, downloaded: downloaded)
+        }
+        switch state {
         case let .downloading(_, bytes, total):
             return .progress(bytes: bytes, total: total)
         case let .failed(message):
@@ -134,17 +179,21 @@ struct ModelChoiceCard: View {
             // A stale `.done` (the file deleted after a completed download)
             // must not read "downloaded": it falls through to the resting
             // line, which reads the resolved URL.
-            return restingFooter
+            return restingFooter(footerStyle: footerStyle, size: size, downloaded: downloaded)
         }
     }
 
     /// The footer's resting line.
-    private var restingFooter: Footer {
+    private static func restingFooter(
+        footerStyle: FooterStyle,
+        size: String,
+        downloaded: Bool
+    ) -> Footer {
         switch footerStyle {
         case .sizeAndStatus:
-            .sizeAndStatus(size: choice.approximateSize, downloaded: resolvedURL != nil)
+            .sizeAndStatus(size: size, downloaded: downloaded)
         case .sizeOnly:
-            .sizeOnly(size: choice.approximateSize)
+            .sizeOnly(size: size)
         }
     }
 
@@ -154,8 +203,8 @@ struct ModelChoiceCard: View {
         selectableButton
             .cardSurface(
                 radius: 12,
-                fill: isSelected ? Palette.accent.opacity(0.08) : Palette.cardFill,
-                stroke: isSelected ? Palette.accent.opacity(0.55) : Palette.cardStroke
+                fill: chrome.usesAccentSurface ? Palette.accent.opacity(0.08) : Palette.cardFill,
+                stroke: chrome.usesAccentSurface ? Palette.accent.opacity(0.55) : Palette.cardStroke
             )
             .hoverHighlight(
                 RoundedRectangle(cornerRadius: 12, style: .continuous),
@@ -164,9 +213,13 @@ struct ModelChoiceCard: View {
             )
     }
 
-    /// The card's button, disabled only when it really is disabled: a
-    /// `.disabled(false)` would re-enable the card under a disabled
-    /// ancestor, so the modifier is applied only when the card is disabled.
+    /// The card's button, disabled only when it really is disabled.
+    ///
+    /// The modifier is applied only in the disabled case rather than always
+    /// with a flag: a disabled **ancestor** wins either way (`View.disabled(_:)`
+    /// lets the higher view override the value set below it), but omitting
+    /// the modifier leaves the card's own subtree free of a `.disabled(false)`
+    /// that says nothing true.
     @ViewBuilder
     private var selectableButton: some View {
         if chrome.isDisabled {
@@ -178,8 +231,7 @@ struct ModelChoiceCard: View {
 
     private var button: some View {
         Button {
-            guard !selectionDisabled, !isSelected else { return }
-            onSelect()
+            select()
         } label: {
             VStack(alignment: .leading, spacing: 6) {
                 title

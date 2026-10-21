@@ -32,6 +32,20 @@ struct SettingsModelRow: View {
     }
 
     var body: some View {
+        makeCard()
+            .onChange(of: downloader.state) { _, state in
+                // A finished Settings download is explicit intent: verify the
+                // new file and auto-select it (see `adoptDownloadedModel`).
+                if case .done = state {
+                    Task { await model.adoptDownloadedModel(choice) }
+                }
+            }
+    }
+
+    /// The card this row renders. Exposed so the row's wiring to the shared
+    /// card is testable without rendering it — the flags are the whole
+    /// difference between the two surfaces, so they are worth pinning.
+    func makeCard() -> ModelChoiceCard {
         ModelChoiceCard(
             choice: choice,
             resolvedURL: resolvedURL,
@@ -44,13 +58,6 @@ struct SettingsModelRow: View {
             statusOnlyWhenSelected: Self.statusOnlyWhenSelected,
             footerStyle: Self.footerStyle
         )
-        .onChange(of: downloader.state) { _, state in
-            // A finished Settings download is explicit intent: verify the
-            // new file and auto-select it (see `adoptDownloadedModel`).
-            if case .done = state {
-                Task { await model.adoptDownloadedModel(choice) }
-            }
-        }
     }
 }
 

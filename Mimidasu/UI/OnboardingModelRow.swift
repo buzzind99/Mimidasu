@@ -23,6 +23,13 @@ struct OnboardingModelRow: View {
     }
 
     var body: some View {
+        makeCard()
+    }
+
+    /// The card this row renders. Exposed so the row's wiring to the shared
+    /// card is testable without rendering it — the flags are the whole
+    /// difference between the two surfaces, so they are worth pinning.
+    func makeCard() -> ModelChoiceCard {
         ModelChoiceCard(
             choice: choice,
             resolvedURL: resolvedURL,
