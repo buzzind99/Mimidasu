@@ -198,7 +198,7 @@ enum SessionPhaseMachineTransitionTable {
         .refused, // .needsModel
         .refused, // .starting
         .refused, // .running
-        .legal(to: .sourceLost, effects: [.postResumeFailed("boom")]), // .paused
+        .legal(to: .sourceLost, effects: [.postCaptureLost("boom")]), // .paused
         .refused, // .sourceLost
         .refused, // .stopping
         .refused // .failed
@@ -242,7 +242,7 @@ enum SessionPhaseMachineTransitionTable {
     ]) + rows(for: .captureRestartFailed("boom"), [
         .refused, // .idle
         .refused, // .needsModel
-        .legal(to: .sourceLost, effects: [.postRestartFailed("boom")]), // .starting
+        .legal(to: .sourceLost, effects: [.postCaptureLost("boom")]), // .starting
         .refused, // .running
         .refused, // .paused
         .refused, // .sourceLost

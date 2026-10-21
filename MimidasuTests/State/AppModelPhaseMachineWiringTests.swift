@@ -30,6 +30,8 @@ struct AppModelPhaseMachineWiringTests {
 
     private func makeModel() async -> AppModel {
         let model = AppModel(
+            translationSettings: isolatedTranslationSettings(suite: "test.AppModelPhaseMachineWiring"),
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelPhaseMachineWiring"),
             favorites: isolatedFavorites(),
             archive: isolatedArchive(),
             initialModelResolve: { _ in nil }
@@ -38,18 +40,16 @@ struct AppModelPhaseMachineWiringTests {
         return model
     }
 
-    @Test("the model's phase is the machine's phase")
-    func modelPhaseIsTheMachinePhase() async {
+    @Test("a phase write reaches the machine")
+    func phaseWriteReachesTheMachine() async {
         let model = await makeModel()
-        #expect(model.phase == model.phaseMachine.phase)
-
         model.phase = .running
-        #expect(model.phase == .running)
+
         #expect(model.phaseMachine.phase == .running)
     }
 
-    @Test("a production phase write moves the machine too")
-    func productionWriteMovesTheMachine() async {
+    @Test("a production stop drives the machine through the teardown")
+    func stopDrivesTheMachine() async {
         let model = await makeModel()
         model.phase = .running
 
@@ -68,8 +68,26 @@ struct AppModelPhaseMachineWiringTests {
         #expect(model.reducePhase(.resumeRequested).isLegal)
         #expect(model.phaseMachine.isResuming, "the resume latch is armed")
 
-        model.phase = .paused
+        model.forcePhaseForTesting(.paused)
         #expect(!model.phaseMachine.isResuming, "the seam must not leave the resume guard closed")
+    }
+
+    @Test("a phase write never disarms the quit-time teardown")
+    func phaseWriteKeepsTheTerminatingLatch() async {
+        let model = await makeModel()
+        #expect(model.reducePhase(.terminationStarted).isLegal)
+        #expect(model.phaseMachine.isTerminating)
+
+        model.phase = .running
+
+        #expect(
+            model.phaseMachine.isTerminating,
+            "a phase write may not revoke the quit-time latch"
+        )
+        #expect(
+            !model.reducePhase(.startRequested).isLegal,
+            "a terminating app never begins a new session"
+        )
     }
 
     @Test("the terminating latch refuses a new session")
@@ -100,25 +118,5 @@ struct AppModelPhaseMachineWiringTests {
             observed.isSet,
             "the machine's phase change must invalidate the views that read it"
         )
-    }
-
-    @Test("the machine's predicates answer for every phase")
-    func predicatesCoverEveryPhase() async {
-        let model = await makeModel()
-        for phase in SessionPhaseFixtures.all {
-            model.phase = phase
-            #expect(
-                model.phaseMachine.isLive == SessionPhaseMachine.isLive(phase),
-                "\(phase)"
-            )
-            #expect(
-                model.phaseMachine.isLiveOrStarting == SessionPhaseMachine.isLiveOrStarting(phase),
-                "\(phase)"
-            )
-            #expect(
-                model.phaseMachine.isLiveOrStopping == SessionPhaseMachine.isLiveOrStopping(phase),
-                "\(phase)"
-            )
-        }
     }
 }

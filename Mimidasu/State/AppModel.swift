@@ -30,14 +30,23 @@ final class AppModel {
 
     /// The session phase.
     ///
-    /// The setter is a **test seam**: production writes go through
-    /// `reducePhase(_:)`, never through this setter. A test that forces a
-    /// phase resets the machine's internal latches with it
-    /// (`setPhaseForTesting`), so the latches stay coherent with the phase
-    /// they describe.
+    /// Production writes go through `reducePhase(_:)`, never through this
+    /// setter. The setter exists for tests, and it **never revokes the
+    /// quit-time latch**: a phase write may not re-open the start gate
+    /// underneath a termination in flight. A test that needs a clean slate
+    /// (both latches reset) uses `forcePhaseForTesting(_:)`.
     var phase: SessionPhase {
         get { phaseMachine.phase }
-        set { phaseMachine.setPhaseForTesting(newValue) }
+        set { phaseMachine.setPhase(newValue) }
+    }
+
+    /// Test seam: force the phase and reset the machine's internal latches
+    /// with it, so the latches stay coherent with the phase they describe.
+    ///
+    /// The explicit way to clear the quit-time latch — production has no
+    /// path to it.
+    func forcePhaseForTesting(_ newPhase: SessionPhase) {
+        phaseMachine.setPhaseForTesting(newPhase)
     }
 
     /// Observed UI state
@@ -468,7 +477,7 @@ final class AppModel {
             // capture, and only a failed resume reports capture lost.
             guard let self else { return }
             let transition = reducePhase(.captureLost(message))
-            if transition.effects.contains(.deferCaptureError(message)) {
+            if transition.defersCaptureError {
                 deferredCaptureError = message
                 return
             }

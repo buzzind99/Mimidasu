@@ -45,10 +45,22 @@ struct SessionPhaseMachineTests {
         }
 
         #expect(seen.count == SessionPhaseMachineTransitionTable.table.count)
-        // 18 actions, but `modelResolved` is exercised with both payloads.
+        // 19 actions, but `modelResolved` is exercised with both payloads.
         let actionVariants: Set<String> = Set(SessionPhaseMachineTransitionTable.table.map { row in "\(row.action)" })
-        #expect(actionVariants.count == 20, "19 actions, `modelResolved` twice")
+        #expect(actionVariants.count == 20, "20 rows: 19 actions, `modelResolved` twice")
         #expect(SessionPhaseMachineTransitionTable.table.count == 20 * SessionPhaseMachineTransitionTable.canonicalPhases.count)
+    }
+
+    /// A legal transition never owes a teardown: the teardown is what makes
+    /// a transition *compensating*, and the category decides.
+    @Test("no legal transition carries the compensating teardown effect")
+    func legalTransitionsNeverTearDown() {
+        for row in SessionPhaseMachineTransitionTable.table where row.category == .legal {
+            #expect(
+                !row.effects.contains(.tearDownSession),
+                "\(row.action) from \(row.from) is legal and must not tear down"
+            )
+        }
     }
 
     // MARK: - Compensating transitions

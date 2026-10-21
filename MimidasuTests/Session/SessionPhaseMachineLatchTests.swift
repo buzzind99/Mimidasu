@@ -72,6 +72,50 @@ struct SessionPhaseMachineLatchTests {
         #expect(!machine.isResuming, "a stop ends the airborne resume")
     }
 
+    // MARK: - The phase write
+
+    @Test("a phase write that leaves `.paused` clears the resuming latch")
+    func phaseWriteLeavingPausedClearsLatch() {
+        var machine = SessionPhaseMachine(phase: .paused)
+        _ = machine.reduce(.resumeRequested)
+
+        machine.setPhase(.running)
+
+        #expect(machine.phase == .running)
+        #expect(!machine.isResuming, "the latch describes the phase, and the phase moved")
+    }
+
+    @Test("a phase write that stays `.paused` keeps the resuming latch")
+    func phaseWriteStayingPausedKeepsLatch() {
+        var machine = SessionPhaseMachine(phase: .paused)
+        _ = machine.reduce(.resumeRequested)
+
+        machine.setPhase(.paused)
+
+        #expect(machine.isResuming, "a resume is still airborne while the session is paused")
+    }
+
+    @Test("a phase write never revokes the quit-time latch")
+    func phaseWriteKeepsTheTerminatingLatch() {
+        var machine = SessionPhaseMachine(phase: .running)
+        _ = machine.reduce(.terminationStarted)
+
+        machine.setPhase(.idle)
+        machine.setPhase(.running)
+
+        #expect(machine.isTerminating, "only the teardown may clear the quit-time latch")
+    }
+
+    @Test("the test seam is the only way to revoke the quit-time latch")
+    func seamRevokesTheTerminatingLatch() {
+        var machine = SessionPhaseMachine(phase: .running)
+        _ = machine.reduce(.terminationStarted)
+
+        machine.setPhaseForTesting(.idle)
+
+        #expect(!machine.isTerminating, "the seam resets both latches")
+    }
+
     // MARK: - The termination latch
 
     @Test("terminationStarted latches the terminating flag")

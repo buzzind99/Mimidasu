@@ -12,9 +12,20 @@
 ///   does and still emits the effect that keeps a torn-down session from
 ///   coming back up.
 ///
-/// The returned effects are **ordered**: a host must run them in the order
-/// they are listed. The quit-time teardown depends on that order — the
-/// staged stop has to land before the warm engine is retired.
+/// The returned effects **name** the gated side effects, in the order they
+/// happen. The host performs them — the list is the transition's
+/// *description*, not an execution plan: the host's lifecycle spans several
+/// actions and also owns bookkeeping the machine does not model.
+///
+/// The production-site table names the call sites production makes and what
+/// each one does; its source check keeps that table and the production
+/// sources in step, so a call site cannot appear or move unnoticed. The
+/// effect lists themselves are a hand-written description of what each site
+/// gates.
+///
+/// The quit-time teardown's order matters — the staged stop has to land
+/// before the warm engine is retired — and it is stated here *and* asserted
+/// against production by the session tests.
 struct SessionPhaseMachine: Sendable {
 
     // MARK: - State
@@ -54,9 +65,14 @@ struct SessionPhaseMachine: Sendable {
 
     /// The 4-case predicate: the 3-case one plus `.starting`.
     ///
-    /// A `.starting` session is live *for termination purposes* — a stop must
-    /// be accepted while the session is still coming up — but not for
-    /// transcript purposes. Two predicates, not one.
+    /// A `.starting` session is live *for wind-down purposes* — a stop must
+    /// be accepted while the session is still coming up, and the quit-time
+    /// teardown must take it down — but not for transcript purposes. Two
+    /// predicates, not one.
+    ///
+    /// The set is exactly the set a stop or a termination may wind down, so
+    /// the machine reads this predicate where it once spelled the same four
+    /// cases out twice.
     static func isLiveOrStarting(_ phase: SessionPhase) -> Bool {
         switch phase {
         case .running, .sourceLost, .paused, .starting: true
@@ -114,6 +130,11 @@ struct SessionPhaseMachine: Sendable {
     // MARK: - Family dispatch
 
     /// The start path: a request to begin, and the outcomes a begin can have.
+    ///
+    /// The `default` arm is unreachable: the dispatch hands each family only
+    /// its own actions. It stays a refusal rather than a trap because the
+    /// transition table is the real guard — an action added to a family
+    /// without a rule here gets a table row, and the table then fails.
     private mutating func reduceStart(_ action: SessionAction) -> SessionTransition {
         switch action {
         case .startRequested: reduceStartRequested()
@@ -300,7 +321,7 @@ struct SessionPhaseMachine: Sendable {
     private mutating func reduceResumeFailed(_ message: String) -> SessionTransition {
         guard phase == .paused else { return .refused(phase: phase) }
         move(to: .sourceLost)
-        return .legal(phase: phase, effects: [.postResumeFailed(message)])
+        return .legal(phase: phase, effects: [.postCaptureLost(message)])
     }
 
     /// The resume was abandoned: the latch is cleared and nothing else
@@ -360,7 +381,7 @@ struct SessionPhaseMachine: Sendable {
     private mutating func reduceCaptureRestartFailed(_ message: String) -> SessionTransition {
         guard phase == .starting else { return .refused(phase: phase) }
         move(to: .sourceLost)
-        return .legal(phase: phase, effects: [.postRestartFailed(message)])
+        return .legal(phase: phase, effects: [.postCaptureLost(message)])
     }
 
     /// The model's availability was resolved.
@@ -383,13 +404,9 @@ struct SessionPhaseMachine: Sendable {
     /// The stop request. `.stopping` is not in the legal-from set: a second
     /// stop is a no-op, not a second teardown.
     private mutating func reduceStopRequested() -> SessionTransition {
-        switch phase {
-        case .starting, .running, .paused, .sourceLost:
-            move(to: .stopping)
-            return .legal(phase: phase, effects: [.stopCapture, .drainTranslation])
-        default:
-            return .refused(phase: phase)
-        }
+        guard isLiveOrStarting else { return .refused(phase: phase) }
+        move(to: .stopping)
+        return .legal(phase: phase, effects: [.stopCapture, .drainTranslation])
     }
 
     /// The teardown finished.
@@ -425,8 +442,7 @@ struct SessionPhaseMachine: Sendable {
     private mutating func reduceTerminationStarted() -> SessionTransition {
         guard !isTerminating else { return .refused(phase: phase) }
         isTerminating = true
-        switch phase {
-        case .starting, .running, .paused, .sourceLost:
+        if isLiveOrStarting {
             move(to: .stopping)
             return .legal(
                 phase: phase,
@@ -440,24 +456,36 @@ struct SessionPhaseMachine: Sendable {
                     .postTerminationTeardownComplete
                 ]
             )
-        case .stopping:
+        }
+        if phase == .stopping {
             return .legal(
                 phase: phase,
                 effects: [.awaitStagedStop, .retireWarmEngine, .postTerminationTeardownComplete]
             )
-        default:
-            return .legal(
-                phase: phase,
-                effects: [.retireWarmEngine, .postTerminationTeardownComplete]
-            )
         }
+        return .legal(
+            phase: phase,
+            effects: [.retireWarmEngine, .postTerminationTeardownComplete]
+        )
     }
 
-    // MARK: - Test seam
+    // MARK: - Phase writes
+
+    /// A phase write that is not a transition: the phase moves, the machine's
+    /// own coherence rule applies, and the **quit-time latch survives**.
+    ///
+    /// The latch is the one fact a phase write may never revoke: it says the
+    /// app is tearing down, and only the teardown may clear it. A host that
+    /// wrote the phase directly must not be able to re-open the start gate
+    /// underneath a termination in flight.
+    mutating func setPhase(_ newPhase: SessionPhase) {
+        move(to: newPhase)
+    }
 
     /// Test seam: force the phase without going through a transition.
     ///
-    /// **Both internal latches are reset.**
+    /// **Both internal latches are reset** — this is the only way to clear
+    /// the quit-time latch, and it exists for tests alone.
     ///
     /// `isResuming` and `isTerminating` describe facts about the *current*
     /// phase's session, and the phases a test forces are exactly the phases
