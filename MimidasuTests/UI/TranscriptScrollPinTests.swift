@@ -190,6 +190,12 @@ struct TranscriptScrollPinTests {
         #expect(!tick.reanchors)
         #expect(!tick.pinnedAfter)
     }
+
+    @Test("only the live feed's newest row fades in")
+    func onlyTheNewestLiveRowFadesIn() {
+        #expect(TranscriptScrollPin.rowFadesIn(in: .live, isNewest: true))
+        #expect(!TranscriptScrollPin.rowFadesIn(in: .live, isNewest: false))
+    }
 }
 
 /// Archive mode and the opening jump share the same pure core; they are a
@@ -219,6 +225,12 @@ struct TranscriptScrollPinArchiveTests {
     func onlyTheLiveFeedFollowsTheTail() {
         #expect(TranscriptScrollPin.followsTail(in: .live))
         #expect(!TranscriptScrollPin.followsTail(in: .archive))
+    }
+
+    @Test("no record row fades in, newest included")
+    func noRecordRowFadesIn() {
+        #expect(!TranscriptScrollPin.rowFadesIn(in: .archive, isNewest: true))
+        #expect(!TranscriptScrollPin.rowFadesIn(in: .archive, isNewest: false))
     }
 
     @Test("the pin and the tail follow the same mode")

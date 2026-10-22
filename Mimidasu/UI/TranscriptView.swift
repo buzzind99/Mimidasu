@@ -101,7 +101,9 @@ struct TranscriptView: View {
                         retryEnabled: retryEnabled(for: entry),
                         isRetranslating: model.pendingRetranslations.contains(entry.sentence.index),
                         retranslateMarker: retranslateMarker(for: entry),
-                        fadesIn: entry.id == model.entries.last?.id
+                        fadesIn: TranscriptScrollPin.rowFadesIn(
+                            in: scrollMode, isNewest: entry.id == model.entries.last?.id
+                        )
                     )
                     .id(entry.id)
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
@@ -415,6 +417,13 @@ enum TranscriptScrollPin {
     /// finished record is left where the reader put it.
     static func followsTail(in mode: Mode) -> Bool {
         mode == .live
+    }
+
+    /// Whether a row fades in on appearance. Only the live feed's newest row
+    /// does: a finished record's rows already exist when the pane takes them,
+    /// and a shorter record can promote a recycled row that never faded.
+    static func rowFadesIn(in mode: Mode, isNewest: Bool) -> Bool {
+        mode == .live && isNewest
     }
 
     /// Whether the down button re-engages the bottom pin. The live feed

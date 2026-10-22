@@ -56,11 +56,12 @@ struct TranscriptRow: View {
     /// fast"), precomputed by `TranscriptView` (render-time comparison
     /// against the active engine); nil = no suffix.
     let retranslateMarker: String?
-    /// True only while this row is the newest entry: a freshly appended
-    /// row fades in, while older rows render opaque so recycled rows
-    /// scrolling back into view don't re-fade. A recycled row whose `shown`
-    /// state was discarded can't re-fade — the `onAppear` guard fails on
-    /// false, and opacity is 1 by implementation.
+    /// True only while this row is the live feed's newest entry: a freshly
+    /// appended row fades in, while older rows render opaque so recycled
+    /// rows scrolling back into view don't re-fade. A record's rows never
+    /// fade, and a mounted row promoted to newest (a shorter transcript
+    /// reused it) is revealed by the change handler below because
+    /// `onAppear` will not fire again.
     let fadesIn: Bool
 
     /// Fade state for a freshly appended row: starts transparent and
@@ -135,6 +136,10 @@ struct TranscriptRow: View {
         .onHover { isHovering in hovering = isHovering }
         .onAppear {
             guard fadesIn, !shown else { return }
+            withAnimation(.easeOut(duration: 0.25)) { shown = true }
+        }
+        .onChange(of: fadesIn) { _, wantsFade in
+            guard wantsFade, !shown else { return }
             withAnimation(.easeOut(duration: 0.25)) { shown = true }
         }
         .onDisappear { hovering = false }
