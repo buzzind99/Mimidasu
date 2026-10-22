@@ -45,7 +45,9 @@ extension AppModel {
     func beginArchiveTranslation(engine: RetranslateEngine, lang: String, sessionID: Int64) {
         let entries: [SessionEntry]
         if let openArchive, openArchive.id == sessionID {
-            entries = openArchive.entries
+            // `openArchive.entries` is the snapshot taken when the archive
+            // opened; later landings live only in the pane rows and the store.
+            entries = self.entries
         } else if let stored = archive.load(id: sessionID) {
             entries = stored.entries
         } else {

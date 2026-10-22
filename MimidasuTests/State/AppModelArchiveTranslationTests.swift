@@ -554,4 +554,39 @@ extension AppModelArchiveTranslationTests {
         #expect(!sut.model.archiveTranslationRunning, "the claim releases with the report")
         #expect(sut.model.archive.load(id: sut.id)?.entries.allSatisfy { entry in entry.translations.isEmpty } == true)
     }
+
+    // MARK: - Open-archive snapshot
+
+    @Test("a bulk start sees translations landed after the archive opened")
+    func bulkStartSeesTranslationsLandedAfterOpen() async {
+        let sut = await makeSUT(translations: [0: "T:こんにちは"])
+        let engine = ScriptedArchiveEngine()
+        install(engine, for: .google, on: sut.model)
+
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
+        #expect(
+            await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 2) },
+            "the first run fills the sentences missing when the archive opened"
+        )
+        #expect(
+            sut.model.openArchive?.summary.languageCount(for: "fr")?.translated == 3,
+            "the summary reads complete after the fill"
+        )
+
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                sut.model.archiveTranslationJob.lastRun?.request.scope == .all
+            },
+            "the second run reads the pane's current rows, not the open-time snapshot"
+        )
+        #expect(
+            sut.model.archiveTranslationJob.lastRun?.request.translated == Set([0, 1, 2]),
+            "every sentence is known to be translated"
+        )
+        #expect(
+            await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
+            "a complete language gets a fresh full pass"
+        )
+    }
 }
