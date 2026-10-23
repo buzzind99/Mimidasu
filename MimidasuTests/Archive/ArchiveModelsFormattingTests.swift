@@ -51,6 +51,18 @@ struct ArchiveModelsFormattingTests {
         return String(format: "%02d:%02d", components.hour ?? 0, components.minute ?? 0)
     }
 
+    /// The date text the auto-title is expected to carry: the localized
+    /// month + day, plus the localized year when outside the current year.
+    private func expectedDateText(of date: Date) -> String {
+        let style: Date.FormatStyle =
+            if Calendar.current.isDate(date, equalTo: Date(), toGranularity: .year) {
+                .dateTime.month(.abbreviated).day()
+            } else {
+                .dateTime.month(.abbreviated).day().year()
+            }
+        return date.formatted(style)
+    }
+
     // MARK: - Badge and chip identity
 
     @Test("an empty language code yields an empty badge")
@@ -98,6 +110,66 @@ struct ArchiveModelsFormattingTests {
         #expect(title.contains("「こんにちは」"), "the fallback carries the first-sentence snippet")
     }
 
+    // MARK: - Row title and excerpt
+
+    @Test("the row title is the trimmed user name when the session is renamed")
+    func rowTitleUsesTheUserName() {
+        let sut = makeSummary(name: "  Evening study  ", firstSentence: "こんにちは")
+
+        #expect(sut.rowTitle == "Evening study")
+        #expect(sut.hasUserName)
+    }
+
+    @Test("an unnamed row title is the bracketed first sentence")
+    func rowTitleUsesTheQuotedFirstSentence() {
+        let sut = makeSummary(firstSentence: "こんにちは")
+
+        #expect(sut.rowTitle == "「こんにちは」")
+        #expect(!sut.hasUserName)
+    }
+
+    @Test("a nameless session without a first sentence falls back to a placeholder")
+    func rowTitleFallsBackToPlaceholder() {
+        #expect(makeSummary(firstSentence: nil).rowTitle == "Untitled session")
+        #expect(makeSummary(firstSentence: "  \n ").rowTitle == "Untitled session")
+    }
+
+    @Test("the excerpt is shown only under a renamed session")
+    func rowExcerptOnlyForNamedSessions() {
+        #expect(
+            makeSummary(name: "Evening study", firstSentence: "こんにちは").rowExcerpt
+                == "「こんにちは」"
+        )
+        #expect(makeSummary(firstSentence: "こんにちは").rowExcerpt == nil)
+        #expect(makeSummary(name: "Evening study", firstSentence: nil).rowExcerpt == nil)
+    }
+
+    @Test("the row title collapses every newline form")
+    func rowTitleCollapsesNewlines() {
+        #expect(makeSummary(firstSentence: "こんにちは\r\n世界").rowTitle == "「こんにちは 世界」")
+    }
+
+    // MARK: - Row meta line (time first)
+
+    @Test("the row meta line starts with the time and omits the date")
+    func rowMetaLineUsesTimeNotDate() {
+        let startedAt = fixedDate
+        let sut = makeSummary(durationS: 90, startedAt: startedAt, sentenceCount: 3)
+
+        let line = sut.rowMetaLine
+
+        #expect(line == "\(expectedTime(of: startedAt)) · 1:30 · 3 sentences")
+        #expect(!line.contains(ArchivedSessionSummary.dateTimeText(startedAt)))
+    }
+
+    @Test("the row meta line omits an unknown duration")
+    func rowMetaLineWithoutDuration() {
+        let startedAt = fixedDate
+        let sut = makeSummary(durationS: nil, startedAt: startedAt, sentenceCount: 3)
+
+        #expect(sut.rowMetaLine == "\(expectedTime(of: startedAt)) · 3 sentences")
+    }
+
     // MARK: - Auto title
 
     @Test("the auto-title falls back to the date when the session has no first sentence")
@@ -107,7 +179,7 @@ struct ArchiveModelsFormattingTests {
 
         let title = sut.autoTitle
 
-        #expect(title == startedAt.formatted(.dateTime.month(.abbreviated).day()))
+        #expect(title == expectedDateText(of: startedAt))
         #expect(!title.contains("「"), "the fallback carries no first-sentence snippet")
     }
 
@@ -118,33 +190,24 @@ struct ArchiveModelsFormattingTests {
 
         let title = sut.autoTitle
 
-        #expect(title == startedAt.formatted(.dateTime.month(.abbreviated).day()))
+        #expect(title == expectedDateText(of: startedAt))
         #expect(!title.contains("「"), "a blank first sentence is no snippet")
     }
 
-    // MARK: - Row meta line
-
-    @Test("the row meta line reads date, duration, and sentence count")
-    func metaLineWithDuration() {
+    @Test("the auto-title falls back to the date when the first sentence is only whitespace")
+    func autoTitleWithWhitespaceOnlyFirstSentence() {
         let startedAt = fixedDate
-        let sut = makeSummary(durationS: 90, startedAt: startedAt, sentenceCount: 3)
+        let sut = makeSummary(startedAt: startedAt, firstSentence: "  \n ")
 
-        let line = sut.metaLine
-
-        #expect(line == "\(ArchivedSessionSummary.dateTimeText(startedAt)) · 1:30 · 3 sentences")
-        #expect(line.contains("1:30"))
-        #expect(line.contains("3 sentences"))
+        #expect(sut.autoTitle == expectedDateText(of: startedAt))
     }
 
-    @Test("the row meta line omits the duration when the duration is unknown")
-    func metaLineWithoutDuration() {
-        let startedAt = fixedDate
-        let sut = makeSummary(durationS: nil, startedAt: startedAt, sentenceCount: 3)
+    @Test("a same-year auto-title fallback omits the year")
+    func autoTitleSameYearFallbackOmitsYear() throws {
+        let date = try #require(sameYearDate())
+        let sut = makeSummary(startedAt: date, firstSentence: nil)
 
-        let line = sut.metaLine
-
-        #expect(line == "\(ArchivedSessionSummary.dateTimeText(startedAt)) · 3 sentences")
-        #expect(!line.contains("1:30"))
+        #expect(sut.autoTitle == date.formatted(.dateTime.month(.abbreviated).day()))
     }
 
     // MARK: - Sentence count and duration text
@@ -195,6 +258,89 @@ struct ArchiveModelsFormattingTests {
         #expect(!stamp.contains("Today"))
     }
 
+    @Test("a same-year session omits the year in its stamp")
+    func dateTimeTextOmitsYearWhenCurrentYear() throws {
+        let date = try #require(sameYearDate())
+        let year = Calendar.current.component(.year, from: date)
+        let monthDay = date.formatted(.dateTime.month(.abbreviated).day())
+
+        let stamp = ArchivedSessionSummary.dateTimeText(date)
+
+        #expect(stamp.hasPrefix(monthDay))
+        #expect(!stamp.contains(", \(year)"))
+        #expect(!stamp.contains("Today"))
+        #expect(stamp.hasSuffix(" · \(expectedTime(of: date))"))
+    }
+
+    @Test("a prior-year session carries its year in its stamp")
+    func dateTimeTextIncludesYearWhenPriorYear() throws {
+        let date = try #require(priorYearDate())
+        let localDate = date.formatted(.dateTime.month(.abbreviated).day().year())
+
+        let stamp = ArchivedSessionSummary.dateTimeText(date)
+
+        #expect(stamp == "\(localDate) · \(expectedTime(of: date))")
+    }
+
+    @Test("the date rail kicker is TODAY for today's session")
+    func rowDateLabelForToday() {
+        #expect(makeSummary(startedAt: Date()).rowDateLabel == "TODAY")
+    }
+
+    @Test("the date rail kicker omits the year in the current year")
+    func rowDateLabelOmitsYearWhenCurrentYear() throws {
+        let date = try #require(sameYearDate())
+        let month = date.formatted(.dateTime.month(.abbreviated)).uppercased()
+
+        #expect(makeSummary(startedAt: date).rowDateLabel == month)
+    }
+
+    @Test("the date rail kicker carries a short year outside the current year")
+    func rowDateLabelIncludesShortYearWhenPriorYear() throws {
+        let date = try #require(priorYearDate())
+        let month = date.formatted(.dateTime.month(.abbreviated)).uppercased()
+        let shortYear = String(format: "’%02d", Calendar.current.component(.year, from: date) % 100)
+
+        #expect(makeSummary(startedAt: date).rowDateLabel == "\(month) \(shortYear)".uppercased())
+    }
+
+    @Test("the auto-title carries the year for a prior-year session")
+    func autoTitleIncludesYearWhenPriorYear() throws {
+        let date = try #require(priorYearDate())
+        let localDate = date.formatted(.dateTime.month(.abbreviated).day().year())
+
+        let title = makeSummary(startedAt: date, firstSentence: "こんにちは").autoTitle
+
+        #expect(title.hasPrefix(localDate))
+        #expect(title.contains("「こんにちは」"))
+    }
+
+    /// A mid-year date in the current year that is never today, so the
+    /// same-year branch is exercised deterministically.
+    private func sameYearDate() -> Date? {
+        let currentYear = Calendar.current.component(.year, from: Date())
+        let todayMonth = Calendar.current.component(.month, from: Date())
+        let todayDay = Calendar.current.component(.day, from: Date())
+        var month = 6, day = 15
+        if todayMonth == month, todayDay == day {
+            month = 7
+        }
+        var components = DateComponents()
+        components.year = currentYear
+        components.month = month
+        components.day = day
+        components.hour = 9
+        components.minute = 11
+        return Calendar.current.date(from: components)
+    }
+
+    /// The same month and day one year earlier — the Oct 14 2026 vs Oct 14
+    /// 2025 collision the year suffix exists to disambiguate.
+    private func priorYearDate() -> Date? {
+        guard let base = sameYearDate() else { return nil }
+        return Calendar.current.date(byAdding: .year, value: -1, to: base)
+    }
+
     @Test("the time text reads a fixed 24-hour clock")
     func timeTextIsFixedClock() throws {
         var components = Calendar.current.dateComponents([.year, .month, .day], from: Date())
@@ -208,33 +354,18 @@ struct ArchiveModelsFormattingTests {
         #expect(ArchivedSessionSummary.timeText(date) == "09:05")
     }
 
-    // MARK: - Banner meta line
+    // MARK: - Banner character tally
 
-    @Test("the banner meta line counts a single character in the singular")
-    func sessionMetaLineForOneCharacter() {
-        let summary = makeSummary(durationS: 90, sentenceCount: 1)
+    @Test("the character count sums the sentence text")
+    func characterCountSumsTheSentenceText() {
         let session = ArchivedSession(
-            summary: summary,
-            entries: [makeEntry(index: 0, text: "あ")]
+            summary: makeSummary(sentenceCount: 2),
+            entries: [
+                makeEntry(index: 0, text: "あい"),
+                makeEntry(index: 1, text: "う")
+            ]
         )
 
-        let line = session.metaLine
-
-        #expect(session.characterCount == 1)
-        #expect(line == "\(summary.metaLine) · 1 character")
-    }
-
-    @Test("the banner meta line counts several characters in the plural")
-    func sessionMetaLineForSeveralCharacters() {
-        let summary = makeSummary(durationS: 90, sentenceCount: 2)
-        let session = ArchivedSession(
-            summary: summary,
-            entries: [makeEntry(index: 0, text: "あ"), makeEntry(index: 1, text: "い")]
-        )
-
-        let line = session.metaLine
-
-        #expect(session.characterCount == 2)
-        #expect(line == "\(summary.metaLine) · 2 characters")
+        #expect(session.characterCount == 3)
     }
 }

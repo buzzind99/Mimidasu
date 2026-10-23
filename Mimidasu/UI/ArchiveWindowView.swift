@@ -92,18 +92,51 @@ struct ArchiveWindowView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(ArchiveWindow.title)
-                .font(.system(size: 15, weight: .heavy))
-                .foregroundStyle(Theme.primaryText)
+        HStack(alignment: .bottom, spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(ArchiveWindow.title)
+                    .font(.system(size: 17, weight: .heavy))
+                    .foregroundStyle(Theme.primaryText)
+                Text("Transcripts kept on this Mac")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.secondaryText)
+            }
             Spacer()
-            Text("\(recentCount) / \(ArchiveStore.recentCap) kept")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(Theme.secondaryText)
+            HStack(spacing: 16) {
+                countBlock("RECENT", value: recentCount, limit: ArchiveStore.recentCap)
+                countBlock("SAVED", value: savedSessions.count, limit: nil)
+            }
         }
         .padding(.top, 18)
-        .padding(.horizontal, 18)
-        .padding(.bottom, 12)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 13)
+    }
+
+    private func countBlock(_ label: String, value: Int, limit: Int?) -> some View {
+        let accessibilityText = if let limit {
+            "\(label) \(value) of \(limit)"
+        } else {
+            "\(label) \(value)"
+        }
+        return VStack(alignment: .trailing, spacing: 2) {
+            Text(label)
+                .font(.system(size: 9, weight: .heavy))
+                .tracking(0.9)
+                .foregroundStyle(Theme.secondaryText)
+            HStack(spacing: 0) {
+                Text("\(value)")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Theme.primaryText)
+                if let limit {
+                    Text(" / \(limit)")
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(Theme.gutterText)
+                }
+            }
+            .monospacedDigit()
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityText)
     }
 
     private var liveHint: some View {
@@ -123,7 +156,7 @@ struct ArchiveWindowView: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(Theme.dotYellow.opacity(0.12))
         )
-        .padding(.horizontal, 18)
+        .padding(.horizontal, 20)
         .padding(.bottom, 4)
     }
 
@@ -180,17 +213,28 @@ struct ArchiveWindowView: View {
 
     private var sessionList: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
+            LazyVStack(alignment: .leading, spacing: 8, pinnedViews: [.sectionHeaders]) {
                 if !recents.isEmpty {
-                    sectionLabel("RECENT")
-                    ForEach(recents) { summary in row(summary) }
+                    Section {
+                        ForEach(recents) { summary in
+                            row(summary)
+                                .padding(.horizontal, 20)
+                        }
+                    } header: {
+                        sectionHeader("RECENT", count: recents.count)
+                    }
                 }
                 if !savedSessions.isEmpty {
-                    sectionLabel("SAVED")
-                    ForEach(savedSessions) { summary in row(summary) }
+                    Section {
+                        ForEach(savedSessions) { summary in
+                            row(summary)
+                                .padding(.horizontal, 20)
+                        }
+                    } header: {
+                        sectionHeader("SAVED", count: savedSessions.count)
+                    }
                 }
             }
-            .padding(.horizontal, 18)
             .padding(.bottom, 18)
         }
     }
@@ -203,12 +247,33 @@ struct ArchiveWindowView: View {
         model.archiveRead.summaries.filter { summary in summary.saved }
     }
 
-    private func sectionLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 9.5, weight: .heavy))
-            .tracking(1.4)
-            .foregroundStyle(Theme.secondaryText)
-            .padding(.top, 8)
+    private func sectionHeader(_ title: String, count: Int) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 12.5, weight: .heavy))
+                .tracking(1.6)
+                .foregroundStyle(Theme.primaryText)
+            Text("\(count)")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Theme.secondaryText)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 2)
+                .overlay(Capsule().stroke(Theme.dividerStrong, lineWidth: 1))
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 15)
+        .padding(.bottom, 13)
+        .background(Theme.window)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Theme.dividerStrong)
+                .frame(height: 1)
+                .padding(.horizontal, 20)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title) \(count)")
+        .accessibilityAddTraits(.isHeader)
     }
 
     /// The per-row binding for the add-language chooser: true while this row
@@ -286,7 +351,7 @@ struct ArchiveWindowView: View {
         // click onward, and progress numbers belong to a started walk.
         let activity = job.activity(for: summary.id)
         let request = activity.request
-        return ArchiveRow(
+        return ArchiveSessionRow(
             model: model,
             summary: summary,
             canOpen: model.canOpenArchivedSession,
@@ -310,261 +375,5 @@ struct ArchiveWindowView: View {
         if model.openArchive?.id == summary.id {
             dismissWindow(id: ArchiveWindow.sceneID)
         }
-    }
-}
-
-/// One stored-session row: title (name or auto-title), meta line, the
-/// language chip line with its `+` add pill, Interrupted badge, the
-/// Delete/Rename/Save cluster, and the text-only Open button. While a bulk
-/// run claims this session the running language's chip reports it, and a
-/// thin progress bar renders under the chips once the run itself starts.
-private struct ArchiveRow: View {
-    var model: AppModel
-    let summary: ArchivedSessionSummary
-    let canOpen: Bool
-    /// The bulk job claims this session (the chip line's busy state, from
-    /// the claim onward); the progress bar renders once the run starts.
-    /// `jobLang` names the language it walks.
-    let isJobRunning: Bool
-    let jobLang: String?
-    /// The run's `(processed, total)`, for the progress bar.
-    let jobProgress: (Int, Int)?
-    /// The add-language chooser's presentation, anchored on the `+` pill.
-    @Binding var chooserPresented: Bool
-    /// The translate picker's presentation for one row language, anchored on
-    /// its chip.
-    let translationPickerPresented: (String) -> Binding<Bool>
-    let onOpen: () -> Void
-    let onDelete: () -> Void
-    let onRename: () -> Void
-    let onSave: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 7) {
-                    Text(summary.displayTitle)
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundStyle(Theme.primaryText)
-                        .lineLimit(1)
-                    if summary.status == .interrupted {
-                        Text("INTERRUPTED")
-                            .font(.system(size: 9.5, weight: .heavy))
-                            .tracking(0.5)
-                            .foregroundStyle(Theme.dotYellow)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(Theme.dotYellow.opacity(0.12)))
-                    }
-                    Spacer()
-                }
-                Text(summary.metaLine)
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Theme.secondaryText)
-                    .monospacedDigit()
-                chipLine
-                if let jobProgress {
-                    ProgressView(
-                        value: Double(jobProgress.0),
-                        total: Double(max(jobProgress.1, 1))
-                    )
-                    .progressViewStyle(.linear)
-                    .tint(Theme.accentPink)
-                    .frame(width: 150)
-                    .padding(.top, 3)
-                }
-            }
-            VStack(alignment: .trailing, spacing: 10) {
-                actionButtons
-                Button(action: onOpen) {
-                    Text("Open")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Theme.accentPink)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Theme.accentPink.opacity(0.12))
-                        )
-                }
-                .buttonStyle(.plain)
-                .disabled(!canOpen)
-                .opacity(canOpen ? 1 : 0.45)
-                .help(canOpen ? "Open this transcript" : "Stop the session to open transcripts")
-                .onHover { _ in }
-                .pointerStyle(canOpen ? .link : nil)
-            }
-            // The action cluster keeps its natural width; the chip line
-            // takes the rest of the row and wraps its pills.
-            .fixedSize(horizontal: true, vertical: false)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 11)
-        .cardSurface(radius: 12)
-    }
-
-    /// The Delete/Rename/Save cluster. Delete is refused while this session's
-    /// run is walking it: no click, no link cursor, and the help says why.
-    private var actionButtons: some View {
-        HStack(spacing: 6) {
-            actionButton(
-                "trash",
-                help: isJobRunning
-                    ? "Can't delete while this session is translating"
-                    : "Delete",
-                isEnabled: !isJobRunning,
-                showsLink: !isJobRunning,
-                action: onDelete
-            )
-            actionButton("square.and.pencil", help: "Rename", action: onRename)
-            if !summary.saved {
-                ArchiveActionButton(help: ArchiveSaveGlyph.saveHelp, action: onSave) {
-                    ArchiveSaveGlyph(size: 11)
-                }
-            }
-        }
-    }
-
-    /// The row's language chips, each a button opening the translate picker
-    /// for its language, with the `+` pill that opens the add-language
-    /// chooser for this session. The chips flow: a long language list wraps
-    /// to a second row instead of squeezing the pills. The `+` pill drops
-    /// out once the session holds every language the app can target.
-    private var chipLine: some View {
-        FlowLayout(spacing: 6, lineSpacing: 4, fingerprint: chipFingerprint) {
-            ForEach(summary.langs) { count in
-                languageChipButton(count)
-            }
-            if !summary.holdsEveryTargetLanguage {
-                ArchiveAddLanguagePill {
-                    chooserPresented = true
-                }
-                .popover(isPresented: $chooserPresented, arrowEdge: .bottom) {
-                    ArchiveSwitchLanguagePopover(
-                        model: model,
-                        summary: summary,
-                        viewingCode: model.openArchive?.id == summary.id
-                            ? model.archiveViewingCode : nil,
-                        onSelect: { lang in
-                            // Never mutates another archive's viewing
-                            // language: a row picker only serves its own
-                            // (opened) session.
-                            guard model.openArchive?.id == summary.id else { return }
-                            model.selectArchiveViewingLanguage(lang)
-                        },
-                        initiallyShowingChooser: true
-                    )
-                }
-            }
-        }
-        .padding(.top, 4)
-    }
-
-    /// The flow layout's cache key: the chips' content and state. Counts
-    /// change as translations land and the busy/selected flags change the
-    /// chip's own width, so both ride the fingerprint.
-    private var chipFingerprint: String {
-        var parts = ["total:\(summary.sentenceCount)"]
-        for count in summary.langs {
-            let busy = isJobRunning && count.lang == jobLang
-            let selected = model.openArchive?.id == summary.id
-                && count.lang == model.archiveViewingCode
-            parts.append("\(count.lang):\(count.translated):\(busy ? 1 : 0):\(selected ? 1 : 0)")
-        }
-        return parts.joined(separator: "|")
-    }
-
-    /// One language chip as a button: opens the translate/re-translate
-    /// picker for this session and language. No chevron — the hover
-    /// highlight and link cursor advertise the click.
-    private func languageChipButton(_ count: ArchiveLanguageCount) -> some View {
-        let isPresented = translationPickerPresented(count.lang)
-        return Button {
-            isPresented.wrappedValue = true
-        } label: {
-            ArchiveLanguageChip(
-                count: count,
-                total: summary.sentenceCount,
-                busy: isJobRunning && count.lang == jobLang,
-                selected: model.openArchive?.id == summary.id
-                    && count.lang == model.archiveViewingCode
-            )
-        }
-        .buttonStyle(.plain)
-        .hoverHighlight(Capsule())
-        .pointerStyle(.link)
-        .help("Translate or re-translate this language")
-        .popover(isPresented: isPresented, arrowEdge: .bottom) {
-            ArchiveTranslationEnginePicker(
-                model: model,
-                summary: summary,
-                lang: count.lang,
-                onStart: { engine in
-                    model.requestArchiveTranslation(
-                        engine: engine, lang: count.lang, sessionID: summary.id,
-                        presenter: .archiveWindow
-                    )
-                },
-                isPresented: isPresented
-            )
-        }
-    }
-
-    /// The action cluster's button: an icon in a small card. The delete and
-    /// rename buttons pass a system image; the save button passes the
-    /// shared archive glyph.
-    private func actionButton(
-        _ systemImage: String,
-        help: String,
-        isEnabled: Bool = true,
-        showsLink: Bool = true,
-        action: @escaping () -> Void
-    ) -> some View {
-        ArchiveActionButton(
-            help: help,
-            isEnabled: isEnabled,
-            showsLink: showsLink,
-            action: action
-        ) {
-            Image(systemName: systemImage)
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.secondaryText)
-        }
-    }
-}
-
-/// The carded icon button behind the archive row's action cluster: the
-/// delete, rename and save controls, each an icon in its own small card.
-private struct ArchiveActionButton<Label: View>: View {
-    let help: String
-    var isEnabled = true
-    var showsLink = true
-    let action: () -> Void
-    @ViewBuilder var label: () -> Label
-
-    var body: some View {
-        Button(action: action) {
-            label()
-                .frame(width: 26, height: 26)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Theme.cardFill)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .stroke(Theme.cardStroke)
-                        )
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
-        .opacity(isEnabled ? 1 : 0.45)
-        .hoverHighlight(
-            RoundedRectangle(cornerRadius: 7, style: .continuous),
-            isEnabled: isEnabled
-        )
-        .pointerStyle(showsLink ? .link : nil)
-        .help(help)
-        .accessibilityLabel(help)
     }
 }

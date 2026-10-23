@@ -131,24 +131,58 @@ struct ArchivedSession: Identifiable, Equatable, Sendable {
 // MARK: - Display formatting
 
 extension ArchivedSessionSummary {
-    /// The label a row and the banner show: the user's name when set, else
+    /// The user's name without surrounding whitespace; empty when the
+    /// session has no usable name.
+    private var trimmedName: String {
+        (name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The label the language popover shows: the user's name when set, else
     /// the auto-title.
     var displayTitle: String {
-        guard let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !trimmed.isEmpty
-        else { return autoTitle }
-        return trimmed
+        trimmedName.isEmpty ? autoTitle : trimmedName
     }
 
     /// Date + first-sentence snippet, for a session that was never renamed.
     var autoTitle: String {
-        guard let firstSentence, !firstSentence.isEmpty else { return dateText }
-        return "\(dateText) · 「\(Self.snippet(firstSentence))」"
+        guard let quoted = quotedFirstSentence else { return dateText }
+        return "\(dateText) · \(quoted)"
     }
 
-    /// The row meta line: date, time, duration, sentence count.
-    var metaLine: String {
-        var parts = [Self.dateTimeText(startedAt)]
+    /// Whether the user gave the session a non-blank name.
+    var hasUserName: Bool {
+        !trimmedName.isEmpty
+    }
+
+    /// The archive row and opened banner title: the user's name, else the
+    /// first sentence as a bracketed snippet, else a placeholder.
+    var rowTitle: String {
+        if !trimmedName.isEmpty {
+            return trimmedName
+        }
+        return quotedFirstSentence ?? "Untitled session"
+    }
+
+    /// The first sentence as a bracketed snippet, or nil when the session has
+    /// no readable first sentence.
+    var quotedFirstSentence: String? {
+        guard let firstSentence else { return nil }
+        let snippet = Self.snippet(firstSentence)
+        guard !snippet.isEmpty else { return nil }
+        return "「\(snippet)」"
+    }
+
+    /// The excerpt under a renamed row: the first sentence, or nil for an
+    /// unnamed session (its title already is that sentence).
+    var rowExcerpt: String? {
+        guard hasUserName else { return nil }
+        return quotedFirstSentence
+    }
+
+    /// The archive row's meta line: time, duration, and sentence count. The
+    /// date lives in the row's date rail.
+    var rowMetaLine: String {
+        var parts = [Self.timeText(startedAt)]
         if let durationText {
             parts.append(durationText)
         }
@@ -173,19 +207,57 @@ extension ArchivedSessionSummary {
         return Self.durationText(seconds: durationS)
     }
 
-    /// Abbreviated month + day ("Oct 14" / "10月14日"), localized. The
-    /// year is deliberately absent: the list is recent history, and the
-    /// start datetime is one click away in the opened banner.
+    /// Localized month + day, plus the localized year when the session is
+    /// not from the current year. Same-year sessions keep the compact form.
     private var dateText: String {
-        startedAt.formatted(.dateTime.month(.abbreviated).day())
+        Self.monthDayYear(startedAt)
     }
 
-    /// "Today · 14:32" or "Oct 14 · 09:11". Fixed 24-hour clock, matching
+    /// The date rail's kicker: "TODAY" for today's session, else the
+    /// uppercased abbreviated month ("OCT"), plus a short year (" ’25")
+    /// when the session is not from the current year. Only "TODAY" ever
+    /// uses the accent color — an old year stays in the neutral style.
+    var rowDateLabel: String {
+        if Calendar.current.isDateInToday(startedAt) {
+            return "TODAY"
+        }
+        let month = startedAt.formatted(.dateTime.month(.abbreviated)).uppercased()
+        guard !Self.isCurrentYear(startedAt) else { return month }
+        return month + Self.shortYearSuffix(startedAt)
+    }
+
+    /// True when `date` falls in the current calendar year.
+    static func isCurrentYear(_ date: Date) -> Bool {
+        Calendar.current.isDate(date, equalTo: Date(), toGranularity: .year)
+    }
+
+    /// The two-digit year suffix for the date rail (" ’25"), from the
+    /// current calendar.
+    private static func shortYearSuffix(_ date: Date) -> String {
+        let year = Calendar.current.component(.year, from: date)
+        return String(format: " ’%02d", year % 100)
+    }
+
+    /// The localized month/day, with the localized year when `date` is
+    /// outside the current year.
+    private static func monthDayYear(_ date: Date) -> String {
+        let style: Date.FormatStyle = if isCurrentYear(date) {
+            .dateTime.month(.abbreviated).day()
+        } else {
+            .dateTime.month(.abbreviated).day().year()
+        }
+        return date.formatted(style)
+    }
+
+    /// "Today · 14:32", "Oct 14 · 09:11", or "Oct 14, 2025 · 09:11" when
+    /// the date is not from the current year. Fixed 24-hour clock, matching
     /// the app's timestamp columns rather than the locale's AM/PM habit.
     static func dateTimeText(_ date: Date) -> String {
-        let day = Calendar.current.isDateInToday(date)
-            ? "Today"
-            : date.formatted(.dateTime.month(.abbreviated).day())
+        let day: String = if Calendar.current.isDateInToday(date) {
+            "Today"
+        } else {
+            monthDayYear(date)
+        }
         return "\(day) · \(timeText(date))"
     }
 
@@ -201,20 +273,17 @@ extension ArchivedSessionSummary {
 
     /// First sentence collapsed and clipped for the auto-title.
     private static func snippet(_ text: String) -> String {
-        let collapsed = text
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let collapsed = collapsedText(text)
         guard collapsed.count > snippetLimit else { return collapsed }
         return collapsed.prefix(snippetLimit) + "…"
     }
 
-    private static let snippetLimit = 30
-}
-
-extension ArchivedSession {
-    /// The banner's meta line: the row meta plus the character total.
-    var metaLine: String {
-        "\(summary.metaLine) · \(characterCount.formatted()) "
-            + (characterCount == 1 ? "character" : "characters")
+    /// Collapses every newline form to one space and trims the edges.
+    private static func collapsedText(_ text: String) -> String {
+        text.split(whereSeparator: { character in character.isNewline })
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    private static let snippetLimit = 30
 }

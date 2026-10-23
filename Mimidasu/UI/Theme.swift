@@ -98,6 +98,11 @@ enum Theme {
     static let cardStroke = SharedTokens.cardStroke
     /// 1pt separators (sidebar divider, live-strip top edge).
     static let divider = SharedTokens.divider
+    /// Stronger 1pt rule and capsule stroke for the archive section headers.
+    static let dividerStrong = Color(
+        light: NSColor(hex: 0xD9CFC0),
+        dark: NSColor.white.withAlphaComponent(0.14)
+    )
     /// Inner tile fill (scale stepper middle, toast dismiss button). Dark
     /// density is deliberately lower than `Palette.tileFill` (4% vs 6%):
     /// main-window tiles sit on a flat surface, settings tiles sit inside an

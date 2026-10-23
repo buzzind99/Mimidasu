@@ -1,15 +1,15 @@
 import SwiftUI
 
 // The language surfaces of archive mode, kept in one cluster: the capsule
-// chip shared by the banner and the archive rows, the row's `+` pill, the
-// switch-language popover with its in-popover add chooser, the engine
-// picker behind the banner's Translate button and each row language chip,
-// and the loading row the Settings target-language card shares.
+// chip the archive rows show, the row's `+` pill, the switch-language
+// popover with its in-popover add chooser, the engine picker behind the
+// banner's toolbar and each row language chip, and the loading row the
+// Settings target-language card shares.
 
-/// One language's count chip (`FR 40/183`): the badge code in the plain
-/// secondary font, the counts in a monospaced emphasis. A value view with no
-/// model, shared by the banner (interactive, with the trailing chevron) and
-/// the archive rows (display-only).
+/// One language's count chip (`FR 40/183`) with a completeness meter under
+/// the counts: the badge code in the plain secondary font, the counts in a
+/// monospaced emphasis. The archive window renders the chip at its default
+/// text scale; the flow layout caches its measurements by content fingerprint.
 struct ArchiveLanguageChip: View {
     let count: ArchiveLanguageCount
     /// The session's sentence count — the chip's denominator.
@@ -17,18 +17,8 @@ struct ArchiveLanguageChip: View {
     /// A bulk job is translating this language right now: accent tint and the
     /// "· translating…" suffix.
     var busy = false
-    /// The viewed language: accent tint (the switch popover's current row).
+    /// The viewed language: accent tint and a capsule outline.
     var selected = false
-    /// Trailing chevron for the interactive form (the banner's chip
-    /// advertises its popover); rows keep the plain capsule.
-    var showsChevron = false
-    /// The text scale the chip's type and glyphs render at: the banner's
-    /// chip follows the transcript pane's scale, the archive window's rows
-    /// keep the default. The archive window's chips must stay at the
-    /// default — its flow layout caches the chip measurements under a
-    /// fingerprint that does not carry the scale, so a scaled chip there
-    /// would be laid out at the wrong width.
-    var scale: UIScale = .default
 
     /// The accent both label runs take while busy or selected; nil keeps the
     /// default secondary/primary pair.
@@ -36,40 +26,50 @@ struct ArchiveLanguageChip: View {
         busy || selected ? Theme.accentPink : nil
     }
 
+    /// The translated fraction the meter fills, clamped to the capsule.
+    private var progress: Double {
+        guard total > 0 else { return 0 }
+        return min(max(Double(count.translated) / Double(total), 0), 1)
+    }
+
     var body: some View {
         HStack(spacing: 5) {
             Text(count.badgeCode)
-                .font(.system(size: 10 * scale.factor, weight: .semibold))
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(tint ?? Theme.secondaryText)
                 .lineLimit(1)
                 .fixedSize()
             Text("\(count.translated)/\(total)")
-                .font(.system(size: 10 * scale.factor, weight: .semibold, design: .monospaced))
+                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(tint ?? Theme.primaryText)
                 .lineLimit(1)
                 .fixedSize()
             if busy {
                 Text("· translating…")
-                    .font(.system(size: 10 * scale.factor, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Theme.accentPink)
                     .lineLimit(1)
                     .fixedSize()
             }
-            if showsChevron {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8 * scale.factor, weight: .semibold))
-                    .foregroundStyle(Theme.secondaryText)
-            }
         }
         .padding(.horizontal, 9)
-        .padding(.vertical, 3)
-        .background(
-            Capsule()
-                .fill(busy || selected ? Theme.accentPink.opacity(0.12) : Theme.tileFill)
+        .padding(.top, 3)
+        .padding(.bottom, 5)
+        .background {
+            GeometryReader { proxy in
+                ZStack(alignment: .bottomLeading) {
+                    Capsule()
+                        .fill(busy || selected ? Theme.accentPink.opacity(0.12) : Theme.tileFill)
+                    Rectangle()
+                        .fill(tint ?? Theme.meterTeal)
+                        .frame(width: proxy.size.width * progress, height: 2)
+                }
+                .clipShape(Capsule())
                 .overlay(
                     Capsule().stroke(selected ? Theme.accentPink.opacity(0.45) : .clear)
                 )
-        )
+            }
+        }
         .accessibilityLabel(accessibilityText)
     }
 
