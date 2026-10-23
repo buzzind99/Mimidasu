@@ -644,17 +644,20 @@ packaged apps in `Contents/Frameworks/`.
   live and per-row translation. Progress/summary is an `.info` toast card
   with Cancel / Retry failed; a failed write counts as a failed sentence.
 - **Window and pane:** a fixed 640×720 `Window("Session archive")` scene
-  splits rows into RECENT and SAVED, newest first, with language chips
-  (`EN 40/183`), interrupted badges, save/rename/delete actions, a bulk-job
-  chip/progress bar, and a live-session hint; opening an Archived session
-  is gated while any Session is live. An Archived session fills the main
-  pane with a banner (Session name with rename, meta, viewed-language
-  switcher, Translate provider picker, save bookmark) and archived
-  SessionEntries that still support lookup, copy, export, and
-  per-SessionEntry re-translation. Opening an Archived session cancels the
-  bulk job, resets the viewing language and dictionary/HUD anchors, and
-  bumps the re-translate epoch; closing clears the pane without restoring
-  it.
+  splits rows into RECENT and SAVED, newest first. Each row carries a date
+  rail, a large title (the user's name, the quoted first sentence, or
+  "Untitled session"), an excerpt under a renamed title, time/duration/sentence meta,
+  language chips with completeness meters, interrupted badges,
+  save/rename/delete actions, and a bulk-job progress bar; the window shows a
+  live-session hint above the list. Opening an Archived session is gated while
+  any Session is live. An Archived session fills the main pane with a banner
+  (date/tier kicker, large title with rename, duration/sentence/character
+  stats, and a toolbar for the viewed-language switch, the Translate provider
+  picker, and the save bookmark) and archived SessionEntries that still
+  support lookup, copy, export, and per-SessionEntry re-translation. Opening
+  an Archived session cancels the bulk job, resets the viewing language and
+  dictionary/HUD anchors, and bumps the re-translate epoch; closing clears
+  the pane without restoring it.
 - **Interactions:** an open Archived session blocks starting a new Session
   until it is closed (the UI offers to close it); pause updates the live
   row's `paused_ms` but never finalizes; stop from paused closes the pause
