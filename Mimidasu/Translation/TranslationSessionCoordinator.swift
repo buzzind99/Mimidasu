@@ -289,18 +289,52 @@ extension TranslationSessionCoordinator {
         return true
     }
 
-    /// Probes a provider's stored key and records the outcome for the inline
-    /// status row (`ConnectionTestResult`). Returns whether the key verified.
+    /// Probes a provider's stored key with its current effective model and
+    /// records the outcome for the inline status row (`ConnectionTestResult`).
+    /// A reported compatible-mode downgrade is cached for that effective
+    /// model so later engine attachments skip the rejected request shape.
+    /// Returns whether the key verified.
     private func verifyKey(for provider: TranslationProvider) async -> Bool {
         guard let key = settings.key(for: provider) else {
             settings.setTestResult(.failure("No API key configured"), for: provider)
             return false
         }
+        let model = settings.effectiveModel(for: provider)
         do {
-            try await TranslationConnectionTester.test(
-                provider: provider, key: key, target: settings.targetLanguage,
-                transport: transport
+            let downgraded = try await TranslationConnectionTester.test(
+                provider: provider, key: key, model: model,
+                target: settings.targetLanguage, transport: transport
             )
+            if downgraded {
+                settings.setCompatibleMode(for: provider, model: model)
+            }
+        } catch {
+            settings.setTestResult(.failure(error.statusMessage), for: provider)
+            return false
+        }
+        settings.setTestResult(.success, for: provider)
+        return true
+    }
+
+    /// Probes a draft model against the provider's stored key and records the
+    /// outcome for the inline status row, without persisting the draft,
+    /// selecting the provider, or re-attaching an engine. An empty draft
+    /// resolves to the provider's catalog default before probing and before
+    /// keying the compatible-mode cache. Returns whether the model verified.
+    func verifyModel(_ draft: String, for provider: TranslationProvider) async -> Bool {
+        guard let key = settings.key(for: provider) else {
+            settings.setTestResult(.failure("No API key configured"), for: provider)
+            return false
+        }
+        let model = draft.isEmpty ? provider.defaultModel : draft
+        do {
+            let downgraded = try await TranslationConnectionTester.test(
+                provider: provider, key: key, model: model,
+                target: settings.targetLanguage, transport: transport
+            )
+            if downgraded {
+                settings.setCompatibleMode(for: provider, model: model)
+            }
         } catch {
             settings.setTestResult(.failure(error.statusMessage), for: provider)
             return false
@@ -352,31 +386,25 @@ extension TranslationSessionCoordinator {
     /// Builds `provider`'s engine, or nil when the provider isn't external
     /// or has no usable key (Apple is served by the `.translationTask` host
     /// in `activate`; the unconfigured edge falls back to Apple with a note
-    /// there). The target threads into every engine: the OpenRouter prompt
-    /// names it, Google/DeepL map it to their wire codes. No retry hook is
-    /// wired — the activation path attaches `onRetry` after building; the
-    /// re-translate lane leaves it nil.
+    /// there). The factory resolves the provider's effective model and seeds
+    /// the compatible-mode memory; the target threads into every engine:
+    /// the LLM prompt names it, Google/DeepL map it to their wire codes. No
+    /// retry hook is wired — the activation path attaches `onRetry` after
+    /// building; the re-translate lane leaves it nil.
     func makeExternalEngine(
         for provider: TranslationProvider, target: TargetLanguage
     ) -> (any TranslationEngine)? {
         guard provider.isExternal, let key = settings.key(for: provider) else {
             return nil
         }
-        return switch provider {
-        case .apple:
-            nil
-        case .google:
-            GoogleTranslateEngine(apiKey: key, target: target, transport: transport)
-        case .deepl:
-            DeepLEngine(apiKey: key, target: target, transport: transport)
-        case .openrouter:
-            OpenRouterEngine(
-                apiKey: key,
-                model: settings.openRouterModel,
-                target: target,
-                transport: transport
-            )
-        }
+        return TranslationEngineFactory.make(
+            provider: provider,
+            key: key,
+            model: settings.effectiveModel(for: provider),
+            target: target,
+            transport: transport,
+            compatibleMode: settings.isCompatibleMode(for: provider)
+        )
     }
 
     /// The settings-target spelling, for the activation path.

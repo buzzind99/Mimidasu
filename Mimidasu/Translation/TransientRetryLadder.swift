@@ -98,6 +98,7 @@ extension TranslationEngineError {
         case .rateLimited: "Rate limited by the provider"
         case let .serverError(code): "Provider server error (\(code))"
         case let .badResponse(detail): "Unexpected provider response: \(detail)"
+        case let .invalidConfiguration(detail): detail
         case .network: "Network error"
         case .cancelled: "Cancelled"
         }

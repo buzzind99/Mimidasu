@@ -17,12 +17,24 @@ struct RetranslateEngineTests {
         #expect(RetranslateEngine.google.rawValue == "google")
         #expect(RetranslateEngine.deepl.rawValue == "deepl")
         #expect(RetranslateEngine.openrouter.rawValue == "openrouter")
+        #expect(RetranslateEngine.openai.rawValue == "openai")
+        #expect(RetranslateEngine.anthropic.rawValue == "anthropic")
+        #expect(RetranslateEngine.moonshot.rawValue == "moonshot")
+        #expect(RetranslateEngine.zai.rawValue == "zai")
+        #expect(RetranslateEngine.deepseek.rawValue == "deepseek")
+        #expect(RetranslateEngine.xai.rawValue == "xai")
 
         #expect(TranslationEngineKind.appleHighFidelity.rawValue == "appleHighFidelity")
         #expect(TranslationEngineKind.appleFast.rawValue == "appleFast")
         #expect(TranslationEngineKind.google.rawValue == "google")
         #expect(TranslationEngineKind.deepl.rawValue == "deepl")
         #expect(TranslationEngineKind.openrouter.rawValue == "openrouter")
+        #expect(TranslationEngineKind.openai.rawValue == "openai")
+        #expect(TranslationEngineKind.anthropic.rawValue == "anthropic")
+        #expect(TranslationEngineKind.moonshot.rawValue == "moonshot")
+        #expect(TranslationEngineKind.zai.rawValue == "zai")
+        #expect(TranslationEngineKind.deepseek.rawValue == "deepseek")
+        #expect(TranslationEngineKind.xai.rawValue == "xai")
     }
 
     @Test("the on-device selections name no provider")
@@ -37,11 +49,23 @@ struct RetranslateEngineTests {
         #expect(RetranslateEngine.google.provider == .google)
         #expect(RetranslateEngine.deepl.provider == .deepl)
         #expect(RetranslateEngine.openrouter.provider == .openrouter)
+        #expect(RetranslateEngine.openai.provider == .openai)
+        #expect(RetranslateEngine.anthropic.provider == .anthropic)
+        #expect(RetranslateEngine.moonshot.provider == .moonshot)
+        #expect(RetranslateEngine.zai.provider == .zai)
+        #expect(RetranslateEngine.deepseek.provider == .deepseek)
+        #expect(RetranslateEngine.xai.provider == .xai)
 
         #expect(RetranslateEngine(provider: .apple) == nil)
         #expect(RetranslateEngine(provider: .google) == .google)
         #expect(RetranslateEngine(provider: .deepl) == .deepl)
         #expect(RetranslateEngine(provider: .openrouter) == .openrouter)
+        #expect(RetranslateEngine(provider: .openai) == .openai)
+        #expect(RetranslateEngine(provider: .anthropic) == .anthropic)
+        #expect(RetranslateEngine(provider: .moonshot) == .moonshot)
+        #expect(RetranslateEngine(provider: .zai) == .zai)
+        #expect(RetranslateEngine(provider: .deepseek) == .deepseek)
+        #expect(RetranslateEngine(provider: .xai) == .xai)
     }
 
     @Test("kind mapping names no kind for Apple — the live Apple identity is probed")
@@ -50,6 +74,12 @@ struct RetranslateEngineTests {
         #expect(TranslationEngineKind(provider: .google) == .google)
         #expect(TranslationEngineKind(provider: .deepl) == .deepl)
         #expect(TranslationEngineKind(provider: .openrouter) == .openrouter)
+        #expect(TranslationEngineKind(provider: .openai) == .openai)
+        #expect(TranslationEngineKind(provider: .anthropic) == .anthropic)
+        #expect(TranslationEngineKind(provider: .moonshot) == .moonshot)
+        #expect(TranslationEngineKind(provider: .zai) == .zai)
+        #expect(TranslationEngineKind(provider: .deepseek) == .deepseek)
+        #expect(TranslationEngineKind(provider: .xai) == .xai)
     }
 
     @Test("marker names match the labels shown on retried rows")
@@ -59,6 +89,12 @@ struct RetranslateEngineTests {
         #expect(TranslationEngineKind.google.markerName == "Google Translate")
         #expect(TranslationEngineKind.deepl.markerName == "DeepL")
         #expect(TranslationEngineKind.openrouter.markerName == "OpenRouter")
+        #expect(TranslationEngineKind.openai.markerName == "OpenAI")
+        #expect(TranslationEngineKind.anthropic.markerName == "Anthropic")
+        #expect(TranslationEngineKind.moonshot.markerName == "Moonshot")
+        #expect(TranslationEngineKind.zai.markerName == "Z.ai")
+        #expect(TranslationEngineKind.deepseek.markerName == "DeepSeek")
+        #expect(TranslationEngineKind.xai.markerName == "xAI")
     }
 
     @Test("engine display names match the picker labels")
@@ -69,6 +105,32 @@ struct RetranslateEngineTests {
         #expect(RetranslateEngine.google.displayName == "Google Translate")
         #expect(RetranslateEngine.deepl.displayName == "DeepL")
         #expect(RetranslateEngine.openrouter.displayName == "OpenRouter")
+        #expect(RetranslateEngine.openai.displayName == "OpenAI")
+        #expect(RetranslateEngine.anthropic.displayName == "Anthropic")
+        #expect(RetranslateEngine.moonshot.displayName == "Moonshot")
+        #expect(RetranslateEngine.zai.displayName == "Z.ai")
+        #expect(RetranslateEngine.deepseek.displayName == "DeepSeek")
+        #expect(RetranslateEngine.xai.displayName == "xAI")
+    }
+
+    @Test("the new re-translate selections name their engine kinds")
+    func newSelectionsNameTheirKinds() {
+        #expect(RetranslateEngine.openai.kind == .openai)
+        #expect(RetranslateEngine.anthropic.kind == .anthropic)
+        #expect(RetranslateEngine.moonshot.kind == .moonshot)
+        #expect(RetranslateEngine.zai.kind == .zai)
+        #expect(RetranslateEngine.deepseek.kind == .deepseek)
+        #expect(RetranslateEngine.xai.kind == .xai)
+    }
+
+    @Test("the new engine kinds name their tiers")
+    func newKindsNameTheirTiers() {
+        #expect(TranslationEngineKind.openai.tier == .openAI)
+        #expect(TranslationEngineKind.anthropic.tier == .anthropic)
+        #expect(TranslationEngineKind.moonshot.tier == .moonshot)
+        #expect(TranslationEngineKind.zai.tier == .zai)
+        #expect(TranslationEngineKind.deepseek.tier == .deepSeek)
+        #expect(TranslationEngineKind.xai.tier == .xAI)
     }
 
     @Test("disclosure intents identify themselves for the sheet and name their provider")

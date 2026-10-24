@@ -107,7 +107,7 @@ extension RetranslateCoordinator {
             return resolveAppleModelRoute(.appleFast, target: target)
         case .appleHighFidelity:
             return resolveAppleModelRoute(.appleHighFidelity, target: target)
-        case .google, .deepl, .openrouter:
+        case let selection:
             guard let provider = selection.provider else { return .session }
             // A selection naming the attached provider IS the session
             // engine — the queue path serves it (externals sample, so a
@@ -274,7 +274,7 @@ extension RetranslateCoordinator {
         let laneEngineCandidate: (any TranslationEngine)? = switch laneKind {
         case .appleFast, .appleHighFidelity:
             laneEngineStorage(for: laneKind, target: target.code)
-        case .google, .deepl, .openrouter:
+        default:
             engine
         }
         let resolved = await laneEngine(
@@ -339,7 +339,7 @@ extension RetranslateCoordinator {
         switch kind {
         case .appleFast, .appleHighFidelity:
             break // the landing decides duplicate-vs-alternate for both
-        case .google, .deepl, .openrouter:
+        default:
             return .proceed(kind)
         }
         guard AppleTierAvailability.supportsStrategySelection else { return .proceed(kind) }

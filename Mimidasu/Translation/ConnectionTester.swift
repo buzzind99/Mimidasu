@@ -1,79 +1,53 @@
 import Foundation
 
-/// Settings "Test" button actions, per provider. Google/DeepL run a minimal
-/// one-sentence translation (cheap, exercises the real request path);
-/// OpenRouter hits `GET /api/v1/key` — validates the key without spending
-/// tokens. Probes run with zero transient retries so a failed test settles
-/// in a single round-trip. Outcomes land in `TranslationSettings` and render
-/// inline.
+/// Settings "Test" button actions, per provider. Every external provider runs
+/// a minimal one-sentence translation through the same factory path the live
+/// engine uses (cheap, exercises the real request shape). Probes run with
+/// zero transient retries so a failed test settles in a single round-trip.
+/// Outcomes land in `TranslationSettings` and render inline.
 enum TranslationConnectionTester {
     /// - Parameters:
-    ///   - target: the selected translation target, threaded into the
-    ///     translate probes (Google/DeepL request bodies); OpenRouter's key
-    ///     probe is target-independent.
+    ///   - model: the draft override to probe; empty resolves to the
+    ///     provider's catalog default inside `TranslationEngineFactory`.
+    ///   - target: the selected translation target, threaded into the engine
+    ///     (Google/DeepL wire codes, LLM prompt).
+    /// - Returns: whether the probe had to fall back to compatible mode
+    ///   (LLM providers only); a compatible-mode retry counts as success.
+    ///   Apple returns false without issuing a request.
     /// - Throws: A short-status `TranslationEngineError` from the engine
     ///   taxonomy (never key material or raw response bodies).
+    @discardableResult
     static func test(
         provider: TranslationProvider,
         key: String,
+        model: String = "",
         target: TargetLanguage = .english,
         transport: HTTPTranslationTransport? = nil
-    ) async throws(TranslationEngineError) {
-        switch provider {
-        case .apple:
-            return
-        case .google:
-            try await translateProbe(
-                GoogleTranslateEngine(
-                    apiKey: key,
-                    target: target,
-                    transport: transport,
-                    ladder: TransientRetryLadder(retries: 0)
-                )
-            )
-        case .deepl:
-            try await translateProbe(
-                DeepLEngine(
-                    apiKey: key,
-                    target: target,
-                    transport: transport,
-                    ladder: TransientRetryLadder(retries: 0)
-                )
-            )
-        case .openrouter:
-            try await keyProbe(key, transport: transport)
-        }
-    }
+    ) async throws(TranslationEngineError) -> Bool {
+        guard provider.isExternal else { return false }
+        // The factory is total for external providers: every one has a
+        // catalog spec, and Apple is the only nil case above.
+        let engine = TranslationEngineFactory.make(
+            provider: provider,
+            key: key,
+            model: model,
+            target: target,
+            transport: transport,
+            ladder: TransientRetryLadder(retries: 0, retriesBadResponse: false)
+        )!
 
-    private static func translateProbe(
-        _ engine: any TranslationEngine
-    ) async throws(TranslationEngineError) {
         let translations: [String]
         do {
             translations = try await engine.translate(["こんにちは"])
         } catch {
             throw TransientRetryLadder.engineError(of: error)
         }
-        guard translations.allSatisfy({ translation in !translation.isEmpty }) else {
+        guard translations.count == 1,
+              let translation = translations.first,
+              !translation.isEmpty
+        else {
             throw TranslationEngineError.badResponse("Provider returned an empty translation")
         }
-    }
-
-    /// OpenRouter key validation: `GET /api/v1/key` requires a valid bearer
-    /// key and costs no tokens.
-    private static func keyProbe(
-        _ key: String,
-        transport: HTTPTranslationTransport?
-    ) async throws(TranslationEngineError) {
-        var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/key")!)
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-
-        let transport = transport ?? HTTPTranslationTransport(timeout: 15)
-        do {
-            _ = try await transport.send(request, classify: ChatCompletionsClient.classify)
-        } catch {
-            throw TransientRetryLadder.engineError(of: error)
-        }
+        return (engine as? LLMTranslationEngine)?.usedCompatibleMode ?? false
     }
 }

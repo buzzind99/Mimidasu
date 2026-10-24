@@ -7,8 +7,9 @@ import Testing
 /// Tests `AppModel`'s engine selection: an external provider spawns a
 /// worker task (config stays nil), an exhausted external engine latches the
 /// one-way Apple fallback per session, a manual retry resets the latch (the
-/// next failure re-latches instead of parking on `.unavailable`), and an
-/// unconfigured selected provider degrades to Apple with a note.
+/// next failure re-latches instead of parking on `.unavailable`), an
+/// unconfigured selected provider degrades to Apple with a note, and a model
+/// Save probes the draft before the caller persists it.
 @MainActor
 @Suite("AppModel engine selection + fallback")
 struct AppModelTranslationEngineTests {
@@ -44,15 +45,33 @@ struct AppModelTranslationEngineTests {
         }
     }
 
-    /// Transport that answers 200 to OpenRouter's key probe (GET) and 401 to
-    /// everything else (e.g. a chat-completions POST with a dead key).
-    private func keyProbeTransport() -> HTTPTranslationTransport {
+    /// Transport that answers every request with a valid chat-completions
+    /// reply, so an LLM provider's translation probe succeeds.
+    private func successfulTranslationTransport() -> HTTPTranslationTransport {
         HTTPTranslationTransport(timeout: 5) { request in
-            let status = request.httpMethod == "GET" ? 200 : 401
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil
+            )!
+            return (chatCompletionReplyBody, response)
+        }
+    }
+
+    /// Transport that answers the first chat-completions request with 401 (a
+    /// dead key fails the live translation) and every later one with a valid
+    /// reply (the re-test probe succeeds).
+    private func failThenSucceedTransport() -> HTTPTranslationTransport {
+        let attempts = Mutex(0)
+        return HTTPTranslationTransport(timeout: 5) { request in
+            let attempt = attempts.withLock { state -> Int in
+                state += 1
+                return state
+            }
+            let status = attempt == 1 ? 401 : 200
+            let body = attempt == 1 ? Data() : chatCompletionReplyBody
             let response = HTTPURLResponse(
                 url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil
             )!
-            return (Data(), response)
+            return (body, response)
         }
     }
 
@@ -114,7 +133,7 @@ struct AppModelTranslationEngineTests {
 
     @Test("each external provider builds its engine and spawns the worker")
     func eachExternalProviderBuildsItsEngine() async {
-        for provider in [TranslationProvider.google, .deepl] {
+        for provider in [TranslationProvider.google, .deepl, .openai] {
             let model = makeModel(
                 settings: makeSettings(provider: provider),
                 transport: constantStatusTransport(401)
@@ -254,6 +273,9 @@ struct AppModelTranslationEngineTests {
 
         await stopTranslation(model)
     }
+}
+
+extension AppModelTranslationEngineTests {
 
     // MARK: - Mid-session provider change
 
@@ -381,8 +403,9 @@ struct AppModelTranslationEngineTests {
         try? settings.saveKey("test-key-1234", for: .openrouter)
         let model = makeModel(
             settings: settings,
-            transport: constantStatusTransport(200)
+            transport: successfulTranslationTransport()
         )
+        await model.initialModelCheck?.value
         model.retryTranslation()
         #expect(await pollUntil { model.translationStatus == .ready })
         model.phase = .running
@@ -479,8 +502,9 @@ struct AppModelTranslationEngineTests {
         let settings = makeSettings(provider: .openrouter)
         let model = makeModel(
             settings: settings,
-            transport: keyProbeTransport()
+            transport: failThenSucceedTransport()
         )
+        await model.initialModelCheck?.value
         model.retryTranslation()
         #expect(await pollUntil { model.translationStatus == .ready })
 
@@ -502,6 +526,171 @@ struct AppModelTranslationEngineTests {
         await stopTranslation(model)
     }
 
+    // MARK: - Model Save
+
+    /// The key card's Save order is probe → `setModel` → re-attach. The probe
+    /// itself must never write the draft, move the selection, or rebuild the
+    /// attached engine.
+    @Test("a successful model probe records success without persisting or re-attaching")
+    func successfulModelProbeDoesNotPersist() async {
+        let settings = makeSettings(provider: .google)
+        try? settings.saveKey("test-key-1234", for: .openai)
+        let model = makeModel(
+            settings: settings,
+            transport: successfulTranslationTransport()
+        )
+        await model.initialModelCheck?.value
+        model.retryTranslation()
+        #expect(await pollUntil { model.translationStatus == .ready })
+        model.phase = .running
+
+        let verified = await model.verifyModel("gpt-6-luna", for: .openai)
+
+        #expect(verified)
+        #expect(settings.testResult(for: .openai) == .success)
+        #expect(settings.model(for: .openai).isEmpty, "the draft is not persisted")
+        #expect(settings.selectedProvider == .google, "the selection is unchanged")
+        #expect(model.activeTranslationEngine == .external, "the active engine is untouched")
+        #expect(model.activeExternalProvider == .google)
+
+        await stopTranslation(model)
+    }
+
+    @Test("a failed model probe records the fixed copy and leaves the stored model and engine alone")
+    func failedModelProbeLeavesStoredModel() async {
+        let settings = makeSettings(provider: .google)
+        try? settings.saveKey("test-key-1234", for: .openai)
+        let attempts = Mutex(0)
+        let transport = HTTPTranslationTransport(timeout: 5) { request in
+            attempts.withLock { state in state += 1 }
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 400, httpVersion: nil, headerFields: nil
+            )!
+            return (Data(), response)
+        }
+        let model = makeModel(settings: settings, transport: transport)
+        await model.initialModelCheck?.value
+        model.retryTranslation()
+        #expect(await pollUntil { model.translationStatus == .ready })
+        model.phase = .running
+
+        let verified = await model.verifyModel("gpt-6-luna", for: .openai)
+
+        #expect(!verified)
+        #expect(
+            settings.testResult(for: .openai)
+                == .failure("The provider rejected the model or its fast-mode settings.")
+        )
+        #expect(settings.model(for: .openai).isEmpty, "the stored model is unchanged")
+        #expect(settings.selectedProvider == .google, "the selection is unchanged")
+        #expect(model.activeTranslationEngine == .external, "the active engine is untouched")
+        #expect(model.activeExternalProvider == .google)
+        #expect(attempts.withLock { count in count } == 2, "the probe tries the compatible fallback once")
+
+        await stopTranslation(model)
+    }
+
+    /// A compatible-mode rejection is still a verified model: the downgrade is
+    /// cached for the resolved draft, and the caller's commit + re-attach
+    /// seeds the new engine with that cache.
+    @Test("a compatible-mode model probe caches the downgrade and the UI commit re-attaches")
+    func compatibleModelProbeCachesAndReattaches() async throws {
+        let settings = makeSettings(provider: .google)
+        try? settings.saveKey("test-key-1234", for: .openai)
+        let attempts = Mutex(0)
+        let bodies = Mutex([Data]())
+        let transport = HTTPTranslationTransport(timeout: 5) { request in
+            bodies.withLock { log in log.append(request.httpBody ?? Data()) }
+            let attempt = attempts.withLock { state -> Int in
+                state += 1
+                return state
+            }
+            let status = attempt == 1 ? 400 : 200
+            let body = attempt == 1 ? Data() : chatCompletionReplyBody
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil
+            )!
+            return (body, response)
+        }
+        let model = makeModel(settings: settings, transport: transport)
+        await model.initialModelCheck?.value
+        model.retryTranslation()
+        #expect(await pollUntil { model.translationStatus == .ready })
+        model.phase = .running
+
+        let verified = await model.verifyModel("gpt-6-luna", for: .openai)
+
+        #expect(verified)
+        #expect(settings.model(for: .openai).isEmpty, "the probe does not persist the draft")
+        #expect(settings.isCompatibleMode(for: .openai), "the downgrade is cached for the resolved draft")
+        #expect(settings.selectedProvider == .google, "the selection waits for the caller")
+        #expect(model.activeExternalProvider == .google, "the probe does not re-attach")
+        #expect(attempts.withLock { count in count } == 2)
+
+        // The key card commits the verified draft, then the settings observer
+        // re-attaches. The cached downgrade makes the new engine skip the
+        // rejected fast-mode fields on its first request.
+        settings.setModel("gpt-6-luna", for: .openai)
+        settings.select(.openai)
+        model.translationProviderDidChange()
+
+        #expect(settings.model(for: .openai) == "gpt-6-luna")
+        #expect(model.activeTranslationEngine == .external)
+        #expect(model.activeExternalProvider == .openai)
+
+        model.translationQueue.enqueue(makeSentence(index: 0, text: "テスト"))
+        #expect(await pollUntil { bodies.withLock { log in log.count == 3 } })
+
+        let body = try #require(bodies.withLock { log in log.last })
+        let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        let object = try #require(json)
+        #expect(object["model"] as? String == "gpt-6-luna", "the re-attached engine issued the request")
+        #expect(object["reasoning_effort"] == nil, "the cached compatible mode seeds the re-attached engine")
+
+        await stopTranslation(model)
+    }
+
+    @Test("verifyModel without a configured key records a failure")
+    func verifyModelWithoutKeyFails() async {
+        let settings = isolatedTranslationSettings(suite: "test.AppModelEngine")
+        let model = makeModel(settings: settings)
+
+        let verified = await model.verifyModel("gpt-6-luna", for: .openai)
+
+        #expect(!verified)
+        #expect(settings.testResult(for: .openai) == .failure("No API key configured"))
+        #expect(settings.selectedProvider == .apple)
+    }
+
+    @Test("verifying a configured LLM provider caches its compatible-mode downgrade")
+    func verifyKeyCachesCompatibleMode() async {
+        let settings = makeSettings(provider: .openai)
+        let attempts = Mutex(0)
+        let transport = HTTPTranslationTransport(timeout: 5) { request in
+            let attempt = attempts.withLock { state -> Int in
+                state += 1
+                return state
+            }
+            let status = attempt == 1 ? 400 : 200
+            let body = attempt == 1 ? Data() : chatCompletionReplyBody
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil
+            )!
+            return (body, response)
+        }
+        let model = makeModel(settings: settings, transport: transport)
+        await model.initialModelCheck?.value
+
+        let verified = await model.verifyAndSelectTranslationProvider(.openai)
+
+        #expect(verified)
+        #expect(settings.testResult(for: .openai) == .success)
+        #expect(settings.isCompatibleMode(for: .openai))
+        #expect(attempts.withLock { count in count } == 2)
+
+        await stopTranslation(model)
+    }
+
     /// Thread-safe text sink for result handlers.
     private final class TextRecorder: @unchecked Sendable {
         private let lock = NSLock()
@@ -516,3 +705,6 @@ struct AppModelTranslationEngineTests {
         }
     }
 }
+
+/// Valid chat-completions reply body used by the success transports.
+private let chatCompletionReplyBody = Data(#"{"choices":[{"message":{"content":"hello"}}]}"#.utf8)

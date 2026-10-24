@@ -35,12 +35,16 @@ struct AppModelCloudDisclosureTests {
         }
     }
 
-    /// Transport that answers 200 with a valid Google v2 translate body, so a
-    /// Google probe succeeds (`translateProbe` rejects an empty translation).
-    /// The OpenRouter key probe ignores the body.
-    private func translatedBodyTransport() -> HTTPTranslationTransport {
+    /// Transport that answers 200 with a body the probed provider can parse:
+    /// a Google v2 translate envelope for Google, a chat-completions reply for
+    /// the LLM providers.
+    private func successfulProbeTransport() -> HTTPTranslationTransport {
         HTTPTranslationTransport(timeout: 5) { request in
-            let body = Data(#"{"data":{"translations":[{"translatedText":"Hello"}]}}"#.utf8)
+            let body = if request.url?.host?.contains("googleapis") == true {
+                Data(#"{"data":{"translations":[{"translatedText":"Hello"}]}}"#.utf8)
+            } else {
+                Data(#"{"choices":[{"message":{"content":"Hello"}}]}"#.utf8)
+            }
             let response = HTTPURLResponse(
                 url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil
             )!
@@ -70,7 +74,7 @@ struct AppModelCloudDisclosureTests {
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelCloudDisclosure"),
             favorites: isolatedFavorites(),
             archive: isolatedArchive(),
-            translationTransport: constantStatusTransport(200),
+            translationTransport: successfulProbeTransport(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
@@ -96,7 +100,7 @@ struct AppModelCloudDisclosureTests {
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelCloudDisclosure"),
             favorites: isolatedFavorites(),
             archive: isolatedArchive(),
-            translationTransport: constantStatusTransport(200),
+            translationTransport: successfulProbeTransport(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
@@ -124,7 +128,7 @@ struct AppModelCloudDisclosureTests {
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelCloudDisclosure"),
             favorites: isolatedFavorites(),
             archive: isolatedArchive(),
-            translationTransport: constantStatusTransport(200),
+            translationTransport: successfulProbeTransport(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
@@ -166,7 +170,7 @@ struct AppModelCloudDisclosureTests {
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelCloudDisclosure"),
             favorites: isolatedFavorites(),
             archive: isolatedArchive(),
-            translationTransport: constantStatusTransport(200),
+            translationTransport: successfulProbeTransport(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
@@ -198,7 +202,7 @@ struct AppModelCloudDisclosureTests {
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelCloudDisclosure"),
             favorites: isolatedFavorites(),
             archive: isolatedArchive(),
-            translationTransport: constantStatusTransport(200),
+            translationTransport: successfulProbeTransport(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
@@ -230,7 +234,7 @@ struct AppModelCloudDisclosureTests {
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelCloudDisclosure"),
             favorites: isolatedFavorites(),
             archive: isolatedArchive(),
-            translationTransport: translatedBodyTransport(),
+            translationTransport: successfulProbeTransport(),
             highFidelityProbe: { _ in false },
             initialModelResolve: { _ in nil }
         )
@@ -245,6 +249,15 @@ struct AppModelCloudDisclosureTests {
         #expect(settings.selectedProvider == .openrouter, "the selection waits for confirmation")
 
         await stopTranslation(model)
+    }
+
+    @Test("archive disclosure ids include the run identity")
+    func archiveDisclosureID() {
+        let disclosure = PendingCloudDisclosure.archiveTranslation(
+            .openai, lang: "en", session: 7, presenter: .archiveWindow
+        )
+
+        #expect(disclosure.id == "archive.openai.en.7.archiveWindow")
     }
 
     // MARK: - Archive picker

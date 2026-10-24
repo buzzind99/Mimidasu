@@ -180,6 +180,12 @@ extension AppModel {
         await translationSession.verifyAndSelect(provider)
     }
 
+    /// Probes a draft model without persisting it, selecting its provider,
+    /// or re-attaching an engine. Returns whether the model verified.
+    func verifyModel(_ draft: String, for provider: TranslationProvider) async -> Bool {
+        await translationSession.verifyModel(draft, for: provider)
+    }
+
     /// Confirms the cloud disclosure for the sheet the user read.
     func confirmCloudDisclosure(_ presented: PendingCloudDisclosure) {
         translationSession.confirmDisclosure(presented)

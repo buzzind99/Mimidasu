@@ -10,8 +10,19 @@ struct TranslationConnectionTesterTests {
 
     // MARK: - Helpers
 
+    private static let chatReply = Data(#"{"choices":[{"message":{"content":"hello"}}]}"#.utf8)
+    private static let openRouterEndpoint = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
+    private static let openAIEndpoint = URL(string: "https://api.openai.com/v1/chat/completions")!
+    private static let anthropicEndpoint = URL(string: "https://api.anthropic.com/v1/messages")!
+
     private static func httpResponse(_ url: URL, _ status: Int) -> HTTPURLResponse {
         HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
+    }
+
+    private static func jsonObject(_ data: Data?) throws -> [String: Any] {
+        let data = try #require(data)
+        let object = try JSONSerialization.jsonObject(with: data)
+        return try #require(object as? [String: Any])
     }
 
     /// Records every request the probe issues; responses come from a scripted
@@ -51,7 +62,9 @@ struct TranslationConnectionTesterTests {
 
     @Test("Apple needs no probe")
     func appleSucceeds() async throws {
-        try await TranslationConnectionTester.test(provider: .apple, key: "")
+        let compatibleMode = try await TranslationConnectionTester.test(provider: .apple, key: "")
+
+        #expect(compatibleMode == false)
     }
 
     @Test("Google probes with a one-sentence translate")
@@ -64,8 +77,11 @@ struct TranslationConnectionTesterTests {
         })
         let transport = makeTransport(script)
 
-        try await TranslationConnectionTester.test(provider: .google, key: "k", transport: transport)
+        let compatibleMode = try await TranslationConnectionTester.test(
+            provider: .google, key: "k", transport: transport
+        )
 
+        #expect(compatibleMode == false)
         let request = try #require(script.requests.first)
         #expect(request.httpMethod == "POST")
         #expect(request.url == GoogleTranslateEngine.endpoint)
@@ -84,8 +100,11 @@ struct TranslationConnectionTesterTests {
         })
         let transport = makeTransport(script)
 
-        try await TranslationConnectionTester.test(provider: .deepl, key: "k", transport: transport)
+        let compatibleMode = try await TranslationConnectionTester.test(
+            provider: .deepl, key: "k", transport: transport
+        )
 
+        #expect(compatibleMode == false)
         let request = try #require(script.requests.first)
         #expect(request.httpMethod == "POST")
         #expect(request.url == DeepLEngine.proEndpoint)
@@ -138,18 +157,71 @@ struct TranslationConnectionTesterTests {
         #expect(decoded.targetLang == "TH")
     }
 
-    @Test("OpenRouter probes GET /api/v1/key with the bearer key")
-    func openRouterKeyProbe() async throws {
-        let keyURL = try #require(URL(string: "https://openrouter.ai/api/v1/key"))
-        let script = Script(handler: { _ in (Data(), Self.httpResponse(keyURL, 200)) })
+    @Test("OpenRouter probes a chat-completions translation with its catalog default model")
+    func openRouterTranslationProbe() async throws {
+        let script = Script(handler: { _ in
+            (Self.chatReply, Self.httpResponse(Self.openRouterEndpoint, 200))
+        })
         let transport = makeTransport(script)
 
-        try await TranslationConnectionTester.test(provider: .openrouter, key: "or-key", transport: transport)
+        let compatibleMode = try await TranslationConnectionTester.test(
+            provider: .openrouter, key: "or-key", transport: transport
+        )
 
+        #expect(compatibleMode == false)
         let request = try #require(script.requests.first)
-        #expect(request.httpMethod == "GET")
-        #expect(request.url == keyURL)
+        #expect(request.httpMethod == "POST")
+        #expect(request.url == Self.openRouterEndpoint)
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer or-key")
+        let body = try JSONDecoder().decode(ChatProbeBody.self, from: #require(script.bodies.first))
+        #expect(body.model == "tencent/hy-mt2-30b-a3b")
+        #expect(script.requestCount == 1)
+    }
+
+    @Test("OpenAI probes with a bearer key and the explicit model")
+    func openAIProbe() async throws {
+        let script = Script(handler: { _ in
+            (Self.chatReply, Self.httpResponse(Self.openAIEndpoint, 200))
+        })
+        let transport = makeTransport(script)
+
+        let compatibleMode = try await TranslationConnectionTester.test(
+            provider: .openai, key: "oa-key", model: "gpt-6-luna-2026", transport: transport
+        )
+
+        #expect(compatibleMode == false)
+        let request = try #require(script.requests.first)
+        #expect(request.httpMethod == "POST")
+        #expect(request.url == Self.openAIEndpoint)
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer oa-key")
+        let body = try JSONDecoder().decode(ChatProbeBody.self, from: #require(script.bodies.first))
+        #expect(body.model == "gpt-6-luna-2026")
+        #expect(script.requestCount == 1)
+    }
+
+    @Test("Anthropic probes the Messages endpoint with its native headers and the explicit model")
+    func anthropicProbe() async throws {
+        let reply = Data(#"{"content":[{"type":"text","text":"hello"}]}"#.utf8)
+        let script = Script(handler: { _ in
+            (reply, Self.httpResponse(Self.anthropicEndpoint, 200))
+        })
+        let transport = makeTransport(script)
+
+        let compatibleMode = try await TranslationConnectionTester.test(
+            provider: .anthropic, key: "anthropic-key",
+            model: "claude-sonnet-5-5", transport: transport
+        )
+
+        #expect(compatibleMode == false)
+        let request = try #require(script.requests.first)
+        #expect(request.httpMethod == "POST")
+        #expect(request.url == Self.anthropicEndpoint)
+        #expect(request.value(forHTTPHeaderField: "x-api-key") == "anthropic-key")
+        #expect(request.value(forHTTPHeaderField: "anthropic-version") == "2023-06-01")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+        let body = try JSONDecoder().decode(AnthropicProbeBody.self, from: #require(script.bodies.first))
+        #expect(body.model == "claude-sonnet-5-5")
+        #expect(script.requestCount == 1)
     }
 
     // MARK: - Failures
@@ -160,7 +232,7 @@ struct TranslationConnectionTesterTests {
         let transport = makeTransport(script)
 
         let thrown = await #expect(throws: TranslationEngineError.self) {
-            try await TranslationConnectionTester.test(provider: .google, key: "k", transport: transport)
+            _ = try await TranslationConnectionTester.test(provider: .google, key: "k", transport: transport)
         }
 
         #expect(thrown == .invalidKey)
@@ -173,7 +245,7 @@ struct TranslationConnectionTesterTests {
         let transport = makeTransport(script)
 
         let thrown = await #expect(throws: TranslationEngineError.self) {
-            try await TranslationConnectionTester.test(provider: .deepl, key: "k", transport: transport)
+            _ = try await TranslationConnectionTester.test(provider: .deepl, key: "k", transport: transport)
         }
 
         #expect(thrown == .invalidKey)
@@ -188,10 +260,27 @@ struct TranslationConnectionTesterTests {
         let transport = makeTransport(script)
 
         let thrown = await #expect(throws: TranslationEngineError.self) {
-            try await TranslationConnectionTester.test(provider: .deepl, key: "k", transport: transport)
+            _ = try await TranslationConnectionTester.test(provider: .deepl, key: "k", transport: transport)
         }
 
         #expect(thrown == .rateLimited)
+        #expect(script.requestCount == 1, "the probe ladder has zero retries")
+    }
+
+    @Test("a server failure on an LLM probe settles in exactly one request")
+    func llmProbeFailureIsNotRetried() async {
+        let script = Script(handler: { _ in
+            (Data(), Self.httpResponse(Self.openAIEndpoint, 500))
+        })
+        let transport = makeTransport(script)
+
+        let thrown = await #expect(throws: TranslationEngineError.self) {
+            _ = try await TranslationConnectionTester.test(
+                provider: .openai, key: "k", model: "gpt-6-luna", transport: transport
+            )
+        }
+
+        #expect(thrown == .serverError(500))
         #expect(script.requestCount == 1, "the probe ladder has zero retries")
     }
 
@@ -203,23 +292,76 @@ struct TranslationConnectionTesterTests {
         let transport = makeTransport(script)
 
         let thrown = await #expect(throws: TranslationEngineError.self) {
-            try await TranslationConnectionTester.test(provider: .deepl, key: "k", transport: transport)
+            _ = try await TranslationConnectionTester.test(provider: .deepl, key: "k", transport: transport)
         }
 
         #expect(thrown == .badResponse("Provider returned an empty translation"))
     }
 
-    @Test("an invalid OpenRouter key fails with invalidKey")
-    func openRouterInvalidKey() async throws {
-        let keyURL = try #require(URL(string: "https://openrouter.ai/api/v1/key"))
-        let script = Script(handler: { _ in (Data(), Self.httpResponse(keyURL, 401)) })
+    @Test("an empty chat-completions translation fails as badResponse")
+    func chatEmptyTranslation() async {
+        let emptyReply = Data(#"{"choices":[{"message":{"content":""}}]}"#.utf8)
+        let script = Script(handler: { _ in
+            (emptyReply, Self.httpResponse(Self.openRouterEndpoint, 200))
+        })
         let transport = makeTransport(script)
 
         let thrown = await #expect(throws: TranslationEngineError.self) {
-            try await TranslationConnectionTester.test(provider: .openrouter, key: "or-key", transport: transport)
+            _ = try await TranslationConnectionTester.test(
+                provider: .openrouter, key: "k", transport: transport
+            )
         }
 
-        #expect(thrown == .invalidKey)
+        #expect(thrown == .badResponse("Model returned an empty translation"))
+        #expect(script.requestCount == 1)
+    }
+
+    // MARK: - Compatible mode
+
+    @Test("an OpenAI compatible-mode retry counts as a successful probe")
+    func compatibleModeProbeSucceeds() async throws {
+        let script = Script(handler: { index in
+            if index == 0 {
+                return (Data(), Self.httpResponse(Self.openAIEndpoint, 400))
+            }
+            return (Self.chatReply, Self.httpResponse(Self.openAIEndpoint, 200))
+        })
+        let transport = makeTransport(script)
+
+        let compatibleMode = try await TranslationConnectionTester.test(
+            provider: .openai, key: "k", model: "gpt-6-luna", transport: transport
+        )
+
+        #expect(compatibleMode)
+        #expect(script.requestCount == 2)
+        let first = try JSONDecoder().decode(ChatProbeBody.self, from: #require(script.bodies.first))
+        #expect(first.reasoningEffort == "none")
+        let retry = try Self.jsonObject(script.bodies.last)
+        #expect(retry["reasoning_effort"] == nil)
+    }
+
+    @Test("a model rejection that survives the compatible retry throws the fixed copy")
+    func compatibleModeProbeFailsWithFixedCopy() async throws {
+        let providerBody = Data(#"{"error":{"message":"raw-provider-detail"}}"#.utf8)
+        let script = Script(handler: { _ in
+            (providerBody, Self.httpResponse(Self.openAIEndpoint, 400))
+        })
+        let transport = makeTransport(script)
+
+        let thrown = await #expect(throws: TranslationEngineError.self) {
+            _ = try await TranslationConnectionTester.test(
+                provider: .openai, key: "k", model: "gpt-6-luna", transport: transport
+            )
+        }
+
+        #expect(
+            thrown == .invalidConfiguration(
+                "The provider rejected the model or its fast-mode settings."
+            )
+        )
+        let message = try #require(thrown?.statusMessage)
+        #expect(!message.contains("raw-provider-detail"), "provider bodies never reach the copy")
+        #expect(script.requestCount == 2)
     }
 }
 
@@ -242,4 +384,18 @@ private struct DeepLProbeBody: Decodable {
         case sourceLang = "source_lang"
         case targetLang = "target_lang"
     }
+}
+
+private struct ChatProbeBody: Decodable {
+    let model: String
+    let reasoningEffort: String?
+
+    enum CodingKeys: String, CodingKey {
+        case model
+        case reasoningEffort = "reasoning_effort"
+    }
+}
+
+private struct AnthropicProbeBody: Decodable {
+    let model: String
 }

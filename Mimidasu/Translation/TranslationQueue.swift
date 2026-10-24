@@ -451,6 +451,8 @@ final class TranslationQueue {
             "Provider server error (\(code)). Retry shortly."
         case let .badResponse(detail):
             "The provider returned an unexpected response: \(detail)"
+        case let .invalidConfiguration(detail):
+            detail
         case .network:
             "Network error reaching the provider. Check the connection, then reconnect."
         case .cancelled:
@@ -490,7 +492,7 @@ final class TranslationQueue {
         of error: Error, engine: any TranslationEngine
     ) -> TranslationFailureSeverity {
         switch TransientRetryLadder.engineError(of: error) {
-        case .invalidKey, .quotaExceeded:
+        case .invalidKey, .quotaExceeded, .invalidConfiguration:
             .permanent
         case .badResponse:
             engine.transientBadResponse ? .transient : .permanent

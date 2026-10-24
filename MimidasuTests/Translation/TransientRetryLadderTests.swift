@@ -84,6 +84,43 @@ struct TransientRetryLadderTests {
         #expect(log.delays.isEmpty)
     }
 
+    @Test("invalidConfiguration is non-transient and spends no retry budget")
+    func invalidConfigurationNotRetried() async {
+        let log = Log()
+        let ladder = makeLadder(log: log)
+
+        let thrown = await #expect(throws: TranslationEngineError.self) {
+            try await ladder.run {
+                log.recordCall()
+                throw TranslationEngineError.invalidConfiguration("unsupported model")
+            }
+        }
+
+        #expect(thrown == .invalidConfiguration("unsupported model"))
+        #expect(log.calls == 1)
+        #expect(log.delays.isEmpty)
+    }
+
+    @Test("transient failures still retry before an invalidConfiguration stops the ladder")
+    func transientRetryStillRunsBeforeInvalidConfiguration() async {
+        let log = Log()
+        let ladder = makeLadder(log: log)
+
+        let thrown = await #expect(throws: TranslationEngineError.self) {
+            try await ladder.run {
+                log.recordCall()
+                if log.calls == 1 {
+                    throw TranslationEngineError.rateLimited
+                }
+                throw TranslationEngineError.invalidConfiguration("unsupported model")
+            }
+        }
+
+        #expect(thrown == .invalidConfiguration("unsupported model"))
+        #expect(log.calls == 2)
+        #expect(log.delays == [.milliseconds(500)])
+    }
+
     @Test("badResponse is non-transient by default")
     func badResponseNotRetriedByDefault() async throws {
         let log = Log()
@@ -199,6 +236,10 @@ struct TransientRetryLadderTests {
         #expect(
             TranslationEngineError.badResponse("boom").statusMessage
                 == "Unexpected provider response: boom"
+        )
+        #expect(
+            TranslationEngineError.invalidConfiguration("model not supported").statusMessage
+                == "model not supported"
         )
         #expect(TranslationEngineError.network.statusMessage == "Network error")
         #expect(TranslationEngineError.cancelled.statusMessage == "Cancelled")

@@ -6,7 +6,7 @@ import Testing
 
 /// Tests `AppModel`'s target-language wiring (restart-only): the selected
 /// target stamps the queue at engine attach, carries into the rebuilt Apple
-/// config, and reaches the attached OpenRouter engine's system prompt.
+/// config, and reaches the attached LLM engine's system prompt.
 @MainActor
 @Suite("AppModel target language")
 struct AppModelTranslationTargetTests {
@@ -19,11 +19,14 @@ struct AppModelTranslationTargetTests {
         Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: text)
     }
 
-    private func makeSettings() -> TranslationSettings {
+    private func makeSettings(
+        provider: TranslationProvider = .openrouter,
+        target: TargetLanguage = TargetLanguage(code: "zh-Hans")
+    ) -> TranslationSettings {
         let settings = isolatedTranslationSettings(suite: "test.AppModelTarget")
-        try? settings.saveKey("test-key-1234", for: .openrouter)
-        settings.select(.openrouter)
-        settings.select(TargetLanguage(code: "zh-Hans"))
+        try? settings.saveKey("test-key-1234", for: provider)
+        settings.select(provider)
+        settings.select(target)
         return settings
     }
 
@@ -111,7 +114,7 @@ struct AppModelTranslationTargetTests {
     // MARK: - External engine wiring
 
     /// The engine built by `makeExternalEngine` receives the target: the
-    /// OpenRouter request body's system prompt names the selected language.
+    /// request body's system prompt names the selected language.
     @Test("the selected target reaches the attached engine's prompt")
     func selectedTargetReachesEnginePrompt() async throws {
         let settings = makeSettings()
@@ -141,6 +144,50 @@ struct AppModelTranslationTargetTests {
         let decoded = try JSONDecoder().decode(ChatBody.self, from: body)
         #expect(decoded.messages[0].role == "system")
         #expect(decoded.messages[0].content.contains("Simplified Chinese"))
+
+        await stopTranslation(model)
+    }
+
+    /// Every LLM provider shares one prompt contract, so a non-default
+    /// provider's request must also name the selected target and keep the ASR
+    /// caveat.
+    @Test("an LLM provider's prompt names the selected target and keeps the ASR caveat")
+    func openAIPromptNamesSpanishTarget() async throws {
+        let settings = makeSettings(
+            provider: .openai,
+            target: TargetLanguage(code: "es")
+        )
+        let bodies = BodyLog()
+        let transport = HTTPTranslationTransport(timeout: 5) { request in
+            bodies.record(request.httpBody ?? Data())
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil
+            )!
+            return (
+                Data(#"{"choices":[{"message":{"content":"hola"}}]}"#.utf8),
+                response
+            )
+        }
+        let model = AppModel(
+            translationSettings: settings,
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelTarget"),
+            favorites: isolatedFavorites(),
+            archive: isolatedArchive(),
+            translationTransport: transport,
+            highFidelityProbe: { _ in false },
+            initialModelResolve: { _ in nil }
+        )
+
+        model.retryTranslation()
+        model.translationQueue.enqueue(makeSentence(index: 0, text: "テスト"))
+        #expect(await pollUntil(timeout: resultTimeout) { !bodies.bodies.isEmpty })
+
+        let body = try #require(bodies.bodies.first)
+        let decoded = try JSONDecoder().decode(ChatBody.self, from: body)
+        #expect(decoded.model == "gpt-6-luna")
+        #expect(decoded.messages[0].role == "system")
+        #expect(decoded.messages[0].content.contains("Spanish"))
+        #expect(decoded.messages[0].content.contains("ASR output"))
 
         await stopTranslation(model)
     }
@@ -178,5 +225,6 @@ private struct ChatBody: Decodable {
         let content: String
     }
 
+    let model: String
     let messages: [Message]
 }

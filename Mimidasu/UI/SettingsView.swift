@@ -11,8 +11,8 @@ struct SettingsView: View {
     @AppearanceSetting private var appearance
     @State private var keyDraft = ""
     @State private var keySaveFailed = false
-    /// Edit buffer for the OpenRouter model field; committed to the stored
-    /// model only on Save.
+    /// Edit buffer for the displayed provider's model field; committed to
+    /// that provider's stored model only after a successful probe.
     @State private var modelDraft = ""
     /// An external provider being set up but not yet configured: its key
     /// card is shown, but the selection (checkmark) stays on the current
@@ -31,9 +31,10 @@ struct SettingsView: View {
     }
 
     init(model: AppModel) {
+        let settings = model.translationSettings
         _model = Bindable(wrappedValue: model)
-        _settings = Bindable(wrappedValue: model.translationSettings)
-        _modelDraft = State(initialValue: model.translationSettings.openRouterModel)
+        _settings = Bindable(wrappedValue: settings)
+        _modelDraft = State(initialValue: settings.model(for: settings.selectedProvider))
     }
 
     var body: some View {
@@ -60,8 +61,14 @@ struct SettingsView: View {
             pendingProvider = nil
             keyDraft = ""
             keySaveFailed = false
-            modelDraft = settings.openRouterModel
+            modelDraft = settings.model(for: settings.selectedProvider)
             model.translationProviderDidChange()
+        }
+        // The key card follows `displayedProvider`: while an unconfigured
+        // provider is pending, the model field must show that provider's
+        // stored model rather than the still-selected provider's.
+        .onChange(of: pendingProvider) {
+            modelDraft = settings.model(for: pendingProvider ?? settings.selectedProvider)
         }
         // The cloud-provider disclosure, raised whenever an external
         // activation is held in `providerAwaitingDisclosure` (a provider
@@ -91,7 +98,7 @@ struct SettingsView: View {
             verifyingProvider = nil
             keyDraft = ""
             keySaveFailed = false
-            modelDraft = settings.openRouterModel
+            modelDraft = settings.model(for: settings.selectedProvider)
             // The cached window doesn't re-run `.task` on reopen; the
             // availability probe is a no-op once loaded anyway.
             Task { await model.appleTranslationAvailability.refreshIfNeeded() }
@@ -240,9 +247,16 @@ struct SettingsView: View {
     private var providerCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             KickerLabel("TRANSLATION · PROVIDER", color: Palette.label)
-            ForEach(TranslationProvider.allCases) { provider in
-                providerRow(provider)
+            // Fixed-height well: four rows visible, the rest scroll. Rows
+            // keep their own hover wash; nothing here clips it.
+            ScrollView(.vertical) {
+                LazyVStack(spacing: 12) {
+                    ForEach(TranslationProvider.allCases) { provider in
+                        providerRow(provider)
+                    }
+                }
             }
+            .frame(height: 188)
         }
         .padding(16)
         .cardSurface(shadow: Palette.cardShadow)

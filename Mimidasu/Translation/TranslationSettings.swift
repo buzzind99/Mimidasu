@@ -8,6 +8,12 @@ enum TranslationProvider: String, CaseIterable, Codable, Identifiable {
     case google
     case deepl
     case openrouter
+    case openai
+    case anthropic
+    case moonshot
+    case zai
+    case deepseek
+    case xai
 
     var id: String {
         rawValue
@@ -25,6 +31,23 @@ enum TranslationProvider: String, CaseIterable, Codable, Identifiable {
     var isExternal: Bool {
         self != .apple
     }
+
+    /// Providers that translate through a chat model rather than a
+    /// fixed-contract machine-translation API.
+    var isLLM: Bool {
+        switch self {
+        case .apple, .google, .deepl:
+            false
+        case .openrouter, .openai, .anthropic, .moonshot, .zai, .deepseek, .xai:
+            true
+        }
+    }
+
+    /// The provider's default model; empty for the non-LLM providers.
+    /// Delegates to the catalog so the values live in one place.
+    var defaultModel: String {
+        LLMProviderCatalog.spec(for: self)?.defaultModel ?? ""
+    }
 }
 
 extension TranslationProvider {
@@ -35,6 +58,7 @@ extension TranslationProvider {
         case .google: "g.circle.fill"
         case .deepl: "d.circle.fill"
         case .openrouter: "o.circle.fill"
+        case .openai, .anthropic, .moonshot, .zai, .deepseek, .xai: "sparkles"
         }
     }
 
@@ -42,10 +66,11 @@ extension TranslationProvider {
     /// providers append a "Configured" marker.
     func settingsDetail(hasKey: Bool) -> String {
         switch self {
-        case .apple: "On-device"
+        case .apple:
+            "On-device"
         case .google, .deepl:
             hasKey ? "External · API key · Configured" : "External · API key"
-        case .openrouter:
+        case .openrouter, .openai, .anthropic, .moonshot, .zai, .deepseek, .xai:
             hasKey ? "External · API key + model · Configured" : "External · API key + model"
         }
     }
@@ -62,6 +87,12 @@ extension TranslationProvider {
         case .google: .google
         case .deepl: .deepL(deepLTier)
         case .openrouter: .openRouter
+        case .openai: .openAI
+        case .anthropic: .anthropic
+        case .moonshot: .moonshot
+        case .zai: .zai
+        case .deepseek: .deepSeek
+        case .xai: .xAI
         }
     }
 
@@ -88,6 +119,12 @@ extension TranslationProvider {
         case .google: "Google"
         case .deepl: "DeepL"
         case .openrouter: "OpenRouter"
+        case .openai: "OpenAI"
+        case .anthropic: "Anthropic"
+        case .moonshot: "Moonshot"
+        case .zai: "Z.ai"
+        case .deepseek: "DeepSeek"
+        case .xai: "xAI"
         }
     }
 }
@@ -101,10 +138,10 @@ enum ConnectionTestResult: Equatable {
 }
 
 /// Non-secret translation settings: selected provider, per-provider `hasKey`
-/// flags (with a last-4 hint for the UI), the OpenRouter model string, and
-/// the latest connection-test results. Keys themselves live only in
-/// `SecureKeyStoring` (the Keychain in production) and are read on demand
-/// when an engine is constructed — never cached here.
+/// flags (with a last-4 hint for the UI), per-provider model overrides, the
+/// compatible-mode cache, and the latest connection-test results. Keys
+/// themselves live only in `SecureKeyStoring` (the Keychain in production)
+/// and are read on demand when an engine is constructed — never cached here.
 ///
 /// Selection policy: a provider becomes selected only once it's configured —
 /// a saved key that passes the connection test (the Settings key card selects
@@ -117,10 +154,15 @@ final class TranslationSettings {
         didSet { defaults.set(selectedProvider.rawValue, forKey: Self.selectedKey) }
     }
 
-    /// OpenRouter chat-completions model, used verbatim in the request body.
-    var openRouterModel: String {
-        didSet { defaults.set(openRouterModel, forKey: Self.openRouterModelKey) }
-    }
+    /// Per-provider chat-model override, used verbatim in the request body.
+    /// An empty string means the provider's catalog default.
+    private(set) var models: [TranslationProvider: String]
+
+    /// Per-provider fast-mode downgrade memory (non-secret): the effective
+    /// model string for which the provider last required compatible mode.
+    /// A value only applies while it still matches the provider's current
+    /// effective model.
+    private(set) var compatibleModes: [TranslationProvider: String]
 
     /// True when the selected DeepL key came from the free tier (`:fx`
     /// suffix) — drives the "DeepL (Free)" label. Non-secret.
@@ -165,7 +207,7 @@ final class TranslationSettings {
     private let keys: SecureKeyStoring
 
     private static let selectedKey = "translation.selectedProvider"
-    private static let openRouterModelKey = "translation.openRouterModel"
+    private static let legacyOpenRouterModelKey = "translation.openRouterModel"
     private static let deeplFreeKey = "translation.deeplFreeTier"
     private static let targetLanguageKey = "translation.targetLanguage"
     private static let retranslateEngineKey = "translation.retranslateEngine"
@@ -180,6 +222,14 @@ final class TranslationSettings {
 
     private static func testResultKey(_ provider: TranslationProvider) -> String {
         "translation.testResult.\(provider.rawValue)"
+    }
+
+    private static func modelKey(_ provider: TranslationProvider) -> String {
+        "translation.model.\(provider.rawValue)"
+    }
+
+    private static func compatibleModeKey(_ provider: TranslationProvider) -> String {
+        "translation.compatibleMode.\(provider.rawValue)"
     }
 
     /// - Parameters:
@@ -198,10 +248,19 @@ final class TranslationSettings {
             self.keys = keys ?? KeychainStore()
         #endif
 
+        // One-time migration from the single OpenRouter model field: seed
+        // the per-provider key, then drop the legacy key so later launches
+        // never resurrect a stale value.
+        if defaults.object(forKey: Self.modelKey(.openrouter)) == nil,
+           let legacyModel = defaults.string(forKey: Self.legacyOpenRouterModelKey)
+        {
+            defaults.set(legacyModel, forKey: Self.modelKey(.openrouter))
+            defaults.removeObject(forKey: Self.legacyOpenRouterModelKey)
+        }
+
         let selected = defaults.string(forKey: Self.selectedKey)
             .flatMap(TranslationProvider.init(rawValue:)) ?? .apple
         selectedProvider = selected
-        openRouterModel = defaults.string(forKey: Self.openRouterModelKey) ?? ""
         deeplIsFreeTier = defaults.bool(forKey: Self.deeplFreeKey)
         targetLanguage = defaults.string(forKey: Self.targetLanguageKey)
             .map(TargetLanguage.init(code:)) ?? .english
@@ -212,6 +271,8 @@ final class TranslationSettings {
         var hasKey: [TranslationProvider: Bool] = [:]
         var keyHints: [TranslationProvider: String] = [:]
         var testResults: [TranslationProvider: ConnectionTestResult] = [:]
+        var loadedModels: [TranslationProvider: String] = [:]
+        var loadedCompatibleModes: [TranslationProvider: String] = [:]
         for provider in TranslationProvider.allCases {
             let stored = defaults.bool(forKey: Self.hasKeyKey(provider))
             // Cross-check the flag against the actual key store: a flag
@@ -221,10 +282,69 @@ final class TranslationSettings {
             if let raw = defaults.string(forKey: Self.testResultKey(provider)) {
                 testResults[provider] = Self.decodeTestResult(raw)
             }
+            loadedModels[provider] = defaults.string(forKey: Self.modelKey(provider)) ?? ""
+            loadedCompatibleModes[provider] = defaults.string(forKey: Self.compatibleModeKey(provider))
         }
         self.hasKey = hasKey
         self.keyHints = keyHints
         self.testResults = testResults
+        models = loadedModels
+        compatibleModes = loadedCompatibleModes
+    }
+
+    // MARK: - Provider models
+
+    /// The stored model override for `provider`; empty means the provider's
+    /// catalog default (see `effectiveModel(for:)`).
+    func model(for provider: TranslationProvider) -> String {
+        models[provider] ?? ""
+    }
+
+    /// Stores a model override. A change to the *effective* model retires
+    /// the provider's compatible-mode memory unless that memory already
+    /// names the new effective model.
+    func setModel(_ model: String, for provider: TranslationProvider) {
+        let previousEffective = effectiveModel(for: provider)
+        models[provider] = model
+        defaults.set(model, forKey: Self.modelKey(provider))
+        let newEffective = effectiveModel(for: provider)
+        guard newEffective != previousEffective,
+              compatibleModes[provider] != newEffective
+        else { return }
+        clearCompatibleMode(for: provider)
+    }
+
+    /// The model the engine actually sends: the stored override, or the
+    /// provider's catalog default when the override is empty.
+    func effectiveModel(for provider: TranslationProvider) -> String {
+        let stored = model(for: provider)
+        return stored.isEmpty ? provider.defaultModel : stored
+    }
+
+    /// True only while the cached downgrade still names the provider's
+    /// current effective model — a model change invalidates the memory.
+    func isCompatibleMode(for provider: TranslationProvider) -> Bool {
+        compatibleModes[provider] == effectiveModel(for: provider)
+    }
+
+    /// Records that `model` required the compatible (reasoning-free)
+    /// request shape for `provider`. Persisted, non-secret.
+    func setCompatibleMode(for provider: TranslationProvider, model: String) {
+        compatibleModes[provider] = model
+        defaults.set(model, forKey: Self.compatibleModeKey(provider))
+    }
+
+    /// Removes the provider's compatible-mode memory.
+    func clearCompatibleMode(for provider: TranslationProvider) {
+        compatibleModes[provider] = nil
+        defaults.removeObject(forKey: Self.compatibleModeKey(provider))
+    }
+
+    /// OpenRouter's model override, kept as the single-provider alias over
+    /// the per-provider API.
+    var openRouterModel: String {
+        get { model(for: .openrouter) }
+        set { setModel(newValue, for: .openrouter) }
     }
 
     // MARK: - Key management
@@ -278,6 +398,7 @@ final class TranslationSettings {
         }
         defaults.set(false, forKey: Self.hasKeyKey(provider))
         defaults.removeObject(forKey: Self.keyHintKey(provider))
+        clearCompatibleMode(for: provider)
         setTestResult(nil, for: provider)
         if selectedProvider == provider {
             select(.apple)
@@ -331,10 +452,9 @@ final class TranslationSettings {
     // MARK: - "Currently using" row
 
     /// The model the OpenRouter engine actually sends per request: the stored
-    /// string, or the engine's default when the field is left empty (mirrors
-    /// the init fallback in `OpenRouterEngine`).
+    /// override, or the catalog default when the field is left empty.
     var effectiveOpenRouterModel: String {
-        openRouterModel.isEmpty ? OpenRouterEngine.defaultModel : openRouterModel
+        effectiveModel(for: .openrouter)
     }
 
     /// Truthful description of the engine currently in use, including the
@@ -369,8 +489,11 @@ final class TranslationSettings {
             // tier the app cannot know. (`deeplIsFreeTier` alone cannot
             // tell "no key" from "a pro key": both are false.)
             TranslationTier.deepL(deepLTier).name
-        case .openrouter:
-            "\(TranslationTier.openRouter.name) · \(effectiveOpenRouterModel)"
+        case .openrouter, .openai, .anthropic, .moonshot, .zai, .deepseek, .xai:
+            provider.tier().name
+        }
+        if provider.isLLM {
+            label += " · \(effectiveModel(for: provider))"
         }
         label += " → \(targetLanguage.displayName)"
         if fallbackActive, provider.isExternal {

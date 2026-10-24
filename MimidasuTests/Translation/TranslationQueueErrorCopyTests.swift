@@ -94,6 +94,10 @@ struct TranslationQueueErrorCopyTests {
             "The provider returned an unexpected response: nope", TranslationFailureSeverity.permanent
         ),
         (
+            TranslationEngineError.invalidConfiguration("The model does not support this request"),
+            "The model does not support this request", TranslationFailureSeverity.permanent
+        ),
+        (
             TranslationEngineError.network,
             "Network error reaching the provider. Check the connection, then reconnect.",
             TranslationFailureSeverity.transient
@@ -133,7 +137,14 @@ struct TranslationQueueErrorCopyTests {
     /// The engine flag mirrors each engine's ladder config.
     @Test("transientBadResponse mirrors the engine ladder configs")
     func engineFlagMirrorsLadderConfig() {
-        #expect(OpenRouterEngine(apiKey: "k", model: "m").transientBadResponse)
+        let openRouterEngine = TranslationEngineFactory.make(
+            provider: .openrouter,
+            key: "k",
+            model: "m",
+            target: .english,
+            transport: nil
+        )
+        #expect(openRouterEngine?.transientBadResponse == true)
         #expect(!GoogleTranslateEngine(apiKey: "k").transientBadResponse)
         #expect(!DeepLEngine(apiKey: "k").transientBadResponse)
     }

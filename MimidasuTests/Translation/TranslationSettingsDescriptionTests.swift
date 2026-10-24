@@ -57,4 +57,39 @@ struct TranslationSettingsDescriptionTests {
             "the attached engine wins over the picker — the row must not name an engine that is not running"
         )
     }
+
+    @Test(
+        "every LLM description appends the effective model",
+        arguments: TranslationProvider.allCases.filter(\.isLLM)
+    )
+    func llmDescriptionAppendsEffectiveModel(provider: TranslationProvider) {
+        let settings = makeSUT()
+        let target = TargetLanguage.english.displayName
+        settings.select(provider)
+
+        #expect(
+            settings.activeEngineDescription(fallbackActive: false)
+                == "\(provider.tier().name) · \(provider.defaultModel) → \(target)"
+        )
+
+        settings.setModel("custom/model", for: provider)
+
+        #expect(
+            settings.activeEngineDescription(fallbackActive: false)
+                == "\(provider.tier().name) · custom/model → \(target)"
+        )
+    }
+
+    @Test("Apple and Google descriptions carry no model suffix")
+    func onDeviceAndFixedContractDescriptionsCarryNoModel() throws {
+        let settings = makeSUT()
+        let target = TargetLanguage.english.displayName
+
+        settings.select(.apple)
+        #expect(settings.activeEngineDescription(fallbackActive: false) == "Apple (NMT) → \(target)")
+
+        try settings.saveKey("sk-google", for: .google)
+        settings.select(.google)
+        #expect(settings.activeEngineDescription(fallbackActive: false) == "Google Translate → \(target)")
+    }
 }

@@ -9,6 +9,12 @@ enum RetranslateEngine: String, Codable, CaseIterable, Sendable, Equatable, Hash
     case google
     case deepl
     case openrouter
+    case openai
+    case anthropic
+    case moonshot
+    case zai
+    case deepseek
+    case xai
 
     /// The external provider this selection routes through (nil for the
     /// on-device selections, which need no key).
@@ -18,6 +24,12 @@ enum RetranslateEngine: String, Codable, CaseIterable, Sendable, Equatable, Hash
         case .google: .google
         case .deepl: .deepl
         case .openrouter: .openrouter
+        case .openai: .openai
+        case .anthropic: .anthropic
+        case .moonshot: .moonshot
+        case .zai: .zai
+        case .deepseek: .deepseek
+        case .xai: .xai
         }
     }
 
@@ -31,6 +43,12 @@ enum RetranslateEngine: String, Codable, CaseIterable, Sendable, Equatable, Hash
         case .google: .google
         case .deepl: .deepl
         case .openrouter: .openrouter
+        case .openai: .openai
+        case .anthropic: .anthropic
+        case .moonshot: .moonshot
+        case .zai: .zai
+        case .deepseek: .deepseek
+        case .xai: .xai
         }
     }
 
@@ -50,6 +68,12 @@ enum RetranslateEngine: String, Codable, CaseIterable, Sendable, Equatable, Hash
         case .google: self = .google
         case .deepl: self = .deepl
         case .openrouter: self = .openrouter
+        case .openai: self = .openai
+        case .anthropic: self = .anthropic
+        case .moonshot: self = .moonshot
+        case .zai: self = .zai
+        case .deepseek: self = .deepseek
+        case .xai: self = .xai
         }
     }
 }
@@ -64,6 +88,12 @@ enum TranslationEngineKind: String, Codable, Sendable, Equatable {
     case google
     case deepl
     case openrouter
+    case openai
+    case anthropic
+    case moonshot
+    case zai
+    case deepseek
+    case xai
 
     /// nil for Apple: the live Apple identity depends on the OS's strategy
     /// probe (high fidelity vs fast), never on the picker selection.
@@ -73,6 +103,12 @@ enum TranslationEngineKind: String, Codable, Sendable, Equatable {
         case .google: self = .google
         case .deepl: self = .deepl
         case .openrouter: self = .openrouter
+        case .openai: self = .openai
+        case .anthropic: self = .anthropic
+        case .moonshot: self = .moonshot
+        case .zai: self = .zai
+        case .deepseek: self = .deepseek
+        case .xai: self = .xai
         }
     }
 
@@ -84,6 +120,12 @@ enum TranslationEngineKind: String, Codable, Sendable, Equatable {
         case .google: .google
         case .deepl: .deepL(.unknown)
         case .openrouter: .openRouter
+        case .openai: .openAI
+        case .anthropic: .anthropic
+        case .moonshot: .moonshot
+        case .zai: .zai
+        case .deepseek: .deepSeek
+        case .xai: .xAI
         }
     }
 

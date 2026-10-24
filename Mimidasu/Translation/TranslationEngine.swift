@@ -25,6 +25,10 @@ enum TranslationEngineError: Error, Equatable, Sendable {
     case badResponse(String)
     case network
     case cancelled
+    /// The provider rejected the model or the fast-mode reasoning fields.
+    /// Non-transient: the ladder must not spend retries on it, and the Apple
+    /// fallback must not latch until the compatible retry also fails.
+    case invalidConfiguration(String)
 }
 
 /// A batch translation engine behind `TranslationQueue` — the seam that lets

@@ -2,21 +2,23 @@ import SwiftUI
 
 /// The API key card: per-provider key entry (straight to the Keychain on
 /// save, never held beyond the field), an opaque dot mask for a saved key
-/// with Remove/Test actions, and the OpenRouter model field. Shown for
-/// external providers — the selected one, or a pending (not yet configured)
-/// one being set up. Saving a key auto-runs a connection test; a successful
-/// test (auto or via the Test button) selects the provider and activates its
-/// engine immediately.
+/// with Remove/Test actions, and the model field for chat-model providers.
+/// Shown for external providers — the selected one, or a pending (not yet
+/// configured) one being set up. Saving a key auto-runs a connection test; a
+/// successful test (auto or via the Test button) selects the provider and
+/// activates its engine immediately.
 struct SettingsKeyCard: View {
     var model: AppModel
     @Bindable var settings: TranslationSettings
     let provider: TranslationProvider
     @Binding var keyDraft: String
     @Binding var keySaveFailed: Bool
-    /// Edit buffer for the OpenRouter model field. The stored model only
-    /// changes on Save, so an abandoned edit never reaches the engine.
+    /// Edit buffer for the provider's model field. The stored model only
+    /// changes after a successful probe, so an abandoned edit never reaches
+    /// the engine.
     @Binding var modelDraft: String
     @State private var isTestingConnection = false
+    @State private var isTestingModel = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -28,7 +30,7 @@ struct SettingsKeyCard: View {
             } else {
                 keyEntryRows()
             }
-            if provider == .openrouter {
+            if provider.isLLM {
                 modelField
             }
         }
@@ -98,32 +100,57 @@ struct SettingsKeyCard: View {
         }
     }
 
-    // MARK: - OpenRouter model
+    // MARK: - Model
 
     private var modelField: some View {
         VStack(alignment: .leading, spacing: 7) {
             settingsDivider()
             KickerLabel("MODEL", color: Palette.label, size: 9.5)
             HStack(spacing: 8) {
-                TextField("tencent/hy-mt2-30b-a3b", text: $modelDraft)
+                TextField(provider.defaultModel, text: $modelDraft)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(Palette.primaryText)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
                     .settingsFieldBackground()
-                // Save commits the draft and re-attaches the engine so a
-                // changed model takes effect on a live session; an uncommitted
-                // edit never reaches the engine. Disabled while the draft
-                // matches the stored model.
+                if isTestingModel {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("Testing…")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.secondaryText)
+                        .fixedSize()
+                }
+                // Save probes the draft through the real request path before
+                // committing it; a failed probe records its result and leaves
+                // both the stored model and the attached engine untouched.
+                // Disabled while the draft matches the stored model or while
+                // a probe is running.
                 SettingsPill(
                     label: "Save", prominent: true,
-                    isEnabled: modelDraft != settings.openRouterModel
+                    isEnabled: !isTestingModel && modelDraft != settings.model(for: provider)
                 ) {
-                    settings.openRouterModel = modelDraft
-                    model.translationProviderDidChange()
+                    saveModelDraft(for: provider)
                 }
             }
+            if !settings.hasKey(for: provider) {
+                connectionStatus(provider)
+            }
+        }
+    }
+
+    private func saveModelDraft(for provider: TranslationProvider) {
+        guard !isTestingModel else { return }
+        let draft = modelDraft
+        isTestingModel = true
+        Task {
+            let verified = await model.verifyModel(draft, for: provider)
+            isTestingModel = false
+            guard verified else { return }
+            settings.setModel(draft, for: provider)
+            // Re-attach so a committed model takes effect on a live session.
+            model.translationProviderDidChange()
         }
     }
 

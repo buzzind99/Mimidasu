@@ -326,8 +326,8 @@ extension RetranslateCoordinator {
         switch engine {
         case .session, .appleFast, .appleHighFidelity:
             settings.selectRetranslate(engine)
-        case .google, .deepl, .openrouter:
-            guard let provider = engine.provider else { return }
+        case let selection:
+            guard let provider = selection.provider else { return }
             // Same invariant as `verifyAndSelect`: a selection is not raised
             // while another disclosure intent is held — the raise would
             // clobber it and swap the presented sheet's content mid-flight.

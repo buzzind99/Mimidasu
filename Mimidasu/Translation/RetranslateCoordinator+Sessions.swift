@@ -53,7 +53,7 @@ extension RetranslateCoordinator {
             retranslateHifiConfigTarget == target ? retranslateHifiSessionEngine : nil
         case .appleFast:
             retranslateConfigTarget == target ? retranslateSessionEngine : nil
-        case .google, .deepl, .openrouter:
+        default:
             nil
         }
     }
@@ -85,7 +85,7 @@ extension RetranslateCoordinator {
                 retranslateHifiConfig, highFidelity: true, target: target
             )
             retranslateHifiConfigTarget = target
-        case .google, .deepl, .openrouter:
+        default:
             break // externals build their engine at click time; no session
         }
     }

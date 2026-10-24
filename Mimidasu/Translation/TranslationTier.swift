@@ -20,6 +20,18 @@ enum TranslationTier: Equatable, Sendable {
     case deepL(DeepLTier)
     /// OpenRouter.
     case openRouter
+    /// OpenAI.
+    case openAI
+    /// Anthropic.
+    case anthropic
+    /// Moonshot.
+    case moonshot
+    /// Z.ai (GLM).
+    case zai
+    /// DeepSeek.
+    case deepSeek
+    /// xAI.
+    case xAI
 
     /// The DeepL subscription tier. `.unknown` while no key is stored — the
     /// tier cannot be known until one is.
@@ -39,6 +51,12 @@ enum TranslationTier: Equatable, Sendable {
         case .deepL(.free): "DeepL (Free)"
         case .deepL(.pro): "DeepL (Pro)"
         case .openRouter: "OpenRouter"
+        case .openAI: "OpenAI"
+        case .anthropic: "Anthropic"
+        case .moonshot: "Moonshot"
+        case .zai: "Z.ai"
+        case .deepSeek: "DeepSeek"
+        case .xAI: "xAI"
         }
     }
 }

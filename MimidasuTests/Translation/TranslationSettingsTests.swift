@@ -293,7 +293,7 @@ struct TranslationSettingsTests {
         try settings.saveKey("sk-openrouter", for: .openrouter)
         settings.select(.openrouter)
 
-        #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenRouter · \(OpenRouterEngine.defaultModel) → \(target)")
+        #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenRouter · \(TranslationProvider.openrouter.defaultModel) → \(target)")
 
         settings.openRouterModel = "tencent/hy-mt2-30b-a3b"
 
@@ -312,11 +312,11 @@ struct TranslationSettingsTests {
         )
     }
 
-    @Test("effective OpenRouter model falls back to the engine default when empty")
+    @Test("effective OpenRouter model falls back to the catalog default when empty")
     func effectiveOpenRouterModelFallsBackToDefault() {
         let (settings, _) = makeSUT()
 
-        #expect(settings.effectiveOpenRouterModel == OpenRouterEngine.defaultModel)
+        #expect(settings.effectiveOpenRouterModel == TranslationProvider.openrouter.defaultModel)
 
         settings.openRouterModel = "custom/model"
         #expect(settings.effectiveOpenRouterModel == "custom/model")
@@ -404,7 +404,11 @@ struct TranslationSettingsTests {
     /// locks them (and the picker labels) against accidental renames.
     @Test("provider raw values and display names stay stable")
     func providerIdentityAndDisplayNames() {
-        #expect(TranslationProvider.allCases.map(\.id) == ["apple", "google", "deepl", "openrouter"])
+        let expectedIDs = [
+            "apple", "google", "deepl", "openrouter", "openai",
+            "anthropic", "moonshot", "zai", "deepseek", "xai"
+        ]
+        #expect(TranslationProvider.allCases.map(\.id) == expectedIDs)
         #expect(TranslationProvider.apple.displayName == "Apple (NMT)")
         #expect(TranslationProvider.google.displayName == "Google Translate")
         #expect(TranslationProvider.deepl.displayName == "DeepL")
@@ -496,5 +500,133 @@ struct TranslationSettingsTests {
         let (settings, _) = makeSUT(defaults: defaults)
 
         #expect(settings.testResult(for: .google) == nil)
+    }
+}
+
+// MARK: - Per-provider models and compatible modes
+
+@MainActor
+extension TranslationSettingsTests {
+    @Test("per-provider model overrides persist across instances")
+    func perProviderModelsPersist() {
+        let (first, defaults) = makeSUT()
+        first.setModel("gpt-custom", for: .openai)
+        let (second, _) = makeSUT(defaults: defaults)
+        #expect(second.model(for: .openai) == "gpt-custom")
+        #expect(second.effectiveModel(for: .openai) == "gpt-custom")
+        #expect(second.model(for: .openrouter).isEmpty)
+    }
+
+    @Test("an empty stored model resolves to the catalog default")
+    func emptyStoredModelResolvesToCatalogDefault() {
+        let (settings, _) = makeSUT()
+        #expect(settings.model(for: .openai).isEmpty)
+        #expect(settings.effectiveModel(for: .openai) == TranslationProvider.openai.defaultModel)
+        #expect(settings.effectiveModel(for: .openai) == LLMProviderCatalog.spec(for: .openai)?.defaultModel)
+    }
+
+    @Test("a legacy OpenRouter model migrates to the per-provider key once")
+    func legacyOpenRouterModelMigratesOnce() throws {
+        let suiteName = "test.TranslationSettings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.set("legacy/model", forKey: "translation.openRouterModel")
+
+        let (first, _) = makeSUT(defaults: defaults)
+        #expect(first.model(for: .openrouter) == "legacy/model")
+        #expect(first.effectiveModel(for: .openrouter) == "legacy/model")
+        #expect(defaults.string(forKey: "translation.openRouterModel") == nil)
+        #expect(defaults.string(forKey: "translation.model.openrouter") == "legacy/model")
+
+        let (second, _) = makeSUT(defaults: defaults)
+        #expect(second.model(for: .openrouter) == "legacy/model")
+        #expect(defaults.string(forKey: "translation.openRouterModel") == nil)
+    }
+
+    @Test("openRouterModel aliases the per-provider value")
+    func openRouterModelAliasesPerProviderValue() {
+        let (settings, _) = makeSUT()
+        settings.openRouterModel = "custom/router"
+        #expect(settings.model(for: .openrouter) == "custom/router")
+        settings.setModel("another/router", for: .openrouter)
+        #expect(settings.openRouterModel == "another/router")
+    }
+
+    @Test("removing a key clears the provider's compatible-mode cache")
+    func removingKeyClearsCompatibleMode() throws {
+        let (settings, _) = makeSUT()
+        try settings.saveKey("sk-openai-1234", for: .openai)
+        settings.setCompatibleMode(for: .openai, model: settings.effectiveModel(for: .openai))
+        #expect(settings.isCompatibleMode(for: .openai))
+
+        settings.removeKey(for: .openai)
+
+        #expect(settings.compatibleModes[.openai] == nil)
+        #expect(!settings.isCompatibleMode(for: .openai))
+    }
+
+    @Test("changing the effective model retires a compatible-mode cache for the old model")
+    func changingEffectiveModelRetiresCompatibleMode() {
+        let (settings, defaults) = makeSUT()
+        settings.setModel("old/model", for: .openai)
+        settings.setCompatibleMode(for: .openai, model: "old/model")
+        #expect(settings.isCompatibleMode(for: .openai))
+
+        settings.setModel("new/model", for: .openai)
+
+        #expect(settings.compatibleModes[.openai] == nil)
+        #expect(!settings.isCompatibleMode(for: .openai))
+        #expect(defaults.string(forKey: "translation.compatibleMode.openai") == nil)
+    }
+
+    @Test("a compatible mode recorded for the new effective model survives the change")
+    func compatibleModeRecordedBeforeModelPersists() {
+        let (settings, _) = makeSUT()
+
+        // The probe can land before the model override is saved.
+        settings.setCompatibleMode(for: .openai, model: "new/model")
+        settings.setModel("new/model", for: .openai)
+
+        #expect(settings.isCompatibleMode(for: .openai))
+    }
+
+    @Test("a persisted compatible mode loads back")
+    func persistedCompatibleModeLoads() {
+        let (first, defaults) = makeSUT()
+        first.setCompatibleMode(for: .openai, model: first.effectiveModel(for: .openai))
+
+        let (second, _) = makeSUT(defaults: defaults)
+
+        #expect(second.compatibleModes[.openai] == second.effectiveModel(for: .openai))
+        #expect(second.isCompatibleMode(for: .openai))
+        #expect(
+            defaults.string(forKey: "translation.compatibleMode.openai")
+                == second.effectiveModel(for: .openai)
+        )
+    }
+
+    @Test("removing the selected provider's key also clears its test result")
+    func removingSelectedProviderKeyClearsTestResult() throws {
+        let (settings, _) = makeSUT()
+        try settings.saveKey("sk-openai-9999", for: .openai)
+        settings.select(.openai)
+        settings.setTestResult(.success, for: .openai)
+        settings.setCompatibleMode(for: .openai, model: settings.effectiveModel(for: .openai))
+
+        settings.removeKey(for: .openai)
+
+        #expect(settings.selectedProvider == .apple)
+        #expect(settings.testResult(for: .openai) == nil)
+        #expect(!settings.isCompatibleMode(for: .openai))
+    }
+
+    @Test("an LLM provider's description names its effective model")
+    func llmProviderDescriptionNamesEffectiveModel() throws {
+        let (settings, _) = makeSUT()
+        let target = TargetLanguage.english.displayName
+        try settings.saveKey("sk-openai", for: .openai)
+        settings.select(.openai)
+        #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenAI · \(TranslationProvider.openai.defaultModel) → \(target)")
+        settings.setModel("gpt-custom", for: .openai)
+        #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenAI · gpt-custom → \(target)")
     }
 }
