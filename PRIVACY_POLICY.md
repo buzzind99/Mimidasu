@@ -47,7 +47,7 @@ The download is verified against a pinned checksum before use.
   finalized transcript **text sentences only** (no audio) are sent over
   HTTPS **directly from your device to that provider** to be translated.
   The developer receives none of it. The app asks for your explicit
-  confirmation the first time you enable a cloud provider. Before enabling
+  confirmation each time you switch to a cloud provider. Before enabling
   one, please review that provider's privacy policy:
   - Google Cloud Privacy Notice: https://cloud.google.com/terms/cloud-privacy-notice
   - DeepL Privacy Policy: https://www.deepl.com/privacy
