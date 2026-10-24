@@ -1,6 +1,6 @@
 # Mimidasu Privacy Policy
 
-**Effective date: September 19, 2026**
+**Effective date: October 23, 2026**
 
 Mimidasu is a macOS application that transcribes Japanese system audio in real
 time and translates it to English. It is designed so that your data stays
@@ -42,8 +42,9 @@ The download is verified against a pinned checksum before use.
   language packs from Apple; that transfer is between your device and Apple
   under Apple's privacy policy.
 - Optionally, you can connect a cloud translation provider — Google
-  Translate, DeepL, or OpenRouter — using **your own API key**. When you
-  do, finalized transcript **text sentences only** (no audio) are sent over
+  Translate, DeepL, OpenRouter, OpenAI, Anthropic, Moonshot, Z.ai
+  (GLM), DeepSeek, or xAI — using **your own API key**. When you do,
+  finalized transcript **text sentences only** (no audio) are sent over
   HTTPS **directly from your device to that provider** to be translated.
   The developer receives none of it. The app asks for your explicit
   confirmation the first time you enable a cloud provider. Before enabling
@@ -51,6 +52,12 @@ The download is verified against a pinned checksum before use.
   - Google Cloud Privacy Notice: https://cloud.google.com/terms/cloud-privacy-notice
   - DeepL Privacy Policy: https://www.deepl.com/privacy
   - OpenRouter Privacy Policy: https://openrouter.ai/privacy
+  - OpenAI Privacy Policy: https://openai.com/policies/privacy-policy/
+  - Anthropic Privacy Policy: https://www.anthropic.com/legal/privacy
+  - Moonshot Privacy Policy: https://platform.moonshot.ai/docs/agreement/userprivacy
+  - Z.ai Privacy Policy: https://docs.z.ai/legal-agreement/privacy-policy
+  - DeepSeek Privacy Policy: https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html
+  - xAI Privacy Policy: https://x.ai/legal/privacy-policy
 - Your provider API key is stored in your Mac's **Keychain** on your
   device. It is shared only with the provider you chose, as
   authentication, and is never transmitted to the developer or to any
