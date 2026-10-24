@@ -8,8 +8,11 @@ enum TranslationEngineFactory {
     ///   - model: the user's override; empty resolves to the catalog default.
     ///   - compatibleMode: seeds the engine's fast-mode downgrade memory for
     ///     the provider+effective model.
+    ///   - onCompatibleModeLearned: called once when an LLM engine first
+    ///     discovers the reasoning-free shape is required; the owner persists
+    ///     it for future engines.
     /// - Returns: nil for Apple (served by the `.translationTask` host) and
-    ///   for a provider with no catalog entry.
+    ///   for a provider that has no catalog entry.
     static func make(
         provider: TranslationProvider,
         key: String,
@@ -17,7 +20,8 @@ enum TranslationEngineFactory {
         target: TargetLanguage,
         transport: HTTPTranslationTransport?,
         ladder: TransientRetryLadder? = nil,
-        compatibleMode: Bool = false
+        compatibleMode: Bool = false,
+        onCompatibleModeLearned: (@Sendable () async -> Void)? = nil
     ) -> (any TranslationEngine)? {
         switch provider {
         case .apple:
@@ -38,39 +42,41 @@ enum TranslationEngineFactory {
             )
         case .openrouter, .openai, .anthropic, .moonshot, .zai, .deepseek, .xai:
             guard let spec = LLMProviderCatalog.spec(for: provider) else { return nil }
-            let effectiveModel = model.isEmpty ? spec.defaultModel : model
-            let options = LLMReasoningPolicy.options(
-                for: provider, model: effectiveModel
-            )
+            let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedModel = trimmedModel.isEmpty ? spec.defaultModel : trimmedModel
+            let options = LLMReasoningPolicy.options(for: provider, model: resolvedModel)
+            let effectiveLadder = ladder ?? TransientRetryLadder(retriesBadResponse: true)
             let client: any LLMChatClient = switch spec.api {
             case .chatCompletions:
                 ChatCompletionsClient(
                     config: ChatCompletionsClient.Config(
                         endpoint: spec.endpoint,
                         headers: ["Authorization": "Bearer \(key)"],
-                        model: effectiveModel,
+                        model: resolvedModel,
                         options: options,
                         treatClientErrorsAsConfiguration: provider != .openrouter
                     ),
                     transport: transport,
-                    ladder: ladder ?? TransientRetryLadder(retriesBadResponse: true)
+                    ladder: effectiveLadder
                 )
             case .anthropicMessages:
                 AnthropicMessagesClient(
                     config: AnthropicMessagesClient.Config(
                         endpoint: spec.endpoint,
                         apiKey: key,
-                        model: effectiveModel,
+                        model: resolvedModel,
                         options: options
                     ),
                     transport: transport,
-                    ladder: ladder ?? TransientRetryLadder(retriesBadResponse: true)
+                    ladder: effectiveLadder
                 )
             }
             return LLMTranslationEngine(
                 target: target,
                 client: client,
-                compatibleMode: compatibleMode
+                compatibleMode: compatibleMode,
+                transientBadResponse: effectiveLadder.retriesBadResponse,
+                onCompatibleModeLearned: onCompatibleModeLearned
             )
         }
     }

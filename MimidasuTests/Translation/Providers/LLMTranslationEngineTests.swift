@@ -570,28 +570,6 @@ extension LLMTranslationEngineTests {
 // MARK: - Raw client paths
 
 extension LLMTranslationEngineTests {
-    @Test("the generic decode path transports and decodes inside the ladder")
-    func genericDecodePath() async throws {
-        let script = Script(handler: Self.okContent("hello"))
-        let client = ChatCompletionsClient(
-            config: ChatCompletionsClient.Config(
-                endpoint: Self.endpoint,
-                headers: ["Authorization": "Bearer \(Self.apiKey)"],
-                model: "test/model"
-            ),
-            transport: makeTransport(script: script),
-            ladder: TransientRetryLadder(retriesBadResponse: true, sleep: { _ in })
-        )
-
-        let content = try await client.complete(
-            LLMTranslationPrompt.messages(for: "こんにちは"),
-            decode: { data in try ChatCompletionsClient.content(of: data) }
-        )
-
-        #expect(content == "hello")
-        #expect(script.requestCount == 1)
-    }
-
     @Test("thinking and output_config options are encoded when present")
     func encodesThinkingAndOutputConfig() async throws {
         let script = Script(handler: Self.okContent("hello"))

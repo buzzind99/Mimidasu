@@ -174,10 +174,19 @@ extension AppModel {
         translationSession.providerDidChange()
     }
 
+    /// Marks a new provider-row click and returns its token, so an earlier
+    /// in-flight key probe cannot stage a selection the user superseded.
+    @discardableResult
+    func noteTranslationProviderIntent() -> Int {
+        translationSession.noteProviderIntent()
+    }
+
     /// Verifies a provider's stored key, then applies the selection on
-    /// success. Returns whether the key verified.
-    func verifyAndSelectTranslationProvider(_ provider: TranslationProvider) async -> Bool {
-        await translationSession.verifyAndSelect(provider)
+    /// success. `intent` is the token captured synchronously by the click.
+    func verifyAndSelectTranslationProvider(
+        _ provider: TranslationProvider, intent: Int? = nil
+    ) async -> ProviderVerificationOutcome {
+        await translationSession.verifyAndSelect(provider, intent: intent)
     }
 
     /// Probes a draft model without persisting it, selecting its provider,

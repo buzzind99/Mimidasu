@@ -290,7 +290,7 @@ extension View {
 
 /// Small bold uppercase kicker label used above sidebar cards, settings
 /// cards, and the dictionary card. Defaults to the main-window secondary
-/// text; settings surfaces pass `Palette.label`, and the OpenRouter model
+/// text; settings surfaces pass `Palette.label`, and the provider model
 /// field uses the 9.5pt variant.
 struct KickerLabel: View {
     let text: String

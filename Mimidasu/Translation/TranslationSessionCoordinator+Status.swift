@@ -18,7 +18,7 @@ extension TranslationSessionCoordinator {
     func handleStatus(_ status: TranslationStatus) {
         translationStatus = status
         reconcileToasts(status)
-        guard case let .unavailable(_, severity) = status else { return }
+        guard case let .unavailable(message, severity) = status else { return }
         guard activeTranslationEngine == .external, !translationFallbackActive else {
             // No engine swap follows this failure, so nothing will ever
             // service the backlog: Apple itself failed (a language pack that
@@ -39,8 +39,11 @@ extension TranslationSessionCoordinator {
         }
         // The one branch a fresh engine follows, so the backlog (and every
         // marker on it) survives: latching Apple replays `pending` onto it.
+        // The failure reason rides along — the unavailable card is replaced
+        // by the fallback card in the same pass, so this is the user's only
+        // explanation of why the cloud engine stopped.
         translationFallbackActive = true
-        fallBackToApple(severity: severity)
+        fallBackToApple(severity: severity, reason: message)
     }
 
     /// Posts/clears the translation toasts on state change (post on entry,
@@ -92,13 +95,18 @@ extension TranslationSessionCoordinator {
     /// The one-way latch: once on Apple for the rest of the session (no
     /// periodic re-probing). Publishes `.degraded` so the footer explains the
     /// switch; the fresh Apple run publishes `.ready` over it once flowing.
-    private func fallBackToApple(severity: TranslationFailureSeverity) {
+    private func fallBackToApple(
+        severity: TranslationFailureSeverity, reason: String
+    ) {
         activeTranslationEngine = .apple
         activeExternalProvider = nil
         // The body is prose, not a tier name: it explains the switch to the
         // user, so it keeps its own wording rather than borrowing the
-        // canonical tier vocabulary.
-        translationStatus = .degraded("External translation failed — using Apple on-device", severity)
+        // canonical tier vocabulary. The provider's failure reason is kept
+        // because the unavailable card it came from is dismissed here.
+        translationStatus = .degraded(
+            "External translation failed — using Apple on-device. \(reason)", severity
+        )
         reconcileToasts(translationStatus)
         refreshConfig()
         // Unlike an explicit Apple activation, this re-fires only the live

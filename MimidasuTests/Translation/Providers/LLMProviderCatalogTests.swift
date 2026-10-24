@@ -3,7 +3,7 @@ import Foundation
 import Testing
 
 /// Tests the catalog facts for chat-model providers: which providers have an
-/// entry, the endpoint and default model each one pins, and the auth scheme
+/// entry, the endpoint and default model each one pins, and the wire protocol
 /// its client uses.
 @Suite("LLMProviderCatalog")
 struct LLMProviderCatalogTests {
@@ -95,21 +95,21 @@ struct LLMProviderCatalogTests {
         #expect(spec?.defaultModel != "deepseek-v4.1-flash")
     }
 
-    // MARK: - Auth scheme
+    // MARK: - Wire protocol
 
-    @Test("every provider uses bearer auth except Anthropic")
-    func authSchemePerProvider() throws {
+    @Test("every provider uses chat completions except Anthropic")
+    func apiPerProvider() throws {
         for provider in TranslationProvider.allCases where provider.isLLM {
             let spec = try #require(LLMProviderCatalog.spec(for: provider))
             if provider == .anthropic {
                 #expect(
-                    isAnthropicAuth(spec.auth),
-                    "Anthropic should use its native auth scheme"
+                    spec.api == .anthropicMessages,
+                    "Anthropic should use the native Messages API"
                 )
             } else {
                 #expect(
-                    isBearerAuth(spec.auth),
-                    "\(provider.rawValue) should use bearer auth"
+                    spec.api == .chatCompletions,
+                    "\(provider.rawValue) should use chat completions"
                 )
             }
         }
@@ -150,21 +150,5 @@ struct LLMProviderCatalogTests {
         )
 
         #expect(engine == nil)
-    }
-
-    // MARK: - Helpers
-
-    private func isBearerAuth(_ auth: LLMProviderSpec.Auth) -> Bool {
-        if case .bearer = auth {
-            return true
-        }
-        return false
-    }
-
-    private func isAnthropicAuth(_ auth: LLMProviderSpec.Auth) -> Bool {
-        if case .anthropic = auth {
-            return true
-        }
-        return false
     }
 }

@@ -11,7 +11,7 @@ import Foundation
 struct TargetLanguage: Hashable, Sendable, Identifiable, Codable {
     /// BCP-47 identifier, e.g. "en", "zh-Hans". The persisted representation.
     let code: String
-    /// English name, used verbatim in the OpenRouter system prompt
+    /// English name, used verbatim in the LLM system prompt
     /// ("English", "Simplified Chinese").
     let englishName: String
     /// Google Translate v2 target code (defaults to `code`; the Chinese

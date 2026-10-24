@@ -429,11 +429,16 @@ struct ArchiveTranslationEnginePicker: View {
                     .font(.system(size: 10.5))
                     .foregroundStyle(Theme.secondaryText)
             }
-            VStack(spacing: 2) {
-                ForEach(engineOptions, id: \.rawValue) { engine in
-                    engineRow(engine)
+            // The engine list grows with the provider catalog; cap it so the
+            // picker never runs off the screen.
+            ScrollView(.vertical) {
+                VStack(spacing: 2) {
+                    ForEach(engineOptions, id: \.rawValue) { engine in
+                        engineRow(engine)
+                    }
                 }
             }
+            .frame(maxHeight: 360)
             Rectangle()
                 .fill(Theme.divider)
                 .frame(height: 1)

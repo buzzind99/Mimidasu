@@ -145,6 +145,16 @@ struct TranslationQueueErrorCopyTests {
             transport: nil
         )
         #expect(openRouterEngine?.transientBadResponse == true)
+
+        let fixedLadderEngine = TranslationEngineFactory.make(
+            provider: .openai,
+            key: "k",
+            model: "m",
+            target: .english,
+            transport: nil,
+            ladder: TransientRetryLadder(retriesBadResponse: false)
+        )
+        #expect(fixedLadderEngine?.transientBadResponse == false)
         #expect(!GoogleTranslateEngine(apiKey: "k").transientBadResponse)
         #expect(!DeepLEngine(apiKey: "k").transientBadResponse)
     }

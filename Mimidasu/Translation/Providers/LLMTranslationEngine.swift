@@ -7,17 +7,20 @@ import Synchronization
 /// past recognition errors. Parsing is defensive and runs inside the
 /// client's ladder; malformed output is retried as `.badResponse`.
 ///
-/// The engine remembers a compatible-mode downgrade for its provider+model:
-/// once the client had to drop the fast-mode fields, later sentences go out
-/// without them from the first attempt.
+/// The engine remembers a compatible-mode downgrade for its lifetime: once
+/// the client had to drop the fast-mode fields, later sentences go out
+/// without them from the first attempt. `onCompatibleModeLearned` lets the
+/// owner persist that fact for future engines (keyed by provider+model).
 struct LLMTranslationEngine: TranslationEngine {
     /// Long numbered lists degrade LLM adherence and translation quality;
     /// the queue slices every batch to one sentence.
     let preferredBatchSize = 1
 
     /// LLM replies are nondeterministic: `.badResponse` is a transient
-    /// (retryable) failure, matching the ladder's `retriesBadResponse: true`.
-    let transientBadResponse = true
+    /// (retryable) failure when the client's ladder retries it. The factory
+    /// derives this from the injected ladder so the queue's severity matches
+    /// the engine's actual retry posture.
+    let transientBadResponse: Bool
 
     var onRetry: (@Sendable (RetryProgress) -> Void)?
 
@@ -28,13 +31,22 @@ struct LLMTranslationEngine: TranslationEngine {
 
     private let modeState: CompatibleModeState
 
+    /// Fires once when this engine first discovers that the provider+model
+    /// needs the reasoning-free shape. The owner persists it for later
+    /// engines; nil means this engine is only a probe.
+    private let onCompatibleModeLearned: (@Sendable () async -> Void)?
+
     init(
         target: TargetLanguage,
         client: any LLMChatClient,
-        compatibleMode: Bool = false
+        compatibleMode: Bool = false,
+        transientBadResponse: Bool = true,
+        onCompatibleModeLearned: (@Sendable () async -> Void)? = nil
     ) {
         self.target = target
         self.client = client
+        self.transientBadResponse = transientBadResponse
+        self.onCompatibleModeLearned = onCompatibleModeLearned
         modeState = CompatibleModeState(compatibleMode: compatibleMode)
     }
 
@@ -50,12 +62,26 @@ struct LLMTranslationEngine: TranslationEngine {
         var results: [String] = []
         results.reserveCapacity(texts.count)
         for text in texts {
-            let reply = try await client.complete(
-                LLMTranslationPrompt.messages(for: text, target: target),
-                compatibleMode: modeState.isCompatible,
-                onRetry: onRetry
-            )
-            modeState.record(reply.usedCompatibleMode)
+            let reply: LLMReply
+            do {
+                reply = try await client.complete(
+                    LLMTranslationPrompt.messages(for: text, target: target),
+                    compatibleMode: modeState.isCompatible,
+                    onRetry: onRetry
+                )
+            } catch let error as TranslationEngineError {
+                // Terminal configuration rejection: the field-free retry was
+                // rejected, or no retry was possible (already compatible /
+                // nothing to strip), so later sentences send only the
+                // field-free shape.
+                if case .invalidConfiguration = error {
+                    modeState.rememberTerminalConfigurationFailure()
+                }
+                throw error
+            }
+            if modeState.record(reply.usedCompatibleMode) {
+                await onCompatibleModeLearned?()
+            }
             results.append(reply.text)
         }
         return results
@@ -81,9 +107,23 @@ private final class CompatibleModeState: Sendable {
         observedCompatibleMode.withLock { observed in observed }
     }
 
-    func record(_ usedCompatibleMode: Bool) {
-        guard usedCompatibleMode else { return }
-        compatibleMode.withLock { stored in stored = true }
+    /// Records a successful reasoning-free retry. Returns true only for the
+    /// first transition, so the owner persists the discovery once.
+    func record(_ usedCompatibleMode: Bool) -> Bool {
+        guard usedCompatibleMode else { return false }
+        let newlyLearned = compatibleMode.withLock { stored -> Bool in
+            guard !stored else { return false }
+            stored = true
+            return true
+        }
         observedCompatibleMode.withLock { observed in observed = true }
+        return newlyLearned
+    }
+
+    /// The field-free retry was rejected as configuration: stop sending the
+    /// fast-mode fields for the rest of this engine's life, without claiming
+    /// a successful downgrade.
+    func rememberTerminalConfigurationFailure() {
+        compatibleMode.withLock { stored in stored = true }
     }
 }

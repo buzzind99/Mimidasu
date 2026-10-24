@@ -11,6 +11,29 @@ enum ActiveTranslationEngine: Equatable {
     case external
 }
 
+/// Outcome of a provider key verification + selection attempt. A superseded
+/// probe is not a failure: Settings must not open the key card for a click
+/// the user already replaced.
+enum ProviderVerificationOutcome: Equatable, Sendable {
+    /// The key verified and the selection was applied (or held for the
+    /// cloud disclosure).
+    case verified
+
+    /// The key probe failed; its test result is recorded.
+    case failed
+
+    /// A newer intent or credential change voided the probe; no selection
+    /// changed. A credential/sequence-superseded probe recorded nothing,
+    /// while an intent-superseded probe may already have recorded its
+    /// status-row result (the recording is for the credential, not the
+    /// click).
+    case superseded
+
+    var didVerify: Bool {
+        self == .verified
+    }
+}
+
 /// The window that raised an archive bulk-run disclosure. The intent is
 /// staged and confirmed within that window, so each window presents only its
 /// own intents and clears only its own intents on a pane boundary.
@@ -111,6 +134,15 @@ final class TranslationSessionCoordinator {
     /// disclosure is pending. Shared with the re-translate lane, whose
     /// external engine selections are held here too.
     var providerAwaitingDisclosure: PendingCloudDisclosure?
+
+    /// Monotonic token for provider-row clicks. A probe completion whose
+    /// generation moved can no longer stage a selection the user superseded.
+    private var providerIntentGeneration = 0
+
+    /// Per-provider probe sequence. A completion whose sequence moved was
+    /// superseded by a later probe for the same provider and must not write
+    /// its test result or compatible-mode evidence over the newer one.
+    private var probeSequences: [TranslationProvider: Int] = [:]
 
     /// The spawned external-engine worker (`queue.run(with:)`). Apple runs
     /// belong to SwiftUI's `.translationTask` instead. Torn down on stop and
@@ -262,6 +294,16 @@ extension TranslationSessionCoordinator {
         reengage()
     }
 
+    /// Marks a new provider-row intent and returns the token the caller must
+    /// pass back to `verifyAndSelect`. Called synchronously by the row action
+    /// so a slow probe started by an earlier click cannot stage a selection
+    /// after the user has moved on (Apple included).
+    @discardableResult
+    func noteProviderIntent() -> Int {
+        providerIntentGeneration &+= 1
+        return providerIntentGeneration
+    }
+
     /// Verifies a provider's stored key (`verifyKey`), then applies the
     /// selection on success — SettingsView's `.onChange(of: selectedProvider)`
     /// re-attaches the engine — unless it's already selected, in which case the
@@ -273,69 +315,133 @@ extension TranslationSessionCoordinator {
     /// provider. A switch is not raised while another intent is already
     /// held: the raise would clobber it and swap the presented sheet's
     /// content mid-flight, so the switch is simply not offered — the user
-    /// re-clicks once the held intent resolves. Returns whether the key
-    /// verified.
-    func verifyAndSelect(_ provider: TranslationProvider) async -> Bool {
-        guard await verifyKey(for: provider) else { return false }
+    /// re-clicks once the held intent resolves.
+    /// - Parameter intent: the row-click token captured by the caller. Nil
+    ///   captures the current token at entry (the Test button, which is not
+    ///   a row selection).
+    func verifyAndSelect(
+        _ provider: TranslationProvider, intent: Int? = nil
+    ) async -> ProviderVerificationOutcome {
+        let generation = intent ?? providerIntentGeneration
+        let verification = await verifyKey(for: provider)
+        // Failures are reported regardless of intent generation: callers
+        // read the per-provider test-result slot, which belongs to the
+        // credential, not the click.
+        guard verification == .verified else { return verification }
+        // The generation clause covers later intents (row clicks,
+        // confirm/decline, selection changes, window events); the hasKey
+        // clause is defense-in-depth, because key removal mid-probe is
+        // normally caught inside `verifyKey`'s `isCurrent` key-equality
+        // check.
+        guard generation == providerIntentGeneration,
+              settings.hasKey(for: provider)
+        else { return .superseded }
         if settings.selectedProvider == provider {
             // Already selected: a re-test, not a switch — re-attach directly.
             providerDidChange()
         } else if provider.isExternal {
-            guard providerAwaitingDisclosure == nil else { return true }
+            guard providerAwaitingDisclosure == nil else { return .verified }
             providerAwaitingDisclosure = .providerSwitch(provider)
         } else {
             settings.select(provider)
         }
-        return true
+        return .verified
+    }
+
+    /// A probe that needed the reasoning-free shape caches it; one that
+    /// succeeded in fast mode clears a stale entry naming the same model, so
+    /// a provider that starts accepting the fast shape stops paying for the
+    /// downgrade on every new engine.
+    private func recordProbeOutcome(
+        _ downgraded: Bool, provider: TranslationProvider, model: String
+    ) {
+        if downgraded {
+            settings.setCompatibleMode(for: provider, model: model)
+        } else {
+            settings.clearCompatibleMode(for: provider, ifModelMatches: model)
+        }
+    }
+
+    /// Identity of one in-flight probe: the provider sequence it belongs to
+    /// and the credential it exercised.
+    private struct ProbeToken {
+        let sequence: Int
+        let key: String
+    }
+
+    /// Starts a probe for `provider`, superseding any earlier one. The
+    /// captured key makes a completion after a key swap stale even when no
+    /// newer probe was started for the provider.
+    private func beginProbe(
+        for provider: TranslationProvider, key: String
+    ) -> ProbeToken {
+        let sequence = (probeSequences[provider] ?? 0) &+ 1
+        probeSequences[provider] = sequence
+        return ProbeToken(sequence: sequence, key: key)
+    }
+
+    /// Whether a probe still describes the provider's current credential and
+    /// has not been superseded by a later probe.
+    private func isCurrent(
+        _ probe: ProbeToken, for provider: TranslationProvider
+    ) -> Bool {
+        probeSequences[provider] == probe.sequence
+            && settings.key(for: provider) == probe.key
     }
 
     /// Probes a provider's stored key with its current effective model and
     /// records the outcome for the inline status row (`ConnectionTestResult`).
     /// A reported compatible-mode downgrade is cached for that effective
     /// model so later engine attachments skip the rejected request shape.
-    /// Returns whether the key verified.
-    private func verifyKey(for provider: TranslationProvider) async -> Bool {
+    /// A superseded probe records nothing and reports `.superseded`.
+    private func verifyKey(
+        for provider: TranslationProvider
+    ) async -> ProviderVerificationOutcome {
         guard let key = settings.key(for: provider) else {
             settings.setTestResult(.failure("No API key configured"), for: provider)
-            return false
+            return .failed
         }
         let model = settings.effectiveModel(for: provider)
+        let probe = beginProbe(for: provider, key: key)
         do {
             let downgraded = try await TranslationConnectionTester.test(
                 provider: provider, key: key, model: model,
                 target: settings.targetLanguage, transport: transport
             )
-            if downgraded {
-                settings.setCompatibleMode(for: provider, model: model)
-            }
+            guard isCurrent(probe, for: provider) else { return .superseded }
+            recordProbeOutcome(downgraded, provider: provider, model: model)
         } catch {
+            guard isCurrent(probe, for: provider) else { return .superseded }
             settings.setTestResult(.failure(error.statusMessage), for: provider)
-            return false
+            return .failed
         }
         settings.setTestResult(.success, for: provider)
-        return true
+        return .verified
     }
 
     /// Probes a draft model against the provider's stored key and records the
     /// outcome for the inline status row, without persisting the draft,
-    /// selecting the provider, or re-attaching an engine. An empty draft
-    /// resolves to the provider's catalog default before probing and before
-    /// keying the compatible-mode cache. Returns whether the model verified.
+    /// selecting the provider, or re-attaching an engine. An empty (or
+    /// whitespace-only) draft resolves to the provider's catalog default
+    /// before probing and before keying the compatible-mode cache. Returns
+    /// whether the model verified.
     func verifyModel(_ draft: String, for provider: TranslationProvider) async -> Bool {
         guard let key = settings.key(for: provider) else {
             settings.setTestResult(.failure("No API key configured"), for: provider)
             return false
         }
-        let model = draft.isEmpty ? provider.defaultModel : draft
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = trimmed.isEmpty ? provider.defaultModel : trimmed
+        let probe = beginProbe(for: provider, key: key)
         do {
             let downgraded = try await TranslationConnectionTester.test(
                 provider: provider, key: key, model: model,
                 target: settings.targetLanguage, transport: transport
             )
-            if downgraded {
-                settings.setCompatibleMode(for: provider, model: model)
-            }
+            guard isCurrent(probe, for: provider) else { return false }
+            recordProbeOutcome(downgraded, provider: provider, model: model)
         } catch {
+            guard isCurrent(probe, for: provider) else { return false }
             settings.setTestResult(.failure(error.statusMessage), for: provider)
             return false
         }
@@ -353,6 +459,9 @@ extension TranslationSessionCoordinator {
     /// select the newer provider (a consent mismatch).
     func confirmDisclosure(_ presented: PendingCloudDisclosure) {
         guard providerAwaitingDisclosure == presented else { return }
+        // The user resolved the sheet; any probe still airborne belongs to an
+        // earlier intent and must not re-stage the same selection.
+        providerIntentGeneration &+= 1
         switch presented {
         case let .providerSwitch(provider):
             providerAwaitingDisclosure = nil
@@ -380,6 +489,9 @@ extension TranslationSessionCoordinator {
     /// next switch (provider or re-translate engine) raises the disclosure
     /// again.
     func declineDisclosure() {
+        // A declined intent is resolved: an older probe still airborne must
+        // not raise the same sheet again.
+        providerIntentGeneration &+= 1
         providerAwaitingDisclosure = nil
     }
 
@@ -387,23 +499,29 @@ extension TranslationSessionCoordinator {
     /// or has no usable key (Apple is served by the `.translationTask` host
     /// in `activate`; the unconfigured edge falls back to Apple with a note
     /// there). The factory resolves the provider's effective model and seeds
-    /// the compatible-mode memory; the target threads into every engine:
-    /// the LLM prompt names it, Google/DeepL map it to their wire codes. No
-    /// retry hook is wired — the activation path attaches `onRetry` after
-    /// building; the re-translate lane leaves it nil.
+    /// the compatible-mode memory; a newly learned downgrade is persisted for
+    /// later engines. The target threads into every engine: the LLM prompt
+    /// names it, Google/DeepL map it to their wire codes. No retry hook is
+    /// wired — the activation path attaches `onRetry` after building; the
+    /// re-translate lane leaves it nil.
     func makeExternalEngine(
         for provider: TranslationProvider, target: TargetLanguage
     ) -> (any TranslationEngine)? {
         guard provider.isExternal, let key = settings.key(for: provider) else {
             return nil
         }
+        let model = settings.effectiveModel(for: provider)
+        let settings = settings
         return TranslationEngineFactory.make(
             provider: provider,
             key: key,
-            model: settings.effectiveModel(for: provider),
+            model: model,
             target: target,
             transport: transport,
-            compatibleMode: settings.isCompatibleMode(for: provider)
+            compatibleMode: settings.isCompatibleMode(for: provider),
+            onCompatibleModeLearned: { [weak settings] in
+                await settings?.recordLiveCompatibleMode(for: provider, model: model, probedKey: key)
+            }
         )
     }
 

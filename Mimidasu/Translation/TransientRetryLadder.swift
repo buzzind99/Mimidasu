@@ -4,16 +4,16 @@ import Foundation
 /// exponential backoff (0.5 s → 2 s), `Retry-After` respected when the
 /// transport surfaced one (already capped at 10 s by the transport).
 ///
-/// Non-transient errors (`invalidKey`, `quotaExceeded`, `badResponse`,
-/// `cancelled`) and exhausted retries rethrow the original error untouched —
-/// `CancellationError` in particular must reach `TranslationQueue` so a torn
-/// down run lands on `.idle`, not `.unavailable`.
+/// Non-transient errors (`invalidKey`, `quotaExceeded`, `invalidConfiguration`,
+/// `badResponse`, `cancelled`) and exhausted retries rethrow the original
+/// error untouched — `CancellationError` in particular must reach
+/// `TranslationQueue` so a torn down run lands on `.idle`, not `.unavailable`.
 ///
 /// `.badResponse` is non-transient by default: for fixed-contract APIs
 /// (Google, DeepL) a malformed envelope is deterministic and retrying is
-/// pointless. Chat-completions engines opt in via `retriesBadResponse` — LLM
-/// output is nondeterministic, and a rambling or empty reply usually fixes
-/// itself on re-ask.
+/// pointless. LLM engines (chat-completions and Anthropic Messages) opt in
+/// via `retriesBadResponse` — LLM output is nondeterministic, and a rambling
+/// or empty reply usually fixes itself on re-ask.
 struct TransientRetryLadder: Sendable {
     let retries: Int
     let backoffs: [Duration]

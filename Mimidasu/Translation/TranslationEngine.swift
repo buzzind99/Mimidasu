@@ -32,9 +32,9 @@ enum TranslationEngineError: Error, Equatable, Sendable {
 }
 
 /// A batch translation engine behind `TranslationQueue` — the seam that lets
-/// Apple on-device, Google, DeepL, and OpenRouter slot in behind one worker
-/// loop. Conformers must be safe to call from any task; the queue serializes
-/// calls, so engines never see concurrent `translate` invocations.
+/// Apple on-device and every cloud provider slot in behind one worker loop.
+/// Conformers must be safe to call from any task; the queue serializes calls,
+/// so engines never see concurrent `translate` invocations.
 protocol TranslationEngine: Sendable {
     /// Upper bound on how many sentences the queue batches into one
     /// `translate` call (long batches degrade small LLMs; cloud APIs cap

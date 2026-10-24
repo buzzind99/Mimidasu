@@ -150,9 +150,9 @@ final class AppModel {
     let notices = NoticeCenter()
     let translationQueue = TranslationQueue()
     /// Non-secret translation provider settings (selected provider, hasKey
-    /// flags, OpenRouter model, test results, target language). Keys stay in
-    /// `SecureKeyStoring` and are read on demand (engine construction,
-    /// connection tests).
+    /// flags, per-provider model overrides, test results, target language).
+    /// Keys stay in `SecureKeyStoring` and are read on demand (engine
+    /// construction, connection tests).
     let translationSettings: TranslationSettings
     /// Runtime-discovered translation-target catalog (`LanguageAvailability`
     /// probe), refreshed by Settings on open; the TARGET LANGUAGE picker

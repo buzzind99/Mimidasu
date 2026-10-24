@@ -23,7 +23,7 @@ struct HTTPTranslationTransport: Sendable {
 
     /// - Parameters:
     ///   - timeout: per-provider request timeout (Google/DeepL 15 s,
-    ///     OpenRouter 30 s).
+    ///     LLM providers 30 s).
     ///   - configuration: injectable `URLSession` stack; production uses
     ///     `.default`. Ignored when `perform` is supplied. Tests inject a
     ///     `protocolClasses` stub to drive the real `URLSession` round-trip
@@ -82,6 +82,10 @@ struct HTTPTranslationTransport: Sendable {
             throw CancellationError()
         } catch let urlError as URLError where urlError.code == .cancelled {
             throw CancellationError()
+        } catch let engineError as TranslationEngineError {
+            // The default round-trip raises `.badResponse` for a non-HTTP
+            // response; keep that taxonomy instead of relabeling it `.network`.
+            throw engineError
         } catch {
             throw TranslationEngineError.network
         }

@@ -480,8 +480,9 @@ final class TranslationQueue {
         }
     }
 
-    /// Classifies a failure for the toast system. `.invalidKey` /
-    /// `.quotaExceeded` are fixed-contract permanent; `.badResponse` follows
+    /// Classifies a failure for the toast system. `.invalidKey`,
+    /// `.quotaExceeded`, and `.invalidConfiguration` are fixed-contract
+    /// permanent; `.badResponse` follows
     /// the engine (`transientBadResponse` — LLM output may improve on
     /// re-ask, a fixed-contract API never does); everything the ladder
     /// treats as retryable is transient. Note: "transient" here means a

@@ -172,7 +172,11 @@ struct AppModelTranslationEngineTests {
         #expect(model.translationConfig != nil, "the Apple host must be re-activated")
         #expect(
             model.translationStatus
-                == .degraded("External translation failed — using Apple on-device", .permanent)
+                == .degraded(
+                    "External translation failed — using Apple on-device. "
+                        + "Invalid API key. Check the key in Settings, then reconnect.",
+                    .permanent
+                )
         )
         // The degraded card carries the Reconnect affordance; it must survive
         // the fresh Apple run's `.ready` while the latch is active.
@@ -412,7 +416,7 @@ extension AppModelTranslationEngineTests {
 
         let verified = await model.verifyAndSelectTranslationProvider(.openrouter)
 
-        #expect(verified)
+        #expect(verified.didVerify)
         #expect(settings.testResult(for: .openrouter) == .success)
         #expect(settings.selectedProvider == .google, "the switch waits for the disclosure")
         #expect(model.providerAwaitingDisclosure == .providerSwitch(.openrouter))
@@ -450,7 +454,7 @@ extension AppModelTranslationEngineTests {
 
         let verified = await model.verifyAndSelectTranslationProvider(.apple)
 
-        #expect(verified)
+        #expect(verified.didVerify)
         #expect(settings.selectedProvider == .apple, "the selection applies immediately")
         #expect(model.providerAwaitingDisclosure == nil, "on-device needs no disclosure")
 
@@ -474,7 +478,7 @@ extension AppModelTranslationEngineTests {
 
         let verified = await model.verifyAndSelectTranslationProvider(.google)
 
-        #expect(!verified)
+        #expect(verified == .failed)
         #expect(settings.selectedProvider == .openrouter, "the selection stays put")
         #expect(settings.testResult(for: .google) == .failure("Invalid API key"))
         #expect(model.activeExternalProvider == .openrouter, "the active engine is untouched")
@@ -489,7 +493,7 @@ extension AppModelTranslationEngineTests {
 
         let verified = await model.verifyAndSelectTranslationProvider(.deepl)
 
-        #expect(!verified)
+        #expect(verified == .failed)
         #expect(settings.testResult(for: .deepl) == .failure("No API key configured"))
         #expect(settings.selectedProvider == .apple, "the selection never moved")
     }
@@ -517,7 +521,7 @@ extension AppModelTranslationEngineTests {
         model.phase = .running
         let verified = await model.verifyAndSelectTranslationProvider(.openrouter)
 
-        #expect(verified)
+        #expect(verified.didVerify)
         #expect(settings.testResult(for: .openrouter) == .success)
         #expect(!model.translationFallbackActive, "re-engagement re-arms the latch")
         #expect(model.activeTranslationEngine == .external)
@@ -618,11 +622,14 @@ extension AppModelTranslationEngineTests {
         #expect(await pollUntil { model.translationStatus == .ready })
         model.phase = .running
 
-        let verified = await model.verifyModel("gpt-6-luna", for: .openai)
+        let verified = await model.verifyModel("gpt-6-sol", for: .openai)
 
         #expect(verified)
         #expect(settings.model(for: .openai).isEmpty, "the probe does not persist the draft")
-        #expect(settings.isCompatibleMode(for: .openai), "the downgrade is cached for the resolved draft")
+        #expect(
+            settings.compatibleModes[.openai] == "gpt-6-sol",
+            "the downgrade is cached under the resolved draft, not the provider default"
+        )
         #expect(settings.selectedProvider == .google, "the selection waits for the caller")
         #expect(model.activeExternalProvider == .google, "the probe does not re-attach")
         #expect(attempts.withLock { count in count } == 2)
@@ -630,11 +637,11 @@ extension AppModelTranslationEngineTests {
         // The key card commits the verified draft, then the settings observer
         // re-attaches. The cached downgrade makes the new engine skip the
         // rejected fast-mode fields on its first request.
-        settings.setModel("gpt-6-luna", for: .openai)
+        settings.setModel("gpt-6-sol", for: .openai)
         settings.select(.openai)
         model.translationProviderDidChange()
 
-        #expect(settings.model(for: .openai) == "gpt-6-luna")
+        #expect(settings.model(for: .openai) == "gpt-6-sol")
         #expect(model.activeTranslationEngine == .external)
         #expect(model.activeExternalProvider == .openai)
 
@@ -644,7 +651,7 @@ extension AppModelTranslationEngineTests {
         let body = try #require(bodies.withLock { log in log.last })
         let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
         let object = try #require(json)
-        #expect(object["model"] as? String == "gpt-6-luna", "the re-attached engine issued the request")
+        #expect(object["model"] as? String == "gpt-6-sol", "the re-attached engine issued the request")
         #expect(object["reasoning_effort"] == nil, "the cached compatible mode seeds the re-attached engine")
 
         await stopTranslation(model)
@@ -683,7 +690,7 @@ extension AppModelTranslationEngineTests {
 
         let verified = await model.verifyAndSelectTranslationProvider(.openai)
 
-        #expect(verified)
+        #expect(verified.didVerify)
         #expect(settings.testResult(for: .openai) == .success)
         #expect(settings.isCompatibleMode(for: .openai))
         #expect(attempts.withLock { count in count } == 2)

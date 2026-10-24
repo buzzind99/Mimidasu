@@ -119,13 +119,18 @@ struct SettingsRetranslateCard: View {
     // MARK: - Options popover
 
     private var optionsMenu: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(engineOptions) { option in
-                optionCard(option)
+        // Every configured provider can be listed; a content-sized popover
+        // would run off smaller screens at full provider counts.
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(engineOptions) { option in
+                    optionCard(option)
+                }
             }
+            .padding(10)
         }
-        .padding(10)
         .frame(width: 300)
+        .frame(maxHeight: 420)
     }
 
     /// One option card: title over description, checkmarked while it is the

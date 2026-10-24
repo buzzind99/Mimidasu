@@ -154,8 +154,8 @@ final class TranslationSettings {
         didSet { defaults.set(selectedProvider.rawValue, forKey: Self.selectedKey) }
     }
 
-    /// Per-provider chat-model override, used verbatim in the request body.
-    /// An empty string means the provider's catalog default.
+    /// Per-provider chat-model override, stored trimmed. An empty string
+    /// means the provider's catalog default (see `effectiveModel(for:)`).
     private(set) var models: [TranslationProvider: String]
 
     /// Per-provider fast-mode downgrade memory (non-secret): the effective
@@ -282,8 +282,12 @@ final class TranslationSettings {
             if let raw = defaults.string(forKey: Self.testResultKey(provider)) {
                 testResults[provider] = Self.decodeTestResult(raw)
             }
-            loadedModels[provider] = defaults.string(forKey: Self.modelKey(provider)) ?? ""
-            loadedCompatibleModes[provider] = defaults.string(forKey: Self.compatibleModeKey(provider))
+            loadedModels[provider] = (defaults.string(forKey: Self.modelKey(provider)) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let storedMode = defaults.string(forKey: Self.compatibleModeKey(provider)) {
+                loadedCompatibleModes[provider] = storedMode
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
         }
         self.hasKey = hasKey
         self.keyHints = keyHints
@@ -304,9 +308,10 @@ final class TranslationSettings {
     /// the provider's compatible-mode memory unless that memory already
     /// names the new effective model.
     func setModel(_ model: String, for provider: TranslationProvider) {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
         let previousEffective = effectiveModel(for: provider)
-        models[provider] = model
-        defaults.set(model, forKey: Self.modelKey(provider))
+        models[provider] = trimmed
+        defaults.set(trimmed, forKey: Self.modelKey(provider))
         let newEffective = effectiveModel(for: provider)
         guard newEffective != previousEffective,
               compatibleModes[provider] != newEffective
@@ -315,9 +320,12 @@ final class TranslationSettings {
     }
 
     /// The model the engine actually sends: the stored override, or the
-    /// provider's catalog default when the override is empty.
+    /// provider's catalog default when the override is empty. Trimming here
+    /// keeps the wire model and the reasoning-policy match identical even for
+    /// a legacy value written before the field was normalized.
     func effectiveModel(for provider: TranslationProvider) -> String {
         let stored = model(for: provider)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         return stored.isEmpty ? provider.defaultModel : stored
     }
 
@@ -330,8 +338,23 @@ final class TranslationSettings {
     /// Records that `model` required the compatible (reasoning-free)
     /// request shape for `provider`. Persisted, non-secret.
     func setCompatibleMode(for provider: TranslationProvider, model: String) {
-        compatibleModes[provider] = model
-        defaults.set(model, forKey: Self.compatibleModeKey(provider))
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        compatibleModes[provider] = trimmed
+        defaults.set(trimmed, forKey: Self.compatibleModeKey(provider))
+    }
+
+    /// Persists a downgrade discovered by a live engine. The engine may
+    /// outlive the settings it was built from, so the fact only lands while
+    /// its captured credential is still stored and its model is still the
+    /// effective one — a late completion must not resurrect a removed cache
+    /// or clobber a newer entry after a key rotation.
+    func recordLiveCompatibleMode(
+        for provider: TranslationProvider, model: String, probedKey: String
+    ) {
+        guard key(for: provider) == probedKey,
+              effectiveModel(for: provider) == model
+        else { return }
+        setCompatibleMode(for: provider, model: model)
     }
 
     /// Removes the provider's compatible-mode memory.
@@ -340,11 +363,13 @@ final class TranslationSettings {
         defaults.removeObject(forKey: Self.compatibleModeKey(provider))
     }
 
-    /// OpenRouter's model override, kept as the single-provider alias over
-    /// the per-provider API.
-    var openRouterModel: String {
-        get { model(for: .openrouter) }
-        set { setModel(newValue, for: .openrouter) }
+    /// Removes the provider's compatible-mode memory only while it names
+    /// `model` — a fast-mode success is evidence for that model alone.
+    func clearCompatibleMode(
+        for provider: TranslationProvider, ifModelMatches model: String
+    ) {
+        guard compatibleModes[provider] == model else { return }
+        clearCompatibleMode(for: provider)
     }
 
     // MARK: - Key management
@@ -450,12 +475,6 @@ final class TranslationSettings {
     }
 
     // MARK: - "Currently using" row
-
-    /// The model the OpenRouter engine actually sends per request: the stored
-    /// override, or the catalog default when the field is left empty.
-    var effectiveOpenRouterModel: String {
-        effectiveModel(for: .openrouter)
-    }
 
     /// Truthful description of the engine currently in use, including the
     /// Apple-fallback latch ("DeepL (Free) — fallback active") and the

@@ -27,6 +27,25 @@ struct AppModelTranslationForwardingTests {
         return model
     }
 
+    @Test("provider intent and lane-factory forwarders write through")
+    func providerIntentAndFactoryForward() async {
+        let model = await makeModel()
+
+        let firstIntent = model.noteTranslationProviderIntent()
+        let secondIntent = model.noteTranslationProviderIntent()
+        #expect(secondIntent > firstIntent, "each row click gets a new token")
+
+        model.retranslateEngineFactory = { _, _ in nil }
+        #expect(
+            model.retranslate.retranslateEngineFactory != nil,
+            "the AppModel setter reaches the coordinator"
+        )
+        #expect(
+            model.retranslateEngineFactory?(.openai, .english) == nil,
+            "the AppModel getter returns the coordinator's factory"
+        )
+    }
+
     @Test("a coordinator-side status change propagates through the AppModel forwarder")
     func statusForwarderPropagates() async {
         let model = await makeModel()

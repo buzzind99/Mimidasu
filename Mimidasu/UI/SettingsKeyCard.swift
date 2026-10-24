@@ -5,8 +5,9 @@ import SwiftUI
 /// with Remove/Test actions, and the model field for chat-model providers.
 /// Shown for external providers — the selected one, or a pending (not yet
 /// configured) one being set up. Saving a key auto-runs a connection test; a
-/// successful test (auto or via the Test button) selects the provider and
-/// activates its engine immediately.
+/// successful test (auto or via the Test button) selects the provider,
+/// subject to the cloud disclosure, and activates its engine once the
+/// selection applies.
 struct SettingsKeyCard: View {
     var model: AppModel
     @Bindable var settings: TranslationSettings
@@ -54,7 +55,9 @@ struct SettingsKeyCard: View {
                 settings.removeKey(for: provider)
                 keyDraft = ""
             }
-            SettingsPill(label: "Test", isEnabled: !isTestingConnection) {
+            // The model and key probes share the provider's probe sequence,
+            // so the card runs one at a time.
+            SettingsPill(label: "Test", isEnabled: !isTestingConnection && !isTestingModel) {
                 runConnectionTest(for: provider)
             }
         }
@@ -114,6 +117,10 @@ struct SettingsKeyCard: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
                     .settingsFieldBackground()
+                    // The probe commits the draft it started with; editing
+                    // mid-flight would leave the field and stored model
+                    // describing different values.
+                    .disabled(isTestingModel)
                 if isTestingModel {
                     ProgressView()
                         .controlSize(.mini)
@@ -125,31 +132,53 @@ struct SettingsKeyCard: View {
                 // Save probes the draft through the real request path before
                 // committing it; a failed probe records its result and leaves
                 // both the stored model and the attached engine untouched.
-                // Disabled while the draft matches the stored model or while
-                // a probe is running.
+                // Disabled while the draft matches the stored model, while
+                // its own probe is running, or while the other probe is
+                // running.
                 SettingsPill(
                     label: "Save", prominent: true,
-                    isEnabled: !isTestingModel && modelDraft != settings.model(for: provider)
+                    isEnabled: settings.hasKey(for: provider)
+                        && !isTestingModel
+                        && !isTestingConnection
+                        && trimmedModelDraft != settings.model(for: provider)
                 ) {
                     saveModelDraft(for: provider)
                 }
             }
             if !settings.hasKey(for: provider) {
-                connectionStatus(provider)
+                Text("Save an API key to test and store a model.")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Palette.mutedText)
             }
         }
     }
 
+    private var trimmedModelDraft: String {
+        modelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private func saveModelDraft(for provider: TranslationProvider) {
-        guard !isTestingModel else { return }
-        let draft = modelDraft
+        guard !isTestingModel, !isTestingConnection, settings.hasKey(for: provider) else { return }
+        let draft = trimmedModelDraft
         isTestingModel = true
         Task {
             let verified = await model.verifyModel(draft, for: provider)
             isTestingModel = false
-            guard verified else { return }
+            // A completion must describe the field the user still sees: the
+            // key can disappear (or the window can reopen and reset the card)
+            // while the probe is airborne.
+            guard verified,
+                  trimmedModelDraft == draft,
+                  settings.hasKey(for: provider)
+            else { return }
+            let previousEffective = settings.effectiveModel(for: provider)
             settings.setModel(draft, for: provider)
-            // Re-attach so a committed model takes effect on a live session.
+            // Re-attach only when the saved provider is the attached one and
+            // the effective model actually changed. Editing another provider's
+            // card must not tear down the live engine or the retranslate lane.
+            guard provider == settings.selectedProvider,
+                  settings.effectiveModel(for: provider) != previousEffective
+            else { return }
             model.translationProviderDidChange()
         }
     }
@@ -189,6 +218,10 @@ struct SettingsKeyCard: View {
     }
 
     private func runConnectionTest(for provider: TranslationProvider) {
+        guard !isTestingConnection, !isTestingModel else { return }
+        // A test is a later provider action: an airborne row probe for an
+        // older intent must not stage its selection afterwards.
+        model.noteTranslationProviderIntent()
         isTestingConnection = true
         Task {
             // Probe + result recording + select-on-success live on `AppModel`,

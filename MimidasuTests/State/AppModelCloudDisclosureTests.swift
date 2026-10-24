@@ -81,7 +81,7 @@ struct AppModelCloudDisclosureTests {
 
         let verified = await model.verifyAndSelectTranslationProvider(.openrouter)
 
-        #expect(verified)
+        #expect(verified.didVerify)
         #expect(settings.testResult(for: .openrouter) == .success)
         #expect(settings.selectedProvider == .apple, "the selection is held")
         #expect(model.providerAwaitingDisclosure == .providerSwitch(.openrouter))
@@ -180,7 +180,7 @@ struct AppModelCloudDisclosureTests {
 
         let verified = await model.verifyAndSelectTranslationProvider(.openrouter)
 
-        #expect(verified)
+        #expect(verified.didVerify)
         #expect(settings.testResult(for: .openrouter) == .success)
         #expect(
             model.providerAwaitingDisclosure == .retranslateEngine(.deepl),
@@ -215,7 +215,7 @@ struct AppModelCloudDisclosureTests {
 
         let verified = await model.verifyAndSelectTranslationProvider(.openrouter)
 
-        #expect(verified)
+        #expect(verified.didVerify)
         #expect(model.providerAwaitingDisclosure == .providerSwitch(.openrouter), "the disclosure re-arms")
         #expect(settings.selectedProvider == .apple)
 

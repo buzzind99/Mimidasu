@@ -3,7 +3,8 @@ import Foundation
 /// Settings "Test" button actions, per provider. Every external provider runs
 /// a minimal one-sentence translation through the same factory path the live
 /// engine uses (cheap, exercises the real request shape). Probes run with
-/// zero transient retries so a failed test settles in a single round-trip.
+/// zero transient retries; an LLM probe may still issue the one-shot
+/// compatible (reasoning-free) request when the fast shape is rejected.
 /// Outcomes land in `TranslationSettings` and render inline.
 enum TranslationConnectionTester {
     /// - Parameters:
@@ -25,16 +26,21 @@ enum TranslationConnectionTester {
         transport: HTTPTranslationTransport? = nil
     ) async throws(TranslationEngineError) -> Bool {
         guard provider.isExternal else { return false }
-        // The factory is total for external providers: every one has a
-        // catalog spec, and Apple is the only nil case above.
-        let engine = TranslationEngineFactory.make(
+        // Apple is the only provider the factory serves nil for today, but a
+        // future external without a catalog entry must fail the probe, not
+        // crash Settings.
+        guard let engine = TranslationEngineFactory.make(
             provider: provider,
             key: key,
             model: model,
             target: target,
             transport: transport,
             ladder: TransientRetryLadder(retries: 0, retriesBadResponse: false)
-        )!
+        ) else {
+            throw TranslationEngineError.invalidConfiguration(
+                "No translation engine is available for \(provider.displayName)."
+            )
+        }
 
         let translations: [String]
         do {

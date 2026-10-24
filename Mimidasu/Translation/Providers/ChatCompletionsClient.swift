@@ -6,8 +6,6 @@ import Foundation
 /// envelope, error mapping, retry ladder, and the one-shot compatible
 /// fallback when a provider rejects the fast-mode fields.
 struct ChatCompletionsClient: LLMChatClient {
-    typealias Message = LLMChatMessage
-
     /// Everything that varies between OpenAI-compatible providers.
     struct Config: Sendable {
         let endpoint: URL
@@ -90,27 +88,6 @@ struct ChatCompletionsClient: LLMChatClient {
         }
     }
 
-    /// One chat completion, decoded by the caller's closure *inside* the
-    /// retry ladder — decode failures share the transient-retry budget with
-    /// the transport round-trip. Chat-completions providers return
-    /// nondeterministic LLM output, so this client's default ladder retries
-    /// `.badResponse` (fixed-contract callers can inject a plain ladder).
-    func complete<T: Sendable>(
-        _ messages: [Message],
-        decode: @escaping @Sendable (Data) throws -> T,
-        onRetry: (@Sendable (RetryProgress) -> Void)? = nil
-    ) async throws -> T {
-        let request = try makeRequest(messages: messages, options: config.options)
-        do {
-            return try await ladder.run({
-                let data = try await transport.send(request, classify: classifier)
-                return try decode(data)
-            }, onRetry: onRetry)
-        } catch let failure as HTTPTranslationTransport.Failure {
-            throw failure.engineError
-        }
-    }
-
     private func perform(
         messages: [LLMChatMessage],
         options: LLMRequestOptions,
@@ -153,13 +130,17 @@ struct ChatCompletionsClient: LLMChatClient {
     // MARK: - Response decoding
 
     /// Extracts the assistant message content from the chat-completions
-    /// envelope — the first step of `decode` for engines that parse the reply
-    /// themselves.
+    /// envelope before the shared lenient parse runs.
     static func content(of data: Data) throws -> String {
         do {
             let response = try JSONDecoder().decode(ChatCompletionsResponse.self, from: data)
-            guard let content = response.choices.first?.message.content else {
+            guard !response.choices.isEmpty else {
                 throw TranslationEngineError.badResponse("Response contained no choices")
+            }
+            guard let content = response.choices[0].message.content else {
+                throw TranslationEngineError.badResponse(
+                    "Response contained no message content"
+                )
             }
             return content
         } catch let error as TranslationEngineError {
