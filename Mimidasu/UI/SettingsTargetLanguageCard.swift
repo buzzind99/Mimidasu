@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// TARGET LANGUAGE settings card: rows come from the runtime-discovered
-/// Apple catalog (`LanguageAvailability` probed by
-/// `AppleTranslationAvailability`), the selection is restart-only — the
+/// TARGET LANGUAGE settings card: a two-column grid of language cards comes
+/// from the runtime-discovered Apple catalog (`LanguageAvailability` probed by
+/// `AppleTranslationAvailability`). The selection is restart-only — the
 /// control is disabled while a session is live and a new target applies at
 /// the next session start — and the footer explains the OS-dependent set.
 struct SettingsTargetLanguageCard: View {
@@ -11,21 +11,22 @@ struct SettingsTargetLanguageCard: View {
     /// A non-English pick held until the English-only dictionary notice is
     /// acknowledged; "Understood" completes the selection.
     @State private var awaitingNotice: TargetLanguage?
-    /// Horizontal inset shared by the row bands and the dividers so every
-    /// band edge and line end aligns.
-    private static let bandInset: CGFloat = 14
-    /// Fixed row height so the scroll viewport can stop exactly on a row
+    /// Fixed card height so the scroll viewport can stop exactly on a card
     /// boundary instead of cutting a partial row.
-    private static let rowHeight: CGFloat = 38
-    /// Full rows shown before the rest scrolls; the rest of the OS-dependent
-    /// catalog scrolls inside the card.
-    private static let visibleRowCount = 5
+    private static let cardHeight: CGFloat = 58
+    /// Gap between cards, both between the two columns and between rows.
+    private static let cardSpacing: CGFloat = 6
+    /// Full card rows shown before the rest scrolls; the rest of the
+    /// OS-dependent catalog scrolls inside the card.
+    private static let visibleRowCount = 4
 
-    /// Exact scroll-viewport height: `min(count, visibleRowCount)` rows plus
-    /// the hairlines between them, so no partial row is ever visible.
-    private static func viewportHeight(rowCount: Int) -> CGFloat {
-        let visible = min(rowCount, visibleRowCount)
-        return CGFloat(visible) * rowHeight + CGFloat(max(visible - 1, 0))
+    /// Exact scroll-viewport height: `min(rows, visibleRowCount)` card rows
+    /// plus the gaps between them, so no partial row is ever visible.
+    private static func viewportHeight(cardCount: Int) -> CGFloat {
+        let rows = (cardCount + 1) / 2
+        let visible = min(rows, visibleRowCount)
+        return CGFloat(visible) * cardHeight
+            + CGFloat(max(visible - 1, 0)) * cardSpacing
     }
 
     init(model: AppModel, settings: TranslationSettings) {
@@ -53,18 +54,20 @@ struct SettingsTargetLanguageCard: View {
                         .foregroundStyle(Palette.mutedText)
                 } else {
                     ScrollView(.vertical) {
-                        VStack(spacing: 0) {
-                            let targets = model.appleTranslationAvailability.targets
-                            ForEach(targets) { target in
-                                row(target)
-                                if target != targets.last {
-                                    settingsDivider().padding(.horizontal, Self.bandInset)
-                                }
+                        LazyVGrid(
+                            columns: [
+                                GridItem(.flexible(), spacing: Self.cardSpacing),
+                                GridItem(.flexible())
+                            ],
+                            spacing: Self.cardSpacing
+                        ) {
+                            ForEach(model.appleTranslationAvailability.targets) { target in
+                                card(target)
                             }
                         }
                     }
                     .frame(height: Self.viewportHeight(
-                        rowCount: model.appleTranslationAvailability.targets.count
+                        cardCount: model.appleTranslationAvailability.targets.count
                     ))
                     // Inert while a session is live: wheel events over the
                     // list scroll the enclosing settings window instead.
@@ -104,7 +107,7 @@ struct SettingsTargetLanguageCard: View {
         return count == 1 ? "1 language" : "\(count) languages"
     }
 
-    private func row(_ target: TargetLanguage) -> some View {
+    private func card(_ target: TargetLanguage) -> some View {
         let selected = settings.targetLanguage == target
         return Button {
             guard !selected else { return }
@@ -116,68 +119,75 @@ struct SettingsTargetLanguageCard: View {
                 awaitingNotice = target
             }
         } label: {
-            HStack(spacing: 10) {
-                Text(target.nativeName)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Palette.primaryText)
-                    .lineLimit(1)
-                // English/international name in grey beside the native
-                // name ("Deutsch German"); hidden when the two coincide.
-                if target.nativeName != target.englishName {
-                    Text(target.englishName)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Palette.secondaryText)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 12)
-                Text(LanguageBadge.code(for: target.code))
-                    .font(.system(size: 9.5, weight: .bold))
-                    .tracking(0.5)
-                    .foregroundStyle(selected ? Palette.accent : Palette.secondaryText)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(selected ? Palette.accent.opacity(0.14) : Palette.pillFill)
-                    )
-                if selected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 15))
-                        .foregroundStyle(Palette.accent)
-                }
-            }
-            .padding(.horizontal, Self.bandInset + 12)
-            .frame(height: Self.rowHeight)
-            .background {
-                if selected {
-                    RowBand(inset: Self.bandInset)
-                        .fill(Palette.accent.opacity(0.12))
-                }
-            }
-            .contentShape(Rectangle())
+            cardLabel(target, selected: selected)
         }
         .buttonStyle(.plain)
         .disabled(sessionIsLive)
         .hoverHighlight(
-            RowBand(inset: Self.bandInset),
+            RoundedRectangle(cornerRadius: 9, style: .continuous),
             isEnabled: !selected,
             tint: Palette.primaryText, opacity: 0.05
         )
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
-}
 
-/// Square-cornered band behind a picker row (hover and selected): inset from
-/// the row's edges so it stops exactly at the divider lines.
-private struct RowBand: Shape {
-    var inset: CGFloat
+    private func cardLabel(_ target: TargetLanguage, selected: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            cardHeader(target, selected: selected)
+            Text(target.nativeName)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(Palette.primaryText)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            // The international name sits under the endonym; English has
+            // no second name, so it explains its role in the catalog.
+            Text(
+                target.nativeName == target.englishName
+                    ? "Default target" : target.englishName
+            )
+            .font(.system(size: 10))
+            .foregroundStyle(Palette.mutedText)
+            .lineLimit(1)
+            .truncationMode(.tail)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: Self.cardHeight)
+        .background {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(selected ? Palette.accent.opacity(0.12) : Color.clear)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(selected ? Palette.accent : Palette.divider)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
 
-    func path(in rect: CGRect) -> Path {
-        Path(CGRect(
-            x: rect.minX + inset,
-            y: rect.minY,
-            width: rect.width - inset * 2,
-            height: rect.height
-        ))
+    private func cardHeader(_ target: TargetLanguage, selected: Bool) -> some View {
+        HStack(spacing: 6) {
+            Text(LanguageBadge.code(for: target.code))
+                .font(.system(size: 8.5, weight: .bold))
+                .tracking(0.6)
+                .foregroundStyle(selected ? Palette.accent : Palette.secondaryText)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(
+                            selected
+                                ? Palette.accent.opacity(0.14)
+                                : Palette.pillFill
+                        )
+                )
+            Spacer(minLength: 4)
+            if selected {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.accent)
+            }
+        }
     }
 }
 
