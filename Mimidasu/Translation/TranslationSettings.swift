@@ -58,7 +58,12 @@ extension TranslationProvider {
         case .google: "g.circle.fill"
         case .deepl: "d.circle.fill"
         case .openrouter: "o.circle.fill"
-        case .openai, .anthropic, .moonshot, .zai, .deepseek, .xai: "sparkles"
+        case .openai: "o.circle.fill"
+        case .anthropic: "a.circle.fill"
+        case .moonshot: "m.circle.fill"
+        case .zai: "z.circle.fill"
+        case .deepseek: "d.circle.fill"
+        case .xai: "x.circle.fill"
         }
     }
 

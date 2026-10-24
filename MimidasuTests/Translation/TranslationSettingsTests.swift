@@ -421,6 +421,9 @@ struct TranslationSettingsTests {
         #expect(TranslationProvider.google.settingsIcon == "g.circle.fill")
         #expect(TranslationProvider.deepl.settingsIcon == "d.circle.fill")
         #expect(TranslationProvider.openrouter.settingsIcon == "o.circle.fill")
+        for provider in [TranslationProvider.openai, .anthropic, .moonshot, .zai, .deepseek, .xai] {
+            #expect(provider.settingsIcon == "\(provider.rawValue.prefix(1)).circle.fill")
+        }
         #expect(TranslationProvider.apple.settingsDetail(hasKey: false) == "On-device")
         #expect(TranslationProvider.google.settingsDetail(hasKey: false) == "External · API key")
         #expect(TranslationProvider.google.settingsDetail(hasKey: true) == "External · API key · Configured")
