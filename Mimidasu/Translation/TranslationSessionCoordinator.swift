@@ -398,7 +398,7 @@ extension TranslationSessionCoordinator {
         for provider: TranslationProvider
     ) async -> ProviderVerificationOutcome {
         guard let key = settings.key(for: provider) else {
-            settings.setTestResult(.failure("No API key configured"), for: provider)
+            settings.setTestResult(.failure("Connection failed"), for: provider)
             return .failed
         }
         let model = settings.effectiveModel(for: provider)
@@ -427,7 +427,7 @@ extension TranslationSessionCoordinator {
     /// whether the model verified.
     func verifyModel(_ draft: String, for provider: TranslationProvider) async -> Bool {
         guard let key = settings.key(for: provider) else {
-            settings.setTestResult(.failure("No API key configured"), for: provider)
+            settings.setTestResult(.failure("Connection failed"), for: provider)
             return false
         }
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -494,7 +494,7 @@ extension AppModelTranslationEngineTests {
         let verified = await model.verifyAndSelectTranslationProvider(.deepl)
 
         #expect(verified == .failed)
-        #expect(settings.testResult(for: .deepl) == .failure("No API key configured"))
+        #expect(settings.testResult(for: .deepl) == .failure("Connection failed"))
         #expect(settings.selectedProvider == .apple, "the selection never moved")
     }
 
@@ -665,7 +665,7 @@ extension AppModelTranslationEngineTests {
         let verified = await model.verifyModel("gpt-6-luna", for: .openai)
 
         #expect(!verified)
-        #expect(settings.testResult(for: .openai) == .failure("No API key configured"))
+        #expect(settings.testResult(for: .openai) == .failure("Connection failed"))
         #expect(settings.selectedProvider == .apple)
     }
 
