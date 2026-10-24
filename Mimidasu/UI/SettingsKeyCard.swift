@@ -64,7 +64,7 @@ struct SettingsKeyCard: View {
         HStack(spacing: 6) {
             connectionStatus(provider)
             Spacer()
-            Text("Key is stored securely in the Keychain and never written to disk.")
+            Text("Key is stored securely in the Keychain.")
                 .font(.system(size: 10))
                 .foregroundStyle(Palette.mutedText)
         }
@@ -96,7 +96,7 @@ struct SettingsKeyCard: View {
         } else {
             HStack(spacing: 6) {
                 Spacer()
-                Text("Key is stored securely in the Keychain and never written to disk.")
+                Text("Key is stored securely in the Keychain.")
                     .font(.system(size: 10.5))
                     .foregroundStyle(Palette.mutedText)
             }
