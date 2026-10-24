@@ -210,7 +210,9 @@ packaged apps in `Contents/Frameworks/`.
   DeepSeek, and xAI — **one sentence per request** with a plain-text prompt
   parsed leniently (no JSON contract). Both clients decode and parse inside
   the retry ladder, so malformed output shares the transient budget; the
-  engine owns ordering and the compatible-mode memory. Six speak
+  engine owns ordering and the compatible-mode memory. A downgrade first
+  seen by a live, lane, or archive engine is persisted for later engines,
+  and a probe that succeeds in fast mode clears a stale entry. Six speak
   OpenAI-compatible chat completions; Anthropic uses its native Messages API.
   `LLMProviderCatalog` is the source
   of truth for endpoints and default models; `LLMReasoningPolicy` is the pure
@@ -847,7 +849,8 @@ evolution; sentence `index` is stable and keys JP↔translation alignment.
 
 A translation entry may carry an optional `engine` field — the provider
 that produced it through the re-translate lane or an archive bulk run
-(`appleFast` / `appleHighFidelity` / `google` / `deepl` / `openrouter`;
+(`appleFast` / `appleHighFidelity` / `google` / `deepl` / `openrouter` /
+`openai` / `anthropic` / `moonshot` / `zai` / `deepseek` / `xai`;
 only Apple Intelligence is gated to macOS 26.4+ — the Apple (NMT) lane
 exists on every supported OS, and is a genuine alternate while an external
 provider is live). Live queue results never carry the field (absent = the
