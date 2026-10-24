@@ -67,16 +67,16 @@ extension TranslationProvider {
         }
     }
 
-    /// Supporting detail line under the provider name. Key-holding external
+    /// Supporting detail line under the provider name. Verified external
     /// providers append a "Configured" marker.
-    func settingsDetail(hasKey: Bool) -> String {
+    func settingsDetail(configured: Bool) -> String {
         switch self {
         case .apple:
             "On-device"
         case .google, .deepl:
-            hasKey ? "External · API key · Configured" : "External · API key"
+            configured ? "External · API key · Configured" : "External · API key"
         case .openrouter, .openai, .anthropic, .moonshot, .zai, .deepseek, .xai:
-            hasKey ? "External · API key + model · Configured" : "External · API key + model"
+            configured ? "External · API key + model · Configured" : "External · API key + model"
         }
     }
 
@@ -383,6 +383,13 @@ final class TranslationSettings {
         hasKey[provider] ?? false
     }
 
+    /// A provider is configured only once its stored key has passed the
+    /// connection probe. A key that was never probed or whose latest probe
+    /// failed reads as unconfigured even though it stays stored for retry.
+    func isConfigured(for provider: TranslationProvider) -> Bool {
+        hasKey(for: provider) && testResult(for: provider) == .success
+    }
+
     /// Last-4 hint shown after saving ("•••• ab12"). Nil when unconfigured.
     func keyHint(for provider: TranslationProvider) -> String? {
         keyHints[provider]
@@ -413,6 +420,8 @@ final class TranslationSettings {
         if provider == .deepl {
             deeplIsFreeTier = key.hasSuffix(":fx")
         }
+        // The new key starts unverified; its probe owns the configured status.
+        setTestResult(nil, for: provider)
     }
 
     /// Removes the key and its non-secret traces. Removing the selected

@@ -129,6 +129,7 @@ struct TranslationSettingsTests {
         #expect(settings.key(for: .google) == nil)
         #expect(settings.keyHint(for: .google) == nil)
         #expect(settings.testResult(for: .google) == nil)
+        #expect(!settings.isConfigured(for: .google))
     }
 
     @Test("removing the selected provider's key falls back to Apple")
@@ -424,13 +425,13 @@ struct TranslationSettingsTests {
         for provider in [TranslationProvider.openai, .anthropic, .moonshot, .zai, .deepseek, .xai] {
             #expect(provider.settingsIcon == "\(provider.rawValue.prefix(1)).circle.fill")
         }
-        #expect(TranslationProvider.apple.settingsDetail(hasKey: false) == "On-device")
-        #expect(TranslationProvider.google.settingsDetail(hasKey: false) == "External · API key")
-        #expect(TranslationProvider.google.settingsDetail(hasKey: true) == "External · API key · Configured")
-        #expect(TranslationProvider.deepl.settingsDetail(hasKey: false) == "External · API key")
-        #expect(TranslationProvider.deepl.settingsDetail(hasKey: true) == "External · API key · Configured")
-        #expect(TranslationProvider.openrouter.settingsDetail(hasKey: false) == "External · API key + model")
-        #expect(TranslationProvider.openrouter.settingsDetail(hasKey: true) == "External · API key + model · Configured")
+        #expect(TranslationProvider.apple.settingsDetail(configured: false) == "On-device")
+        #expect(TranslationProvider.google.settingsDetail(configured: false) == "External · API key")
+        #expect(TranslationProvider.google.settingsDetail(configured: true) == "External · API key · Configured")
+        #expect(TranslationProvider.deepl.settingsDetail(configured: false) == "External · API key")
+        #expect(TranslationProvider.deepl.settingsDetail(configured: true) == "External · API key · Configured")
+        #expect(TranslationProvider.openrouter.settingsDetail(configured: false) == "External · API key + model")
+        #expect(TranslationProvider.openrouter.settingsDetail(configured: true) == "External · API key + model · Configured")
         #expect(TranslationProvider.apple.settingsName(deepLTier: .unknown) == "Apple (NMT)")
         #expect(
             TranslationProvider.apple.settingsName(deepLTier: .unknown, appleHighFidelity: true)
@@ -725,5 +726,38 @@ extension TranslationSettingsTests {
         #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenAI · \(TranslationProvider.openai.defaultModel) → \(target)")
         settings.setModel("gpt-custom", for: .openai)
         #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenAI · gpt-custom → \(target)")
+    }
+}
+
+// MARK: - Configured status
+
+@MainActor
+extension TranslationSettingsTests {
+    @Test("a provider is configured only after a successful probe")
+    func configuredRequiresSuccessfulProbe() throws {
+        let (settings, _) = makeSUT()
+
+        try settings.saveKey("sk-google-1234", for: .google)
+        #expect(!settings.isConfigured(for: .google))
+
+        settings.setTestResult(.failure("Invalid API key"), for: .google)
+        #expect(!settings.isConfigured(for: .google))
+
+        settings.setTestResult(.success, for: .google)
+        #expect(settings.isConfigured(for: .google))
+    }
+
+    @Test("saving a new key clears the previous verified status")
+    func savingKeyClearsVerifiedStatus() throws {
+        let (settings, _) = makeSUT()
+        try settings.saveKey("sk-google-1234", for: .google)
+        settings.setTestResult(.success, for: .google)
+        #expect(settings.isConfigured(for: .google))
+
+        try settings.saveKey("sk-google-5678", for: .google)
+
+        #expect(settings.hasKey(for: .google))
+        #expect(settings.testResult(for: .google) == nil)
+        #expect(!settings.isConfigured(for: .google))
     }
 }

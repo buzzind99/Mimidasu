@@ -522,10 +522,10 @@ struct ArchiveTranslationEnginePicker: View {
     }
 
     /// On-device tiers need no key; an external row is usable only while its
-    /// provider has a stored key.
+    /// provider has a key that passed the connection probe.
     private func isConfigured(_ engine: RetranslateEngine) -> Bool {
         guard let provider = engine.provider else { return true }
-        return model.translationSettings.hasKey(for: provider)
+        return model.translationSettings.isConfigured(for: provider)
     }
 
     private func tailText(_ engine: RetranslateEngine, configured: Bool) -> String {

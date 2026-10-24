@@ -424,7 +424,7 @@ private extension SettingsView {
             cancelVerification()
             pendingProvider = nil
             settings.select(provider)
-        } else if settings.hasKey(for: provider) {
+        } else if settings.isConfigured(for: provider) {
             verifyThenSelect(provider, intent: intent)
         } else {
             cancelVerification()
@@ -455,7 +455,7 @@ private extension SettingsView {
                     .foregroundStyle(Palette.primaryText)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    Text(provider.settingsDetail(hasKey: settings.hasKey(for: provider)))
+                    Text(provider.settingsDetail(configured: settings.isConfigured(for: provider)))
                         .font(.system(size: 10.5))
                         .foregroundStyle(Palette.mutedText)
                         .lineLimit(1)
