@@ -121,14 +121,15 @@ extension AppModel {
     /// archive keeps running (its airborne result still persists under its
     /// own id), and a pending main-window pick for the previous archive
     /// clears with the swap.
-    func openArchiveSession(id: Int64) {
-        guard canOpenArchivedSession else { return }
+    @discardableResult
+    func openArchiveSession(id: Int64) -> Bool {
+        guard canOpenArchivedSession else { return false }
         // The window's "back to pane" move: nothing swaps, so the running
         // bulk job and its card must survive.
         if openArchive?.id == id {
-            return
+            return true
         }
-        guard let loaded = archive.load(id: id) else { return }
+        guard let loaded = archive.load(id: id) else { return false }
         // The main window's sheet is leaving the pane with the previous
         // archive; the archive window's own intents and other kinds stay.
         if case .archiveTranslation(_, _, _, .mainWindow) = providerAwaitingDisclosure {
@@ -157,6 +158,7 @@ extension AppModel {
         sessionEndedAt = nil
         captureLostAt = nil
         retranslate.archiveWillOpen()
+        return true
     }
 
     /// Closes the opened archive: the pane empties (no restore) and the

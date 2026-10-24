@@ -8,7 +8,6 @@ import SwiftUI
 struct ArchiveSessionRow: View {
     var model: AppModel
     let summary: ArchivedSessionSummary
-    let canOpen: Bool
     /// The bulk job claims this session (the chip line's busy state, from
     /// the claim onward); the progress bar renders once the run starts.
     /// `jobLang` names the language it walks.
@@ -137,6 +136,10 @@ struct ArchiveSessionRow: View {
     }
 
     // MARK: - Actions
+
+    private var canOpen: Bool {
+        model.canOpenArchivedSession
+    }
 
     private var actionColumn: some View {
         VStack(alignment: .trailing, spacing: 8) {

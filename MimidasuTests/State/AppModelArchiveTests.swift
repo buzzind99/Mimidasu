@@ -95,8 +95,9 @@ struct AppModelArchiveTests {
         let (model, id) = await makeModel()
         model.phase = .running
 
-        model.openArchiveSession(id: id)
+        let opened = model.openArchiveSession(id: id)
 
+        #expect(!opened)
         #expect(model.openArchive == nil)
         #expect(model.entries.isEmpty)
     }
@@ -128,8 +129,9 @@ struct AppModelArchiveTests {
         model.sessionStartedAt = ContinuousClock.now
         model.sessionEndedAt = ContinuousClock.now
 
-        model.openArchiveSession(id: id)
+        let opened = model.openArchiveSession(id: id)
 
+        #expect(opened)
         #expect(model.openArchive?.id == id)
         #expect(model.entries.map { entry in entry.sentence.text } == ["こんにちは", "さようなら"])
         #expect(model.entryPositionBySentence == [0: 0, 1: 1])
@@ -147,10 +149,22 @@ struct AppModelArchiveTests {
     func openUnknownIdIsNoop() async {
         let (model, _) = await makeModel()
 
-        model.openArchiveSession(id: 9999)
+        let opened = model.openArchiveSession(id: 9999)
 
+        #expect(!opened)
         #expect(model.openArchive == nil)
         #expect(model.entries.isEmpty)
+    }
+
+    @Test("re-opening the session already in the pane reports success")
+    func reopenOpenArchiveReportsSuccess() async {
+        let (model, id) = await makeModel()
+        model.openArchiveSession(id: id)
+
+        let reopened = model.openArchiveSession(id: id)
+
+        #expect(reopened)
+        #expect(model.openArchive?.id == id)
     }
 
     @Test("closing empties the pane without restoring the live rows")

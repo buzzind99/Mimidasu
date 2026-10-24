@@ -354,7 +354,6 @@ struct ArchiveWindowView: View {
         return ArchiveSessionRow(
             model: model,
             summary: summary,
-            canOpen: model.canOpenArchivedSession,
             isJobRunning: request != nil,
             jobLang: request?.lang,
             jobProgress: activity.progress.map { progress in (progress.processed, progress.total) },
@@ -370,9 +369,8 @@ struct ArchiveWindowView: View {
     }
 
     private func open(_ summary: ArchivedSessionSummary) {
-        model.openArchiveSession(id: summary.id)
         // Only a successful open swaps the pane; a refusal keeps the window.
-        if model.openArchive?.id == summary.id {
+        if model.openArchiveSession(id: summary.id) {
             dismissWindow(id: ArchiveWindow.sceneID)
         }
     }
