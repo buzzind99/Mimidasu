@@ -7,8 +7,8 @@ default) or **Full** (FunASR-Nano) — via the CrispASR runtime with
 FireRedVAD endpointing, and translates finalized sentences to a selectable
 target language (English by default) with Apple's on-device Translation
 framework — or Apple Intelligence where installed — or an optional cloud
-provider (Google Translate, DeepL, OpenRouter) behind the same provider
-seam (`TranslationEngine`). Ruby
+provider (Google Translate, DeepL, or a first-class LLM provider) behind the
+same provider seam (`TranslationEngine`). Ruby
 annotations (romaji/furigana) and tap-to-lookup dictionary entries come
 from a bundled IPADIC tokenizer plus a pinned JMDict/JMnedict SQLite DB,
 which also powers a full-dictionary search (Japanese / romaji / English
@@ -190,9 +190,11 @@ packaged apps in `Contents/Frameworks/`.
   `.translationTask`, hosted in a process-lifetime 1×1 panel
   (`TranslationSessionPanelController`) so closing the main window can't
   cancel the task and strand the queue's pending sentences; the default;
-  OS prompts a one-time language pack), and Google Translate, DeepL,
-  OpenRouter. On macOS 26.4+ the live session config requests the Apple
-  Intelligence strategy, with silent framework fallback to Apple (NMT).
+  OS prompts a one-time language pack), and nine external providers: Google
+  Translate, DeepL, and seven LLM providers — OpenRouter, OpenAI, Anthropic,
+  Moonshot, Z.ai (GLM), DeepSeek, and xAI. On macOS 26.4+ the live
+  session config requests the Apple Intelligence strategy, with silent
+  framework fallback to Apple (NMT).
   `AppleTierAvailability` records pair-scoped evidence
   `(installed, targetCode)` behind a sequence token; the probe
   fires on Apple and external activation and on fallback, and a session end
@@ -203,18 +205,29 @@ packaged apps in `Contents/Frameworks/`.
   the re-translate lane (Apple (NMT) and Apple Intelligence), stacked in
   one view tree because multiple modifiers on one view are unreliable.
 - **Cloud adapters:** Google Translate (batch REST), DeepL (batch REST,
-  `:fx` free-tier host), OpenRouter (chat completions, **one sentence per
-  request** with a plain-text prompt parsed leniently — no JSON contract —
-  and a default model when Settings leaves the field empty). Source is
-  fixed `ja`; the target follows the selection. Provider switching is
-  live: a verified selection re-attaches the provider mid-session (pending
-  sentences replay via the queue's generation token; the Apple-fallback
-  latch resets — an explicit change is user intent to re-engage), and a
-  key save's connection test re-attaches an already-selected provider once
-  it verifies (a fresh switch still completes through the disclosure
-  sheet).
+  `:fx` free-tier host), and seven LLM providers on one generic engine —
+  OpenRouter, OpenAI, Anthropic, Moonshot (Kimi model IDs), Z.ai (GLM),
+  DeepSeek, and xAI — **one sentence per request** with a plain-text prompt
+  parsed leniently (no JSON contract). Both clients decode and parse inside
+  the retry ladder, so malformed output shares the transient budget; the
+  engine owns ordering and the compatible-mode memory. Six speak
+  OpenAI-compatible chat completions; Anthropic uses its native Messages API.
+  `LLMProviderCatalog` is the source
+  of truth for endpoints and default models; `LLMReasoningPolicy` is the pure
+  fast-mode resolver; `TranslationEngineFactory` is the single construction
+  path (live queue, re-translate lane, connection tester). Fast mode —
+  disable thinking where the model supports it, else the lowest reasoning
+  effort — is the default; an unknown model sends no reasoning fields, and
+  OpenRouter's request body is unchanged. A model override wins over the
+  catalog default. Source is fixed `ja`; the target follows the selection.
+  Provider switching is live: a verified selection re-attaches the provider
+  mid-session (pending sentences replay via the queue's generation token;
+  the Apple-fallback latch resets — an explicit change is user intent to
+  re-engage), and a key save's connection test re-attaches an
+  already-selected provider once it verifies (a fresh switch still completes
+  through the disclosure sheet).
 - **Target language:** `TargetLanguage` carries a BCP-47 entry code plus
-  per-provider mappings (Google/DeepL API codes; OpenRouter prompts name the
+  per-provider mappings (Google/DeepL API codes; LLM prompts name the
   language); the selection persists as `translation.targetLanguage` and is
   restart-only — the picker disables while a session is `.starting`,
   `.running`, `.paused`, `.stopping`, or `.sourceLost`.
@@ -235,12 +248,13 @@ packaged apps in `Contents/Frameworks/`.
   the queue drains with a 5 s bound so the session stays exportable.
 - **Retry ladder:** transient failures (429 / 5xx / network) retry twice
   with backoff, honoring a capped `Retry-After`; invalid key, quota, and
-  malformed output fail fast — except chat-completions providers, which
-  retry malformed output (nondeterministic LLM replies) while fixed-
-  contract Google/DeepL never do. Settings' Test probes run zero-retry
-  (Google/DeepL translate a probe sentence; OpenRouter validates the key
-  via a key endpoint so no tokens are spent), and the outcome persists per
-  provider.
+  malformed output fail fast — except LLM providers, which retry malformed
+  output (nondeterministic replies) while fixed-contract Google/DeepL never
+  do. A rejected fast-mode field does not spend the transient budget: the
+  same request retries once without reasoning fields (compatible mode)
+  before surfacing a non-transient `.invalidConfiguration`.
+  Settings' Test probes run zero-retry translation for every external
+  provider — OpenRouter included — and the outcome persists per provider.
 - **Failure ladder:** exhausted external errors latch Apple on-device for
   the rest of the session (one-way per session; `.degraded` published; the
   manual Reconnect action re-attempts the external provider and resets the
@@ -252,9 +266,11 @@ packaged apps in `Contents/Frameworks/`.
 - **Keys:** `KeychainStore` (`Security/`, device-only accessibility);
   key material never reaches UserDefaults, logs, error strings, or export
   files — the settings store persists non-secrets only (provider
-  selection, key-presence flags + hints, test outcomes, the OpenRouter
-  model, DeepL free-tier). Dev builds pin the key store to a no-op, so
-  development always runs Apple on-device.
+  selection, key-presence flags + hints, test outcomes, per-provider model
+  overrides under `translation.model.<provider>` with the legacy
+  `translation.openRouterModel` key migrated, a compatible-mode cache, DeepL
+  free-tier). Dev builds pin the key store to a no-op, so development always
+  runs Apple on-device.
 - **Disclosure:** activating any cloud provider — for the live session, the
   re-translate lane, or a bulk archive run — requires confirming
   `CloudDisclosureSheet` with intent-aware copy ("sentences transcribed from
@@ -265,7 +281,8 @@ packaged apps in `Contents/Frameworks/`.
   the machine.
 - **Re-translate lane:** a finalized Sentence can be re-translated through
   a selected provider (`session` / `appleFast` / `appleHighFidelity` /
-  `google` / `deepl` / `openrouter`, persisted as
+  `google` / `deepl` / `openrouter` / `openai` / `anthropic` / `moonshot` /
+  `zai` / `deepseek` / `xai`, persisted as
   `translation.retranslateEngine`). Routes resolve at click time against
   the *lane target*: Settings' target for a live session, the open
   archive's viewing language for an archived Sentence. A live `.session`
