@@ -12,16 +12,6 @@ struct AppModelArchiveTranslationStoreTests {
 
     private let resultTimeout: TimeInterval = 5
 
-    /// The three rows a full `fr` run of the default fixture lands, in
-    /// sentence order.
-    private var expectedFRLandings: [[SentenceTranslation]] {
-        [
-            [SentenceTranslation(lang: "fr", text: "T:こんにちは", engine: .google)],
-            [SentenceTranslation(lang: "fr", text: "T:さようなら", engine: .google)],
-            [SentenceTranslation(lang: "fr", text: "T:おはよう", engine: .google)]
-        ]
-    }
-
     // MARK: - Lost store writes
 
     @Test("lost store writes count as failed sentences and warn once per run")
@@ -121,16 +111,5 @@ struct AppModelArchiveTranslationStoreTests {
 
         #expect(sendCount == 2)
         #expect(!complete)
-    }
-
-    @Test("a complete language reports the full count and reads complete")
-    func sendCountReportsFullWhenComplete() async {
-        let sut = await makeSUT(translations: [0: "Seed 0", 1: "Seed 1", 2: "Seed 2"])
-
-        let sendCount = sut.model.archiveTranslationSendCount(lang: "fr")
-        let complete = sut.model.archiveLanguageIsComplete("fr")
-
-        #expect(sendCount == 3, "a complete language re-sends every sentence when re-run")
-        #expect(complete)
     }
 }

@@ -156,17 +156,6 @@ struct AppModelArchiveTests {
         #expect(model.entries.isEmpty)
     }
 
-    @Test("re-opening the session already in the pane reports success")
-    func reopenOpenArchiveReportsSuccess() async {
-        let (model, id) = await makeModel()
-        model.openArchiveSession(id: id)
-
-        let reopened = model.openArchiveSession(id: id)
-
-        #expect(reopened)
-        #expect(model.openArchive?.id == id)
-    }
-
     @Test("closing empties the pane without restoring the live rows")
     func closeEmptiesPane() async {
         let (model, id) = await makeModel()
@@ -198,7 +187,11 @@ struct AppModelArchiveTests {
             "the run starts and parks on its first sentence"
         )
 
-        sut.model.openArchiveSession(id: sut.id)
+        #expect(
+            sut.model.openArchiveSession(id: sut.id),
+            "the same-id reopen reports success"
+        )
+        #expect(sut.model.openArchive?.id == sut.id, "the same archive stays open")
 
         #expect(sut.model.archiveTranslationJob.activity != .idle, "the same-id reopen must not cancel the run")
         #expect(archiveToast(sut.model) != nil, "its progress card stays up")
@@ -255,6 +248,10 @@ struct AppModelArchiveTests {
                 == ["T:こんにちは", "T:さようなら", "T:おはよう"],
             "every landing persists under the first archive"
         )
+        #expect(
+            sut.store.load(id: secondID)?.entries.allSatisfy { entry in entry.translations.isEmpty } == true,
+            "the swapped-in archive is never modified"
+        )
     }
 
     @Test("archive boundaries clear only main-window intents")
@@ -308,27 +305,17 @@ struct AppModelArchiveTests {
 
     // MARK: - Promote / rename / delete
 
-    @Test("promoting moves the session to Saved and updates the open banner")
-    func promoteUpdatesStoreAndBanner() async {
-        let (model, id) = await makeModel()
-        model.openArchiveSession(id: id)
-        let revisionBefore = model.archiveRevision
-
-        model.promoteArchive(id: id)
-
-        #expect(model.archive.list().first?.saved == true)
-        #expect(model.openArchive?.summary.saved == true)
-        #expect(model.archiveRevision != revisionBefore)
-    }
-
-    @Test("the banner save icon promotes once and then no-ops")
+    @Test("the banner save icon promotes once, updates the store and banner, then no-ops")
     func saveOpenArchivePromotesOnce() async {
         let (model, id) = await makeModel()
         model.openArchiveSession(id: id)
         #expect(model.openArchive?.summary.saved == false)
+        let revisionBefore = model.archiveRevision
 
         model.saveOpenArchive()
         #expect(model.archive.list().first?.saved == true)
+        #expect(model.openArchive?.summary.saved == true)
+        #expect(model.archiveRevision != revisionBefore)
 
         let revisionAfterPromote = model.archiveRevision
         model.saveOpenArchive()
@@ -413,13 +400,5 @@ struct AppModelArchiveTests {
         #expect(!finalized)
         #expect(model.archiveRevision == revisionBefore)
         #expect(!model.toasts.toasts.contains { toast in toast.key == ToastKey.archiveUnavailable })
-    }
-
-    @Test("a healthy store reports the archive as available")
-    func healthyStoreIsAvailable() async {
-        let (model, _) = await makeModel()
-
-        #expect(model.archiveAvailable)
-        #expect(!model.archiveWriteFailed)
     }
 }

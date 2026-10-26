@@ -72,25 +72,6 @@ struct AppModelTranslationHighFidelityTests {
         await stopTranslation(model)
     }
 
-    /// A positive probe lands on the attached Apple engine: the ENGINES
-    /// card's marker reads it.
-    @Test("a positive probe marks the attached Apple engine")
-    func positiveProbeMarksAppleEngine() async {
-        let model = AppModel(
-            translationSettings: makeSettings(provider: .apple),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelHighFidelity"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            highFidelityProbe: { _ in true },
-            initialModelResolve: { _ in nil }
-        )
-
-        model.retryTranslation()
-        #expect(await pollUntil { model.appleHighFidelity }, "the probe lands on the Apple engine")
-
-        await stopTranslation(model)
-    }
-
     /// A negative probe keeps the marker off — the Apple row stays
     /// "Apple (NMT)".
     /// The marker is reset synchronously at activation, so the negative

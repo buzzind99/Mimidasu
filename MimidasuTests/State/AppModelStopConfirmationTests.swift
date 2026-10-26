@@ -32,6 +32,8 @@ struct AppModelStopConfirmationTests {
     @Test("a live-ish session with rows and a healthy store prompts")
     func liveNonEmptyPrompts() async {
         let model = await makeModel()
+        #expect(model.archiveAvailable, "the healthy store reads as available")
+        #expect(!model.archiveWriteFailed)
         model.entries = [entry("こんにちは")]
 
         for phase in livePhases {

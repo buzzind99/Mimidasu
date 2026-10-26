@@ -65,24 +65,17 @@ struct ArchiveWindowStateTranslationPickerTests {
         #expect(state.translationPicker == nil)
     }
 
-    @Test("clear leaves the slot for another session")
-    func clearLeavesTheSlotForAnotherSession() {
+    @Test(
+        "clear leaves the slot for a non-owner",
+        arguments: [(sessionID: Int64(8), lang: "fr"), (sessionID: 7, lang: "de")]
+    )
+    func clearLeavesTheSlotForAnotherOwner(sessionID: Int64, lang: String) {
         let state = ArchiveWindowState()
         state.requestTranslationPicker(summary(id: 7), lang: "fr")
 
-        state.clearTranslationPicker(sessionID: 8, lang: "fr")
+        state.clearTranslationPicker(sessionID: sessionID, lang: lang)
 
-        #expect(state.translationPicker == owner, "a sibling row's dismissal never closes this one")
-    }
-
-    @Test("clear leaves the slot for another language")
-    func clearLeavesTheSlotForAnotherLanguage() {
-        let state = ArchiveWindowState()
-        state.requestTranslationPicker(summary(id: 7), lang: "fr")
-
-        state.clearTranslationPicker(sessionID: 7, lang: "de")
-
-        #expect(state.translationPicker == owner, "a sibling language's dismissal never closes this one")
+        #expect(state.translationPicker == owner, "a non-owner's dismissal never closes this one")
     }
 }
 

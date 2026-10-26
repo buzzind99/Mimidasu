@@ -17,26 +17,12 @@ struct AppModelModelSelectionTests {
     private func makeSUT(
         resolve: @escaping @Sendable (ASRModelChoice) -> URL? = { _ in nil }
     ) async -> AppModel {
-        let model = AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelSelection"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelSelection"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            highFidelityProbe: { _ in false },
-            initialModelResolve: resolve
-        )
+        let model = makeIdleModel(suite: "test.AppModelSelection", initialModelResolve: resolve)
         await model.initialModelCheck?.value
         return model
     }
 
     // MARK: - Defaults / availability
-
-    @Test("ASR model selection defaults to Lite")
-    func asrModelDefaultsToLite() async {
-        let model = await makeSUT()
-
-        #expect(model.asrModelSettings.selected == .lite)
-    }
 
     @Test("model discovery caches availability for both choices")
     func refreshCachesAvailabilityPerChoice() async {

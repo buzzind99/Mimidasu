@@ -62,19 +62,20 @@ struct NoticeCenterToneTests {
 
     // MARK: - Tone → token mapping
 
-    @Test("confirm maps to the teal notice tokens")
-    func confirmTokens() {
-        #expect(
-            Theme.noticeTokens(for: .confirm)
-                == NoticePillTokens(fill: Theme.noticeFill, text: Theme.noticeText)
-        )
-    }
-
-    @Test("warning maps to the amber notice tokens")
-    func warningTokens() {
-        #expect(
-            Theme.noticeTokens(for: .warning)
-                == NoticePillTokens(fill: Theme.noticeWarningFill, text: Theme.noticeWarningText)
-        )
+    @Test(
+        "each tone maps to its notice tokens",
+        arguments: [
+            (
+                tone: NoticeCenter.NoticeTone.confirm,
+                expected: NoticePillTokens(fill: Theme.noticeFill, text: Theme.noticeText)
+            ),
+            (
+                tone: .warning,
+                expected: NoticePillTokens(fill: Theme.noticeWarningFill, text: Theme.noticeWarningText)
+            ),
+        ]
+    )
+    func toneMapsToTokens(tone: NoticeCenter.NoticeTone, expected: NoticePillTokens) {
+        #expect(Theme.noticeTokens(for: tone) == expected)
     }
 }

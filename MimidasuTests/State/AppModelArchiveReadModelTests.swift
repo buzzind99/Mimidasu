@@ -18,25 +18,12 @@ struct AppModelArchiveReadModelTests {
 
     // MARK: - Fixtures
 
-    private func metadata(
-        target: String = "en", startedAt: TimeInterval = 1_000_000
-    ) -> SessionMetadata {
-        SessionMetadata(
-            startedAt: Date(timeIntervalSince1970: startedAt),
-            sourceLang: "ja", targetLang: target, model: "test-model", chunkMS: 160
-        )
-    }
-
-    private func sentence(_ index: Int, text: String) -> Sentence {
-        Sentence(index: index, startS: Double(index), endS: Double(index) + 1, lang: "ja", text: text)
-    }
-
     /// One finalized, listed session of `sentences` sentences.
     private func seedFinalized(_ store: ArchiveStore, sentences: [String] = ["こんにちは"]) -> Int64? {
         var id: Int64?
         for (index, text) in sentences.enumerated() {
             id = store.append(
-                sentence: sentence(index, text: text), sessionID: id, metadata: metadata()
+                sentence: archiveSentence(index, text: text), sessionID: id, metadata: archiveMetadata(target: "en")
             )
         }
         guard let id else { return nil }
@@ -46,18 +33,11 @@ struct AppModelArchiveReadModelTests {
 
     /// One unlisted `recording` row with a single sentence.
     private func seedRecording(_ store: ArchiveStore) -> Int64? {
-        store.append(sentence: sentence(0, text: "こんにちは"), sessionID: nil, metadata: metadata())
+        store.append(sentence: archiveSentence(0, text: "こんにちは"), sessionID: nil, metadata: archiveMetadata(target: "en"))
     }
 
     private func makeModel(store: ArchiveStore) async -> AppModel {
-        let model = AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelArchiveReadModel"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelArchiveReadModel"),
-            favorites: isolatedFavorites(),
-            archive: store,
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
+        let model = makeIdleModel(suite: "test.AppModelArchiveReadModel", archive: store)
         await model.initialModelCheck?.value
         return model
     }
@@ -165,7 +145,7 @@ struct AppModelArchiveReadModelTests {
         let model = await makeModel(store: store)
         let id = try #require(seedRecording(store))
         model.recordingSessionID = id
-        let seed = sentence(0, text: "こんにちは")
+        let seed = archiveSentence(0, text: "こんにちは")
         model.entries = [SessionEntry(sentence: seed)]
         model.entryPositionBySentence = [seed.index: 0]
         let revisionBefore = model.archiveRevision
@@ -265,7 +245,7 @@ struct AppModelArchiveReadModelTests {
 
         let afterCommands = model.archiveRevision
         let appended = model.archiveRead.append(
-            sentence: sentence(1, text: "おはよう"), sessionID: recordingID, metadata: metadata()
+            sentence: archiveSentence(1, text: "おはよう"), sessionID: recordingID, metadata: archiveMetadata(target: "en")
         )
         #expect(appended == recordingID, "the read model's append lands against the row")
         #expect(

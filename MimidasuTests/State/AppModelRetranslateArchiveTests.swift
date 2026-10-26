@@ -12,6 +12,7 @@ import Testing
 @Suite("AppModel re-translate archive")
 struct AppModelRetranslateArchiveTests {
 
+    private let harness = RetranslateHarness(suite: "test.AppModelRetranslateArchive")
     private let resultTimeout: TimeInterval = 5
 
     // MARK: - Fixtures
@@ -76,50 +77,23 @@ struct AppModelRetranslateArchiveTests {
         let id: Int64
     }
 
-    /// Seed metadata stored with the archive fixture: target `fr`.
-    private func metadata() -> SessionMetadata {
-        SessionMetadata(
-            startedAt: Date(timeIntervalSince1970: 1_000_000),
-            sourceLang: "ja",
-            targetLang: "fr",
-            model: "test-model",
-            chunkMS: 160
-        )
-    }
-
-    private func sentence(_ index: Int, text: String) -> Sentence {
-        Sentence(index: index, startS: Double(index), endS: Double(index) + 1, lang: "ja", text: text)
-    }
-
     /// A model with a finalized two-sentence archive (target `fr`) open in
     /// the pane; the settings target stays `en`, so every stamped `fr`
     /// proves the archive route's target reached the flight.
     private func makeSUT() async -> SUT {
         let store = isolatedArchive()
         let id = store.append(
-            sentence: sentence(0, text: "こんにちは"), sessionID: nil, metadata: metadata()
+            sentence: archiveSentence(0, text: "こんにちは"), sessionID: nil, metadata: archiveMetadata()
         )
         _ = store.append(
-            sentence: sentence(1, text: "さようなら"), sessionID: id, metadata: metadata()
+            sentence: archiveSentence(1, text: "さようなら"), sessionID: id, metadata: archiveMetadata()
         )
         let finalized = id ?? -1
         store.finalize(session: finalized, durationMS: 60000, saved: false)
 
-        let model = AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelRetranslateArchive"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelRetranslateArchive"),
-            favorites: isolatedFavorites(),
-            archive: store,
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
-        await model.initialModelCheck?.value
+        let model = await harness.makeModel(archive: store)
         model.openArchiveSession(id: finalized)
         return SUT(model: model, store: store, id: finalized)
-    }
-
-    private func sentence(_ sut: SUT, at index: Int) -> Sentence {
-        sut.model.entries.first { entry in entry.sentence.index == index }!.sentence
     }
 
     // MARK: - Gate
@@ -127,7 +101,7 @@ struct AppModelRetranslateArchiveTests {
     @Test("a retry with no live session and no open archive is a no-op")
     func retryWithoutGateIsNoop() async {
         let sut = await makeSUT()
-        let target = sentence(sut, at: 0)
+        let target = entrySentence(in: sut.model, at: 0)
         sut.model.closeArchive()
 
         sut.model.retranslateSentence(target)
@@ -154,7 +128,7 @@ struct AppModelRetranslateArchiveTests {
     @Test("the .session selection maps to the Apple-fast dedicated session and writes back to the store")
     func sessionSelectionMapsToAppleFast() async {
         let sut = await makeSUT()
-        let target = sentence(sut, at: 0)
+        let target = entrySentence(in: sut.model, at: 0)
 
         sut.model.retranslateSentence(target)
         // Unarmed at click time: the lane armed the fast config and waits;
@@ -192,7 +166,7 @@ struct AppModelRetranslateArchiveTests {
     @Test("a second click while the retry is in flight is a no-op")
     func doubleClickIsIdempotent() async {
         let sut = await makeSUT()
-        let target = sentence(sut, at: 0)
+        let target = entrySentence(in: sut.model, at: 0)
         let engine = GatedArchiveEngine()
 
         sut.model.retranslateSentence(target)
@@ -215,7 +189,7 @@ struct AppModelRetranslateArchiveTests {
     @Test("closing the archive mid-flight drops the landing without writing back")
     func closeDuringFlightDropsResult() async {
         let sut = await makeSUT()
-        let target = sentence(sut, at: 0)
+        let target = entrySentence(in: sut.model, at: 0)
         let engine = GatedArchiveEngine()
 
         sut.model.retranslateSentence(target)
@@ -242,7 +216,7 @@ struct AppModelRetranslateArchiveTests {
             provider == .google ? engine : nil
         }
         sut.model.translationSettings.selectRetranslate(.google)
-        let target = sentence(sut, at: 1)
+        let target = entrySentence(in: sut.model, at: 1)
 
         sut.model.retranslateSentence(target)
 
@@ -262,7 +236,7 @@ struct AppModelRetranslateArchiveTests {
         let sut = await makeSUT()
         sut.model.retranslateEngineFactory = { _, _ in nil }
         sut.model.translationSettings.selectRetranslate(.google)
-        let target = sentence(sut, at: 0)
+        let target = entrySentence(in: sut.model, at: 0)
 
         sut.model.retranslateSentence(target)
 
@@ -304,7 +278,7 @@ struct AppModelRetranslateArchiveTests {
         let sut = await makeSUT()
         sut.model.translationSettings.selectRetranslate(.appleHighFidelity)
 
-        sut.model.retranslateSentence(sentence(sut, at: 0))
+        sut.model.retranslateSentence(entrySentence(in: sut.model, at: 0))
 
         #expect(sut.model.retranslateHifiConfig != nil, "the hifi lane armed, not the fast one")
         #expect(sut.model.retranslateConfig == nil)
@@ -316,12 +290,12 @@ struct AppModelRetranslateArchiveTests {
         let sut = await makeSUT()
         // First archive (fr) arms the config; the click needs no hand-over
         // for the arming to happen.
-        sut.model.retranslateSentence(sentence(sut, at: 0))
+        sut.model.retranslateSentence(entrySentence(in: sut.model, at: 0))
         #expect(sut.model.retranslate.retranslateConfigTarget == "fr")
 
         // A second archive stored German replaces the pane.
         let secondID = sut.store.append(
-            sentence: sentence(0, text: "Guten Tag"), sessionID: nil,
+            sentence: archiveSentence(0, text: "Guten Tag"), sessionID: nil,
             metadata: SessionMetadata(
                 startedAt: Date(timeIntervalSince1970: 2_000_000),
                 sourceLang: "ja", targetLang: "de", model: "test-model", chunkMS: 160
@@ -331,7 +305,7 @@ struct AppModelRetranslateArchiveTests {
         sut.model.closeArchive()
         sut.model.openArchiveSession(id: secondID ?? -1)
 
-        sut.model.retranslateSentence(sentence(sut, at: 0))
+        sut.model.retranslateSentence(entrySentence(in: sut.model, at: 0))
 
         #expect(
             sut.model.retranslate.retranslateConfigTarget == "de",
@@ -350,7 +324,7 @@ struct AppModelRetranslateArchiveTests {
         // row path degrades with the same target-scoped rule as the bulk run.
         sut.model.appleHighFidelityProbe = (false, "fr")
 
-        sut.model.retranslateSentence(sentence(sut, at: 0))
+        sut.model.retranslateSentence(entrySentence(in: sut.model, at: 0))
 
         #expect(sut.model.retranslateConfig != nil, "the degraded row retry arms the fast session")
         #expect(sut.model.retranslateHifiConfig == nil, "the high-fidelity session is never armed")
@@ -367,8 +341,8 @@ struct AppModelRetranslateArchiveTests {
         sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "fr")
         sut.model.retranslateSessionArrived(engine)
 
-        let first = sentence(sut, at: 0)
-        let second = sentence(sut, at: 1)
+        let first = entrySentence(in: sut.model, at: 0)
+        let second = entrySentence(in: sut.model, at: 1)
         sut.model.retranslateSentence(first)
         #expect(
             await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },

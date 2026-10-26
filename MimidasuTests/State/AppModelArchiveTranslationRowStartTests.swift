@@ -171,20 +171,6 @@ struct ArchiveTranslationRowDisclosureTests {
 
     private let resultTimeout: TimeInterval = 5
 
-    @Test("the banner request stages a main-window intent for the open archive")
-    func bannerRequestStagesMainWindowIntent() async {
-        let sut = await makeSUT()
-
-        sut.model.requestArchiveTranslation(engine: .google, lang: "fr")
-
-        #expect(
-            sut.model.providerAwaitingDisclosure
-                == .archiveTranslation(.google, lang: "fr", session: sut.id, presenter: .mainWindow),
-            "the banner pick pairs the open archive with the main window"
-        )
-        #expect(!sut.model.archiveTranslationRunning, "staging never starts a run")
-    }
-
     @Test("a row request stages an archive-window intent for its own session")
     func rowRequestStagesArchiveWindowIntent() async {
         let sut = await makeSUT()

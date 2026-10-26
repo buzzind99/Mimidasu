@@ -65,22 +65,16 @@ struct AudioLevelStateTests {
 
     // MARK: - dBFS
 
-    @Test("a full-scale chunk reads 0 dBFS")
-    func fullScaleReadsZeroDBFS() {
+    @Test(
+        "dBFS reads the full-scale and silent ends",
+        arguments: [(rms: Float(1.0), expected: Double(0)), (rms: Float(0), expected: -.infinity)]
+    )
+    func dbfsReadsTheEnds(rms: Float, expected: Double) {
         let sut = AudioLevelState()
 
-        sut.update(rms: 1.0)
+        sut.update(rms: rms)
 
-        #expect(sut.dBFS == 0)
-    }
-
-    @Test("a silent chunk reads −∞ dBFS")
-    func silenceReadsNegativeInfinityDBFS() {
-        let sut = AudioLevelState()
-
-        sut.update(rms: 0)
-
-        #expect(sut.dBFS == -.infinity)
+        #expect(sut.dBFS == expected)
     }
 
     // MARK: - reset

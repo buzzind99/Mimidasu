@@ -12,32 +12,14 @@ struct AppModelRetranslateLaneFailureTests {
 
     // MARK: - Fixtures
 
+    private let harness = RetranslateHarness(suite: "test.AppModelRetranslateLaneFailure")
     private let resultTimeout: TimeInterval = 5
-
-    private func makeSUT() async -> AppModel {
-        let model = AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelRetranslateLaneFailure"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelRetranslateLaneFailure"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
-        await model.initialModelCheck?.value
-        return model
-    }
-
-    private func makeSentence(
-        index: Int, text: String = "テスト"
-    ) -> Sentence {
-        Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: text)
-    }
 
     // MARK: - Failure surfaces
 
     @Test("a failed lane run posts the failure toast and clears the marker")
     func failedLaneRunPostsFailureToastAndClearsMarker() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         model.retranslateEngineFactory = { _, _ in LaneEmptyEngine() }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
@@ -68,7 +50,7 @@ struct AppModelRetranslateLaneFailureTests {
 
     @Test("a lane failure crossing a stop posts nothing — the stop already cleared the toasts")
     func laneFailureCrossingStopPostsNoToast() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let engine = LaneGatedFailingEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
@@ -121,7 +103,7 @@ struct AppModelRetranslateLaneFailureTests {
 
     @Test("a cancelled lane flight is dropped silently")
     func cancelledLaneFlightIsDroppedSilently() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let engine = LaneCancellableEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
@@ -187,17 +169,6 @@ private final class LaneCancellableEngine: TranslationEngine, @unchecked Sendabl
         try Task.checkCancellation()
         try await Task.sleep(for: .seconds(30))
         return texts.map { text in "JA:\(text)" }
-    }
-}
-
-/// Queue fixture: prefixes with "EN:", serving the backlog so a stop's
-/// translation-tail drain stays instant.
-private final class QueueEchoEngine: TranslationEngine, @unchecked Sendable {
-    let preferredBatchSize = 16
-    var onRetry: (@Sendable (RetryProgress) -> Void)?
-
-    func translate(_ texts: [String]) async throws -> [String] {
-        texts.map { text in "EN:\(text)" }
     }
 }
 

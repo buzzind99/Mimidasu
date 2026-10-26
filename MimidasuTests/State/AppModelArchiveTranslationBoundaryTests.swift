@@ -15,6 +15,13 @@ struct AppModelArchiveTranslationBoundaryTests {
 
     private let resultTimeout: TimeInterval = 5
 
+    /// The pane boundary under test: opening another archive swaps the pane;
+    /// closing it empties the pane.
+    enum ArchiveBoundary: String, CaseIterable, Sendable {
+        case swap
+        case close
+    }
+
     // MARK: - Boundary during resolution
 
     @Test("a swap during engine resolution lets the run proceed on the late hand-over")
@@ -88,24 +95,11 @@ struct AppModelArchiveTranslationBoundaryTests {
 
     // MARK: - Boundary keeps the dedicated session
 
-    @Test("swapping the pane keeps the armed high-fidelity config and its stored engine")
-    func swapKeepsArmedHighFidelitySession() async {
-        let sut = await makeSUT()
-        let otherID = appendArchive(to: sut.store)
-        let engine = ScriptedArchiveEngine()
-        sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleHighFidelity, target: "fr")
-        sut.model.retranslateHifiSessionArrived(engine)
-        #expect(sut.model.retranslateHifiConfig != nil, "the high-fidelity session starts armed")
-        #expect(sut.model.retranslateHifiSessionEngine != nil, "the hand-over stores the engine")
-
-        sut.model.openArchiveSession(id: otherID)
-
-        #expect(sut.model.retranslateHifiConfig != nil, "the swap keeps the armed config")
-        #expect(sut.model.retranslateHifiSessionEngine != nil, "the swap keeps the stored engine")
-    }
-
-    @Test("closing the archive keeps the armed high-fidelity config and its stored engine")
-    func closeKeepsArmedHighFidelitySession() async {
+    @Test(
+        "an archive boundary keeps the armed high-fidelity config and its stored engine",
+        arguments: ArchiveBoundary.allCases
+    )
+    func boundaryKeepsArmedHighFidelitySession(boundary: ArchiveBoundary) async {
         let sut = await makeSUT()
         let engine = ScriptedArchiveEngine()
         sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleHighFidelity, target: "fr")
@@ -113,10 +107,15 @@ struct AppModelArchiveTranslationBoundaryTests {
         #expect(sut.model.retranslateHifiConfig != nil, "the high-fidelity session starts armed")
         #expect(sut.model.retranslateHifiSessionEngine != nil, "the hand-over stores the engine")
 
-        sut.model.closeArchive()
+        switch boundary {
+        case .swap:
+            sut.model.openArchiveSession(id: appendArchive(to: sut.store))
+        case .close:
+            sut.model.closeArchive()
+        }
 
-        #expect(sut.model.retranslateHifiConfig != nil, "the close keeps the armed config")
-        #expect(sut.model.retranslateHifiSessionEngine != nil, "the close keeps the stored engine")
+        #expect(sut.model.retranslateHifiConfig != nil, "the boundary keeps the armed config")
+        #expect(sut.model.retranslateHifiSessionEngine != nil, "the boundary keeps the stored engine")
     }
 
     // MARK: - Stored engine after a boundary

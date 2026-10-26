@@ -25,41 +25,17 @@ struct AppModelSessionTests {
 
     // MARK: - Fixtures
 
-    /// Thread-safe ordered call log (main actor + detached warm-up interleave).
-    private final class FlowLog: @unchecked Sendable {
-        private let lock = NSLock()
-        private var entries: [String] = []
-
-        func record(_ name: String) {
-            lock.withLock { entries.append(name) }
-        }
-
-        var names: [String] {
-            lock.withLock { entries }
-        }
-
-        func contains(inOrder needle: [String]) -> Bool {
-            var index = 0
-            for entry in names where index < needle.count {
-                if entry == needle[index] {
-                    index += 1
-                }
-            }
-            return index == needle.count
-        }
-    }
-
     private final class ScriptedASREngine: ASREngine, @unchecked Sendable {
         let isMock = true
         var onEngineError: ((String) -> Void)?
         var processedSamples = 0
         var pushedSamples = 0
 
-        private let log: FlowLog
+        private let log: CallLog
         private let pollScript: [ASREvent]
         private var pollIndex = 0
 
-        init(log: FlowLog, poll: [ASREvent] = []) {
+        init(log: CallLog, poll: [ASREvent] = []) {
             self.log = log
             pollScript = poll
         }
@@ -93,7 +69,7 @@ struct AppModelSessionTests {
         var onChunk: ((AudioChunk) -> Void)?
         var onIOError: ((CaptureError) -> Void)?
 
-        private let log: FlowLog
+        private let log: CallLog
         private let startError: (any Error)?
         private let restartStartError: (any Error)?
         private let startGate: StartGate?
@@ -101,7 +77,7 @@ struct AppModelSessionTests {
         private var starts = 0
 
         init(
-            log: FlowLog, startError: (any Error)? = nil,
+            log: CallLog, startError: (any Error)? = nil,
             restartStartError: (any Error)? = nil, startGate: StartGate? = nil
         ) {
             self.log = log
@@ -169,7 +145,7 @@ struct AppModelSessionTests {
         let controller: SessionController
         let engine: ScriptedASREngine
         let capture: ScriptedCapture
-        let log: FlowLog
+        let log: CallLog
     }
 
     private func makeSUT(
@@ -179,7 +155,7 @@ struct AppModelSessionTests {
         restartStartError: (any Error)? = nil,
         startGate: StartGate? = nil
     ) async -> SUT {
-        let log = FlowLog()
+        let log = CallLog()
         let engine = ScriptedASREngine(log: log, poll: poll)
         let capture = ScriptedCapture(
             log: log, startError: captureStartError,
@@ -285,9 +261,10 @@ struct AppModelSessionTests {
     }
 
     /// The failure card is "cleared on next Start": the dismissal happens
-    /// synchronously at start entry, before the second attempt's own outcome.
-    @Test("a previous session's failure card is cleared by the next Start")
-    func startClearsPreviousSessionFailedToast() async {
+    /// synchronously at start entry, before the second attempt's own outcome —
+    /// which fails again and proves the failed session was allowed to retry.
+    @Test("a previous session's failure card clears on the next Start, which retries")
+    func startClearsFailureCardAndRetries() async {
         let sut = await makeSUT(captureStartError: ScriptedStartError())
         sut.model.start()
         #expect(await pollUntil { sut.model.phase == .failed("boom") }, "the capture failure fails the start")
@@ -296,16 +273,6 @@ struct AppModelSessionTests {
         sut.model.start()
 
         #expect(sut.model.toasts.toasts.isEmpty, "the stale failure card was dismissed on entry")
-    }
-
-    @Test("a failed session restarts on Start")
-    func failedSessionRestartsOnStart() async {
-        let sut = await makeSUT(captureStartError: ScriptedStartError())
-        sut.model.start()
-        #expect(await pollUntil { sut.model.phase == .failed("boom") }, "the capture failure fails the start")
-
-        sut.model.start()
-
         #expect(await pollUntil { sut.model.phase == .failed("boom") }, "the second attempt fails again (startError persists)")
         #expect(
             sut.log.names.filter { name in name == "capture.start" }.count == 2,

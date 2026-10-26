@@ -16,25 +16,18 @@ struct LivePartialStateTests {
 
     // MARK: - Observed partial
 
-    @Test("setting the partial fires the new value")
-    func setFiresNewValue() async {
+    @Test("the partial fires each observed change")
+    func partialFiresEachChange() async {
         let (sut, observed) = makeSUT()
 
         sut.partial = "こんにちは"
 
         #expect(sut.partial == "こんにちは")
         #expect(await pollUntil { observed.values == ["こんにちは"] }, "the recorder fires the new partial")
-    }
-
-    @Test("clearing the partial fires an empty string")
-    func clearFiresEmptyString() async {
-        let (sut, observed) = makeSUT()
-        sut.partial = "こんにちは"
-        #expect(await pollUntil { observed.values == ["こんにちは"] })
 
         sut.partial = ""
-        #expect(await pollUntil { observed.values == ["こんにちは", ""] })
 
+        #expect(await pollUntil { observed.values == ["こんにちは", ""] }, "clearing fires an empty string")
         #expect(sut.partial == "")
     }
 }

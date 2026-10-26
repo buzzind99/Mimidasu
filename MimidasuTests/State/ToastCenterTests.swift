@@ -137,23 +137,6 @@ struct ToastCenterTests {
 
     // MARK: - Info style
 
-    @Test("an info card with progress has no auto-dismiss timer")
-    func infoWithProgressHasNoTimer() {
-        let spy = ManualScheduler()
-        let center = makeSUT(scheduler: spy)
-
-        center.post(
-            key: "job", style: .info, title: "Translating…", body: "1/3 sentences",
-            progress: ToastCenter.ToastProgress(done: 1, total: 3)
-        )
-
-        #expect(spy.pendingCount == 0, "progress keeps the card up until the run ends")
-
-        spy.firePending()
-
-        #expect(center.toasts.count == 1, "the card survives")
-    }
-
     @Test("an info summary with neither progress nor action auto-dismisses")
     func infoSummaryAutoDismisses() {
         let spy = ManualScheduler()
@@ -168,21 +151,36 @@ struct ToastCenterTests {
         #expect(center.toasts.isEmpty)
     }
 
-    @Test("an info card with an action but no progress has no auto-dismiss timer")
-    func infoWithActionHasNoTimer() {
+    @Test(
+        "an info card with progress or an action has no auto-dismiss timer",
+        arguments: [
+            InfoCardCase(
+                title: "Translating…", body: "1/3 sentences",
+                progress: ToastCenter.ToastProgress(done: 1, total: 3),
+                actionLabel: nil
+            ),
+            InfoCardCase(
+                title: "Finished", body: "2 failed",
+                progress: nil,
+                actionLabel: "Retry failed sentences"
+            ),
+        ]
+    )
+    func infoPayloadHasNoTimer(payload: InfoCardCase) {
         let spy = ManualScheduler()
         let center = makeSUT(scheduler: spy)
+        let action = payload.actionLabel.map { label in ToastCenter.Action(label: label) {} }
 
         center.post(
-            key: "job", style: .info, title: "Finished", body: "2 failed",
-            action: .init(label: "Retry failed sentences") {}
+            key: "job", style: .info, title: payload.title, body: payload.body,
+            action: action, progress: payload.progress
         )
 
-        #expect(spy.pendingCount == 0, "an action keeps the card up until it is taken")
+        #expect(spy.pendingCount == 0, "progress or an action keeps the card up until it is taken")
 
         spy.firePending()
 
-        #expect(center.toasts.count == 1)
+        #expect(center.toasts.count == 1, "the card survives")
     }
 
     @Test(
@@ -340,59 +338,12 @@ struct ToastCenterTests {
     }
 }
 
-// MARK: - Manual scheduler fixtures
+// MARK: - Info-card fixtures
 
-/// A scheduled firing; cancelled via the closure `schedule` returns.
-private final class ManualTimerToken: @unchecked Sendable {
-    let fire: @MainActor () -> Void
-    var cancelled = false
-
-    init(fire: @escaping @MainActor () -> Void) {
-        self.fire = fire
-    }
-}
-
-/// Deterministic toast scheduler: records every scheduled firing with a
-/// cancellable token; tests fire pending dismissals instead of sleeping.
-private final class ManualScheduler: @unchecked Sendable {
-    private let lock = NSLock()
-    private var scheduled: [ManualTimerToken] = []
-
-    var delays: [Duration] = []
-
-    func schedule(
-        _ delay: Duration, _ fire: @escaping @MainActor () -> Void
-    ) -> @Sendable () -> Void {
-        let token = ManualTimerToken(fire: fire)
-        lock.lock()
-        scheduled.append(token)
-        delays.append(delay)
-        lock.unlock()
-        return { [weak self] in
-            guard let self else { return }
-            lock.lock()
-            token.cancelled = true
-            lock.unlock()
-        }
-    }
-
-    /// Live (uncancelled) firings, in schedule order.
-    private var live: [ManualTimerToken] {
-        lock.withLock { scheduled.filter { token in !token.cancelled } }
-    }
-
-    var pendingCount: Int {
-        live.count
-    }
-
-    /// Fires every live dismissal and forgets the schedule. MainActor: the
-    /// stored `fire` closures are, and every caller (the tests) is too.
-    @MainActor
-    func firePending() {
-        let tokens = live
-        lock.withLock { scheduled.removeAll() }
-        for token in tokens {
-            token.fire()
-        }
-    }
+/// One info-card payload shape: the progress variant and the action variant.
+struct InfoCardCase: Sendable {
+    let title: String
+    let body: String
+    let progress: ToastCenter.ToastProgress?
+    let actionLabel: String?
 }

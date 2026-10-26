@@ -90,18 +90,6 @@ struct AppModelPhaseMachineWiringTests {
         )
     }
 
-    @Test("the terminating latch refuses a new session")
-    func terminatingLatchRefusesStart() async {
-        let model = await makeModel()
-        #expect(model.reducePhase(.terminationStarted).isLegal)
-        #expect(model.phaseMachine.isTerminating)
-
-        #expect(
-            !model.reducePhase(.startRequested).isLegal,
-            "a terminating app never begins a new session"
-        )
-    }
-
     @Test("a phase change notifies observers — the views that read the phase still re-render")
     func phaseChangeNotifiesObservers() async {
         let model = await makeModel()

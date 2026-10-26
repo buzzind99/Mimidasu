@@ -10,38 +10,8 @@ import Testing
 @Suite("AppModel re-translate probe deferral")
 struct AppModelRetranslateProbeTests {
 
+    private let harness = RetranslateHarness(suite: "test.AppModelRetranslateProbe")
     private let resultTimeout: TimeInterval = 5
-
-    private func makeSUT() async -> AppModel {
-        let model = AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelRetranslateProbe"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelRetranslateProbe"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
-        await model.initialModelCheck?.value
-        return model
-    }
-
-    private func makeSentence(
-        index: Int, text: String = "テスト"
-    ) -> Sentence {
-        Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: text)
-    }
-
-    /// Attaches a queue worker the way `activateTranslation` does, so the
-    /// session-engine path can serve the initial translation.
-    @discardableResult
-    private func attachWorker(_ model: AppModel) async -> Task<Void, Never> {
-        let worker = Task { await model.translationQueue.run(with: QueueEchoEngine()) }
-        #expect(
-            await pollUntil(timeout: resultTimeout) { model.translationQueue.hasWorker },
-            "the queue worker must be attached before a retry can be served"
-        )
-        return worker
-    }
 
     // MARK: - Probe deferral
 
@@ -50,14 +20,14 @@ struct AppModelRetranslateProbeTests {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("the provisional-identity defer requires macOS 26.4")
         }
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         // Live Apple, probe UNLANDED: the identity is unknown. The retry
         // must not take the session path on the provisional `.appleFast`
         // read — the live session may actually run high fidelity, whose
         // text would land unstamped over a fast request.
         model.translationSettings.selectRetranslate(.appleFast)
         model.phase = .running
-        let worker = await attachWorker(model)
+        let worker = await harness.attachWorker(model)
         defer { worker.cancel() }
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
@@ -90,10 +60,10 @@ struct AppModelRetranslateProbeTests {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("the provisional-identity defer requires macOS 26.4")
         }
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         model.translationSettings.selectRetranslate(.appleFast)
         model.phase = .running
-        let worker = await attachWorker(model)
+        let worker = await harness.attachWorker(model)
         defer { worker.cancel() }
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
@@ -130,10 +100,10 @@ struct AppModelRetranslateProbeTests {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("the provisional-identity defer requires macOS 26.4")
         }
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         model.translationSettings.selectRetranslate(.appleHighFidelity)
         model.phase = .running
-        let worker = await attachWorker(model)
+        let worker = await harness.attachWorker(model)
         defer { worker.cancel() }
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
@@ -169,13 +139,13 @@ struct AppModelRetranslateProbeTests {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("the provisional-identity defer requires macOS 26.4")
         }
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         // External live session: both Apple models are genuine alternates.
         model.activeTranslationEngine = .external
         model.activeExternalProvider = .google
         model.translationSettings.selectRetranslate(.appleHighFidelity)
         model.phase = .running
-        let worker = await attachWorker(model)
+        let worker = await harness.attachWorker(model)
         defer { worker.cancel() }
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
@@ -228,7 +198,7 @@ struct AppModelRetranslateProbeTests {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("the provisional-identity defer requires macOS 26.4")
         }
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         model.activeTranslationEngine = .external
         model.activeExternalProvider = .google
         model.translationSettings.selectRetranslate(.appleHighFidelity)
@@ -269,7 +239,7 @@ struct AppModelRetranslateProbeTests {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("the provisional-identity defer requires macOS 26.4")
         }
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         model.translationSettings.selectRetranslate(.appleFast)
         model.phase = .running
         let sentence = makeSentence(index: 7)
@@ -306,7 +276,7 @@ struct AppModelRetranslateProbeTests {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("the provisional-identity defer requires macOS 26.4")
         }
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         model.activeTranslationEngine = .external
         model.activeExternalProvider = .google
         model.translationSettings.selectRetranslate(.appleHighFidelity)
@@ -339,15 +309,5 @@ struct AppModelRetranslateProbeTests {
             model.retranslateHifiConfig != nil,
             "the config stays armed — the next click reuses it once the probe lands"
         )
-    }
-}
-
-/// Session-engine fixture: prefixes with "EN:".
-private final class QueueEchoEngine: TranslationEngine, @unchecked Sendable {
-    let preferredBatchSize = 16
-    var onRetry: (@Sendable (RetryProgress) -> Void)?
-
-    func translate(_ texts: [String]) async throws -> [String] {
-        texts.map { text in "EN:\(text)" }
     }
 }

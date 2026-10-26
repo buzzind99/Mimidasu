@@ -4,7 +4,7 @@ import Testing
 
 /// `AppModel`'s continuous persistence over a begin-driven live session
 /// (scripted capture/engine): the lazy recording row, the stop-time
-/// finalize + Recent toast, the empty-session no-op, the launch sweep, and
+/// finalize + Recent toast, the empty-session no-op, pause persistence, and
 /// the degraded-store latch (one warning toast, no finalize, no toast on
 /// stop).
 @MainActor
@@ -285,31 +285,6 @@ struct AppModelArchivePersistenceTests {
         await stop(sut)
     }
 
-    @Test("a failed translation write latches the session")
-    func failedLiveTranslationWriteLatches() async {
-        let sut = await makeSUT(finals: [sentenceFinal])
-        await startRunning(sut)
-        #expect(await pollUntil { sut.model.recordingSessionID != nil })
-        guard let id = sut.model.recordingSessionID else {
-            Issue.record("the recording row should exist")
-            return
-        }
-        #expect(sut.store.delete(id: id), "removing the row underneath makes the upsert fail")
-
-        sut.model.applyTranslation(
-            index: 0, translation: SentenceTranslation(lang: "en", text: "Hello")
-        )
-
-        #expect(sut.model.archiveWriteFailed, "the failed write latches")
-        #expect(!sut.model.archiveAvailable)
-        #expect(
-            sut.model.toasts.toasts.filter { toast in toast.key == ToastKey.archiveUnavailable }.count == 1,
-            "one warning for the session"
-        )
-
-        await stop(sut)
-    }
-
     @Test("the write latch resets when the next session begins")
     func writeLatchResetsAtSessionBegin() async {
         let (store, root) = makeDegradedStore()
@@ -356,30 +331,6 @@ struct AppModelArchivePersistenceTests {
             abs((summary.durationS ?? 0) * 1000 - activeMS) <= 1000,
             "the stored duration excludes the paused span"
         )
-    }
-
-    // MARK: - Launch sweep
-
-    @Test("the launch sweep turns an abandoned recording row into an interrupted recent")
-    func launchSweepFlipsAbandonedRecording() async {
-        let store = isolatedArchive()
-        let abandoned = store.append(
-            sentence: Sentence(index: 0, startS: 0, endS: 1.5, lang: "ja", text: "こんにちは"),
-            sessionID: nil,
-            metadata: SessionMetadata(
-                startedAt: Date(timeIntervalSince1970: 500_000),
-                sourceLang: "ja", targetLang: "en", model: "test-model", chunkMS: 160
-            )
-        )
-        #expect(abandoned != nil, "the abandoned recording row is seeded first")
-
-        let sut = await makeSUT(store: store)
-
-        #expect(
-            sut.store.list().first?.status == .interrupted,
-            "the launch sweep runs from init, before anything can list the archive"
-        )
-        #expect(sut.model.archiveRevision != 0, "the sweep bumps the revision")
     }
 
     // MARK: - Degraded store

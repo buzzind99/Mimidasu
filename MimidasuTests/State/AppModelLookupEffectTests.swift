@@ -26,14 +26,9 @@ final class AppModelLookupEffectTests {
     // MARK: - Fixtures
 
     private func makeModel() -> AppModel {
-        AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelLookupEffects"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelLookupEffects"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            highFidelityProbe: { _ in false },
-            jmDictLookup: JMDictLookup(resolveDatabase: { [fixture] in fixture.url }),
-            initialModelResolve: { _ in nil }
+        makeIdleModel(
+            suite: "test.AppModelLookupEffects",
+            jmDictLookup: JMDictLookup(resolveDatabase: { [fixture] in fixture.url })
         )
     }
 
@@ -155,94 +150,56 @@ final class AppModelLookupEffectTests {
 
     // MARK: - Stale-generation drops
 
-    @Test("a stale show lands nothing")
-    func staleShowDropped() async {
+    @Test(
+        "a stale generation drops every effect",
+        arguments: [
+            (segments: [LookupSegment(surface: "お")], surface: "お"),
+            (segments: [LookupSegment(surface: "無語")], surface: "無語"),
+            (segments: [LookupSegment](), surface: "お")
+        ]
+    )
+    func staleGenerationDropsEveryEffect(segments: [LookupSegment], surface: String) async throws {
         let model = makeModel()
-
-        await model.runLookup(
-            segments: [LookupSegment(surface: "お")], tappedAt: 0,
-            sentenceText: "お", surface: "お",
-            source: .liveStrip, generation: -999
-        )
-
-        #expect(model.selectedLookup == nil)
-        #expect(model.pinnedLookup == nil)
-    }
-
-    @Test("a stale no-hit posts no pill and leaves state untouched")
-    func staleWarnDropped() async throws {
-        let model = makeModel()
+        // A different headword than the stale show would resolve, so that
+        // effect cannot land unnoticed by matching the pre-existing content.
         let content = LookupContent.found(
-            result: result(["お"]), also: [], origin: .tappedSurface
+            result: result(["あめ"]), also: [], origin: .tappedSurface
         )
         model.applyEffect(.show(content: content, entryIndex: 0), source: .liveStrip)
         let pinnedBefore = try #require(model.pinnedLookup)
 
         await model.runLookup(
-            segments: [LookupSegment(surface: "無語")], tappedAt: 0,
-            sentenceText: "無語", surface: "無語",
-            source: .liveStrip, generation: -999
+            segments: segments, tappedAt: 0, sentenceText: surface,
+            surface: surface, source: .liveStrip, generation: -999
         )
 
-        #expect(model.notices.message == nil)
-        #expect(model.selectedLookup?.content == content)
-        #expect(model.pinnedLookup == pinnedBefore)
-    }
-
-    @Test("a stale fault posts no toast")
-    func staleFaultDropped() async {
-        let model = makeModel()
-
-        await model.runLookup(
-            segments: [], tappedAt: 0, sentenceText: "お土産",
-            surface: "お", source: .liveStrip, generation: -999
-        )
-
-        #expect(model.toasts.toasts.isEmpty)
+        #expect(model.notices.message == nil, "a stale warning leaves the pill down")
+        #expect(model.toasts.toasts.isEmpty, "a stale fault posts no toast")
+        #expect(model.selectedLookup?.content == content, "the stale show lands nothing")
+        #expect(model.pinnedLookup == pinnedBefore, "the stale warn leaves the pin untouched")
     }
 
     // MARK: - Pager and pills over canned content
 
-    @Test("the pager steps popover and pinned card together")
-    func pagerStepsBoth() {
+    @Test(
+        "the pager steps and clamps popover and pinned card together",
+        arguments: [
+            (requested: 1, expected: 1),
+            (requested: 99, expected: 1),
+            (requested: -5, expected: 0)
+        ]
+    )
+    func pagerStepsAndClamps(requested: Int, expected: Int) {
         let model = makeModel()
         let content = LookupContent.found(
             result: result(["飴", "雨"]), also: [], origin: .tappedSurface
         )
         model.applyEffect(.show(content: content, entryIndex: 0), source: .liveStrip)
 
-        model.stepLookupEntry(to: 1)
+        model.stepLookupEntry(to: requested)
 
-        #expect(model.selectedLookup?.entryIndex == 1)
-        #expect(model.pinnedLookup?.entryIndex == 1)
-    }
-
-    @Test("the pager clamps past the last entry")
-    func pagerClampsPastEnd() {
-        let model = makeModel()
-        let content = LookupContent.found(
-            result: result(["飴", "雨"]), also: [], origin: .tappedSurface
-        )
-        model.applyEffect(.show(content: content, entryIndex: 0), source: .liveStrip)
-
-        model.stepLookupEntry(to: 99)
-
-        #expect(model.selectedLookup?.entryIndex == 1, "clamped to the last entry")
-        #expect(model.pinnedLookup?.entryIndex == 1, "clamped to the last entry")
-    }
-
-    @Test("the pager clamps before the first entry")
-    func pagerClampsBeforeStart() {
-        let model = makeModel()
-        let content = LookupContent.found(
-            result: result(["飴", "雨"]), also: [], origin: .tappedSurface
-        )
-        model.applyEffect(.show(content: content, entryIndex: 0), source: .liveStrip)
-
-        model.stepLookupEntry(to: -5)
-
-        #expect(model.selectedLookup?.entryIndex == 0, "clamped to the first entry")
-        #expect(model.pinnedLookup?.entryIndex == 0, "clamped to the first entry")
+        #expect(model.selectedLookup?.entryIndex == expected)
+        #expect(model.pinnedLookup?.entryIndex == expected)
     }
 
     @Test("the pager is inert over not-found content")

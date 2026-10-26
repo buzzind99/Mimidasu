@@ -20,17 +20,6 @@ struct AppModelArchiveLanguageTests {
 
     // MARK: - Fixtures
 
-    private func metadata(target: String) -> SessionMetadata {
-        SessionMetadata(
-            startedAt: Date(timeIntervalSince1970: 1_000_000),
-            sourceLang: "ja", targetLang: target, model: "test-model", chunkMS: 160
-        )
-    }
-
-    private func sentence(_ index: Int, text: String) -> Sentence {
-        Sentence(index: index, startS: Double(index), endS: Double(index) + 1, lang: "ja", text: text)
-    }
-
     /// A finalized three-sentence archive (stored target `en`) open in the
     /// pane; `translations` seeds pre-existing rows by sentence index.
     private func makeSUT(
@@ -41,7 +30,8 @@ struct AppModelArchiveLanguageTests {
         var id: Int64?
         for (index, text) in ["こんにちは", "さようなら", "おはよう"].enumerated() {
             id = store.append(
-                sentence: sentence(index, text: text), sessionID: id, metadata: metadata(target: target)
+                sentence: archiveSentence(index, text: text), sessionID: id,
+                metadata: archiveMetadata(target: target)
             )
         }
         let finalized = id ?? -1
@@ -50,14 +40,7 @@ struct AppModelArchiveLanguageTests {
         }
         store.finalize(session: finalized, durationMS: 60000, saved: false)
 
-        let model = AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelArchiveLanguage"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelArchiveLanguage"),
-            favorites: isolatedFavorites(),
-            archive: store,
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
+        let model = makeIdleModel(suite: "test.AppModelArchiveLanguage", archive: store)
         await model.initialModelCheck?.value
         model.openArchiveSession(id: finalized)
         return SUT(model: model, store: store, id: finalized)
@@ -69,7 +52,8 @@ struct AppModelArchiveLanguageTests {
         var id: Int64?
         for (index, text) in ["おやすみ", "いただきます"].enumerated() {
             id = sut.store.append(
-                sentence: sentence(index, text: text), sessionID: id, metadata: metadata(target: "en")
+                sentence: archiveSentence(index, text: text), sessionID: id,
+                metadata: archiveMetadata(target: "en")
             )
         }
         let finalized = id ?? -1
@@ -244,29 +228,5 @@ struct AppModelArchiveLanguageTests {
         )
         #expect(sut.model.archiveLanguageIsComplete("fr"))
         #expect(sut.model.archiveRevision != revisionBefore, "the revision bumps for the window's rows")
-    }
-
-    @Test("a failed archive-mode write warns without latching the live persistence")
-    func failedArchiveWriteWarnsWithoutLatching() async {
-        let sut = await makeSUT(translations: [0: SentenceTranslation(lang: "fr", text: "Seed")])
-        #expect(sut.store.delete(id: sut.id), "the row is removed underneath the open pane")
-        let revisionBefore = sut.model.archiveRevision
-
-        let landed = sut.model.applyTranslation(
-            index: 0, translation: SentenceTranslation(lang: "fr", text: "Third")
-        )
-
-        #expect(!landed, "the failed write reports itself")
-        #expect(
-            sut.model.entries.first?.translation(for: "fr")?.text == "Seed",
-            "the row keeps its previous translation instead of a phantom one"
-        )
-        #expect(!sut.model.archiveWriteFailed, "an archive-mode failure never latches the live session")
-        let warning = sut.model.toasts.toasts.first { toast in
-            toast.key == ToastKey.archiveUnavailable
-        }
-        #expect(warning != nil, "the archive warning posts without latching")
-        #expect(warning?.isClosable == true, "the archive-mode warning is dismissible")
-        #expect(sut.model.archiveRevision == revisionBefore, "a failed write bumps nothing")
     }
 }

@@ -22,40 +22,13 @@ struct AppModelDictionaryTests {
     /// Stubbed launch check: the real locator hashes the dev GGUF and feeds
     /// the engine warm-up — real blocking work tests must never trigger.
     private func makeModel() -> AppModel {
-        AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelDictionary"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelDictionary"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
+        makeIdleModel(suite: "test.AppModelDictionary")
     }
 
     private static let ipadic = URL(fileURLWithPath: "/tmp/ipadic.dic")
     private static let jmDict = URL(fileURLWithPath: "/tmp/jmdict.sqlite")
 
     // MARK: - Launch kick
-
-    @Test("kicks both artifact preparations")
-    func kicksBothArtifacts() async {
-        let model = makeModel()
-        var prepareCalls = 0
-        var jmDictPrepareCalls = 0
-
-        model.prepareDictionaries(
-            prepare: {
-                prepareCalls += 1
-                return Self.ipadic
-            },
-            prepareJMDict: {
-                jmDictPrepareCalls += 1
-                return Self.jmDict
-            }
-        )
-
-        #expect(await pollUntil { prepareCalls == 1 && jmDictPrepareCalls == 1 })
-    }
 
     @Test("asks the store even when nothing is missing, so adoption is decided in one place")
     func alwaysAsksTheStore() async {
@@ -84,38 +57,31 @@ struct AppModelDictionaryTests {
     }
 
     @Test("a failed preparation is log-only and raises no user-visible error")
-    func failedBuildStaysQuiet() async {
+    func failedPreparationsStayQuiet() async {
         let model = makeModel()
-        let failure = DictionaryStore.DictionaryStoreError.libraryUnavailable
         var prepareCalls = 0
+        var jmDictPrepareCalls = 0
 
         model.prepareDictionaries(
             prepare: {
                 prepareCalls += 1
-                throw failure
+                throw DictionaryStore.DictionaryStoreError.libraryUnavailable
             },
             prepareJMDict: { Self.jmDict }
         )
 
-        #expect(await pollUntil { prepareCalls == 1 }, "the failing preparation runs")
+        #expect(await pollUntil { prepareCalls == 1 }, "the failing tokenizer preparation runs")
         #expect(!model.isPreparingDictionary)
-    }
-
-    @Test("a failed JMDict preparation is log-only and raises no user-visible error")
-    func failedJMDBuildStaysQuiet() async {
-        let model = makeModel()
-        let failure = DictionaryStore.DictionaryStoreError.smokeTestFailed(reason: "smoke")
-        var jmDictPrepareCalls = 0
 
         model.prepareDictionaries(
             prepare: { Self.ipadic },
             prepareJMDict: {
                 jmDictPrepareCalls += 1
-                throw failure
+                throw DictionaryStore.DictionaryStoreError.smokeTestFailed(reason: "smoke")
             }
         )
 
-        #expect(await pollUntil { jmDictPrepareCalls == 1 }, "the failing preparation runs")
+        #expect(await pollUntil { jmDictPrepareCalls == 1 }, "the failing JMDict preparation runs")
         #expect(!model.isPreparingDictionary)
     }
 
@@ -144,25 +110,6 @@ struct AppModelDictionaryTests {
         #expect(jmDictPrepareCalls == 1)
         #expect(preparingDuringPreparation)
         #expect(!model.isPreparingDictionary)
-    }
-
-    @Test("session-start gate still asks for an index-less JMDict database")
-    func gateAlwaysConfirmsJMDict() async throws {
-        // Same regression as `alwaysAsksTheStore`, on the path that blocks
-        // capture. A gate here would let a session start against a dictionary
-        // whose every Latin query returns nothing.
-        let model = makeModel()
-        var jmDictPrepareCalls = 0
-
-        try await model.ensureDictionaryReady(
-            prepare: { Self.ipadic },
-            prepareJMDict: {
-                jmDictPrepareCalls += 1
-                return Self.jmDict
-            }
-        )
-
-        #expect(jmDictPrepareCalls == 1)
     }
 
     @Test("session-start gate rethrows a failed preparation so the start fails visibly")

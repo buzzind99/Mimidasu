@@ -21,20 +21,9 @@ struct AppModelExportTests {
     // MARK: - Helpers
 
     private func makeSUT() async -> AppModel {
-        let model = AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelExport"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelExport"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
+        let model = makeIdleModel(suite: "test.AppModelExport")
         await model.initialModelCheck?.value
         return model
-    }
-
-    private func makeSentence(index: Int = 0) -> Sentence {
-        Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: sentenceText)
     }
 
     /// Minimal engine double so `SessionController.begin()` runs without the
@@ -154,40 +143,24 @@ struct AppModelExportTests {
 
     // MARK: - Format delegation
 
-    @Test("txt export matches the plain exporter")
-    func exportTxtMatchesPlainExporter() async throws {
-        let model = await makeSUT()
-        model.sessionController.onSentence?(makeSentence())
-
-        let data = try model.export(format: .txt)
-
-        #expect(data == Data(SessionExporter.plainText(entries: model.entries).utf8))
-    }
-
-    @Test("srt export matches the subtitle exporter")
-    func exportSrtMatchesSubtitleExporter() async throws {
+    @Test(
+        "txt, srt, and vtt exports match their exporter",
+        arguments: [
+            (format: SessionExporter.Format.txt, expected: "00:00  テスト\n00:00  Test\n"),
+            (format: .srt, expected: "1\n00:00:00,000 --> 00:00:01,000\nTest\n\n"),
+            (format: .vtt, expected: "WEBVTT\n\n1\n00:00:00.000 --> 00:00:01.000\nTest\n\n"),
+        ]
+    )
+    func exportMatchesExporter(format: SessionExporter.Format, expected: String) async throws {
         let model = await makeSUT()
         model.sessionController.onSentence?(makeSentence())
         model.applyTranslation(
             index: 0, translation: SentenceTranslation(lang: "en", text: translationText)
         )
 
-        let data = try model.export(format: .srt)
+        let data = try model.export(format: format)
 
-        #expect(data == Data(SessionExporter.subtitles(entries: model.entries, format: .srt).utf8))
-    }
-
-    @Test("vtt export matches the subtitle exporter")
-    func exportVttMatchesSubtitleExporter() async throws {
-        let model = await makeSUT()
-        model.sessionController.onSentence?(makeSentence())
-        model.applyTranslation(
-            index: 0, translation: SentenceTranslation(lang: "en", text: translationText)
-        )
-
-        let data = try model.export(format: .vtt)
-
-        #expect(data == Data(SessionExporter.subtitles(entries: model.entries, format: .vtt).utf8))
+        #expect(data == Data(expected.utf8))
     }
 
     // MARK: - JSON export
@@ -290,14 +263,7 @@ struct AppModelExportTests {
             sentence: makeSentence(), sessionID: nil, metadata: metadata
         )
         store.finalize(session: id ?? -1, durationMS: 30000, saved: false)
-        let model = AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelExportArchive"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelExportArchive"),
-            favorites: isolatedFavorites(),
-            archive: store,
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
+        let model = makeIdleModel(suite: "test.AppModelExportArchive", archive: store)
         await model.initialModelCheck?.value
         model.openArchiveSession(id: id ?? -1)
         return ArchiveSUT(model: model, id: id ?? -1)

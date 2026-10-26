@@ -29,16 +29,6 @@ struct NoticeCenterTests {
         #expect(center.message == "Text copied")
     }
 
-    @Test("reposting replaces the message in place")
-    func repostReplacesInPlace() {
-        let center = makeSUT(scheduler: ManualScheduler())
-
-        center.post(message: "first")
-        center.post(message: "second")
-
-        #expect(center.message == "second", "a single notice is held at a time")
-    }
-
     // MARK: - Auto-dismiss
 
     @Test("a post schedules its 2 s auto-dismiss and fires it")
@@ -98,62 +88,5 @@ struct NoticeCenterTests {
 
         #expect(center.message == nil)
         #expect(spy.pendingCount == 0)
-    }
-}
-
-// MARK: - Manual scheduler fixtures
-
-/// A scheduled firing; cancelled via the closure `schedule` returns.
-private final class ManualTimerToken: @unchecked Sendable {
-    let fire: @MainActor () -> Void
-    var cancelled = false
-
-    init(fire: @escaping @MainActor () -> Void) {
-        self.fire = fire
-    }
-}
-
-/// Deterministic notice scheduler: records every scheduled firing with a
-/// cancellable token; tests fire pending dismissals instead of sleeping.
-private final class ManualScheduler: @unchecked Sendable {
-    private let lock = NSLock()
-    private var scheduled: [ManualTimerToken] = []
-
-    var delays: [Duration] = []
-
-    func schedule(
-        _ delay: Duration, _ fire: @escaping @MainActor () -> Void
-    ) -> @Sendable () -> Void {
-        let token = ManualTimerToken(fire: fire)
-        lock.lock()
-        scheduled.append(token)
-        delays.append(delay)
-        lock.unlock()
-        return { [weak self] in
-            guard let self else { return }
-            lock.lock()
-            token.cancelled = true
-            lock.unlock()
-        }
-    }
-
-    /// Live (uncancelled) firings, in schedule order.
-    private var live: [ManualTimerToken] {
-        lock.withLock { scheduled.filter { token in !token.cancelled } }
-    }
-
-    var pendingCount: Int {
-        live.count
-    }
-
-    /// Fires every live dismissal and forgets the schedule. MainActor: the
-    /// stored `fire` closures are, and every caller (the tests) is too.
-    @MainActor
-    func firePending() {
-        let tokens = live
-        lock.withLock { scheduled.removeAll() }
-        for token in tokens {
-            token.fire()
-        }
     }
 }

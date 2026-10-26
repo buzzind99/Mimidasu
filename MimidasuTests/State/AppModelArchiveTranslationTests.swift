@@ -19,59 +19,6 @@ struct AppModelArchiveTranslationTests {
 
     private let resultTimeout: TimeInterval = 5
 
-    // MARK: - Fixtures
-
-    /// The three rows a full `fr` run of the default fixture lands, in
-    /// sentence order.
-    private var expectedFRLandings: [[SentenceTranslation]] {
-        [
-            [SentenceTranslation(lang: "fr", text: "T:こんにちは", engine: .google)],
-            [SentenceTranslation(lang: "fr", text: "T:さようなら", engine: .google)],
-            [SentenceTranslation(lang: "fr", text: "T:おはよう", engine: .google)]
-        ]
-    }
-
-    // MARK: - Filling missing sentences
-
-    @Test("an external start fills every missing sentence and writes each landing back")
-    func externalStartFillsEveryMissingSentence() async {
-        let sut = await makeSUT()
-        let engine = ScriptedArchiveEngine()
-        install(engine, for: .google, on: sut.model)
-
-        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
-
-        #expect(
-            await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
-            "the run fills every missing sentence"
-        )
-        #expect(engine.recordedBatches == [["こんにちは"], ["さようなら"], ["おはよう"]])
-        #expect(
-            sut.model.entries.map { entry in entry.translations } == expectedFRLandings,
-            "the pane rows carry the new translations"
-        )
-        #expect(
-            sut.model.openArchive?.summary.languageCount(for: "fr")
-                == ArchiveLanguageCount(lang: "fr", translated: 3),
-            "the banner's language count refreshes in place"
-        )
-
-        // Durable: the store is the home of every landing.
-        #expect(
-            sut.model.archive.load(id: sut.id)?.entries.map { entry in entry.translations }
-                == expectedFRLandings,
-            "every landing is written back with its engine kind stamp"
-        )
-
-        // And a reopen reads the write-back out of the store.
-        sut.model.closeArchive()
-        sut.model.openArchiveSession(id: sut.id)
-        #expect(
-            sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.text }
-                == ["T:こんにちは", "T:さようなら", "T:おはよう"]
-        )
-    }
-
     // MARK: - Progress card
 
     @Test("the progress card advances in place and morphs into the all-success summary")
@@ -172,54 +119,6 @@ struct AppModelArchiveTranslationTests {
         )
     }
 
-    @Test("a retry after the archive swapped re-runs the failed sentence in its own archive")
-    func retryAfterArchiveSwapRunsAgainstItsOwnArchive() async {
-        let sut = await makeSUT()
-        let engine = ScriptedArchiveEngine()
-        engine.fail(on: ["さようなら"])
-        install(engine, for: .google, on: sut.model)
-
-        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
-        #expect(
-            await pollUntil(timeout: resultTimeout) {
-                !sut.model.archiveTranslationRunning
-                    && sut.model.archiveTranslationJob.failureIndexes == [1]
-            },
-            "the run finishes with one failure"
-        )
-
-        let otherID = appendArchive(to: sut.store)
-        sut.model.openArchiveSession(id: otherID)
-        #expect(sut.model.openArchive?.id == otherID, "the other archive is open")
-
-        engine.clearFailures()
-        sut.model.retryFailedArchiveTranslation()
-
-        #expect(
-            await pollUntil(timeout: resultTimeout) {
-                archiveToast(sut.model)?.body == "Translated 1 sentence to Français"
-                    && !sut.model.archiveTranslationRunning
-            },
-            "the retry lands the failed sentence with another archive open"
-        )
-        #expect(
-            engine.recordedBatches == [["こんにちは"], ["さようなら"], ["おはよう"], ["さようなら"]],
-            "the retry sends exactly the failed index"
-        )
-        #expect(
-            sut.model.archiveTranslationJob.lastRun?.request.sessionID == sut.id,
-            "the retry stays on the original run's archive"
-        )
-        #expect(
-            sut.store.load(id: sut.id)?.entries.allSatisfy { entry in entry.translation(for: "fr") != nil } == true,
-            "the original archive now carries every translation"
-        )
-        #expect(
-            sut.store.load(id: otherID)?.entries.allSatisfy { entry in entry.translations.isEmpty } == true,
-            "the swapped-in archive is never modified"
-        )
-    }
-
     @Test("a failure card survives close and reopen, and retries from another open session")
     func failureCardSurvivesCloseAndRetriesFromAnotherOpenSession() async {
         let sut = await makeSUT()
@@ -234,6 +133,10 @@ struct AppModelArchiveTranslationTests {
                     && !sut.model.archiveTranslationRunning
             },
             "the failure summary lands"
+        )
+        #expect(
+            sut.model.archiveTranslationJob.failureIndexes == [1],
+            "the run finishes with one failure"
         )
         let failureCard = archiveToast(sut.model)
         #expect(failureCard?.action != nil, "the failure card is up and waits")
@@ -254,6 +157,7 @@ struct AppModelArchiveTranslationTests {
 
         let otherID = appendArchive(to: sut.store)
         sut.model.openArchiveSession(id: otherID)
+        #expect(sut.model.openArchive?.id == otherID, "the other archive is open")
         #expect(
             archiveToast(sut.model)?.id == failureCard?.id,
             "the card stays up while another session is open"
@@ -268,6 +172,14 @@ struct AppModelArchiveTranslationTests {
                     && !sut.model.archiveTranslationRunning
             },
             "the retry from another open session lands the failed sentence"
+        )
+        #expect(
+            engine.recordedBatches == [["こんにちは"], ["さようなら"], ["おはよう"], ["さようなら"]],
+            "the retry sends exactly the failed index"
+        )
+        #expect(
+            sut.model.archiveTranslationJob.lastRun?.request.sessionID == sut.id,
+            "the retry stays on the original run's archive"
         )
         #expect(
             sut.store.load(id: sut.id)?.entries.allSatisfy { entry in entry.translation(for: "fr") != nil } == true,
@@ -351,53 +263,6 @@ extension AppModelArchiveTranslationTests {
         #expect(
             sut.store.load(id: sut.id)?.entries.map { entry in entry.translations } == expectedFRLandings,
             "every landing persists under its own archive's id"
-        )
-    }
-
-    @Test("an open swap keeps the run and its card, and lands under the original id")
-    func openSwapKeepsTheRunAndItsCard() async {
-        let sut = await makeSUT()
-        let gate = PermitGate()
-        let engine = ScriptedArchiveEngine(gate: gate)
-        install(engine, for: .google, on: sut.model)
-
-        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
-        #expect(
-            await pollUntil(timeout: resultTimeout) {
-                sut.model.archiveTranslationRunning && engine.recordedBatches.count == 1
-            },
-            "the run starts and parks on its first sentence"
-        )
-        let cardID = archiveToast(sut.model)?.id
-        #expect(cardID != nil, "the started event posts the progress card")
-
-        let otherID = appendArchive(to: sut.store)
-        sut.model.openArchiveSession(id: otherID)
-
-        #expect(sut.model.openArchive?.id == otherID, "the swap opened the other archive")
-        #expect(sut.model.archiveTranslationRunning, "the swap keeps the run claimed")
-        #expect(archiveToast(sut.model)?.id == cardID, "the card stays with the run")
-        gate.release()
-        gate.release()
-        gate.release()
-        #expect(
-            await pollUntil(timeout: resultTimeout) {
-                archiveToast(sut.model)?.title == "Archive translation finished"
-                    && !sut.model.archiveTranslationRunning
-            },
-            "the released run walks every sentence"
-        )
-        #expect(
-            engine.recordedBatches == [["こんにちは"], ["さようなら"], ["おはよう"]],
-            "every sentence is still sent after the swap"
-        )
-        #expect(
-            sut.store.load(id: sut.id)?.entries.map { entry in entry.translations } == expectedFRLandings,
-            "every landing persists under its own archive's id"
-        )
-        #expect(
-            sut.store.load(id: otherID)?.entries.allSatisfy { entry in entry.translations.isEmpty } == true,
-            "the newly opened archive is untouched"
         )
     }
 

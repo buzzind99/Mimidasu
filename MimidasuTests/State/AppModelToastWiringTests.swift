@@ -17,14 +17,7 @@ struct AppModelToastWiringTests {
 
     /// Stubbed launch check — see `AppModelTests.makeSUT`.
     private func makeSUT() async -> AppModel {
-        let model = AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelToastWiring"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelToastWiring"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
+        let model = makeIdleModel(suite: "test.AppModelToastWiring")
         await model.initialModelCheck?.value
         return model
     }

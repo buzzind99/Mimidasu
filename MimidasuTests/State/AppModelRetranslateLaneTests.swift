@@ -1,7 +1,34 @@
 import Foundation
 @testable import Mimidasu
-import Synchronization
 import Testing
+
+/// How a lane's external selection resolves to no engine: a test factory
+/// that reports no engine, or the live-session build with no stored key.
+enum UnavailableLaneEngine: String, CaseIterable, Sendable {
+    case factoryWithoutEngine
+    case missingKey
+
+    var provider: TranslationProvider {
+        switch self {
+        case .factoryWithoutEngine: .openrouter
+        case .missingKey: .google
+        }
+    }
+
+    var selection: RetranslateEngine {
+        switch self {
+        case .factoryWithoutEngine: .openrouter
+        case .missingKey: .google
+        }
+    }
+
+    var usesFactory: Bool {
+        switch self {
+        case .factoryWithoutEngine: true
+        case .missingKey: false
+        }
+    }
+}
 
 /// Tests the alternate-engine re-translate lane's runner semantics against
 /// mock engines: engine-stamped delivery, unstamped cache seeding,
@@ -14,48 +41,15 @@ struct AppModelRetranslateLaneTests {
 
     // MARK: - Fixtures
 
+    private let harness = RetranslateHarness(suite: "test.AppModelRetranslateLane")
     private let sentenceText = "テスト"
     private let resultTimeout: TimeInterval = 5
-
-    private func makeSUT() async -> AppModel {
-        let model = AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelRetranslateLane"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelRetranslateLane"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
-        await model.initialModelCheck?.value
-        return model
-    }
-
-    private func makeSentence(
-        index: Int, text: String = "テスト"
-    ) -> Sentence {
-        Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: text)
-    }
-
-    /// Attaches a queue worker the way `activateTranslation` does. Besides
-    /// serving initial deliveries it keeps a stop's translation-tail drain
-    /// instant: an unserved backlog spins the drain's whole bounded timeout,
-    /// which both slows the suite and hides the ordering under test behind
-    /// it.
-    @discardableResult
-    private func attachWorker(_ model: AppModel) async -> Task<Void, Never> {
-        let worker = Task { await model.translationQueue.run(with: QueueEchoEngine()) }
-        #expect(
-            await pollUntil(timeout: resultTimeout) { model.translationQueue.hasWorker },
-            "the queue worker must be attached"
-        )
-        return worker
-    }
 
     // MARK: - Lane delivery
 
     @Test("a lane result stamps the engine and seeds the cache unstamped")
     func laneResultStampsEngineAndSeedsCacheUnstamped() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let engine = LaneEchoEngine()
         model.retranslateEngineFactory = { provider, _ in
             #expect(provider == .google)
@@ -87,16 +81,19 @@ struct AppModelRetranslateLaneTests {
         #expect(repeatEntry?.translations.first?.engine == nil, "the seed is unstamped")
     }
 
-    @Test("an unavailable lane engine posts a toast and skips the row")
-    func unavailableLaneEnginePostsToastAndSkips() async {
-        let model = await makeSUT()
-        let calls = Mutex(0)
-        model.retranslateEngineFactory = { provider, _ in
-            calls.withLock { counter in counter += 1 }
-            #expect(provider == .openrouter)
-            return nil
+    @Test(
+        "an unavailable lane engine posts a toast and skips the row",
+        arguments: UnavailableLaneEngine.allCases
+    )
+    func unavailableLaneEnginePostsToastAndSkips(testCase: UnavailableLaneEngine) async {
+        let model = await harness.makeModel()
+        if testCase.usesFactory {
+            model.retranslateEngineFactory = { provider, _ in
+                #expect(provider == testCase.provider)
+                return nil
+            }
         }
-        model.translationSettings.selectRetranslate(.openrouter)
+        model.translationSettings.selectRetranslate(testCase.selection)
         model.phase = .running
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
@@ -112,14 +109,14 @@ struct AppModelRetranslateLaneTests {
         )
         let toast = model.toasts.toasts.first(where: { candidate in candidate.key == ToastKey.retranslate })
         #expect(toast?.title == "Re-translate unavailable")
-        #expect(toast?.body == "No API key stored for OpenRouter.")
+        #expect(toast?.body == "No API key stored for \(testCase.provider.displayName).")
     }
 
     // MARK: - Serialization
 
     @Test("lane translations serialize — the second click chains, never races")
     func laneTranslationsSerialize() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let engine = LaneGatedEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
@@ -149,7 +146,7 @@ struct AppModelRetranslateLaneTests {
 
     @Test("a duplicate lane click while the row already retranslates is a no-op")
     func duplicateLaneClickIsRefused() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let engine = LaneGatedEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
@@ -178,12 +175,12 @@ struct AppModelRetranslateLaneTests {
 
     @Test("a chained lane task that resumes after a stop retires its own marker")
     func chainedLaneTaskResumingAfterStopRetiresMarker() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let engine = LaneGatedEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
-        let worker = await attachWorker(model)
+        let worker = await harness.attachWorker(model)
         defer { worker.cancel() }
         let first = makeSentence(index: 1, text: "一")
         let second = makeSentence(index: 2, text: "二")
@@ -231,7 +228,7 @@ struct AppModelRetranslateLaneTests {
 
     @Test("an arming lane session that resolves after the session went away is not flown")
     func armedLaneSessionArrivingAfterPhaseLossIsNotFlown() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         model.translationSettings.selectRetranslate(.appleFast)
         // An external live session, so the fast selection is a genuine
         // alternate and the lane arms its dedicated session on the click.
@@ -279,12 +276,12 @@ struct AppModelRetranslateLaneTests {
 
     @Test("a lane result landing after a stop is dropped")
     func laneResultAfterStopIsDropped() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let engine = LaneGatedEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
-        let worker = await attachWorker(model)
+        let worker = await harness.attachWorker(model)
         defer { worker.cancel() }
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
@@ -324,12 +321,12 @@ struct AppModelRetranslateLaneTests {
 
     @Test("a lane flight held across a session boundary never swaps the next session's row")
     func laneFlightAcrossSessionBoundaryIsDropped() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let engine = LaneGatedEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
-        let worker = await attachWorker(model)
+        let worker = await harness.attachWorker(model)
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
         // Settle the worker's initial delivery: a queued or airborne
@@ -380,7 +377,7 @@ struct AppModelRetranslateLaneTests {
 
     @Test("a lane flight dropped by a capture restart retires its marker")
     func laneFlightDuringCaptureRestartRetiresMarker() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let engine = LaneGatedEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
@@ -418,7 +415,7 @@ struct AppModelRetranslateLaneTests {
 
     @Test("a mid-session teardown refuses an in-flight lane delivery silently")
     func midSessionTeardownRefusesInFlightLaneDelivery() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let engine = LaneGatedEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
@@ -466,79 +463,4 @@ struct AppModelRetranslateLaneTests {
         )
         #expect(model.retranslateLaneTask == nil, "the teardown clears the stored task")
     }
-}
-
-/// Session-engine fixture: prefixes with "EN:", recording each batch so a
-/// test can pin exactly which sentences the queue served.
-private final class QueueEchoEngine: TranslationEngine, @unchecked Sendable {
-    let preferredBatchSize = 16
-    var onRetry: (@Sendable (RetryProgress) -> Void)?
-
-    private let state = Mutex([[String]]())
-
-    var recordedBatches: [[String]] {
-        state.withLock { batches in batches }
-    }
-
-    func translate(_ texts: [String]) async throws -> [String] {
-        state.withLock { batches in batches.append(texts) }
-        return texts.map { text in "EN:\(text)" }
-    }
-}
-
-/// Lane fixture whose `translate` parks until the gate opens, so a test can
-/// hold a flight mid-air and prove a second click does not start a competing
-/// one and that a late landing is dropped. Completed flights are counted so
-/// a negative assertion can wait on the flight it concerns instead of
-/// sleeping past it.
-private final class LaneGatedEngine: TranslationEngine, @unchecked Sendable {
-    let preferredBatchSize = 4
-    var onRetry: (@Sendable (RetryProgress) -> Void)?
-
-    private let state = Mutex(LaneGateState())
-
-    var recordedBatches: [[String]] {
-        state.withLock { gateState in gateState.batches }
-    }
-
-    /// Flights that entered, parked, and returned — the deterministic
-    /// "this flight finished" observable.
-    var completions: Int {
-        state.withLock { gateState in gateState.completions }
-    }
-
-    /// Releases every parked `translate`, and lets any that arrives later
-    /// through.
-    func openGate() {
-        let parked = state.withLock { gateState -> [CheckedContinuation<Void, Never>] in
-            gateState.open = true
-            let parked = gateState.waiters
-            gateState.waiters.removeAll()
-            return parked
-        }
-        for waiter in parked {
-            waiter.resume()
-        }
-    }
-
-    func translate(_ texts: [String]) async throws -> [String] {
-        state.withLock { gateState in gateState.batches.append(texts) }
-        await withCheckedContinuation { continuation in
-            let immediate = state.withLock { gateState -> CheckedContinuation<Void, Never>? in
-                guard !gateState.open else { return continuation }
-                gateState.waiters.append(continuation)
-                return nil
-            }
-            immediate?.resume()
-        }
-        state.withLock { gateState in gateState.completions += 1 }
-        return texts.map { text in "JA:\(text)" }
-    }
-}
-
-private struct LaneGateState {
-    var open = false
-    var batches: [[String]] = []
-    var waiters: [CheckedContinuation<Void, Never>] = []
-    var completions = 0
 }

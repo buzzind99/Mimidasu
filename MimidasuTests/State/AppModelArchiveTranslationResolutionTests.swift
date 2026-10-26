@@ -34,11 +34,6 @@ struct ArchiveTranslationResolutionTests {
 
     private let resultTimeout: TimeInterval = 5
 
-    /// The open archive's row for `index`.
-    private func sentence(_ sut: ArchiveTranslationSUT, at index: Int) -> Sentence {
-        sut.model.entries.first { entry in entry.sentence.index == index }!.sentence
-    }
-
     @Test("a high-fidelity selection flies the armed high-fidelity session")
     func highFidelityStartUsesArmedHifiSession() async throws {
         guard #available(macOS 26.4, *) else {
@@ -134,54 +129,72 @@ struct ArchiveTranslationResolutionTests {
 
     // MARK: - Un-pre-armed hand-over
 
-    @Test("a fast run with no pre-armed engine resolves on the late hand-over")
-    func unarmedFastRunResolvesOnLateHandover() async {
-        let sut = await makeSUT()
-        let engine = ScriptedArchiveEngine()
+    /// The Apple lane whose run has no pre-armed engine and resolves on the
+    /// late hand-over: the fast lane, and the Intelligence lane on 26.4+.
+    enum LateHandoverLane: String, CaseIterable, Sendable {
+        case fast
+        case highFidelity
 
-        sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
-        #expect(
-            await pollUntil(timeout: resultTimeout) { sut.model.retranslateConfig != nil },
-            "the run's resolution arms the fast session"
-        )
-        sut.model.retranslateSessionArrived(engine)
+        var selection: RetranslateEngine {
+            switch self {
+            case .fast: .appleFast
+            case .highFidelity: .appleHighFidelity
+            }
+        }
 
-        #expect(
-            await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
-            "the late hand-over serves the whole run"
-        )
-        #expect(sut.model.archiveTranslationJob.lastRun?.kind == .appleFast)
-        #expect(
-            sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
-                == [.appleFast, .appleFast, .appleFast],
-            "every landed row is stamped fast"
-        )
+        var kind: TranslationEngineKind {
+            switch self {
+            case .fast: .appleFast
+            case .highFidelity: .appleHighFidelity
+            }
+        }
+
+        var requiresStrategyAPI: Bool {
+            switch self {
+            case .fast: false
+            case .highFidelity: true
+            }
+        }
     }
 
-    @Test("a high-fidelity run with no pre-armed engine resolves on the late hand-over")
-    func unarmedHifiRunResolvesOnLateHandover() async throws {
-        guard #available(macOS 26.4, *) else {
-            try Test.cancel("the high-fidelity lane requires macOS 26.4")
+    @Test(
+        "an un-pre-armed Apple run resolves on the late hand-over",
+        arguments: LateHandoverLane.allCases
+    )
+    func unarmedAppleRunResolvesOnLateHandover(lane: LateHandoverLane) async throws {
+        if lane.requiresStrategyAPI {
+            guard #available(macOS 26.4, *) else {
+                try Test.cancel("the high-fidelity lane requires macOS 26.4")
+            }
         }
         let sut = await makeSUT()
         let engine = ScriptedArchiveEngine()
 
-        sut.model.beginArchiveTranslation(engine: .appleHighFidelity, lang: "fr")
-        #expect(
-            await pollUntil(timeout: resultTimeout) { sut.model.retranslateHifiConfig != nil },
-            "the run's resolution arms the high-fidelity session"
-        )
-        sut.model.retranslateHifiSessionArrived(engine)
+        sut.model.beginArchiveTranslation(engine: lane.selection, lang: "fr")
+        switch lane {
+        case .fast:
+            #expect(
+                await pollUntil(timeout: resultTimeout) { sut.model.retranslateConfig != nil },
+                "the run's resolution arms the fast session"
+            )
+            sut.model.retranslateSessionArrived(engine)
+        case .highFidelity:
+            #expect(
+                await pollUntil(timeout: resultTimeout) { sut.model.retranslateHifiConfig != nil },
+                "the run's resolution arms the high-fidelity session"
+            )
+            sut.model.retranslateHifiSessionArrived(engine)
+        }
 
         #expect(
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
             "the late hand-over serves the whole run"
         )
-        #expect(sut.model.archiveTranslationJob.lastRun?.kind == .appleHighFidelity)
+        #expect(sut.model.archiveTranslationJob.lastRun?.kind == lane.kind)
         #expect(
             sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
-                == [.appleHighFidelity, .appleHighFidelity, .appleHighFidelity],
-            "every landed row is stamped high fidelity"
+                == [lane.kind, lane.kind, lane.kind],
+            "every landed row is stamped with the resolved model"
         )
     }
 
@@ -326,22 +339,18 @@ struct ArchiveTranslationResolutionTests {
 
     // MARK: - Picker offer
 
-    @Test("the picker offers high fidelity for a pair with no unavailability evidence")
-    func pickerOffersHighFidelityWithoutEvidence() async throws {
+    @Test("the picker offers high fidelity without evidence and withdraws only for its pair")
+    func pickerOfferReflectsProbeEvidence() async throws {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("the high-fidelity offer requires macOS 26.4")
         }
         let sut = await makeSUT()
 
-        #expect(sut.model.archiveHighFidelityOffered(for: "fr"))
-    }
+        #expect(
+            sut.model.archiveHighFidelityOffered(for: "fr"),
+            "a pair with no unavailability evidence keeps the offer"
+        )
 
-    @Test("a probe landed not-installed withdraws the offer only for its pair")
-    func probeWithdrawsOfferOnlyForItsPair() async throws {
-        guard #available(macOS 26.4, *) else {
-            try Test.cancel("the high-fidelity offer requires macOS 26.4")
-        }
-        let sut = await makeSUT()
         sut.model.appleHighFidelityProbe = (false, "fr")
 
         #expect(
@@ -365,11 +374,6 @@ struct ArchiveTranslationResolutionTests {
 struct ArchiveTranslationAdoptionTests {
 
     private let resultTimeout: TimeInterval = 5
-
-    /// The open archive's row for `index`.
-    private func sentence(_ sut: ArchiveTranslationSUT, at index: Int) -> Sentence {
-        sut.model.entries.first { entry in entry.sentence.index == index }!.sentence
-    }
 
     /// Marks the instant the run enters engine resolution before forwarding
     /// to the wired resolver. The claim is published synchronously, so tests
@@ -400,7 +404,7 @@ struct ArchiveTranslationAdoptionTests {
         let laneEngine = ScriptedArchiveEngine(gate: gate)
         install(laneEngine, for: .google, on: sut.model)
         sut.model.translationSettings.selectRetranslate(.google)
-        sut.model.retranslateSentence(sentence(sut, at: 0))
+        sut.model.retranslateSentence(entrySentence(in: sut.model, at: 0))
         #expect(
             await pollUntil(timeout: resultTimeout) { laneEngine.recordedBatches.count == 1 },
             "the lane link parks in its engine"
@@ -437,7 +441,7 @@ struct ArchiveTranslationAdoptionTests {
         let laneEngine = ScriptedArchiveEngine(gate: gate)
         install(laneEngine, for: .google, on: sut.model)
         sut.model.translationSettings.selectRetranslate(.google)
-        sut.model.retranslateSentence(sentence(sut, at: 0))
+        sut.model.retranslateSentence(entrySentence(in: sut.model, at: 0))
         #expect(
             await pollUntil(timeout: resultTimeout) { laneEngine.recordedBatches.count == 1 },
             "the lane link parks in its engine"
@@ -489,13 +493,13 @@ struct ArchiveTranslationAdoptionTests {
         let engine = ScriptedArchiveEngine()
 
         // A `fr` retry with no engine armed: the lane parks in the arm wait.
-        sut.model.retranslateSentence(sentence(sut, at: 0))
+        sut.model.retranslateSentence(entrySentence(in: sut.model, at: 0))
         #expect(sut.model.pendingRetranslations.contains(0), "the fr click marks its row")
 
         // The pane moves to `de` and a `de` retry re-arms the fast config for
         // its own target; its lane chains behind the parked fr link.
         sut.model.selectArchiveViewingLanguage("de")
-        sut.model.retranslateSentence(sentence(sut, at: 1))
+        sut.model.retranslateSentence(entrySentence(in: sut.model, at: 1))
         #expect(
             sut.model.retranslate.retranslateConfigTarget == "de",
             "the de click rebuilds the armed config for its target"

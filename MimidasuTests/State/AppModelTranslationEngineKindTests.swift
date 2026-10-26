@@ -41,14 +41,10 @@ struct AppModelTranslationEngineKindTests {
         settings: TranslationSettings,
         transport: HTTPTranslationTransport? = nil
     ) -> AppModel {
-        AppModel(
+        makeIdleModel(
+            suite: "test.AppModelEngineKind",
             translationSettings: settings,
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngineKind"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            translationTransport: transport,
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
+            translationTransport: transport
         )
     }
 
@@ -85,30 +81,24 @@ struct AppModelTranslationEngineKindTests {
         #expect(model.activeEngineKind == .appleFast)
     }
 
-    @Test("an installed high-fidelity probe for the current pair reads high fidelity")
-    func installedProbeForCurrentPairReadsHighFidelity() throws {
+    @Test(
+        "the high-fidelity label follows the probed pair",
+        arguments: [
+            (probeTarget: "en", expected: TranslationEngineKind.appleHighFidelity),
+            (probeTarget: "zh-Hans", expected: .appleFast),
+        ]
+    )
+    func installedProbeForCurrentPairReadsHighFidelity(
+        probeTarget: String, expected: TranslationEngineKind
+    ) throws {
         // `activeEngineKind` only reports the high-fidelity identity on
         // 26.4+; below it the answer is always the fast model.
         guard #available(macOS 26.4, *) else {
             try Test.cancel("the high-fidelity identity requires macOS 26.4")
         }
         let model = makeModel(settings: makeSettings(provider: .apple))
-        model.appleHighFidelityProbe = (true, "en")
+        model.appleHighFidelityProbe = (true, probeTarget)
 
-        #expect(model.activeEngineKind == .appleHighFidelity)
-    }
-
-    @Test("a probe for a different pair does not label the current target")
-    func probeForDifferentPairDoesNotLabelCurrentTarget() throws {
-        // `activeEngineKind` only consults the probe on 26.4+; below it the
-        // pair-matching logic under test is compiled out and the assertion
-        // would pass vacuously.
-        guard #available(macOS 26.4, *) else {
-            try Test.cancel("the probe-pair matching requires macOS 26.4")
-        }
-        let model = makeModel(settings: makeSettings(provider: .apple))
-        model.appleHighFidelityProbe = (true, "zh-Hans")
-
-        #expect(model.activeEngineKind == .appleFast)
+        #expect(model.activeEngineKind == expected)
     }
 }

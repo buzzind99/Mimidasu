@@ -20,21 +20,10 @@ struct AppModelTranslationTests {
     /// First translate loads the pack model; generous for slow machines.
     private let resultTimeout: TimeInterval = 20
 
-    private func makeSentence(index: Int, text: String) -> Sentence {
-        Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: text)
-    }
-
     /// Stubbed launch check: the real locator hashes the dev GGUF and feeds
     /// the engine warm-up — real blocking work tests must never trigger.
     private func makeModel() -> AppModel {
-        AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelTranslation"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelTranslation"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
+        makeIdleModel(suite: "test.AppModelTranslation")
     }
 
     private func makeInstalledJAToENSession() async throws -> TranslationSession {

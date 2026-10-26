@@ -10,76 +10,87 @@ import Testing
 @Suite("AppModel re-translate Apple lanes")
 struct AppModelRetranslateAppleLaneTests {
 
+    private let harness = RetranslateHarness(suite: "test.AppModelRetranslateAppleLane")
     private let resultTimeout: TimeInterval = 5
 
-    private func makeSUT() async -> AppModel {
-        let model = AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelRetranslateAppleLane"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelRetranslateAppleLane"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
-        await model.initialModelCheck?.value
-        return model
-    }
+    /// The two dedicated Apple lanes' still-arming timeout: the fast model
+    /// against a live Apple session, and Intelligence against an external
+    /// live session so it stays a genuine alternate.
+    enum StillArmingLane: String, CaseIterable, Sendable {
+        case fast
+        case highFidelity
 
-    private func makeSentence(
-        index: Int, text: String = "テスト"
-    ) -> Sentence {
-        Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: text)
-    }
+        var selection: RetranslateEngine {
+            switch self {
+            case .fast: .appleFast
+            case .highFidelity: .appleHighFidelity
+            }
+        }
 
-    /// Attaches a queue worker the way `activateTranslation` does, so the
-    /// session-engine path can serve the initial translation.
-    @discardableResult
-    private func attachWorker(_ model: AppModel) async -> Task<Void, Never> {
-        let worker = Task { await model.translationQueue.run(with: QueueEchoEngine()) }
-        #expect(
-            await pollUntil(timeout: resultTimeout) { model.translationQueue.hasWorker },
-            "the queue worker must be attached before a retry can be served"
-        )
-        return worker
+        var usesExternalLiveSession: Bool {
+            switch self {
+            case .fast: false
+            case .highFidelity: true
+            }
+        }
+
+        var toastBody: String {
+            switch self {
+            case .fast: "Apple (NMT) session is still starting — try again in a moment."
+            case .highFidelity: "Apple Intelligence session is still starting — try again in a moment."
+            }
+        }
+
+        var armsFastConfig: Bool {
+            switch self {
+            case .fast: true
+            case .highFidelity: false
+            }
+        }
+
+        var armsHifiConfig: Bool {
+            switch self {
+            case .fast: false
+            case .highFidelity: true
+            }
+        }
     }
 
     // MARK: - Session plumbing
 
-    @Test("the fast-lane arrival hook stores its engine only while its config is armed")
-    func fastArrivalStoresEngine() async {
-        let model = await makeSUT()
+    @Test(
+        "an Apple lane's arrival hook stores its engine only while its config is armed",
+        arguments: [TranslationEngineKind.appleFast, .appleHighFidelity]
+    )
+    func arrivalStoresEngineOnlyWhileArmed(kind: TranslationEngineKind) async {
+        let model = await harness.makeModel()
 
         // An unarmed config refuses the hand-over: a session for a lane that
         // was never armed must not be stored for the next lane to acquire
         // instantly.
-        model.retranslateSessionArrived(LaneEchoEngine())
-        #expect(model.retranslateSessionEngine == nil)
-
-        model.armRetranslateSessionIfNeeded(for: .appleFast)
-        model.retranslateSessionArrived(LaneEchoEngine())
-
-        #expect(model.retranslateSessionEngine != nil)
-        #expect(model.retranslateHifiSessionEngine == nil, "the intelligence lane's slot is untouched")
-    }
-
-    @Test("the intelligence-lane arrival hook stores its engine only while its config is armed")
-    func hifiArrivalStoresEngine() async {
-        let model = await makeSUT()
-
-        // Same gate as the fast lane: no armed config, no stored session.
-        model.retranslateHifiSessionArrived(LaneEchoEngine())
-        #expect(model.retranslateHifiSessionEngine == nil)
-
-        model.armRetranslateSessionIfNeeded(for: .appleHighFidelity)
-        model.retranslateHifiSessionArrived(LaneEchoEngine())
-
-        #expect(model.retranslateHifiSessionEngine != nil)
-        #expect(model.retranslateSessionEngine == nil, "the fast lane's slot is untouched")
+        switch kind {
+        case .appleFast:
+            model.retranslateSessionArrived(LaneEchoEngine())
+            #expect(model.retranslateSessionEngine == nil)
+            model.armRetranslateSessionIfNeeded(for: kind)
+            model.retranslateSessionArrived(LaneEchoEngine())
+            #expect(model.retranslateSessionEngine != nil)
+            #expect(model.retranslateHifiSessionEngine == nil, "the intelligence lane's slot is untouched")
+        case .appleHighFidelity:
+            model.retranslateHifiSessionArrived(LaneEchoEngine())
+            #expect(model.retranslateHifiSessionEngine == nil)
+            model.armRetranslateSessionIfNeeded(for: kind)
+            model.retranslateHifiSessionArrived(LaneEchoEngine())
+            #expect(model.retranslateHifiSessionEngine != nil)
+            #expect(model.retranslateSessionEngine == nil, "the fast lane's slot is untouched")
+        default:
+            Issue.record("unexpected Apple lane kind \(kind.rawValue)")
+        }
     }
 
     @Test("arming an external kind arms no dedicated session")
     func armingExternalKindArmsNothing() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
 
         model.armRetranslateSessionIfNeeded(for: .google)
 
@@ -93,7 +104,7 @@ struct AppModelRetranslateAppleLaneTests {
 
     @Test("arming an already-armed kind never reassigns its config")
     func armingArmedKindKeepsConfig() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         model.armRetranslateSessionIfNeeded(for: .appleFast)
         let armed = model.retranslateConfig
         #expect(armed != nil)
@@ -115,12 +126,12 @@ struct AppModelRetranslateAppleLaneTests {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("the armed fast lane requires macOS 26.4")
         }
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         // A high-fidelity live session makes the fast model a real alternate.
         model.appleHighFidelityProbe = (true, "en")
         model.translationSettings.selectRetranslate(.appleFast)
         model.phase = .running
-        let worker = await attachWorker(model)
+        let worker = await harness.attachWorker(model)
         defer { worker.cancel() }
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
@@ -152,14 +163,21 @@ struct AppModelRetranslateAppleLaneTests {
         #expect(repeatEntry?.translations.first?.engine == nil, "the seed is unstamped")
     }
 
-    @Test("a still-arming fast session posts the starting toast and keeps the config armed")
-    func stillArmingFastSessionPostsStartingToast() async throws {
+    @Test(
+        "a still-arming Apple session posts its own starting toast",
+        arguments: StillArmingLane.allCases
+    )
+    func stillArmingSessionPostsStartingToast(testCase: StillArmingLane) async throws {
         guard #available(macOS 26.4, *) else {
-            try Test.cancel("the armed fast lane requires macOS 26.4")
+            try Test.cancel("the armed Apple lane requires macOS 26.4")
         }
-        let model = await makeSUT()
+        let model = await harness.makeModel()
+        if testCase.usesExternalLiveSession {
+            model.activeTranslationEngine = .external
+            model.activeExternalProvider = .google
+        }
         model.appleHighFidelityProbe = (true, "en")
-        model.translationSettings.selectRetranslate(.appleFast)
+        model.translationSettings.selectRetranslate(testCase.selection)
         model.phase = .running
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
@@ -179,14 +197,18 @@ struct AppModelRetranslateAppleLaneTests {
         )
         let toast = model.toasts.toasts.first(where: { candidate in candidate.key == ToastKey.retranslate })
         #expect(toast?.title == "Re-translate unavailable")
-        #expect(toast?.body == "Apple (NMT) session is still starting — try again in a moment.")
+        #expect(toast?.body == testCase.toastBody)
         #expect(
             model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the row keeps its previous translation"
         )
         #expect(
-            model.retranslateConfig != nil,
-            "the config stays armed — the next click is instant once the session lands"
+            (model.retranslateConfig != nil) == testCase.armsFastConfig,
+            "the fast config stays armed exactly for its own lane"
+        )
+        #expect(
+            (model.retranslateHifiConfig != nil) == testCase.armsHifiConfig,
+            "the hifi config stays armed exactly for its own lane"
         )
     }
 
@@ -197,7 +219,7 @@ struct AppModelRetranslateAppleLaneTests {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("the armed hifi lane requires macOS 26.4")
         }
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         // An EXTERNAL live session, so a high-fidelity retry is a genuine
         // alternate at every stage of the probe — a live Apple session would
         // take the session path once a landed-installed probe reveals it
@@ -208,7 +230,7 @@ struct AppModelRetranslateAppleLaneTests {
         model.activeExternalProvider = .google
         model.translationSettings.selectRetranslate(.appleHighFidelity)
         model.phase = .running
-        let worker = await attachWorker(model)
+        let worker = await harness.attachWorker(model)
         defer { worker.cancel() }
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
@@ -236,50 +258,6 @@ struct AppModelRetranslateAppleLaneTests {
         #expect(model.retranslateConfig == nil, "the fast lane's session is never armed")
     }
 
-    @Test("a still-arming intelligence session posts its own starting toast")
-    func stillArmingHifiSessionPostsStartingToast() async throws {
-        guard #available(macOS 26.4, *) else {
-            try Test.cancel("the armed hifi lane requires macOS 26.4")
-        }
-        let model = await makeSUT()
-        // The probe landed installed for an EXTERNAL live session: the
-        // Intelligence selection is a genuine alternate and the probe
-        // deferral passes straight through — what stalls is the arm wait
-        // itself. (A live Apple session would take the session path; a
-        // pending probe would defer first instead of arming-waiting.)
-        model.activeTranslationEngine = .external
-        model.activeExternalProvider = .google
-        model.appleHighFidelityProbe = (true, "en")
-        model.translationSettings.selectRetranslate(.appleHighFidelity)
-        model.phase = .running
-        let sentence = makeSentence(index: 7)
-        model.sessionController.onSentence?(sentence)
-        model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
-
-        // No engine ever arrives; the bounded wait runs out on its own.
-        model.laneArmTimeout = .milliseconds(50)
-        model.retranslateSentence(sentence)
-
-        #expect(
-            await pollUntil(timeout: resultTimeout) {
-                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
-            },
-            "the timed-out wait retires the markers"
-        )
-        let toast = model.toasts.toasts.first(where: { candidate in candidate.key == ToastKey.retranslate })
-        #expect(toast?.title == "Re-translate unavailable")
-        #expect(toast?.body == "Apple Intelligence session is still starting — try again in a moment.")
-        #expect(
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
-            "the row keeps its previous translation"
-        )
-        #expect(
-            model.retranslateHifiConfig != nil,
-            "the config stays armed — the next click is instant once the session lands"
-        )
-        #expect(model.retranslateConfig == nil, "the fast lane's session is never armed")
-    }
-
     @Test("a cancelled wait retires the markers without reporting a starting session")
     func cancelledWaitRetiresMarkersSilently() async throws {
         // Below 26.4 the fast selection resolves to the session path (or
@@ -288,7 +266,7 @@ struct AppModelRetranslateAppleLaneTests {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("the armed fast lane requires macOS 26.4")
         }
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         model.appleHighFidelityProbe = (true, "en")
         model.translationSettings.selectRetranslate(.appleFast)
         model.phase = .running
@@ -320,7 +298,7 @@ struct AppModelRetranslateAppleLaneTests {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("the probe-deferred fast lane requires macOS 26.4")
         }
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         // The probe stays unlanded: an Apple-kind retry has no live
         // identity to route on, so it defers at the probe gate.
         model.translationSettings.selectRetranslate(.appleFast)
@@ -354,11 +332,11 @@ struct AppModelRetranslateAppleLaneTests {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("the armed fast lane requires macOS 26.4")
         }
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         model.appleHighFidelityProbe = (true, "en")
         model.translationSettings.selectRetranslate(.appleFast)
         model.phase = .running
-        let worker = await attachWorker(model)
+        let worker = await harness.attachWorker(model)
         defer { worker.cancel() }
         let first = makeSentence(index: 1, text: "一")
         let second = makeSentence(index: 2, text: "二")
@@ -412,7 +390,7 @@ struct AppModelRetranslateAppleLaneTests {
 
     @Test("an intelligence selection the OS cannot serve degrades to the fast model")
     func unavailableHighFidelityDegradesToFast() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         model.translationSettings.selectRetranslate(.appleHighFidelity)
         // The probe landed not-installed for this pair: requesting high
         // fidelity anyway would silently return the fast model's text while
@@ -424,7 +402,7 @@ struct AppModelRetranslateAppleLaneTests {
         model.activeTranslationEngine = .external
         model.activeExternalProvider = .google
         model.phase = .running
-        let worker = await attachWorker(model)
+        let worker = await harness.attachWorker(model)
         defer { worker.cancel() }
         let sentence = makeSentence(index: 3)
         model.sessionController.onSentence?(sentence)
@@ -451,15 +429,5 @@ struct AppModelRetranslateAppleLaneTests {
             model.translationSettings.retranslateEngine == .appleHighFidelity,
             "the persisted selection is not rewritten — only its resolution degrades"
         )
-    }
-}
-
-/// Session-engine fixture: prefixes with "EN:".
-private final class QueueEchoEngine: TranslationEngine, @unchecked Sendable {
-    let preferredBatchSize = 16
-    var onRetry: (@Sendable (RetryProgress) -> Void)?
-
-    func translate(_ texts: [String]) async throws -> [String] {
-        texts.map { text in "EN:\(text)" }
     }
 }

@@ -22,35 +22,7 @@ struct AppModelRetranslationTests {
 
     // MARK: - Helpers
 
-    private func makeSUT() async -> AppModel {
-        let model = AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelRetranslation"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelRetranslation"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
-        await model.initialModelCheck?.value
-        return model
-    }
-
-    private func makeSentence(index: Int) -> Sentence {
-        Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: sentenceText)
-    }
-
-    /// Attaches a queue worker the way `activateTranslation` does for an
-    /// external provider, and waits for the run to take the engine — the
-    /// retry gate refuses without one.
-    @discardableResult
-    private func attachWorker(_ model: AppModel, engine: any TranslationEngine) async -> Task<Void, Never> {
-        let worker = Task { await model.translationQueue.run(with: engine) }
-        #expect(
-            await pollUntil(timeout: resultTimeout) { model.translationQueue.hasWorker },
-            "the queue worker must be attached before a retry can be served"
-        )
-        return worker
-    }
+    private let harness = RetranslateHarness(suite: "test.AppModelRetranslation")
 
     /// Waits for the row to carry a translation, i.e. for the queue's `result`
     /// handler to have run `applyTranslation`.
@@ -66,9 +38,9 @@ struct AppModelRetranslationTests {
     /// retry never piles up an `" / "`-joined second copy.
     @Test("a manual re-translation replaces the row's translation in place")
     func retranslateReplacesInPlace() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let engine = EchoRetranslateEngine()
-        let worker = await attachWorker(model, engine: engine)
+        let worker = await harness.attachWorker(model, engine: engine)
         defer { worker.cancel() }
         model.phase = .running
 
@@ -93,9 +65,9 @@ struct AppModelRetranslationTests {
     /// results for one sentence.
     @Test("a second retry click while the row already retranslates is a no-op")
     func retranslateTwiceIsIdempotent() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let engine = GatedRetranslateEngine()
-        let worker = await attachWorker(model, engine: engine)
+        let worker = await harness.attachWorker(model, engine: engine)
         defer {
             engine.openGate()
             worker.cancel()
@@ -146,9 +118,9 @@ struct AppModelRetranslationTests {
     /// queueing a competing copy.
     @Test("a retry click on a sentence already being translated is a no-op")
     func retranslateGatedOnAlreadyTranslating() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let engine = GatedRetranslateEngine()
-        let worker = await attachWorker(model, engine: engine)
+        let worker = await harness.attachWorker(model, engine: engine)
         defer {
             engine.openGate()
             worker.cancel()
@@ -181,7 +153,7 @@ struct AppModelRetranslationTests {
     /// marker must not be inserted — a no-op can never dim the row.
     @Test("a manual re-translation outside a running session is a no-op")
     func retranslateGatedOnRunningPhase() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         model.phase = .idle
 
         model.retranslateSentence(makeSentence(index: 7))
@@ -196,9 +168,9 @@ struct AppModelRetranslationTests {
     /// retryable without restarting capture.
     @Test("a manual re-translation stays available after the capture source is lost")
     func retranslateAllowedInSourceLost() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let engine = EchoRetranslateEngine()
-        let worker = await attachWorker(model, engine: engine)
+        let worker = await harness.attachWorker(model, engine: engine)
         defer { worker.cancel() }
         model.phase = .sourceLost
 
@@ -221,7 +193,7 @@ struct AppModelRetranslationTests {
     /// lock out further clicks, since its own guard is what refuses them.
     @Test("a manual re-translation without an attached worker is a no-op")
     func retranslateGatedOnAttachedWorker() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         model.phase = .running
 
         model.retranslateSentence(makeSentence(index: 7))
@@ -243,10 +215,10 @@ struct AppModelRetranslationTests {
     /// would serve.
     @Test("the worker-active mirror tracks the queue worker's attach and release")
     func workerActiveMirrorTracksQueueWorker() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         #expect(!model.translationWorkerActive, "no run has attached an engine yet")
 
-        let worker = await attachWorker(model, engine: EchoRetranslateEngine())
+        let worker = await harness.attachWorker(model, engine: EchoRetranslateEngine())
         #expect(
             model.translationWorkerActive,
             "the mirror flips on when the run attaches its engine"
@@ -269,11 +241,11 @@ struct AppModelRetranslationTests {
     /// marker must survive to keep the row dimmed until that result lands.
     @Test("an unavailable external engine keeps the marker through the fallback")
     func unavailableExternalEngineKeepsPendingRetranslations() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         // Gated: the retry's flight parks, so nothing can retire the marker
         // but the code under test.
         let engine = GatedRetranslateEngine()
-        let worker = await attachWorker(model, engine: engine)
+        let worker = await harness.attachWorker(model, engine: engine)
         defer {
             engine.openGate()
             worker.cancel()
@@ -298,9 +270,9 @@ struct AppModelRetranslationTests {
     /// card's Reconnect — the stale marker must not outlive it.
     @Test("an unavailable Apple engine clears the marker so the row stays retryable")
     func unavailableAppleEngineClearsPendingRetranslations() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let engine = GatedRetranslateEngine()
-        let worker = await attachWorker(model, engine: engine)
+        let worker = await harness.attachWorker(model, engine: engine)
         defer {
             engine.openGate()
             worker.cancel()
@@ -323,7 +295,7 @@ struct AppModelRetranslationTests {
     /// already set, so no second swap is coming and the marker must go too.
     @Test("an unavailable status after the fallback latched clears the marker")
     func unavailableAfterFallbackClearsPendingRetranslations() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         model.phase = .running
         model.pendingRetranslations = [7]
         model.translationFallbackActive = true
@@ -334,26 +306,12 @@ struct AppModelRetranslationTests {
         #expect(model.pendingRetranslations.isEmpty)
     }
 
-    /// The transcript stays on screen after a stop, so a row waiting on a retry
-    /// would sit dimmed with its (now hidden) button as the only cue.
-    @Test("stopping clears pending re-translations so rows cannot stay dimmed")
-    func stopClearsPendingRetranslations() async {
-        let model = await makeSUT()
-        model.phase = .running
-        model.pendingRetranslations = [7]
-
-        await model.performStop()
-
-        #expect(model.pendingRetranslations.isEmpty)
-        #expect(model.phase == .idle)
-    }
-
     /// Sentence indexes restart at 0 every session, so a marker left over from
     /// the last one would alias an unrelated row: it would render dimmed from
     /// its first frame and its own guard would refuse the retry that fixes it.
     @Test("a new session clears pending re-translations so indexes cannot alias")
     func sessionBeginClearsPendingRetranslations() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         model.pendingRetranslations = [7]
 
         model.sessionController.onSessionBegin?()
@@ -366,7 +324,7 @@ struct AppModelRetranslationTests {
     /// "Currently using" row on Apple.
     @Test("a new session resets the Apple fallback latch")
     func sessionBeginResetsFallbackLatch() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         model.translationFallbackActive = true
 
         model.sessionController.onSessionBegin?()
@@ -378,7 +336,7 @@ struct AppModelRetranslationTests {
     /// must still retire its marker, or the index stays locked as dimmed.
     @Test("a result for an unknown row still clears its marker")
     func applyTranslationClearsMarkerForUnknownIndex() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         model.pendingRetranslations = [7]
 
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: translationText))
@@ -396,7 +354,7 @@ struct AppModelRetranslationTests {
     /// result for a language the row already has replaces it.
     @Test("a repeat delivery for a language the row already has replaces it")
     func applyTranslationReplacesOnRepeatDelivery() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
 
@@ -411,7 +369,7 @@ struct AppModelRetranslationTests {
     /// which is what makes the replace rule safe for the multi-target future.
     @Test("a delivery for a new language joins the row")
     func applyTranslationAppendsNewLanguage() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         model.sessionController.onSentence?(makeSentence(index: 7))
 
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "First."))

@@ -18,41 +18,23 @@ struct LatencyStateTests {
 
     // MARK: - update(_:)
 
-    @Test("rounds a sub-tenth value to the tenth of a second")
-    func subTenthValueRoundsToTenth() async {
-        let (sut, observed) = makeSUT()
+    @Test(
+        "update rounds to the nearest tenth",
+        arguments: [
+            (input: 0.14, expected: 0.1, observed: [0.1]),
+            (input: 0.16, expected: 0.2, observed: [0.2]),
+            (input: 0.05, expected: 0.1, observed: [0.1]),
+            (input: 0.04, expected: 0.0, observed: [Double]()),
+        ]
+    )
+    func updateRoundsToNearestTenth(input: Double, expected: Double, observed: [Double]) async {
+        let (sut, recorder) = makeSUT()
 
-        sut.update(0.14)
+        sut.update(input)
+        await flushObservations()
 
-        #expect(sut.seconds == 0.1)
-        #expect(await pollUntil { observed.values == [0.1] }, "the recorder fires the rounded value")
-    }
-
-    @Test("rounds a value above the boundary up to the next tenth")
-    func aboveBoundaryRoundsUp() {
-        let (sut, _) = makeSUT()
-
-        sut.update(0.16)
-
-        #expect(sut.seconds == 0.2)
-    }
-
-    @Test("rounds the exact 0.05 boundary up")
-    func exactBoundaryRoundsUp() {
-        let (sut, _) = makeSUT()
-
-        sut.update(0.05)
-
-        #expect(sut.seconds == 0.1)
-    }
-
-    @Test("rounds a value just below the boundary down")
-    func justBelowBoundaryRoundsDown() {
-        let (sut, _) = makeSUT()
-
-        sut.update(0.04)
-
-        #expect(sut.seconds == 0.0)
+        #expect(sut.seconds == expected)
+        #expect(recorder.values == observed, "the recorder fires exactly the rounded changes")
     }
 
     @Test("does not re-fire when the rounded value is unchanged")

@@ -14,7 +14,6 @@ struct AppModelTests {
 
     // MARK: - Fixtures
 
-    private let sentenceText = "テスト"
     private let translationText = "Test"
 
     // MARK: - Helpers
@@ -26,111 +25,56 @@ struct AppModelTests {
     /// parallel test execution. Flow coverage over scripted doubles lives in
     /// `AppModelSessionTests`.
     private func makeSUT() async -> AppModel {
-        let model = AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelControl"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelControl"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            // Hermetic: session start activates the Apple engine, whose
-            // probe would otherwise hit the real LanguageAvailability.
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
+        let model = makeIdleModel(suite: "test.AppModelControl")
         await model.initialModelCheck?.value
         return model
     }
 
-    private func makeSentence(index: Int = 0) -> Sentence {
-        Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: sentenceText)
-    }
-
     // MARK: - stop() guards
 
-    @Test("stop is a no-op while idle")
-    func stopWhenIdle() async {
+    @Test(
+        "stop is a no-op outside the live phases",
+        arguments: [SessionPhase.idle, .needsModel, .failed("boom")]
+    )
+    func stopOutsideLivePhasesIsNoOp(phase: SessionPhase) async {
         let model = await makeSUT()
-        model.phase = .idle
+        model.phase = phase
 
         model.stop()
 
-        #expect(model.phase == .idle)
-    }
-
-    @Test("stop is a no-op while needs-model")
-    func stopWhenNeedsModel() async {
-        let model = await makeSUT()
-        model.phase = .needsModel
-
-        model.stop()
-
-        #expect(model.phase == .needsModel)
-    }
-
-    @Test("stop is a no-op after a failure")
-    func stopWhenFailed() async {
-        let model = await makeSUT()
-        model.phase = .failed("boom")
-
-        model.stop()
-
-        #expect(model.phase == .failed("boom"))
+        #expect(model.phase == phase)
+        #expect(model.stopTask == nil, "a refused stop must not leave a teardown task behind")
     }
 
     // MARK: - stop() teardown
 
-    @Test("stop from starting cancels and winds down to idle")
-    func stopCancelsStarting() async {
+    @Test(
+        "stop winds every live phase down to idle and resets translation status",
+        arguments: [SessionPhase.starting, .running, .sourceLost]
+    )
+    func stopWindsDownToIdle(phase: SessionPhase) async {
         let model = await makeSUT()
-        model.phase = .starting
+        model.phase = phase
+        model.translationStatus = .translating
 
         model.stop()
 
         #expect(model.phase == .stopping)
         #expect(await pollUntil { model.phase == .idle }, "stop winds down to idle")
-    }
-
-    @Test("stop from running winds down to idle and resets translation status")
-    func stopWindsDownRunning() async {
-        let model = await makeSUT()
-        model.phase = .running
-
-        model.stop()
-
-        #expect(model.phase == .stopping)
-        #expect(await pollUntil { model.phase == .idle }, "stop winds down to idle")
-        #expect(model.translationStatus == .idle)
-    }
-
-    @Test("stop after losing the source winds down to idle")
-    func stopWindsDownSourceLost() async {
-        let model = await makeSUT()
-        model.phase = .sourceLost
-
-        model.stop()
-
-        #expect(model.phase == .stopping)
-        #expect(await pollUntil { model.phase == .idle }, "stop winds down to idle")
+        #expect(model.translationStatus == .idle, "the teardown parks the status")
     }
 
     // MARK: - retryTranslation()
 
-    @Test("retryTranslation creates a configuration when none exists")
-    func retryCreatesConfigWhenNil() async {
+    @Test("retryTranslation creates a configuration when none exists and again on a retry")
+    func retryCreatesAndReplacesConfig() async {
         let model = await makeSUT()
         model.translationConfig = nil
 
         model.retryTranslation()
-
         #expect(model.translationConfig != nil)
-    }
-
-    @Test("retryTranslation replaces the existing configuration")
-    func retryReassignsConfig() async {
-        let model = await makeSUT()
-        model.retryTranslation()
 
         model.retryTranslation()
-
         #expect(model.translationConfig != nil)
     }
 
@@ -191,33 +135,24 @@ struct AppModelTests {
 
     // MARK: - Capture errors
 
-    @Test("a capture error while running marks the source lost and posts the capture.lost toast")
-    func onCaptureErrorMarksSourceLostWhenRunning() async {
+    @Test(
+        "a capture error while live marks the source lost and posts the capture.lost toast",
+        arguments: [
+            (phase: SessionPhase.running, message: "stream died"),
+            (phase: .starting, message: "stream died during start"),
+        ]
+    )
+    func onCaptureErrorMarksSourceLostWhenLive(phase: SessionPhase, message: String) async {
         let model = await makeSUT()
-        model.phase = .running
+        model.phase = phase
 
-        model.sessionController.onCaptureError?("stream died")
+        model.sessionController.onCaptureError?(message)
 
         #expect(model.phase == .sourceLost)
         let toast = model.toasts.toasts.first { toast in toast.key == ToastKey.captureLost }
         #expect(toast?.style == .redPersistent)
-        #expect(toast?.body == "stream died")
+        #expect(toast?.body == message)
         #expect(toast?.action?.label == "Restart capture")
-    }
-
-    @Test("a capture error while starting marks the source lost and posts the capture.lost toast")
-    func onCaptureErrorMarksSourceLostWhenStarting() async {
-        let model = await makeSUT()
-        model.phase = .starting
-
-        model.sessionController.onCaptureError?("stream died during start")
-
-        #expect(model.phase == .sourceLost)
-        #expect(
-            model.toasts.toasts.contains { toast in
-                toast.key == ToastKey.captureLost && toast.body == "stream died during start"
-            }
-        )
     }
 
     @Test("a capture error while idle is ignored")
@@ -233,25 +168,19 @@ struct AppModelTests {
 
     // MARK: - HUD & overlay visibility
 
-    @Test("showing the HUD leaves the translation overlay's visibility alone")
-    func showingHUDKeepsOverlayVisibility() async {
+    @Test("HUD visibility never changes the translation overlay's visibility")
+    func hudVisibilityKeepsOverlayVisibility() async {
         let model = await makeSUT()
         model.translationOverlayVisible = true
 
         model.hudVisible = true
-
-        #expect(model.translationOverlayVisible)
-    }
-
-    @Test("hiding the HUD leaves the translation overlay visible")
-    func hidingHUDKeepsTranslationOverlayVisible() async {
-        let model = await makeSUT()
-        model.hudVisible = true
-        model.translationOverlayVisible = true
+        #expect(model.translationOverlayVisible, "showing the HUD leaves the overlay alone")
 
         model.hudVisible = false
+        #expect(model.translationOverlayVisible, "hiding the HUD leaves the overlay visible")
 
-        #expect(model.translationOverlayVisible)
+        model.hudVisible = true
+        #expect(model.translationOverlayVisible, "re-showing the HUD still leaves the overlay visible")
     }
 
     @Test("flipping hudVisible posts the HUD visibility notification")
@@ -269,18 +198,6 @@ struct AppModelTests {
         model.hudVisible = false
 
         #expect(flips.withLock { count in count } == 2)
-    }
-
-    @Test("hiding and re-showing the HUD leaves the overlay visible")
-    func hidingAndReshowingHUDKeepsOverlayVisible() async {
-        let model = await makeSUT()
-        model.hudVisible = true
-        model.translationOverlayVisible = true
-        model.hudVisible = false
-
-        model.hudVisible = true
-
-        #expect(model.translationOverlayVisible)
     }
 
     @Test("anyOverlayVisible tracks either overlay")
@@ -401,16 +318,6 @@ struct AppModelTests {
         #expect(model.toasts.toasts.isEmpty)
     }
 
-    @Test("the translation queue status handler publishes the status")
-    func translationQueueStatusHandlerPublishesStatus() async {
-        let model = await makeSUT()
-        model.translationStatus = .translating
-
-        model.translationQueue.resetForRetry()
-
-        #expect(model.translationStatus == .idle)
-    }
-
     // MARK: - refreshModelAvailability / start() guards
 
     @Test("model discovery recovers a needs-model session when a model resolves")
@@ -473,14 +380,8 @@ struct AppModelTests {
         // A private center: posting on the shared `.default` center would
         // stop every other live `AppModel` running in parallel tests.
         let notifications = NotificationCenter()
-        let model = AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelControl"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelControl"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil },
-            willTerminateNotifications: notifications
+        let model = makeIdleModel(
+            suite: "test.AppModelControl", willTerminateNotifications: notifications
         )
         await model.initialModelCheck?.value
         model.phase = .running

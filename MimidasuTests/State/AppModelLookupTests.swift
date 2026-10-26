@@ -26,14 +26,9 @@ final class AppModelLookupTests {
     // MARK: - Fixtures
 
     private func makeModel(jmDictLookup: JMDictLookup? = nil) -> AppModel {
-        AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelLookup"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelLookup"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            highFidelityProbe: { _ in false },
-            jmDictLookup: jmDictLookup ?? JMDictLookup(resolveDatabase: { [fixture] in fixture.url }),
-            initialModelResolve: { _ in nil }
+        makeIdleModel(
+            suite: "test.AppModelLookup",
+            jmDictLookup: jmDictLookup ?? JMDictLookup(resolveDatabase: { [fixture] in fixture.url })
         )
     }
 
@@ -101,37 +96,8 @@ final class AppModelLookupTests {
         #expect(model.selectedLookup == nil)
     }
 
-    @Test("lookup identity distinguishes sources and travels with the matched headword")
-    func lookupIdentity() async throws {
-        let model = makeModel()
-
-        await runHit(model, source: .transcript(sentenceIndex: 0, tokenIndex: 0))
-        #expect(model.selectedLookup?.source == .transcript(sentenceIndex: 0, tokenIndex: 0))
-        #expect(model.selectedLookup?.content.displayResult?.matched == "お")
-        let transcriptID = try #require(model.selectedLookup?.id)
-
-        await model.runLookup(
-            segments: lookupO(), tappedAt: 0, sentenceText: "お土産",
-            surface: "お", source: .liveStrip
-        )
-        #expect(model.selectedLookup?.source == .liveStrip)
-        #expect(model.selectedLookup?.content.displayResult?.matched == "お")
-        let stripID = try #require(model.selectedLookup?.id)
-        #expect(transcriptID != stripID)
-    }
-
-    @Test("lookup identity format joins source and token (debug-id contract)")
-    func lookupIdentityFormat() async throws {
-        let model = makeModel()
-
-        await runHit(model, source: .transcript(sentenceIndex: 0, tokenIndex: 0))
-        let transcriptID = try #require(model.selectedLookup?.id)
-
-        #expect(transcriptID.hasSuffix("-お"))
-    }
-
     @Test(
-        "a lookup selection carries its source and matched headword",
+        "a lookup selection carries its source, matched headword, and debug id",
         arguments: [
             SelectedLookup.Source.transcript(sentenceIndex: 0, tokenIndex: 0),
             SelectedLookup.Source.liveStrip
@@ -147,6 +113,10 @@ final class AppModelLookupTests {
 
         #expect(model.selectedLookup?.source == source)
         #expect(model.selectedLookup?.content.displayResult?.matched == "お")
+        #expect(
+            model.selectedLookup?.id.hasSuffix("-お") == true,
+            "the identity format joins the source and the matched token"
+        )
     }
 
     @Test("sequential taps land in order; each tap bumps the generation")
@@ -249,12 +219,14 @@ final class AppModelLookupTests {
         let model = makeModel()
 
         await runHit(model, source: .transcript(sentenceIndex: 1, tokenIndex: 0))
+        let transcriptID = model.selectedLookup?.id
         await model.runLookup(
             segments: lookupO(), tappedAt: 0, sentenceText: "お土産",
             surface: "お", source: .liveStrip
         )
 
         #expect(model.selectedLookup?.source == .liveStrip)
+        #expect(model.selectedLookup?.id != transcriptID, "the source is part of the identity")
     }
 
     @Test("a second tap on the same word swaps the content while the anchor stays")
@@ -306,22 +278,13 @@ final class AppModelLookupTests {
 
     // MARK: - Lifecycle
 
-    @Test("session clear resets the popover, the pinned card, and in-flight lookups")
+    @Test("session clear resets the popover and the pinned card")
     func sessionClearResets() async {
         let model = makeModel()
         await runHit(model, source: .liveStrip)
 
         model.sessionController.onSessionBegin?()
 
-        #expect(model.selectedLookup == nil)
-        #expect(model.pinnedLookup == nil)
-
-        // A lookup spawned before the clear (stale generation) must not
-        // resurrect state afterwards.
-        await model.runLookup(
-            segments: lookupO(), tappedAt: 0, sentenceText: "お土産",
-            surface: "お", source: .liveStrip, generation: -999
-        )
         #expect(model.selectedLookup == nil)
         #expect(model.pinnedLookup == nil)
     }

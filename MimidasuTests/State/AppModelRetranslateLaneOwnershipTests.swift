@@ -14,39 +14,9 @@ struct AppModelRetranslateLaneOwnershipTests {
 
     // MARK: - Fixtures
 
+    private let harness = RetranslateHarness(suite: "test.AppModelRetranslateLaneOwnership")
     private let sentenceText = "テスト"
     private let resultTimeout: TimeInterval = 5
-
-    private func makeSUT() async -> AppModel {
-        let model = AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelRetranslateLaneOwnership"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelRetranslateLaneOwnership"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
-        await model.initialModelCheck?.value
-        return model
-    }
-
-    private func makeSentence(
-        index: Int, text: String = "テスト"
-    ) -> Sentence {
-        Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: text)
-    }
-
-    /// Attaches a queue worker the way `activateTranslation` does, keeping a
-    /// stop's translation-tail drain instant.
-    @discardableResult
-    private func attachWorker(_ model: AppModel) async -> Task<Void, Never> {
-        let worker = Task { await model.translationQueue.run(with: LaneEchoEngine()) }
-        #expect(
-            await pollUntil(timeout: resultTimeout) { model.translationQueue.hasWorker },
-            "the queue worker must be attached"
-        )
-        return worker
-    }
 
     /// `#expect(await pollUntil(...))` with the message first, so the
     /// suite's many bounded waits read one line apiece.
@@ -64,7 +34,7 @@ struct AppModelRetranslateLaneOwnershipTests {
 
     @Test("a stale straggler's retirement cannot clobber a new session's marker")
     func staleStragglerRetireCannotClearNewEpochMarker() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         // A fresh gate per factory call: the first session's flight parks in
         // its own engine, the new session's retry in another — so the
         // straggler can be released while the new flight stays parked
@@ -82,7 +52,7 @@ struct AppModelRetranslateLaneOwnershipTests {
         }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
-        let worker = await attachWorker(model)
+        let worker = await harness.attachWorker(model, engine: LaneEchoEngine())
         let first = makeSentence(index: 7)
         model.sessionController.onSentence?(first)
         // Settle the worker's initial delivery: a queued or airborne
@@ -154,7 +124,7 @@ struct AppModelRetranslateLaneOwnershipTests {
 
     @Test("a queue unavailable mid-lane keeps the lane marker")
     func queueUnavailableKeepsLaneMarker() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let engine = LaneGatedEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
@@ -188,7 +158,7 @@ struct AppModelRetranslateLaneOwnershipTests {
 
     @Test("a lane-retried backlog row is not overwritten by a later reconnect replay")
     func laneRetriedBacklogRowSurvivesReconnectReplay() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let engine = LaneEchoEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
@@ -238,7 +208,7 @@ struct AppModelRetranslateLaneOwnershipTests {
 
     @Test("a lane result whose row vanished never seeds the cache")
     func laneResultForVanishedRowSkipsCacheSeed() async {
-        let model = await makeSUT()
+        let model = await harness.makeModel()
         let engine = LaneGatedEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
@@ -277,70 +247,4 @@ struct AppModelRetranslateLaneOwnershipTests {
         }
         #expect(model.entries[1].translations.first?.engine == nil)
     }
-}
-
-/// Session-engine fixture: prefixes with "EN:", keeping the moved cache test's
-/// initial deliveries distinct from the lane fixture's "JA:" prefix.
-private final class QueueEchoEngine: TranslationEngine, @unchecked Sendable {
-    let preferredBatchSize = 16
-    var onRetry: (@Sendable (RetryProgress) -> Void)?
-
-    func translate(_ texts: [String]) async throws -> [String] {
-        texts.map { text in "EN:\(text)" }
-    }
-}
-
-/// Lane fixture whose `translate` parks until the gate opens. Completed
-/// flights are counted so an assertion can wait on the flight it concerns
-/// instead of sleeping past it.
-private final class LaneGatedEngine: TranslationEngine, @unchecked Sendable {
-    let preferredBatchSize = 4
-    var onRetry: (@Sendable (RetryProgress) -> Void)?
-
-    private let state = Mutex(LaneGateState())
-
-    var recordedBatches: [[String]] {
-        state.withLock { gateState in gateState.batches }
-    }
-
-    /// Flights that entered, parked, and returned — the deterministic
-    /// "this flight finished" observable.
-    var completions: Int {
-        state.withLock { gateState in gateState.completions }
-    }
-
-    /// Releases every parked `translate`, and lets any that arrives later
-    /// through.
-    func openGate() {
-        let parked = state.withLock { gateState -> [CheckedContinuation<Void, Never>] in
-            gateState.open = true
-            let parked = gateState.waiters
-            gateState.waiters.removeAll()
-            return parked
-        }
-        for waiter in parked {
-            waiter.resume()
-        }
-    }
-
-    func translate(_ texts: [String]) async throws -> [String] {
-        state.withLock { gateState in gateState.batches.append(texts) }
-        await withCheckedContinuation { continuation in
-            let immediate = state.withLock { gateState -> CheckedContinuation<Void, Never>? in
-                guard !gateState.open else { return continuation }
-                gateState.waiters.append(continuation)
-                return nil
-            }
-            immediate?.resume()
-        }
-        state.withLock { gateState in gateState.completions += 1 }
-        return texts.map { text in "JA:\(text)" }
-    }
-}
-
-private struct LaneGateState {
-    var open = false
-    var batches: [[String]] = []
-    var waiters: [CheckedContinuation<Void, Never>] = []
-    var completions = 0
 }

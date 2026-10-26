@@ -19,39 +19,16 @@ struct AppModelPauseTests {
 
     // MARK: - Fixtures
 
-    private final class FlowLog: @unchecked Sendable {
-        private let lock = NSLock()
-        private var entries: [String] = []
-
-        func record(_ name: String) {
-            lock.withLock { entries.append(name) }
-        }
-
-        var names: [String] {
-            lock.withLock { entries }
-        }
-
-        func contains(inOrder needle: [String]) -> Bool {
-            var index = 0
-            for entry in names where index < needle.count {
-                if entry == needle[index] {
-                    index += 1
-                }
-            }
-            return index == needle.count
-        }
-    }
-
     private final class ScriptedASREngine: ASREngine, @unchecked Sendable {
         let isMock = true
         var onEngineError: ((String) -> Void)?
         var processedSamples = 0
         var pushedSamples = 0
 
-        private let log: FlowLog
+        private let log: CallLog
         private var remaining: [ASREvent] = []
 
-        init(log: FlowLog) {
+        init(log: CallLog) {
             self.log = log
         }
 
@@ -90,13 +67,13 @@ struct AppModelPauseTests {
         var onChunk: ((AudioChunk) -> Void)?
         var onIOError: ((CaptureError) -> Void)?
 
-        private let log: FlowLog
+        private let log: CallLog
         private let resumeError: (any Error)?
         private let pauseGate: PermitGate?
         private let resumeGate: PermitGate?
 
         init(
-            log: FlowLog, resumeError: (any Error)? = nil,
+            log: CallLog, resumeError: (any Error)? = nil,
             pauseGate: PermitGate? = nil, resumeGate: PermitGate? = nil
         ) {
             self.log = log
@@ -134,7 +111,7 @@ struct AppModelPauseTests {
     private struct SUT {
         let model: AppModel
         let controller: SessionController
-        let log: FlowLog
+        let log: CallLog
         let store: ArchiveStore
         let engine: ScriptedASREngine
     }
@@ -148,7 +125,7 @@ struct AppModelPauseTests {
         pauseGate: PermitGate? = nil,
         resumeGate: PermitGate? = nil
     ) async -> SUT {
-        let log = FlowLog()
+        let log = CallLog()
         let engine = ScriptedASREngine(log: log)
         let capture = ScriptedCapture(
             log: log, resumeError: resumeError, pauseGate: pauseGate, resumeGate: resumeGate

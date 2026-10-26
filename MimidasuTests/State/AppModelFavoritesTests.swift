@@ -14,14 +14,7 @@ struct AppModelFavoritesTests {
     // MARK: - Fixtures
 
     private func makeSUT(favorites: FavoritesStore) async -> AppModel {
-        let model = AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelFavorites"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelFavorites"),
-            favorites: favorites,
-            archive: isolatedArchive(),
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
+        let model = makeIdleModel(suite: "test.AppModelFavorites", favorites: favorites)
         await model.initialModelCheck?.value
         return model
     }
@@ -88,15 +81,6 @@ struct AppModelFavoritesTests {
         let outcome = model.toggleFavorite(headword: "見る", reading: "みる")
 
         #expect(outcome == .pendingRemoval(headword: "見る"))
-    }
-
-    @Test("a question left unanswered leaves the list untouched")
-    func unansweredQuestionKeepsWord() async {
-        let model = await makeSUT(favorites: isolatedFavorites())
-        model.toggleFavorite(entry())
-        model.toggleFavorite(entry())
-
-        #expect(model.favorites.count == 1)
     }
 
     @Test("confirming removes the word and stays silent — the alert already said so")

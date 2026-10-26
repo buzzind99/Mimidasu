@@ -15,14 +15,7 @@ import Testing
 struct AppModelTranslationForwardingTests {
 
     private func makeModel() async -> AppModel {
-        let model = AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelTranslationForwarding"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelTranslationForwarding"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
+        let model = makeIdleModel(suite: "test.AppModelTranslationForwarding")
         await model.initialModelCheck?.value
         return model
     }
@@ -115,17 +108,14 @@ struct AppModelTranslationForwardingTests {
     func laneTuningForwarders() async {
         let model = await makeModel()
 
-        #expect(model.retranslate.retranslateEngineFactory == nil)
         #expect(model.laneArmTimeout == .seconds(5))
         #expect(model.probeSettleTimeout == .seconds(3))
 
         model.laneArmTimeout = .milliseconds(25)
         model.probeSettleTimeout = .milliseconds(25)
-        model.retranslateEngineFactory = { _, _ -> (any TranslationEngine)? in nil }
 
         #expect(model.retranslate.laneArmTimeout == .milliseconds(25))
         #expect(model.retranslate.probeSettleTimeout == .milliseconds(25))
-        #expect(model.retranslate.retranslateEngineFactory != nil)
     }
 
     @Test("liveSessionRunsKind forwards the live engine identity")

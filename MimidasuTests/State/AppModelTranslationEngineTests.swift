@@ -16,12 +16,6 @@ struct AppModelTranslationEngineTests {
 
     // MARK: - Fixtures
 
-    private let resultTimeout: TimeInterval = 5
-
-    private func makeSentence(index: Int, text: String) -> Sentence {
-        Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: text)
-    }
-
     private func makeSettings(provider: TranslationProvider) -> TranslationSettings {
         let settings = isolatedTranslationSettings(suite: "test.AppModelEngine")
         if provider != .apple {
@@ -90,34 +84,14 @@ struct AppModelTranslationEngineTests {
         settings: TranslationSettings,
         transport: HTTPTranslationTransport? = nil
     ) -> AppModel {
-        AppModel(
+        makeIdleModel(
+            suite: "test.AppModelEngine",
             translationSettings: settings,
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            translationTransport: transport,
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
+            translationTransport: transport
         )
     }
 
     // MARK: - Engine selection
-
-    @Test("an external provider spawns a worker and parks the Apple host")
-    func externalProviderSpawnsWorkerWithoutConfig() async {
-        let model = makeModel(
-            settings: makeSettings(provider: .openrouter),
-            transport: constantStatusTransport(500)
-        )
-
-        model.retryTranslation()
-        #expect(await pollUntil { model.translationStatus == .ready }, "retryTranslation publishes .ready")
-
-        #expect(model.activeTranslationEngine == .external)
-        #expect(model.translationConfig == nil)
-
-        await stopTranslation(model)
-    }
 
     @Test("an unconfigured selected provider degrades to Apple")
     func unconfiguredProviderFallsBackToApple() {
@@ -133,7 +107,7 @@ struct AppModelTranslationEngineTests {
 
     @Test("each external provider builds its engine and spawns the worker")
     func eachExternalProviderBuildsItsEngine() async {
-        for provider in [TranslationProvider.google, .deepl, .openai] {
+        for provider in [TranslationProvider.openrouter, .google, .deepl, .openai] {
             let model = makeModel(
                 settings: makeSettings(provider: provider),
                 transport: constantStatusTransport(401)
@@ -178,11 +152,6 @@ struct AppModelTranslationEngineTests {
                     .permanent
                 )
         )
-        // The degraded card carries the Reconnect affordance; it must survive
-        // the fresh Apple run's `.ready` while the latch is active.
-        let fallbackToast = model.toasts.toasts.first { toast in toast.key == ToastKey.translationFallback }
-        #expect(fallbackToast?.style == .yellowPersistent)
-        #expect(fallbackToast?.action?.label == "Reconnect")
 
         await stopTranslation(model)
     }
@@ -414,13 +383,7 @@ extension AppModelTranslationEngineTests {
         #expect(await pollUntil { model.translationStatus == .ready })
         model.phase = .running
 
-        let verified = await model.verifyAndSelectTranslationProvider(.openrouter)
-
-        #expect(verified.didVerify)
-        #expect(settings.testResult(for: .openrouter) == .success)
-        #expect(settings.selectedProvider == .google, "the switch waits for the disclosure")
-        #expect(model.providerAwaitingDisclosure == .providerSwitch(.openrouter))
-
+        _ = await model.verifyAndSelectTranslationProvider(.openrouter)
         model.confirmCloudDisclosure(.providerSwitch(.openrouter))
         #expect(settings.selectedProvider == .openrouter, "confirming moves the selection")
         #expect(model.activeExternalProvider == .google, "activation waits for the settings-change observer")

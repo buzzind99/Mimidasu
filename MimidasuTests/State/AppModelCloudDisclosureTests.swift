@@ -64,7 +64,7 @@ struct AppModelCloudDisclosureTests {
 
     /// The first activation of a cloud provider is held: the probe verifies
     /// (`.success` recorded, `true` returned) but the selection stays put
-    /// until the disclosure is confirmed.
+    /// until the disclosure is confirmed, which completes the held selection.
     @Test("the first external activation is held behind the cloud disclosure")
     func firstExternalProbeHoldsForDisclosure() async {
         let settings = makeSettings(provider: .apple)
@@ -87,25 +87,6 @@ struct AppModelCloudDisclosureTests {
         #expect(model.providerAwaitingDisclosure == .providerSwitch(.openrouter))
         #expect(model.activeExternalProvider == nil, "activation waits for the selection")
 
-        await stopTranslation(model)
-    }
-
-    /// Confirming the disclosure completes the held selection.
-    @Test("confirming the disclosure selects the held provider")
-    func confirmingDisclosureSelectsHeldProvider() async {
-        let settings = makeSettings(provider: .apple)
-        try? settings.saveKey("test-key-1234", for: .openrouter)
-        let model = AppModel(
-            translationSettings: settings,
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelCloudDisclosure"),
-            favorites: isolatedFavorites(),
-            archive: isolatedArchive(),
-            translationTransport: successfulProbeTransport(),
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
-
-        _ = await model.verifyAndSelectTranslationProvider(.openrouter)
         model.confirmCloudDisclosure(.providerSwitch(.openrouter))
 
         #expect(model.providerAwaitingDisclosure == nil)

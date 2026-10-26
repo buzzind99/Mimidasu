@@ -43,14 +43,7 @@ struct AppModelArchiveWriteBackTests {
             "the live fixture seeds its recording row"
         )
 
-        let model = AppModel(
-            translationSettings: isolatedTranslationSettings(suite: "test.AppModelArchiveWriteBack"),
-            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelArchiveWriteBack"),
-            favorites: isolatedFavorites(),
-            archive: store,
-            highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
-        )
+        let model = makeIdleModel(suite: "test.AppModelArchiveWriteBack", archive: store)
         await model.initialModelCheck?.value
         model.recordingSessionID = recordingID
         model.entries = [SessionEntry(sentence: sentence)]
@@ -267,6 +260,7 @@ struct AppModelArchiveWriteBackTests {
 
         #expect(landed, "the display-from-memory swap still reports itself")
         #expect(sut.model.archiveWriteFailed, "the lost write latches the session")
+        #expect(!sut.model.archiveAvailable, "the latched session reads as unavailable")
         let warnings = archiveWarnings(sut.model)
         #expect(warnings.count == 1, "one warning for the session")
         #expect(warnings.first?.isClosable == false, "the live warning is a persistent condition")
@@ -285,6 +279,7 @@ struct AppModelArchiveWriteBackTests {
         let engine = ScriptedArchiveEngine()
         install(engine, for: .google, on: sut.model)
         let revisionBefore = sut.model.archiveRevision
+        let expectedLandings = expectedFRResults.map { translation in [translation] }
 
         sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
 
@@ -292,15 +287,20 @@ struct AppModelArchiveWriteBackTests {
             await pollUntil(timeout: runTimeout) { runFinished(sut.model, translated: 3) },
             "the run lands every sentence through the seam"
         )
+        #expect(engine.recordedBatches == [["こんにちは"], ["さようなら"], ["おはよう"]])
         #expect(
             sut.store.load(id: sut.id)?.entries.map { entry in entry.translations }
-                == expectedFRResults.map { translation in [translation] },
+                == expectedLandings,
             "every landed pull persists in the store"
         )
         #expect(
-            sut.model.entries.map { entry in entry.translation(for: "fr")?.text }
-                == ["T:こんにちは", "T:さようなら", "T:おはよう"],
-            "the pane swaps each row to its landed text"
+            sut.model.entries.map { entry in entry.translations } == expectedLandings,
+            "the pane swaps each row to its landed translation"
+        )
+        #expect(
+            sut.model.openArchive?.summary.languageCount(for: "fr")
+                == ArchiveLanguageCount(lang: "fr", translated: 3),
+            "the banner's language count refreshes in place"
         )
         #expect(
             sut.model.archiveRevision == revisionBefore + 3,
@@ -313,6 +313,14 @@ struct AppModelArchiveWriteBackTests {
         #expect(
             sut.model.archiveTranslationJob.failureIndexes.isEmpty,
             "no sentence counts as failed"
+        )
+
+        sut.model.closeArchive()
+        sut.model.openArchiveSession(id: sut.id)
+        #expect(
+            sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.text }
+                == ["T:こんにちは", "T:さようなら", "T:おはよう"],
+            "a reopen reads every write-back out of the store"
         )
     }
 
