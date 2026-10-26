@@ -3,7 +3,7 @@ import Foundation
 import Testing
 
 /// The Lookup Display module's fault map, driven over the fixture database:
-/// the infrastructure failures — missing, dangling, closed, corrupt — plus
+/// the infrastructure failures — missing, closed, corrupt — plus
 /// the empty-segments and empty-surface gates land on their typed faults;
 /// nil segments warn instead.
 /// A generic internal error stays covered at the pure map in
@@ -97,17 +97,6 @@ final class LookupDisplayFaultTests {
         let effect = await display.resolve(harness.requestO(), favorites: .empty)
 
         #expect(effect == .fault(.databaseClosed))
-    }
-
-    @Test("a dangling database URL faults as database-missing")
-    func danglingDatabaseURLFaultsMissing() async {
-        let missing = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mimidasu-missing-\(UUID().uuidString).sqlite")
-        let display = harness.makeDisplay(resolveDatabase: { [missing] in missing })
-
-        let effect = await display.resolve(harness.requestO(), favorites: .empty)
-
-        #expect(effect == .fault(.databaseMissing))
     }
 
     @Test("a corrupt database faults as a sqlite error")

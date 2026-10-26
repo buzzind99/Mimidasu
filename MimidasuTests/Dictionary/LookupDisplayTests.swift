@@ -167,32 +167,7 @@ final class LookupDisplayTests {
         #expect(origin == .join)
     }
 
-    @Test("a lemma hit resolves with the tapped-lemma origin")
-    func tappedLemmaResolvesWithLemmaOrigin() async {
-        let display = harness.makeDisplay()
-        let request = TapLookupRequest(
-            segments: [LookupSegment(surface: "食べた", lemma: "食べる")],
-            tappedAt: 0,
-            sentenceText: "食べた",
-            surface: "食べた"
-        )
-
-        let effect = await display.resolve(request, favorites: .empty)
-
-        guard case let .show(content, entryIndex) = effect else {
-            Issue.record("expected show, got \(effect)")
-            return
-        }
-        #expect(entryIndex == 0)
-        #expect(content.displayResult?.matched == "食べる")
-        guard case let .found(_, _, origin) = content else {
-            Issue.record("expected found content")
-            return
-        }
-        #expect(origin == .tappedLemma)
-    }
-
-    @Test("a lemma tap leads on the starred dictionary form")
+    @Test("a lemma tap resolves with the tapped-lemma origin and leads on the starred form")
     func lemmaTapPromotesStarredDictionaryForm() async {
         let display = harness.makeDisplay()
         let request = TapLookupRequest(
@@ -203,12 +178,23 @@ final class LookupDisplayTests {
         )
         let favorites = FavoriteIdentity(keys: [FavoriteIdentity.normalize("食べる")])
 
-        let effect = await display.resolve(request, favorites: favorites)
+        let plain = await display.resolve(request, favorites: .empty)
+        let favorited = await display.resolve(request, favorites: favorites)
 
-        guard case let .show(content, entryIndex) = effect,
+        guard case let .show(plainContent, plainIndex) = plain,
+              case let .found(plainResult, _, plainOrigin) = plainContent
+        else {
+            Issue.record("expected found show, got \(plain)")
+            return
+        }
+        #expect(plainIndex == 0)
+        #expect(plainResult.matched == "食べる")
+        #expect(plainOrigin == .tappedLemma)
+
+        guard case let .show(content, entryIndex) = favorited,
               case let .found(result, _, origin) = content
         else {
-            Issue.record("expected found show, got \(effect)")
+            Issue.record("expected found show, got \(favorited)")
             return
         }
         #expect(entryIndex == 0)
@@ -218,8 +204,8 @@ final class LookupDisplayTests {
         #expect(favorites.leads(result))
     }
 
-    @Test("a split-only tap shows not-found with the splits demoted to related")
-    func splitOnlyDemotesToRelated() async {
+    @Test("a split-only tap demotes to related, and favorites leave it unpromoted")
+    func splitOnlyDemotesToRelatedWithoutFavoritePromotion() async {
         let display = harness.makeDisplay()
         let request = TapLookupRequest(
             segments: [LookupSegment(surface: "雨尾")],
@@ -227,49 +213,26 @@ final class LookupDisplayTests {
             sentenceText: "雨尾",
             surface: "雨尾"
         )
-
-        let effect = await display.resolve(request, favorites: .empty)
-
-        guard case let .show(content, entryIndex) = effect else {
-            Issue.record("expected show, got \(effect)")
-            return
-        }
-        #expect(entryIndex == 0)
-        guard case let .notFound(surface, related) = content else {
-            Issue.record("expected not-found content, got \(content)")
-            return
-        }
-        #expect(surface == "雨尾")
-        #expect(related.map(\.matched) == ["雨", "尾"])
-    }
-
-    @Test("favorites leave a not-found resolution unpromoted")
-    func favoritesLeaveNotFoundUnpromoted() async {
-        let display = harness.makeDisplay()
-        let request = TapLookupRequest(
-            segments: [LookupSegment(surface: "雨尾")],
-            tappedAt: 0,
-            sentenceText: "雨尾",
-            surface: "雨尾"
-        )
+        let favorites = FavoriteIdentity(keys: [FavoriteIdentity.normalize("雨")])
 
         let plain = await display.resolve(request, favorites: .empty)
-        let favorited = await display.resolve(
-            request, favorites: FavoriteIdentity(keys: [FavoriteIdentity.normalize("雨")])
-        )
+        let favorited = await display.resolve(request, favorites: favorites)
 
-        guard case let .show(plainContent, _) = plain,
-              case let .show(favoritedContent, _) = favorited
+        guard case let .show(plainContent, plainIndex) = plain,
+              case let .show(favoritedContent, favoritedIndex) = favorited
         else {
             Issue.record("expected show, got \(plain) / \(favorited)")
             return
         }
-        guard case let .notFound(_, plainRelated) = plainContent,
+        guard case let .notFound(plainSurface, plainRelated) = plainContent,
               case let .notFound(surface, related) = favoritedContent
         else {
             Issue.record("expected not-found content")
             return
         }
+        #expect(plainIndex == 0)
+        #expect(favoritedIndex == 0)
+        #expect(plainSurface == "雨尾")
         #expect(surface == "雨尾")
         #expect(related.map(\.matched) == ["雨", "尾"])
         #expect(related == plainRelated)

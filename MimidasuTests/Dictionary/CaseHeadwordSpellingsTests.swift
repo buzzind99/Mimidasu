@@ -13,25 +13,20 @@ import Testing
 struct CaseHeadwordSpellingsTests {
     private let mixed = CaseHeadwordSpellings(spellings: ["ActiveX", "iPhone", "TKG"])
 
-    @Test("reports a stored spelling whose fold is the query as an exact match")
-    func foldedQueryIsExact() throws {
-        let match = try #require(mixed.matches(openingFold: "activex").first)
+    @Test(
+        "reports a stored spelling by how the query opens it",
+        arguments: [
+            ("activex", CaseHeadwordSpellings.Match(spelling: "ActiveX", isExact: true)),
+            ("iphon", CaseHeadwordSpellings.Match(spelling: "iPhone", isExact: false)),
+            ("tkg", CaseHeadwordSpellings.Match(spelling: "TKG", isExact: true))
+        ]
+    )
+    func matchByOpeningFold(
+        openingFold: String, expected: CaseHeadwordSpellings.Match
+    ) throws {
+        let match = try #require(mixed.matches(openingFold: openingFold).first)
 
-        #expect(match == CaseHeadwordSpellings.Match(spelling: "ActiveX", isExact: true))
-    }
-
-    @Test("reports a stored spelling the query merely opens as a prefix match")
-    func openedSpellingIsPrefix() throws {
-        let match = try #require(mixed.matches(openingFold: "iphon").first)
-
-        #expect(match == CaseHeadwordSpellings.Match(spelling: "iPhone", isExact: false))
-    }
-
-    @Test("leaves the all-caps spelling to the query's own uppercase probe")
-    func allCapsSpellingFoldsToItself() throws {
-        let match = try #require(mixed.matches(openingFold: "tkg").first)
-
-        #expect(match == CaseHeadwordSpellings.Match(spelling: "TKG", isExact: true))
+        #expect(match == expected)
     }
 
     @Test("keeps every spelling that folds to the same form")

@@ -32,7 +32,7 @@ final class JMDictLookupExpansionTests {
         return outcome
     }
 
-    @Test("displays the tapped piece: お resolves お, お土産 lands in also")
+    @Test("displays the tapped piece and keeps the longer-join hit in also")
     func compoundHit() throws {
         let outcome = try foundOutcome(engine.lookup(
             segments: [LookupSegment(surface: "お"), LookupSegment(surface: "土産", lemma: "土産")],
@@ -43,6 +43,8 @@ final class JMDictLookupExpansionTests {
         #expect(outcome.display.matched == "お")
         #expect(outcome.displayOrigin == .tappedSurface)
         #expect(outcome.display.entries.map(\.entSeq) == [9_990_040])
+        #expect(outcome.also.map(\.matched) == ["お土産"])
+        #expect(outcome.also[0].entries.map(\.entSeq) == [1_002_500])
     }
 
     @Test("displays the join when the tapped piece alone misses, labeled by the join origin")
@@ -102,18 +104,6 @@ final class JMDictLookupExpansionTests {
         #expect(outcome.display.matched == "食べる")
         #expect(outcome.displayOrigin == .tappedLemma)
         #expect(outcome.display.entries.map(\.entSeq) == [1_358_280])
-    }
-
-    @Test("retains the longer-join hits that add new entries as results")
-    func shorterHitsRetained() throws {
-        let outcome = try foundOutcome(engine.lookup(
-            segments: [LookupSegment(surface: "お"), LookupSegment(surface: "土産", lemma: "土産")],
-            tappedAt: 0,
-            sentenceText: "お土産"
-        ))
-
-        #expect(outcome.also.map(\.matched) == ["お土産"])
-        #expect(outcome.also[0].entries.map(\.entSeq) == [1_002_500])
     }
 
     @Test("a whole-word miss resolved only by splits is not-found with related hits")

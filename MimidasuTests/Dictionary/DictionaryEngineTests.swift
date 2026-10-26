@@ -258,19 +258,6 @@ struct DictionaryEngineTests {
         #expect(tokens[1].bound == nil)
     }
 
-    @Test("decodes a legacy payload without base/pos keys to nil")
-    func legacyPayloadDecodesBaseAndPosToNil() throws {
-        // No base/pos keys at all — still decodes, to nil (the same shape
-        // every pinned test payload above uses).
-        fakeTokenizeJSONText = payloadMixed
-        let engine = makeEngine()
-
-        let tokens = try #require(engine.tokenize(anyText))
-
-        #expect(tokens == payloadTokens)
-        #expect(tokens.allSatisfy { token in token.base == nil && token.pos == nil })
-    }
-
     @Test("decodes an empty payload to no tokens")
     func emptyPayload() {
         fakeTokenizeJSONText = "[]"
@@ -328,25 +315,17 @@ struct DictionaryEngineLiveTests {
 
     // MARK: smoke
 
-    @Test("tokenizes the student sentence into four surfaces")
+    @Test("tokenizes the student sentence into four surfaces with readings")
     func studentSentenceSurfaces() throws {
         let engine = try #require(LiveDictionaryRuntime.engine)
 
         let tokens = try #require(engine.tokenize("私は学生です"))
 
         #expect(tokens.map(\.text) == ["私", "は", "学生", "です"])
-    }
-
-    @Test("carries hiragana readings per surface")
-    func studentSentenceReadings() throws {
-        let engine = try #require(LiveDictionaryRuntime.engine)
-
-        let tokens = try #require(engine.tokenize("私は学生です"))
-
         #expect(tokens.map(\.reading) == ["わたし", "は", "がくせい", "です"])
     }
 
-    @Test("carries surface readings for conjugated tokens (食べました)")
+    @Test("carries readings, base forms, and coarse POS for conjugated tokens (食べました)")
     func conjugatedSurfaceReadings() throws {
         let engine = try #require(LiveDictionaryRuntime.engine)
 
@@ -356,14 +335,6 @@ struct DictionaryEngineLiveTests {
             tokens.map { token in [token.text, token.reading] }
                 == [["食べ", "たべ"], ["まし", "まし"], ["た", "た"]]
         )
-    }
-
-    @Test("carries base form and coarse POS for conjugated tokens (食べました)")
-    func conjugatedBaseAndPos() throws {
-        let engine = try #require(LiveDictionaryRuntime.engine)
-
-        let tokens = try #require(engine.tokenize("食べました"))
-
         #expect(
             tokens.map { token in [token.text, token.base, token.pos] }
                 == [["食べ", "食べる", "動詞"], ["まし", "ます", "助動詞"], ["た", "た", "助動詞"]]

@@ -66,9 +66,9 @@ final class DictionarySearchEngineLemmaTests {
         #expect(outcome.hits.allSatisfy { hit in hit.matchKind != .lemma })
     }
 
-    @Test("bridges romaji inflected forms through the converted kana's lemma",
-          arguments: ["tabetai", "tabemasu"])
-    func romajiLemmaBridge(query: String) throws {
+    @Test("lemmatizes inflected forms reached from kana or romaji",
+          arguments: ["tabetai", "tabemasu", "たべたい", "たべます"])
+    func inflectedLemmaBridge(query: String) throws {
         // The stub answers for the converted kana only, the way the real
         // tokenizer answers for Japanese text and stays silent for romaji —
         // a bridge that tokenized the raw query would ask for "tabetai"
@@ -97,34 +97,6 @@ final class DictionarySearchEngineLemmaTests {
         #expect(hit.reb == "たべる")
         #expect(hit.matchKind.badgeLabel == "LEMMA")
         #expect(outcome.hits.filter { candidate in candidate.entSeq == 1_358_280 }.count == 1)
-    }
-
-    @Test("still lemmatizes kana inflected forms after the unwrap change",
-          arguments: ["たべたい", "たべます"])
-    func kanaLemmaRegression(query: String) throws {
-        let sut = DictionarySearchEngine(
-            resolveDatabase: { [url = databaseURL] in url },
-            tokenize: { text in
-                guard text == query else { return nil }
-                return [DictionaryToken(
-                    text: text, start: 0, end: 4,
-                    reading: text, base: "たべる", pos: "動詞", bound: false
-                )]
-            }
-        )
-        defer { sut.close() }
-
-        let outcome = try sut.search(query, filters: DictionarySearchFilters())
-        let hit = try #require(outcome.hits.first { candidate in
-            candidate.entSeq == 1_358_280
-        })
-
-        #expect(hit.matchKind == .lemma)
-        #expect(hit.highlightRange == nil)
-        #expect(hit.matchedField == .reb)
-        #expect(hit.keb == "食べる")
-        #expect(hit.reb == "たべる")
-        #expect(hit.matchKind.badgeLabel == "LEMMA")
     }
 
     @Test("unwraps a られる-tail lemma onto the source verb")

@@ -19,13 +19,6 @@ struct TapLookupFaultTests {
         #expect(mapped == fault)
     }
 
-    @Test("a corrupt fault passes through untouched")
-    func corruptPassthrough() {
-        let mapped = TapLookupFault(TapLookupFault.databaseCorrupt)
-
-        #expect(mapped == .databaseCorrupt)
-    }
-
     @Test("each engine error maps onto its fault", arguments: [
         (JMDictLookupError.databaseMissing, TapLookupFault.databaseMissing),
         (JMDictLookupError.databaseClosed, TapLookupFault.databaseClosed),

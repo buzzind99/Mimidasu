@@ -13,34 +13,6 @@ import Testing
 
 extension DictionaryStoreTests {
 
-    // MARK: errorDescription
-
-    @Test("names the missing bundled JMDict artifact")
-    func bundledJMDictMissingMessage() {
-        let error = DictionaryStore.DictionaryStoreError.bundledJMDictMissing
-
-        #expect(
-            error.errorDescription
-                == "Bundled \(JMDictPin.bundledFileName) not found in the app bundle."
-        )
-    }
-
-    @Test("names a failed index build apart from a failed smoke query")
-    func indexBuildFailedMessage() {
-        let index = DictionaryStore.DictionaryStoreError.indexBuildFailed(
-            reason: "SQLite error 8: attempt to write a readonly database"
-        )
-
-        // Distinct copy: the two failures surface the same way to the user (a
-        // prepare that failed and retries), and the status bar must not claim
-        // a smoke query failed when the index build is what stopped it.
-        #expect(
-            index.errorDescription
-                == "Dictionary index could not be built: SQLite error 8: "
-                + "attempt to write a readonly database."
-        )
-    }
-
     // MARK: resolveJMDict
 
     #if DEBUG
@@ -127,6 +99,13 @@ extension DictionaryStoreTests {
 
         #expect(url == destination.appendingPathComponent(JMDictPin.preparedFileName))
         #expect(FileManager.default.fileExists(atPath: url.path))
+        // The stamp is written on the promoted copy, so a DDL change can outrun
+        // the filename.
+        let database = try SQLiteDatabase(path: url.path)
+        defer { database.close() }
+        let stamp = try database.statement(JMDictFTSIndex.schemaVersionSQL)
+        #expect(try stamp.step())
+        #expect(stamp.requiredInt(0) == JMDictFTSIndex.schemaVersion)
     }
 
     @Test("adopts a JMDict database prepared by an earlier launch without decompressing")
@@ -214,20 +193,6 @@ extension DictionaryStoreTests {
         #expect(url == existing)
     }
 
-    @Test("stamps the index so a DDL change can outrun the filename")
-    func jmDictBuildStampsTheIndex() async throws {
-        fakePrepareCopySource = smokeDatabase
-        let store = makeStore()
-
-        let url = try await store.prepareJMDict()
-
-        let database = try SQLiteDatabase(path: url.path)
-        defer { database.close() }
-        let stamp = try database.statement(JMDictFTSIndex.schemaVersionSQL)
-        #expect(try stamp.step())
-        #expect(stamp.requiredInt(0) == JMDictFTSIndex.schemaVersion)
-    }
-
     @Test("re-stages an index built against an older schema version")
     func jmDictReStagesStaleIndex() async throws {
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
@@ -286,23 +251,6 @@ extension DictionaryStoreTests {
         #expect(fakePrepareCalls == 1)
     }
 
-    @Test("coalesces concurrent JMDict callers into one decompression")
-    func jmDictConcurrentCallersCoalesce() async throws {
-        fakePrepareCopySource = smokeDatabase
-        // Short but guaranteed to overlap: late callers line up behind the
-        // in-flight decompression and observe the done phase.
-        fakePrepareDelayMs = 50
-        let store = makeStore()
-
-        async let first = store.prepareJMDict()
-        async let second = store.prepareJMDict()
-        async let third = store.prepareJMDict()
-        let results = try await (first, second, third)
-
-        #expect(results.0 == results.1 && results.1 == results.2)
-        #expect(fakePrepareCalls == 1, "all callers must share the single decompression")
-    }
-
     @Test("removes stale versioned JMDict artifacts after a successful promote")
     func jmDictPromoteRemovesLegacyArtifacts() async throws {
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
@@ -315,36 +263,6 @@ extension DictionaryStoreTests {
 
         #expect(!FileManager.default.fileExists(atPath: stale.path))
         #expect(FileManager.default.fileExists(atPath: url.path))
-    }
-
-    @Test("reports a JMDict decompression failure and leaves no partial database")
-    func jmDictPrepareFailureLeavesNoPartialFile() async throws {
-        let store = makeStore(ffi: makeFakeFFI(prepare: fakePrepareFail))
-
-        let error = await #expect(throws: DictionaryStore.DictionaryStoreError.self) {
-            try await store.prepareJMDict()
-        }
-
-        #expect(error == .prepareFailed(returnCode: 1))
-        #expect(
-            !FileManager.default.fileExists(
-                atPath: destination.appendingPathComponent(JMDictPin.preparedFileName).path
-            ),
-            "a failed prepare must not leave a partial database"
-        )
-    }
-
-    @Test("re-attempts the JMDict decompression on the next call after a failure")
-    func jmDictFailedPrepareRetries() async throws {
-        let store = makeStore(ffi: makeFakeFFI(prepare: fakePrepareFail))
-        _ = try? await store.prepareJMDict()
-
-        let error = await #expect(throws: DictionaryStore.DictionaryStoreError.self) {
-            try await store.prepareJMDict()
-        }
-
-        #expect(error == .prepareFailed(returnCode: 1))
-        #expect(fakePrepareCalls == 2, "the retry must re-attempt the decompression")
     }
 
     @Test("fails the JMDict prepare when the artifact is not a database")

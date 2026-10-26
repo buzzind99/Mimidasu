@@ -61,17 +61,6 @@ final class DictionarySearchEngineBadgeTests {
         #expect(DictionaryContent.jlptBadge(hit.jlpt) == "≈N5")
     }
 
-    /// The join is a fallback, not an override: a headword-tier row matched a
-    /// specific writing and keeps that writing's level, which is the more
-    /// precise answer of the two.
-    @Test("a headword-tier hit keeps the level of the writing it matched")
-    func headwordHitKeepsRowJLPT() throws {
-        let hit = try #require(search("食べる").hits.first)
-
-        #expect(hit.matchKind == .exact)
-        #expect(hit.jlpt == 5)
-    }
-
     /// A kana-only entry reaches the gloss stage through its reading alone —
     /// with no kanji writing the metadata join must seek the reading, or the
     /// level has nowhere to come from and the badge silently disappears.

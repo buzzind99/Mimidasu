@@ -43,13 +43,6 @@ struct JMDictNameEntriesTests {
 
     // MARK: - Offset and predicate
 
-    @Test("the JMnedict ingest offset is ten million")
-    func ingestOffsetValue() {
-        let boundary = JMDictNameEntries.ingestOffset
-
-        #expect(boundary == 10_000_000)
-    }
-
     @Test("classifies an ent_seq at and around the ingest offset", arguments: [
         (9_999_999, false),
         (10_000_000, true),
@@ -60,16 +53,6 @@ struct JMDictNameEntriesTests {
         let classified = JMDictNameEntries.isName(entSeq: entSeq)
 
         #expect(classified == expected)
-    }
-
-    @Test("only the offset range counts as a name entry")
-    func isName() {
-        // Real data never touches this band (words stay well under the
-        // offset; ingest lands names at 15M+) — the pair pins the >=
-        // predicate itself.
-        #expect(!JMDictNameEntries.isName(entry()))
-        #expect(JMDictNameEntries.isName(nameEntry(entSeq: 10_000_000)))
-        #expect(!JMDictNameEntries.isName(nameEntry(entSeq: 9_999_999)))
     }
 
     @Test("the entry property agrees with the static predicate", arguments: [
@@ -139,11 +122,6 @@ struct JMDictNameEntriesTests {
                 "SHIP", "STATION", "SURNAME", "WORK"
             ]
         )
-    }
-
-    @Test("allBadges is deduped and sorted")
-    func allBadgesSortedSet() {
-        #expect(JMDictNameEntries.allBadges == Set(JMDictNameEntries.allBadges).sorted())
     }
 
     @Test("maps every stored name type to its badge label", arguments: [

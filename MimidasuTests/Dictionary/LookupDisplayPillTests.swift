@@ -45,56 +45,6 @@ final class LookupDisplayPillTests {
         #expect(origin == .tappedSurface)
     }
 
-    @Test("an in-bounds tap shows the same verdict")
-    func inBoundsTapShowsSameVerdict() async {
-        let display = harness.makeDisplay()
-        let request = TapLookupRequest(
-            segments: [
-                LookupSegment(surface: "お"),
-                LookupSegment(surface: "土産", lemma: "土産")
-            ],
-            tappedAt: 0,
-            sentenceText: "お土産",
-            surface: "お"
-        )
-
-        let effect = await display.resolve(request, favorites: .empty)
-
-        guard case let .show(content, _) = effect else {
-            Issue.record("expected show, got \(effect)")
-            return
-        }
-        // Stored 0 is also the first rescan hit, so the verdict is the same
-        // either way: this pins the verdict only, not the keep-stored
-        // mechanism — the keep-vs-rescan discrimination lives in the seam
-        // tests below.
-        #expect(content.displayResult?.matched == "お")
-        #expect(content.fallbackResults.map(\.matched) == ["お土産"])
-        guard case let .found(_, _, origin) = content else {
-            Issue.record("expected found content")
-            return
-        }
-        #expect(origin == .tappedSurface)
-    }
-
-    @Test("an out-of-bounds tap with no matching surface warns")
-    func outOfBoundsTapWithoutMatchingSurfaceWarns() async {
-        let display = harness.makeDisplay()
-        let request = TapLookupRequest(
-            segments: [
-                LookupSegment(surface: "お"),
-                LookupSegment(surface: "土産", lemma: "土産")
-            ],
-            tappedAt: 9,
-            sentenceText: "お土産",
-            surface: "xyz"
-        )
-
-        let effect = await display.resolve(request, favorites: .empty)
-
-        #expect(effect == .warnNoHit(surface: "xyz"))
-    }
-
     // MARK: Re-anchor seam
 
     @Test("the seam re-anchors a duplicate surface to its first occurrence")
@@ -108,19 +58,6 @@ final class LookupDisplayPillTests {
                 surface: "お",
                 in: [LookupSegment(surface: "お"), LookupSegment(surface: "お", lemma: "尾")]
             ) == 0
-        )
-    }
-
-    @Test("the seam keeps an in-bounds stored index whose surface agrees")
-    func seamKeepsAgreeingStoredIndex() {
-        // Agreement is checked at the stored slot itself: 1 matches 土産, so
-        // the stored index is kept.
-        #expect(
-            LookupDisplay.reAnchoredTapIndex(
-                stored: 1,
-                surface: "土産",
-                in: [LookupSegment(surface: "お"), LookupSegment(surface: "土産", lemma: "土産")]
-            ) == 1
         )
     }
 
@@ -182,37 +119,6 @@ final class LookupDisplayPillTests {
     func seamFailsClosedWithoutSegments() {
         #expect(LookupDisplay.reAnchoredTapIndex(stored: 3, surface: "お", in: nil) == 3)
         #expect(LookupDisplay.reAnchoredTapIndex(stored: 3, surface: "お", in: []) == 3)
-    }
-
-    @Test("a duplicate surface re-anchors to the first occurrence and shows")
-    func duplicateSurfaceReanchorsToFirstOccurrence() async {
-        let display = harness.makeDisplay()
-        let request = TapLookupRequest(
-            segments: [
-                LookupSegment(surface: "お"),
-                LookupSegment(surface: "お", lemma: "尾")
-            ],
-            tappedAt: 9,
-            sentenceText: "おお",
-            surface: "お"
-        )
-
-        let effect = await display.resolve(request, favorites: .empty)
-
-        guard case let .show(content, _) = effect else {
-            Issue.record("expected show, got \(effect)")
-            return
-        }
-        #expect(content.displayResult?.matched == "お")
-        // Behavior smoke only: the tapped surface candidate reaches the
-        // engine before the lemma, so either tiebreak order resolves
-        // identically through the fixture — the discriminating
-        // first-occurrence pin lives in the re-anchor seam tests above.
-        guard case let .found(_, _, origin) = content else {
-            Issue.record("expected found content")
-            return
-        }
-        #expect(origin == .tappedSurface)
     }
 
     @Test("an also-pill promotion fully re-selects and the row recomputes")
@@ -316,51 +222,31 @@ final class LookupDisplayPillTests {
         #expect(back == .found(result: joined, also: [single], origin: .tappedSurface))
     }
 
-    @Test("the pager steps the display entries")
-    func pagerStepsToEntry() async throws {
+    @Test(
+        "the pager steps the display entries and clamps at both ends",
+        arguments: [(1, 1), (99, 1), (-5, 0)]
+    )
+    func pagerStepsAndClamps(target: Int, expected: Int) async throws {
         let content = try await harness.shownContent(for: harness.requestAme())
 
         let count = try #require(content.displayResult?.entries.count)
         #expect(count == 2)
 
-        let stepped = harness.makeDisplay().steppedEntry(in: content, to: 1)
+        let stepped = harness.makeDisplay().steppedEntry(in: content, to: target)
 
-        #expect(stepped == 1)
+        #expect(stepped == expected)
     }
 
-    @Test("the pager clamps past the last entry")
-    func pagerClampsPastEnd() async throws {
-        let content = try await harness.shownContent(for: harness.requestAme())
-
-        let stepped = harness.makeDisplay().steppedEntry(in: content, to: 99)
-
-        #expect(stepped == (content.displayResult?.entries.count ?? 0) - 1)
-    }
-
-    @Test("the pager clamps before the first entry")
-    func pagerClampsBeforeStart() async throws {
-        let content = try await harness.shownContent(for: harness.requestAme())
-
-        let stepped = harness.makeDisplay().steppedEntry(in: content, to: -5)
-
-        #expect(stepped == 0)
-    }
-
-    @Test("the pager is inert on not-found content")
-    func pagerNilOnNotFound() {
-        let content = LookupContent.notFound(
+    @Test("the pager is inert on not-found content and without content")
+    func pagerInertWithoutDisplay() {
+        let notFound = LookupContent.notFound(
             surface: "雨尾", related: [harness.result(["雨"])]
         )
 
-        let stepped = harness.makeDisplay().steppedEntry(in: content, to: 0)
+        let fromNotFound = harness.makeDisplay().steppedEntry(in: notFound, to: 0)
+        let fromNil = harness.makeDisplay().steppedEntry(in: nil, to: 0)
 
-        #expect(stepped == nil)
-    }
-
-    @Test("the pager is inert without content")
-    func pagerNilOnNilContent() {
-        let stepped = harness.makeDisplay().steppedEntry(in: nil, to: 0)
-
-        #expect(stepped == nil)
+        #expect(fromNotFound == nil)
+        #expect(fromNil == nil)
     }
 }

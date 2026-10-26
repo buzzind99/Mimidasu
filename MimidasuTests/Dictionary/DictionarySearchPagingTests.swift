@@ -63,8 +63,8 @@ struct DictionarySearchPagingTests {
         )
     }
 
-    @Test("returns every row it found, not just the window")
-    func returnsEveryFoundRow() throws {
+    @Test("returns every row it found, so two windows over the same stages agree")
+    func windowsOverTheSameStagesAgree() throws {
         // 120 rows, so no stage is ever skipped for want of window space: the
         // engine found them all and all of them are in the payload. Paging
         // slices this, so a row below the window costs two lookups to build
@@ -76,6 +76,16 @@ struct DictionarySearchPagingTests {
         #expect(outcome.hits.count == 120)
         #expect(outcome.matchedCount == 120)
         #expect(!outcome.saturated)
+
+        // Neither window was deep enough to change what ran, so the two searches
+        // are the same search — which is what makes a reveal between them free.
+        let first = try fixture.outcome("かん", limit: 50)
+        let second = try fixture.outcome("かん", limit: 100)
+
+        #expect(first.hits == second.hits)
+        #expect(first.matchedCount == 120)
+        #expect(!first.saturated)
+        #expect(!second.saturated)
     }
 
     @Test("a window one tier deep still reports the stage it skipped")
@@ -94,21 +104,6 @@ struct DictionarySearchPagingTests {
         // The full run of the same query reaches the rows the narrow one
         // declared invisible.
         #expect(try fixture.outcome("あめ").matchedCount == 4)
-    }
-
-    @Test("two windows over the same stages return one result set")
-    func windowsAgreeOnFoundRows() throws {
-        let fixture = try makePagedFixture(120)
-
-        let first = try fixture.outcome("かん", limit: 50)
-        let second = try fixture.outcome("かん", limit: 100)
-
-        // Neither window was deep enough to change what ran, so the two searches
-        // are the same search — which is what makes a reveal between them free.
-        #expect(first.hits == second.hits)
-        #expect(first.matchedCount == 120)
-        #expect(!first.saturated)
-        #expect(!second.saturated)
     }
 
     @Test("a probe that un-skips a stage only appends below the rows in hand")
@@ -142,7 +137,7 @@ struct DictionarySearchPagingTests {
         #expect(outcome.matchedCount == ceiling + 100)
     }
 
-    @Test("a headroom-bound scan publishes its total as a floor")
+    @Test("a headroom-bound scan publishes the same floor at every window")
     func headroomBoundPublishesAFloor() throws {
         let headroom = DictionarySearchEngine.prefixFetchHeadroom
         let fixture = try makeHeadroomBoundFixture()
@@ -161,11 +156,6 @@ struct DictionarySearchPagingTests {
         // a candidate and there was no tier for the window to saturate against.
         // The two facts are independent, and only one of them is a stage.
         #expect(outcome.saturated == false)
-    }
-
-    @Test("no window lifts a bound, so paging cannot un-truncate it")
-    func pagingCannotUnTruncate() throws {
-        let fixture = try makeHeadroomBoundFixture()
 
         let narrow = try fixture.outcome("かん", limit: DictionarySearchEngine.pageSize)
         let deep = try fixture.outcome("かん", limit: DictionarySearchEngine.maxRows)
@@ -253,51 +243,48 @@ struct DictionarySearchPagingTests {
         #expect(outcome.isFloor == false)
     }
 
-    @Test("a common-only search reports a total it can honour, with no floor")
-    func commonOnlyIsNeverSaturated() throws {
-        let fixture = try makeCommonFilteredFixture()
+    /// The three filters this fixture's all-words population can empty, so a
+    /// filtered search must refuse saturation whichever one is selected.
+    enum NonSaturatingFilter: CaseIterable, Sendable {
+        case commonOnly
+        case jlpt
+        case nameType
 
+        var emptiesThePopulation: Bool {
+            self != .commonOnly
+        }
+
+        func outcome(_ fixture: DictionarySearchFixture) throws -> DictionarySearchOutcome {
+            switch self {
+            case .commonOnly: try fixture.outcome("kan", commonOnly: true)
+            case .jlpt: try fixture.outcome("kan", jlptLevels: [5])
+            case .nameType: try fixture.outcome("kan", nameTypes: ["SURNAME"])
+            }
+        }
+    }
+
+    @Test("filtered searches are never saturated", arguments: NonSaturatingFilter.allCases)
+    func filteredSearchIsNeverSaturated(filter: NonSaturatingFilter) throws {
         // The window the ladder could measure here is 120 prefix rows and the
         // window the user sees is 40. Publishing a floor over the wrong one is
         // what made `mak` read `36 / 36+` and re-run the same search on every
         // click — the prefix stages ignore the window, so the measurement
         // could never come back any other way.
-        let outcome = try fixture.outcome("kan", commonOnly: true)
-
-        #expect(outcome.saturated == false)
-    }
-
-    @Test("a JLPT-filtered search is never saturated")
-    func jlptFilteredIsNeverSaturated() throws {
         let fixture = try makeCommonFilteredFixture()
 
-        // The bulk rows carry no JLPT level, so the filter drops every one —
-        // saturation still stays refused, which is the point: the probe cannot
-        // see the join the filter reads. Assert the empty answer too: an
-        // ignored filter over this fixture is also unsaturated, so the flag
-        // alone cannot tell them apart.
-        let outcome = try fixture.outcome("kan", jlptLevels: [5])
+        let outcome = try filter.outcome(fixture)
 
         #expect(outcome.saturated == false)
-        #expect(outcome.matchedCount == 0)
-        #expect(outcome.hits.isEmpty)
-        #expect(outcome.isFloor == false)
-    }
-
-    @Test("a name-type-filtered search is never saturated")
-    func nameTypeFilteredIsNeverSaturated() throws {
-        let fixture = try makeCommonFilteredFixture()
-
-        // The bulk rows are words, so the surname filter drops every one —
-        // saturation still stays refused: the probe cannot see the badges the
-        // filter reads. Same discrimination problem as the JLPT twin above —
-        // pin the empty answer, not just the flag.
-        let outcome = try fixture.outcome("kan", nameTypes: ["SURNAME"])
-
-        #expect(outcome.saturated == false)
-        #expect(outcome.matchedCount == 0)
-        #expect(outcome.hits.isEmpty)
-        #expect(outcome.isFloor == false)
+        // The JLPT and name-type rows carry no level and no name badge, so
+        // their selections drop every row — and the empty answer has to be
+        // exact, not a floor a wider window could lift. An ignored filter over
+        // this fixture is also unsaturated, so the flag alone cannot tell them
+        // apart; pin the empty answer too.
+        if filter.emptiesThePopulation {
+            #expect(outcome.matchedCount == 0)
+            #expect(outcome.hits.isEmpty)
+            #expect(outcome.isFloor == false)
+        }
     }
 
     @Test("a common-only search returns every row it found")

@@ -341,12 +341,17 @@ final class DictionarySearchEngineTests {
         #expect(try search("きむら", scope: .names, commonOnly: true).isEmpty)
     }
 
-    @Test("a blank query never reaches the ladder", arguments: ["", "   "])
+    @Test("a blank query never reaches the ladder and publishes the empty outcome",
+          arguments: ["", "   "])
     func blankQuerySkipsTheLadder(query: String) throws {
         let sut = DictionarySearchEngine(resolveDatabase: { [url = databaseURL] in url })
         defer { sut.close() }
 
-        #expect(try sut.search(query, filters: DictionarySearchFilters()) == .empty)
+        let outcome = try sut.search(query, filters: DictionarySearchFilters())
+
+        #expect(outcome == .empty)
+        #expect(outcome.isEmpty)
+        #expect(outcome.matchedCount == 0)
     }
 
     // MARK: Envelope
@@ -360,12 +365,6 @@ final class DictionarySearchEngineTests {
         #expect(outcome.hits.count == 4)
         #expect(outcome.saturated == false)
         #expect(outcome.isEmpty == false)
-    }
-
-    @Test("the empty outcome is the zero value a blank query publishes")
-    func emptyOutcome() {
-        #expect(DictionarySearchOutcome.empty.isEmpty)
-        #expect(DictionarySearchOutcome.empty.matchedCount == 0)
     }
 
     @Test("orders identically for the same query, so no row moves between keystrokes")

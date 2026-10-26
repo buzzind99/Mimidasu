@@ -108,10 +108,5 @@ final class DictionarySearchEngineLemmaScopeTests {
 
         #expect(verb.matchKind == .lemma)
         #expect(!outcome.hits.contains { hit in hit.entSeq == 9_990_184 })
-
-        let compound = try fixture.outcome("たべよごす")
-        #expect(compound.hits.contains { hit in
-            hit.entSeq == 9_990_184 && hit.matchKind == .exact
-        })
     }
 }

@@ -32,14 +32,22 @@ struct DictionaryFilterTransitionTests {
         #expect(updated.nameTypes == ["SURNAME"])
     }
 
-    @Test("toggling POS off clears nothing else")
-    func togglePOSRemovalClearsNothing() {
-        let filters = DictionarySearchFilters(nameTypes: ["SURNAME"], posGroups: [.verb])
+    @Test("toggling a selection off clears nothing else")
+    func toggleRemovalClearsNothing() {
+        let posOff = DictionarySearchFilters(nameTypes: ["SURNAME"], posGroups: [.verb])
+            .apply(.togglePOS(.verb))
+        #expect(posOff.posGroups.isEmpty)
+        #expect(posOff.nameTypes == ["SURNAME"])
 
-        let updated = filters.apply(.togglePOS(.verb))
+        let jlptOff = DictionarySearchFilters(jlptLevels: [5], nameTypes: ["SURNAME"])
+            .apply(.toggleJLPTLevel(5))
+        #expect(jlptOff.jlptLevels.isEmpty)
+        #expect(jlptOff.nameTypes == ["SURNAME"])
 
-        #expect(updated.posGroups.isEmpty)
-        #expect(updated.nameTypes == ["SURNAME"])
+        let nameOff = DictionarySearchFilters(jlptLevels: [5], nameTypes: ["SURNAME"])
+            .apply(.toggleNameType("SURNAME"))
+        #expect(nameOff.nameTypes.isEmpty)
+        #expect(nameOff.jlptLevels == [5])
     }
 
     @Test("toggling a name type under All clears JLPT and POS")
@@ -75,26 +83,6 @@ struct DictionaryFilterTransitionTests {
         #expect(updated.posGroups == [.verb])
     }
 
-    @Test("toggling JLPT off clears nothing else")
-    func toggleJLPTLevelRemovalClearsNothing() {
-        let filters = DictionarySearchFilters(jlptLevels: [5], nameTypes: ["SURNAME"])
-
-        let updated = filters.apply(.toggleJLPTLevel(5))
-
-        #expect(updated.jlptLevels.isEmpty)
-        #expect(updated.nameTypes == ["SURNAME"])
-    }
-
-    @Test("toggling a name type off clears nothing else")
-    func toggleNameTypeRemovalClearsNothing() {
-        let filters = DictionarySearchFilters(jlptLevels: [5], nameTypes: ["SURNAME"])
-
-        let updated = filters.apply(.toggleNameType("SURNAME"))
-
-        #expect(updated.nameTypes.isEmpty)
-        #expect(updated.jlptLevels == [5])
-    }
-
     // MARK: - Scope carry-over
 
     @Test("entering All from Words clears name types and keeps POS and JLPT")
@@ -125,12 +113,15 @@ struct DictionaryFilterTransitionTests {
         #expect(updated.posGroups.isEmpty)
     }
 
-    @Test("entering All from All clears nothing")
+    @Test("re-entering All from All clears nothing, even a raw two-sided selection")
     func setScopeFromAllToAll() {
-        let filters = DictionarySearchFilters(nameTypes: ["SURNAME"], posGroups: [.verb])
+        let filters = DictionarySearchFilters(
+            jlptLevels: [5], nameTypes: ["SURNAME"], posGroups: [.verb]
+        )
 
         let updated = filters.apply(.setScope(.all))
 
+        #expect(updated.jlptLevels == [5])
         #expect(updated.nameTypes == ["SURNAME"])
         #expect(updated.posGroups == [.verb])
     }
@@ -183,34 +174,22 @@ struct DictionaryFilterTransitionTests {
 
     // MARK: - Clear events
 
-    @Test("clearing JLPT keeps name types")
-    func clearJLPTLevelsKeepsNameTypes() {
-        let filters = DictionarySearchFilters(jlptLevels: [1, 2], nameTypes: ["SURNAME"])
+    @Test("clearing one row keeps the other rows' selections")
+    func clearEventsKeepOtherSelections() {
+        let jlptCleared = DictionarySearchFilters(jlptLevels: [1, 2], nameTypes: ["SURNAME"])
+            .apply(.clearJLPTLevels)
+        #expect(jlptCleared.jlptLevels.isEmpty)
+        #expect(jlptCleared.nameTypes == ["SURNAME"])
 
-        let updated = filters.apply(.clearJLPTLevels)
+        let nameCleared = DictionarySearchFilters(jlptLevels: [5], nameTypes: ["SURNAME"])
+            .apply(.clearNameTypes)
+        #expect(nameCleared.nameTypes.isEmpty)
+        #expect(nameCleared.jlptLevels == [5])
 
-        #expect(updated.jlptLevels.isEmpty)
-        #expect(updated.nameTypes == ["SURNAME"])
-    }
-
-    @Test("clearing name types keeps JLPT")
-    func clearNameTypesKeepsJLPT() {
-        let filters = DictionarySearchFilters(jlptLevels: [5], nameTypes: ["SURNAME"])
-
-        let updated = filters.apply(.clearNameTypes)
-
-        #expect(updated.nameTypes.isEmpty)
-        #expect(updated.jlptLevels == [5])
-    }
-
-    @Test("clearing POS keeps name types")
-    func clearPOSKeepsNameTypes() {
-        let filters = DictionarySearchFilters(nameTypes: ["SURNAME"], posGroups: [.verb])
-
-        let updated = filters.apply(.clearPOS)
-
-        #expect(updated.posGroups.isEmpty)
-        #expect(updated.nameTypes == ["SURNAME"])
+        let posCleared = DictionarySearchFilters(nameTypes: ["SURNAME"], posGroups: [.verb])
+            .apply(.clearPOS)
+        #expect(posCleared.posGroups.isEmpty)
+        #expect(posCleared.nameTypes == ["SURNAME"])
     }
 
     // MARK: - Reset, COMMON, normalization
@@ -266,71 +245,39 @@ struct DictionaryFilterTransitionTests {
         #expect(back.commonOnly == false)
     }
 
-    @Test("a raw two-sided All selection survives an unrelated scope event")
-    func rawTwoSidedAllSelectionIsPreserved() {
-        let raw = DictionarySearchFilters(jlptLevels: [5], nameTypes: ["SURNAME"])
+    @Test("entering Names clears COMMON, directly and through normalization")
+    func normalizationClearsCommonUnderNames() {
+        let entered = DictionarySearchFilters(commonOnly: true).apply(.setScope(.names))
 
-        let updated = raw.apply(.setScope(.all))
+        #expect(entered.scope == .names)
+        #expect(entered.commonOnly == false)
 
-        #expect(updated.jlptLevels == [5])
-        #expect(updated.nameTypes == ["SURNAME"])
-    }
-
-    @Test("entering Names normalizes COMMON away")
-    func setScopeNamesNormalizesCommonAway() {
-        let updated = DictionarySearchFilters(commonOnly: true).apply(.setScope(.names))
-
-        #expect(updated.scope == .names)
-        #expect(updated.commonOnly == false)
-    }
-
-    @Test("normalized clears COMMON under Names")
-    func normalizedClearsCommonUnderNames() {
         let normalized = DictionarySearchFilters(scope: .names, commonOnly: true).normalized
 
         #expect(normalized.commonOnly == false)
         #expect(normalized.scope == .names)
-    }
-
-    @Test("normalized is idempotent")
-    func normalizedIsIdempotent() {
-        let once = DictionarySearchFilters(scope: .names, commonOnly: true).normalized
-
-        #expect(once.normalized == once)
+        #expect(normalized.normalized == normalized)
     }
 
     // MARK: - Scope capability table
 
-    @Test("scope capability: JLPT", arguments: zip(
-        [DictionarySearchFilters.Scope.all, .words, .names],
-        [true, true, false]
-    ))
-    func scopeAnswersJLPT(scope: DictionarySearchFilters.Scope, expected: Bool) {
-        #expect(scope.answersJLPT == expected)
-    }
-
-    @Test("scope capability: name types", arguments: zip(
-        [DictionarySearchFilters.Scope.all, .words, .names],
-        [true, false, true]
-    ))
-    func scopeAnswersNameTypes(scope: DictionarySearchFilters.Scope, expected: Bool) {
-        #expect(scope.answersNameTypes == expected)
-    }
-
-    @Test("scope capability: POS", arguments: zip(
-        [DictionarySearchFilters.Scope.all, .words, .names],
-        [true, true, false]
-    ))
-    func scopeAnswersPOS(scope: DictionarySearchFilters.Scope, expected: Bool) {
-        #expect(scope.answersPOS == expected)
-    }
-
-    @Test("scope capability: COMMON", arguments: zip(
-        [DictionarySearchFilters.Scope.all, .words, .names],
-        [true, true, false]
-    ))
-    func scopeAnswersCommon(scope: DictionarySearchFilters.Scope, expected: Bool) {
-        #expect(scope.answersCommon == expected)
+    @Test(
+        "scope capability: JLPT, name types, POS, and COMMON",
+        arguments: [
+            (DictionarySearchFilters.Scope.all, true, true, true, true),
+            (.words, true, false, true, true),
+            (.names, false, true, false, false),
+        ]
+    )
+    func scopeCapabilities(
+        scope: DictionarySearchFilters.Scope,
+        answersJLPT: Bool, answersNameTypes: Bool,
+        answersPOS: Bool, answersCommon: Bool
+    ) {
+        #expect(scope.answersJLPT == answersJLPT)
+        #expect(scope.answersNameTypes == answersNameTypes)
+        #expect(scope.answersPOS == answersPOS)
+        #expect(scope.answersCommon == answersCommon)
     }
 
     // MARK: - Seeded sequences

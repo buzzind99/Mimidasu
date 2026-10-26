@@ -51,7 +51,7 @@ struct DictionarySearchPOSFilterTests {
 
     @Test("a POS selection filters under Words")
     func posFiltersUnderWords() throws {
-        let fixture = try DictionarySearchFixture(extraWords: Self.posHomographs)
+        let fixture = try DictionarySearchFixture(extraWords: JMDictFixtureDatabase.SyntheticWords.posHomographs)
         let unfiltered = try fixture.outcome("ぽすも", scope: .words)
 
         #expect(unfiltered.hits.map(\.entSeq) == [9_990_185, 9_990_186])
@@ -107,7 +107,7 @@ struct DictionarySearchPOSFilterTests {
 
     @Test("POS coexists with the exact tier")
     func posCoexistsWithMatchGroups() throws {
-        let fixture = try DictionarySearchFixture(extraWords: Self.posHomographs)
+        let fixture = try DictionarySearchFixture(extraWords: JMDictFixtureDatabase.SyntheticWords.posHomographs)
         let verbs = try fixture.outcome("ぽすも", matchGroups: [.exact], posGroups: [.verb])
 
         #expect(verbs.hits.map(\.entSeq) == [9_990_185])
@@ -135,38 +135,6 @@ struct DictionarySearchPOSFilterTests {
         #expect(nouns.matchedCount == 0)
         #expect(nouns.isFloor == false)
     }
-
-    /// Two kana-only homographs sharing the reading ぽすも: a verb
-    /// (`v1,vt`) and a noun (`n`), so the POS engine tests can pin
-    /// narrowing on entries the suite itself owns.
-    private static let posHomographs: [JMDictFixtureDatabase.FixtureWord] = [
-        JMDictFixtureDatabase.FixtureWord(
-            id: "9990185",
-            kanji: nil,
-            kana: [JMDictFixtureDatabase.FixtureKana(
-                text: "ぽすも", common: false, appliesToKanji: nil,
-                jlptLevel: nil, pitchAccent: nil
-            )],
-            sense: [JMDictFixtureDatabase.FixtureSense(
-                partOfSpeech: ["v1", "vt"], appliesToKanji: nil, appliesToKana: nil,
-                misc: nil,
-                gloss: [JMDictFixtureDatabase.FixtureGloss(lang: "eng", text: "to posmo")]
-            )]
-        ),
-        JMDictFixtureDatabase.FixtureWord(
-            id: "9990186",
-            kanji: nil,
-            kana: [JMDictFixtureDatabase.FixtureKana(
-                text: "ぽすも", common: false, appliesToKanji: nil,
-                jlptLevel: nil, pitchAccent: nil
-            )],
-            sense: [JMDictFixtureDatabase.FixtureSense(
-                partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil,
-                misc: nil,
-                gloss: [JMDictFixtureDatabase.FixtureGloss(lang: "eng", text: "a posmo")]
-            )]
-        )
-    ]
 
     /// Two level-5 kana-only homographs sharing the reading ぽすじ: a verb
     /// (`v1,vt`) and a noun (`n`), so the JLPT+POS coexistence test can pin

@@ -34,29 +34,16 @@ struct DictionaryFFITests {
         #expect(attempts == 2, "the second candidate should be tried after the first fails")
     }
 
-    @Test("returns nil when the open symbol is missing")
-    func openSymbolMissing() {
+    @Test("returns nil when a required symbol is missing", arguments: [
+        "dictionary_open", "dictionary_prepare",
+    ])
+    func requiredSymbolMissing(symbolName: String) {
         let openLibrary: (String) -> UnsafeMutableRawPointer? = { _ in
             UnsafeMutableRawPointer(bitPattern: 1)
         }
         let symbol: (UnsafeMutableRawPointer, String) -> UnsafeMutableRawPointer? = { _, name in
-            // "dictionary_open" is the dylib's ABI literal, mirrored here.
-            name == "dictionary_open" ? nil : UnsafeMutableRawPointer(strdup(name))
-        }
-
-        let ffi = DictionaryFFI.load(openLibrary: openLibrary, symbol: symbol)
-
-        #expect(ffi == nil)
-    }
-
-    @Test("returns nil when the prepare symbol is missing")
-    func prepareSymbolMissing() {
-        let openLibrary: (String) -> UnsafeMutableRawPointer? = { _ in
-            UnsafeMutableRawPointer(bitPattern: 1)
-        }
-        let symbol: (UnsafeMutableRawPointer, String) -> UnsafeMutableRawPointer? = { _, name in
-            // "dictionary_prepare" is the dylib's ABI literal, mirrored here.
-            name == "dictionary_prepare" ? nil : UnsafeMutableRawPointer(strdup(name))
+            // The missing name is the dylib's ABI literal; every other symbol binds.
+            name == symbolName ? nil : UnsafeMutableRawPointer(strdup(name))
         }
 
         let ffi = DictionaryFFI.load(openLibrary: openLibrary, symbol: symbol)

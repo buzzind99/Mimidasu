@@ -143,54 +143,9 @@ final class DictionarySearchEngineLemmaGatingTests {
     func lemmaPrefersBaseOverUnwrap() throws {
         // くれろ's base くれる exists, so the retry answers くれる and never
         // probes the くる unwrap — shape alone cannot tell a potential from
-        // a dictionary -える verb. Both entries ride `extraWords`.
-        let fixture = try DictionarySearchFixture(
-            tokenize: { text in
-                guard text == "くれろ" else { return nil }
-                return [DictionaryToken(
-                    text: text, start: 0, end: 3,
-                    reading: text, base: "くれる", pos: "動詞", bound: false
-                )]
-            },
-            extraWords: [
-                JMDictFixtureDatabase.FixtureWord(
-                    id: "9990181",
-                    kanji: [JMDictFixtureDatabase.FixtureKanji(
-                        text: "呉れる", common: true, jlptLevel: 5, pitchAccent: nil
-                    )],
-                    kana: [JMDictFixtureDatabase.FixtureKana(
-                        text: "くれる", common: true, appliesToKanji: ["*"],
-                        jlptLevel: nil, pitchAccent: nil
-                    )],
-                    sense: [JMDictFixtureDatabase.FixtureSense(
-                        partOfSpeech: ["v1"], appliesToKanji: nil, appliesToKana: nil,
-                        misc: nil,
-                        gloss: [JMDictFixtureDatabase.FixtureGloss(
-                            lang: "eng", text: "to give"
-                        )]
-                    )]
-                ),
-                JMDictFixtureDatabase.FixtureWord(
-                    id: "9990182",
-                    kanji: [JMDictFixtureDatabase.FixtureKanji(
-                        text: "来る", common: true, jlptLevel: 5, pitchAccent: nil
-                    )],
-                    kana: [JMDictFixtureDatabase.FixtureKana(
-                        text: "くる", common: true, appliesToKanji: ["*"],
-                        jlptLevel: nil, pitchAccent: nil
-                    )],
-                    sense: [JMDictFixtureDatabase.FixtureSense(
-                        partOfSpeech: ["vk"], appliesToKanji: nil, appliesToKana: nil,
-                        misc: nil,
-                        gloss: [JMDictFixtureDatabase.FixtureGloss(
-                            lang: "eng", text: "to come"
-                        )]
-                    )]
-                )
-            ]
-        )
+        // a dictionary -える verb.
+        let outcome = try Self.baseOverUnwrapFixture().outcome("くれろ")
 
-        let outcome = try fixture.outcome("くれろ")
         #expect(outcome.hits.contains { hit in
             hit.entSeq == 9_990_181 && hit.matchKind == .lemma
         })
@@ -247,7 +202,18 @@ final class DictionarySearchEngineLemmaGatingTests {
         // Both くれる and くる are common, so a common-only search keeps both
         // post-join rows: the base must still win and the unwrap must be
         // dropped, matching the unfiltered two-stage order.
-        let fixture = try DictionarySearchFixture(
+        let filtered = try Self.baseOverUnwrapFixture().outcome("くれろ", commonOnly: true)
+
+        #expect(filtered.hits.contains { hit in
+            hit.entSeq == 9_990_181 && hit.matchKind == .lemma
+        })
+        #expect(!filtered.hits.contains { hit in hit.entSeq == 9_990_182 })
+    }
+
+    /// くれる's base and くる's potential unwrap, both common, so the lemma
+    /// retry has to pick the genuine base over the unwrap it merely derives.
+    private static func baseOverUnwrapFixture() throws -> DictionarySearchFixture {
+        try DictionarySearchFixture(
             tokenize: { text in
                 guard text == "くれろ" else { return nil }
                 return [DictionaryToken(
@@ -292,11 +258,5 @@ final class DictionarySearchEngineLemmaGatingTests {
                 )
             ]
         )
-
-        let filtered = try fixture.outcome("くれろ", commonOnly: true)
-        #expect(filtered.hits.contains { hit in
-            hit.entSeq == 9_990_181 && hit.matchKind == .lemma
-        })
-        #expect(!filtered.hits.contains { hit in hit.entSeq == 9_990_182 })
     }
 }

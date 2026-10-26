@@ -440,5 +440,37 @@ extension JMDictFixtureDatabase {
                 ]
             )
         ]
+
+        /// Two kana-only homographs sharing the reading ぽすも: a verb
+        /// (`v1,vt`) and a noun (`n`), so the POS suites can pin narrowing on
+        /// entries they own.
+        static let posHomographs: [FixtureWord] = [
+            FixtureWord(
+                id: "9990185",
+                kanji: nil,
+                kana: [FixtureKana(
+                    text: "ぽすも", common: false, appliesToKanji: nil,
+                    jlptLevel: nil, pitchAccent: nil
+                )],
+                sense: [FixtureSense(
+                    partOfSpeech: ["v1", "vt"], appliesToKanji: nil, appliesToKana: nil,
+                    misc: nil,
+                    gloss: [FixtureGloss(lang: "eng", text: "to posmo")]
+                )]
+            ),
+            FixtureWord(
+                id: "9990186",
+                kanji: nil,
+                kana: [FixtureKana(
+                    text: "ぽすも", common: false, appliesToKanji: nil,
+                    jlptLevel: nil, pitchAccent: nil
+                )],
+                sense: [FixtureSense(
+                    partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil,
+                    misc: nil,
+                    gloss: [FixtureGloss(lang: "eng", text: "a posmo")]
+                )]
+            )
+        ]
     }
 }

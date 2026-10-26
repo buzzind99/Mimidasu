@@ -1,6 +1,5 @@
 import Foundation
 @testable import Mimidasu
-import SQLite3
 import Testing
 
 /// The annotator's reading fallback (`JMDictLookup.reading(forWriting:)`)
@@ -107,35 +106,13 @@ final class JMDictReadingFallbackTests {
     /// entry whose entry reading is katakana, the shape the hiragana folding
     /// exists for (JMDict stores gairaigo entry readings in katakana).
     private func makeKatakanaRebDatabase() throws -> JMDictFixtureDatabase.Built {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mimidasu-jmdict-katakana-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let url = directory.appendingPathComponent("jmdict-katakana.sqlite")
-
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(
-            url.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil
-        ) == SQLITE_OK, let db else {
-            sqlite3_close_v2(db)
-            throw JMDictFixtureDatabase.FixtureError.sqlite("katakana fixture open failed")
-        }
-        defer { sqlite3_close_v2(db) }
-        guard sqlite3_exec(
-            db,
-            """
-            CREATE TABLE entries(ent_seq INTEGER PRIMARY KEY, keb TEXT, reb TEXT, common INTEGER NOT NULL);
-            CREATE TABLE senses(entry_id INTEGER NOT NULL, ord INTEGER NOT NULL, pos TEXT,
-              gloss TEXT NOT NULL, misc TEXT, skeb TEXT, sreb TEXT);
-            CREATE TABLE headwords(entry_id INTEGER NOT NULL, text TEXT NOT NULL, kind TEXT NOT NULL,
-              jlpt INTEGER, hatsuon TEXT, acc TEXT, zo TEXT);
+        try JMDictFixtureDatabase.minimalDatabase(
+            prefix: "mimidasu-jmdict-katakana",
+            statements: """
             INSERT INTO entries VALUES (8880010, '魔語', 'マゴ', 0);
             INSERT INTO headwords VALUES (8880010, '魔語', 'keb', NULL, NULL, NULL, NULL);
             INSERT INTO headwords VALUES (8880010, 'マゴ', 'reb', NULL, NULL, NULL, NULL);
-            """,
-            nil, nil, nil
-        ) == SQLITE_OK else {
-            throw JMDictFixtureDatabase.FixtureError.sqlite(String(cString: sqlite3_errmsg(db)))
-        }
-        return JMDictFixtureDatabase.Built(url: url)
+            """
+        )
     }
 }

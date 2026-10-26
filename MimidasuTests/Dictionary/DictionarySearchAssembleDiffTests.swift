@@ -47,7 +47,7 @@ struct DictionarySearchAssembleDiffTests {
         return Stage(rows: rows, db: db, fixture: fixture)
     }
 
-    @Test("the reordered assemble returns the old assemble's hits and total")
+    @Test("the reordered assemble agrees with the old shape under every filter")
     func reorderIsLossless() throws {
         let stage = try makeRows()
         defer { stage.db.close() }
@@ -57,54 +57,25 @@ struct DictionarySearchAssembleDiffTests {
         #expect(rows.count == Self.survivors)
         #expect(Self.survivors > DictionarySearchEngine.maxRows)
 
-        let filters = DictionarySearchFilters()
-        let current = try DictionarySearchEngine.assemble(
-            rows, filters: filters, db: stage.db, saturated: false, truncated: false
-        )
-        let legacy = try Self.legacyAssemble(rows, filters: filters, db: stage.db)
-
-        #expect(current.hits == legacy.hits)
-        #expect(current.matchedCount == legacy.matchedCount)
-        #expect(current.hits.count == DictionarySearchEngine.maxRows)
+        let all = try Self.assertAgrees(rows, filters: DictionarySearchFilters(), db: stage.db)
+        #expect(all.hits.count == DictionarySearchEngine.maxRows)
         // Every survivor is counted, not just the window — this is what the
         // deleted fetch cap used to under-report.
-        #expect(current.matchedCount == Self.survivors)
-    }
-
-    @Test("the reordered assemble agrees under common-only, where the filter moved")
-    func reorderIsLosslessUnderCommonOnly() throws {
-        let stage = try makeRows()
-        defer { stage.db.close() }
-        let rows = stage.rows
-        let filters = DictionarySearchFilters(commonOnly: true)
-        let current = try DictionarySearchEngine.assemble(
-            rows, filters: filters, db: stage.db, saturated: false, truncated: false
-        )
-        let legacy = try Self.legacyAssemble(rows, filters: filters, db: stage.db)
+        #expect(all.matchedCount == Self.survivors)
 
         // `commonOnly` now filters against the pre-fetched flag instead of the
         // joined metadata. Same value, different statement — so it is worth
         // proving rather than assuming.
-        #expect(current.hits == legacy.hits)
-        #expect(current.matchedCount == legacy.matchedCount)
-        #expect(current.hits.allSatisfy { hit in hit.common })
-        #expect(current.matchedCount < Self.survivors)
-    }
-
-    @Test("the reordered assemble agrees under a scope filter")
-    func reorderIsLosslessUnderScope() throws {
-        let stage = try makeRows()
-        defer { stage.db.close() }
-        let rows = stage.rows
-        let filters = DictionarySearchFilters(scope: .words)
-        let current = try DictionarySearchEngine.assemble(
-            rows, filters: filters, db: stage.db, saturated: false, truncated: false
+        let common = try Self.assertAgrees(
+            rows, filters: DictionarySearchFilters(commonOnly: true), db: stage.db
         )
-        let legacy = try Self.legacyAssemble(rows, filters: filters, db: stage.db)
+        #expect(common.hits.allSatisfy { hit in hit.common })
+        #expect(common.matchedCount < Self.survivors)
 
-        #expect(current.hits == legacy.hits)
-        #expect(current.matchedCount == legacy.matchedCount)
-        #expect(current.hits.allSatisfy { hit in !hit.isName })
+        let words = try Self.assertAgrees(
+            rows, filters: DictionarySearchFilters(scope: .words), db: stage.db
+        )
+        #expect(words.hits.allSatisfy { hit in !hit.isName })
     }
 
     @Test("the production search path returns the reordered assemble's answer")
@@ -119,6 +90,23 @@ struct DictionarySearchAssembleDiffTests {
 
         #expect(outcome.hits == assembled.hits)
         #expect(outcome.matchedCount == Self.survivors)
+    }
+
+    /// Asserts the reordered and legacy assembles agree for one filter set, and
+    /// returns the reordered outcome for the caller's case-specific checks.
+    private static func assertAgrees(
+        _ rows: [DictionarySearchEngine.CandidateRow],
+        filters: DictionarySearchFilters,
+        db: SQLiteDatabase
+    ) throws -> DictionarySearchOutcome {
+        let current = try DictionarySearchEngine.assemble(
+            rows, filters: filters, db: db, saturated: false, truncated: false
+        )
+        let legacy = try legacyAssemble(rows, filters: filters, db: db)
+
+        #expect(current.hits == legacy.hits)
+        #expect(current.matchedCount == legacy.matchedCount)
+        return current
     }
 
     /// The pre-reorder `assemble`, transcribed: join every survivor, filter

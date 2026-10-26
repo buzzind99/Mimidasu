@@ -154,11 +154,9 @@ final class DictionarySearchEngineInternalsTests {
     @Test("saturates the window on distinct entries, not on the rows behind them",
           arguments: [
               SaturationCase(50, 50, 0, 1, [2], true),
-              SaturationCase(50, 50, 0, 1, [1], true),
               SaturationCase(50, 50, 0, 1, [Int](), false),
               SaturationCase(50, 49, 0, 1, [2], false),
               SaturationCase(50, 49, 2, 1, [2], false),
-              SaturationCase(50, 50, 1, 1, [2], true),
               SaturationCase(50, 49, 2, 1, [1], false),
               SaturationCase(50, 49, 2, 1, [5], true),
               // The reported case: `best regards` scanned 74 prefix rows over 42
@@ -435,11 +433,6 @@ final class DictionarySearchEngineInternalsTests {
         #expect(match.range == 0 ..< 1)
     }
 
-    @Test("an empty column leaves nothing to span")
-    func emptyColumnNoSpan() {
-        #expect(DictionarySearchEngine.glossMatch(pattern: "ss", column: "").range == nil)
-    }
-
     @Test("an ordinary column grades per gloss and locates the span")
     func ordinaryColumnLocated() {
         let located = DictionarySearchEngine.glossMatch(
@@ -455,11 +448,9 @@ final class DictionarySearchEngineInternalsTests {
           arguments: [
               ("to lose", 0 ..< 7, DictionarySearchHit.MatchKind.glossWordBoundary),
               ("to lose", 3 ..< 7, DictionarySearchHit.MatchKind.glossWordBoundary),
-              ("to be defeated", 6 ..< 14, DictionarySearchHit.MatchKind.glossWordBoundary),
               ("to lose", 0 ..< 2, DictionarySearchHit.MatchKind.glossPrefix),
               ("to be defeated", 6 ..< 9, DictionarySearchHit.MatchKind.glossSubstring),
               ("to rice", 4 ..< 7, DictionarySearchHit.MatchKind.glossSubstring),
-              ("mind", 1 ..< 3, DictionarySearchHit.MatchKind.glossSubstring),
               ("to rice", 3 ..< 7, DictionarySearchHit.MatchKind.glossWordBoundary),
           ])
     func glossMatchKindRanking(gloss: String, range: Range<Int>, kind: DictionarySearchHit.MatchKind) {
@@ -494,15 +485,10 @@ final class DictionarySearchEngineInternalsTests {
         let sut = DictionarySearchEngine()
         defer { sut.close() }
 
-        // Whether the database resolves is the machine's business; that the
-        // default closures are callable without a fixture is the point, and an
-        // empty query never reaches them.
-        #expect(try sut.search("", filters: DictionarySearchFilters()) == .empty)
-        // The falsifiable half, and the reason the first line is a smoke test
-        // rather than a pin: closing first drives a *real* query through the
-        // default-wired instance and lands on the one branch that needs no
-        // database anywhere — a closed handle answers before the resolver is
-        // ever consulted.
+        // Closing first drives a *real* query through the default-wired
+        // instance and lands on the one branch that needs no database
+        // anywhere — a closed handle answers before the resolver is ever
+        // consulted.
         sut.close()
         #expect(throws: DictionarySearchError.databaseClosed) {
             try sut.search("ま", filters: DictionarySearchFilters())

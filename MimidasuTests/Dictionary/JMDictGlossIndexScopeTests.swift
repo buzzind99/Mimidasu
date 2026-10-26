@@ -59,10 +59,12 @@ struct JMDictGlossIndexScopeTests {
         #expect(names.count > 10000)
 
         // `.all` is the union of the two scopes: the property the capped `.all`
-        // scan structurally could not have.
+        // scan structurally could not have. The scoped scans also never overlap:
+        // the rowid bounds partition the corpus on the ingest offset.
         #expect(all == words.union(names))
         #expect(all.isSuperset(of: words))
         #expect(all.isSuperset(of: names))
+        #expect(words.isDisjoint(with: names))
 
         // Names are the entire point of the uncapped scan: they used to be unreachable
         // through `.all`, and now they are not.
@@ -86,21 +88,6 @@ struct JMDictGlossIndexScopeTests {
         #expect(names.count > words.count)
         #expect(all == words.union(names))
         #expect(all.count == words.count + names.count)
-    }
-
-    @Test("the scopes partition on the ingest offset, with no overlap or gap")
-    func scopesPartitionTheCorpus() throws {
-        let db = try database()
-        defer { db.close() }
-
-        // A smaller query than `to` keeps this cheap while still crossing the
-        // boundary densely on both sides.
-        let words = try entries("name", scope: .words, db: db)
-        let names = try entries("name", scope: .names, db: db)
-        let all = try entries("name", scope: .all, db: db)
-
-        #expect(words.isDisjoint(with: names))
-        #expect(all == words.union(names))
     }
 
     @Test("the rowid range is what makes a scoped scan cheap")

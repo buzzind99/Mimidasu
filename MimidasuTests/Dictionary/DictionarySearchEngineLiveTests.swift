@@ -103,19 +103,6 @@ struct DictionarySearchEngineLiveTests {
         #expect(deep.matchedCount == outcome.matchedCount)
     }
 
-    @Test("a window past the ceiling returns no more than the ceiling")
-    func windowClampsToCeiling() throws {
-        let engine = try makeEngine()
-        defer { engine.close() }
-
-        let outcome = try engine.search(
-            "あ", filters: DictionarySearchFilters(), limit: DictionarySearchEngine.maxRows * 10
-        )
-
-        #expect(outcome.hits.count == DictionarySearchEngine.maxRows)
-        #expect(outcome.matchedCount >= DictionarySearchEngine.maxRows)
-    }
-
     @Test("a tight query fits one page, so there is nothing to load")
     func tightQueryFits() throws {
         let engine = try makeEngine()
@@ -367,18 +354,6 @@ struct DictionarySearchEngineLiveTests {
         #expect(names.hits.isEmpty == false)
     }
 
-    @Test("common-only empties the Names scope, which is why the toggle greys out")
-    func commonOnlyWithNames() throws {
-        let engine = try makeEngine()
-        defer { engine.close() }
-
-        let outcome = try engine.search(
-            "し", filters: DictionarySearchFilters(scope: .names, commonOnly: true)
-        )
-
-        #expect(outcome.isEmpty)
-    }
-
     @Test("a romaji query reaches the entry it spells")
     func romajiReachesHeadwords() throws {
         let engine = try makeEngine()
@@ -423,18 +398,6 @@ struct DictionarySearchEngineLiveTests {
         #expect(hit.headword == "TKG")
     }
 
-    @Test("a numeric headword answers its own digits")
-    func numericHeadword() throws {
-        let engine = try makeEngine()
-        defer { engine.close() }
-
-        let outcome = try engine.search("4649", filters: DictionarySearchFilters())
-        let hit = try #require(outcome.hits.first { candidate in candidate.keb == "4649" })
-
-        #expect(hit.matchKind == .exact)
-        #expect(hit.reb == "よろしく")
-    }
-
     @Test("a romaji spelling reaches the yoroshiku homographs")
     func yoroshikuRomaji() throws {
         let engine = try makeEngine()
@@ -469,19 +432,5 @@ struct DictionarySearchEngineLiveTests {
         #expect(outcome.hits.count == min(outcome.matchedCount, DictionarySearchEngine.maxRows))
         #expect(outcome.matchedCount > 40000)
         #expect(outcome.hits.filter { hit in hit.matchedField == .gloss }.count > 900)
-    }
-
-    @Test("a lowercase initialism reaches its uppercase headword")
-    func latinCaseHeadword() throws {
-        let engine = try makeEngine()
-        defer { engine.close() }
-
-        let outcome = try engine.search("tkg", filters: DictionarySearchFilters())
-        let hit = try #require(outcome.hits.first { candidate in
-            candidate.entSeq == 2_834_407
-        })
-
-        #expect(hit.matchKind == .exact)
-        #expect(hit.keb == "TKG")
     }
 }

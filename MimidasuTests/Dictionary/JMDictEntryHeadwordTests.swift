@@ -1,6 +1,21 @@
 @testable import Mimidasu
 import Testing
 
+private let headwordSpellings: [(String?, String?)] = [
+    ("お土産", "おみやけ"),
+    (nil, "おみやけ"),
+    ("", "みる"),
+    ("見る", ""),
+    ("", nil),
+    (nil, ""),
+    ("", ""),
+    (nil, nil)
+]
+
+private let headwordExpectations: [String?] = [
+    "お土産", "おみやけ", "みる", "見る", nil, nil, nil, nil
+]
+
 /// The written form a star keys on: the kanji writing when present, the
 /// reading otherwise, with an empty spelling counting as absent — pinned on
 /// the entry property and on the static rule it delegates to.
@@ -29,46 +44,14 @@ struct JMDictEntryHeadwordTests {
         )
     }
 
-    /// (keb, reb) rows checked through the property and the static rule.
-    private static let agreementCases: [(String?, String?)] = [
-        ("お土産", "おみやけ"),
-        ("", "みる"),
-        ("", nil),
-        (nil, ""),
-        ("", ""),
-        ("見る", ""),
-        (nil, nil)
-    ]
-
     // MARK: - The rule
 
-    @Test("headword prefers the kanji writing and falls back to the reading")
-    func headword() {
-        #expect(entry().headword == "お土産")
-        #expect(entry(keb: nil).headword == "おみやけ")
-    }
-
-    @Test("an empty kanji writing falls back to the reading")
-    func emptyKebFallsBackToReading() {
-        #expect(JMDictEntry.headword(keb: "", reb: "みる") == "みる")
-    }
-
-    @Test("an empty reading falls back to the kanji writing")
-    func emptyRebFallsBackToKanji() {
-        #expect(JMDictEntry.headword(keb: "見る", reb: "") == "見る")
-    }
-
-    @Test("no usable spelling reads as nil")
-    func noUsableSpellingIsNil() {
-        #expect(JMDictEntry.headword(keb: "", reb: nil) == nil)
-        #expect(JMDictEntry.headword(keb: nil, reb: "") == nil)
-        #expect(JMDictEntry.headword(keb: "", reb: "") == nil)
-    }
-
-    @Test("the entry property agrees with the static rule", arguments: agreementCases)
-    func headwordAgreement(keb: String?, reb: String?) {
-        let built = entry(keb: keb, reb: reb)
-
-        #expect(built.headword == JMDictEntry.headword(keb: keb, reb: reb))
+    @Test(
+        "headword prefers the kanji writing and falls back to the reading",
+        arguments: zip(headwordSpellings, headwordExpectations)
+    )
+    func headword(spellings: (keb: String?, reb: String?), expected: String?) {
+        #expect(entry(keb: spellings.keb, reb: spellings.reb).headword == expected)
+        #expect(JMDictEntry.headword(keb: spellings.keb, reb: spellings.reb) == expected)
     }
 }

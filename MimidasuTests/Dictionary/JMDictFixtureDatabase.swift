@@ -161,10 +161,22 @@ enum JMDictFixtureDatabase {
     /// matching entries row. Serves the orphan-shape paths the full fixture
     /// is unnecessary for.
     static func orphanHeadword() throws -> Built {
+        try minimalDatabase(
+            prefix: "mimidasu-jmdict-orphan",
+            statements: "INSERT INTO headwords VALUES (777, '孤語', 'keb', NULL, NULL, NULL, NULL);"
+        )
+    }
+
+    /// A minimal database carrying only the columns the lookup queries read,
+    /// plus `statements` seeded on top. The schema deliberately drops the
+    /// build's WITHOUT ROWID primary keys and REFERENCES clauses: the engine's
+    /// queries depend only on column names and order, which match the build's
+    /// exactly.
+    static func minimalDatabase(prefix: String, statements: String) throws -> Built {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mimidasu-jmdict-orphan-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("\(prefix)-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let url = directory.appendingPathComponent("jmdict-orphan.sqlite")
+        let url = directory.appendingPathComponent("\(prefix).sqlite")
 
         var db: OpaquePointer?
         guard sqlite3_open_v2(
@@ -175,17 +187,13 @@ enum JMDictFixtureDatabase {
             throw FixtureError.sqlite(message)
         }
         defer { sqlite3_close_v2(db) }
-        // The schema deliberately drops the build's WITHOUT ROWID primary
-        // keys and REFERENCES clauses: the engine's queries depend only on
-        // column names and order, which match the build's exactly.
         try exec(db, """
         CREATE TABLE entries(ent_seq INTEGER PRIMARY KEY, keb TEXT, reb TEXT, common INTEGER NOT NULL);
         CREATE TABLE senses(entry_id INTEGER NOT NULL, ord INTEGER NOT NULL, pos TEXT,
           gloss TEXT NOT NULL, misc TEXT, skeb TEXT, sreb TEXT);
         CREATE TABLE headwords(entry_id INTEGER NOT NULL, text TEXT NOT NULL, kind TEXT NOT NULL,
           jlpt INTEGER, hatsuon TEXT, acc TEXT, zo TEXT);
-        INSERT INTO headwords VALUES (777, '孤語', 'keb', NULL, NULL, NULL, NULL);
-        """)
+        """ + statements)
         return Built(url: url)
     }
 

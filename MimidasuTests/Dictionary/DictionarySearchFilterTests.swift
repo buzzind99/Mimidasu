@@ -131,21 +131,6 @@ final class DictionarySearchFilterTests {
         })
     }
 
-    @Test("the surname filter drops the word homograph")
-    func surnameFilterDropsWords() throws {
-        let unfiltered = try fixture.outcome("あめむら")
-
-        #expect(unfiltered.hits.map(\.entSeq) == [9_990_100, 15_668_307])
-        #expect(unfiltered.matchedCount == 2)
-
-        let filtered = try fixture.outcome("あめむら", nameTypes: ["SURNAME"])
-
-        #expect(filtered.hits.map(\.entSeq) == [15_668_307])
-        #expect(filtered.matchedCount == 1)
-        #expect(filtered.isFloor == false)
-        #expect(filtered.hits.allSatisfy { hit in hit.isName })
-    }
-
     @Test("a multi-badge name intersects on any selected badge")
     func surnameFilterMatchesMultiBadgeNames() throws {
         // 木村 carries place + surname: SURNAME intersects, GIVEN NAME does
@@ -244,6 +229,7 @@ final class DictionarySearchFilterTests {
         let unfiltered = try fixture.outcome("あめむら")
 
         #expect(unfiltered.hits.map(\.entSeq) == [9_990_100, 15_668_307])
+        #expect(unfiltered.matchedCount == 2)
 
         let filtered = try fixture.outcome("あめむら", posGroups: [.noun])
 
@@ -254,7 +240,7 @@ final class DictionarySearchFilterTests {
 
     @Test("a verb-only search keeps the verb homograph and drops the noun one")
     func posFilterNarrowsHomographs() throws {
-        let posFixture = try DictionarySearchFixture(extraWords: Self.posHomographs)
+        let posFixture = try DictionarySearchFixture(extraWords: JMDictFixtureDatabase.SyntheticWords.posHomographs)
         let unfiltered = try posFixture.outcome("ぽすも")
 
         #expect(unfiltered.hits.map(\.entSeq) == [9_990_185, 9_990_186])
@@ -348,36 +334,4 @@ final class DictionarySearchFilterTests {
 
         #expect(plain == explicit)
     }
-
-    /// Two kana-only homographs sharing the reading ぽすも: a verb
-    /// (`v1,vt`) and a noun (`n`), so the POS engine tests can pin
-    /// narrowing on entries the suite itself owns.
-    private static let posHomographs: [JMDictFixtureDatabase.FixtureWord] = [
-        JMDictFixtureDatabase.FixtureWord(
-            id: "9990185",
-            kanji: nil,
-            kana: [JMDictFixtureDatabase.FixtureKana(
-                text: "ぽすも", common: false, appliesToKanji: nil,
-                jlptLevel: nil, pitchAccent: nil
-            )],
-            sense: [JMDictFixtureDatabase.FixtureSense(
-                partOfSpeech: ["v1", "vt"], appliesToKanji: nil, appliesToKana: nil,
-                misc: nil,
-                gloss: [JMDictFixtureDatabase.FixtureGloss(lang: "eng", text: "to posmo")]
-            )]
-        ),
-        JMDictFixtureDatabase.FixtureWord(
-            id: "9990186",
-            kanji: nil,
-            kana: [JMDictFixtureDatabase.FixtureKana(
-                text: "ぽすも", common: false, appliesToKanji: nil,
-                jlptLevel: nil, pitchAccent: nil
-            )],
-            sense: [JMDictFixtureDatabase.FixtureSense(
-                partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil,
-                misc: nil,
-                gloss: [JMDictFixtureDatabase.FixtureGloss(lang: "eng", text: "a posmo")]
-            )]
-        )
-    ]
 }

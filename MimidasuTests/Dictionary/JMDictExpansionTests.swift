@@ -33,7 +33,7 @@ final class JMDictExpansionCandidateTests {
         #expect(candidates.map(\.candidate.text) == ["土産", "土", "産"])
     }
 
-    @Test("the surface leads the lemma for the single-token candidates")
+    @Test("the surface leads the lemma, and every candidate carries its build origin")
     func surfaceFirstPreference() {
         let candidates = JMDictExpansion.candidates(
             segments: segments(("食べ", "食べる"), ("ま", nil), ("した", nil)),
@@ -43,9 +43,14 @@ final class JMDictExpansionCandidateTests {
 
         // The tapped surface leads, the lemma follows as the miss fallback
         // (the potential-shaped tail adds the unwrapped 食ぶ), the joins
-        // come longest-first, and the kanji split trails them all.
+        // come longest-first, and the kanji split trails them all. Each
+        // candidate is tagged with its role so the resolution can demote
+        // split-only taps to not-found.
         #expect(candidates.map(\.candidate.text) == [
             "食べ", "食べる", "食ぶ", "食べました", "食べま", "食"
+        ])
+        #expect(candidates.map(\.origin) == [
+            .tappedSurface, .tappedLemma, .tappedLemma, .join, .join, .split
         ])
     }
 
@@ -298,19 +303,6 @@ final class JMDictExpansionCandidateTests {
         #expect(candidates.map(\.candidate.text) == ["風呂", "風呂敷", "風", "呂", "呂敷"])
     }
 
-    @Test("a kana tap gains no boundary-crossing splits across a kanji neighbor")
-    func kanaTapNoCrossingSplits() {
-        let candidates = JMDictExpansion.candidates(
-            segments: segments(("お", nil), ("土産", "土産")),
-            tappedAt: 0,
-            sentenceText: "お土産"
-        )
-
-        // The kanji run starts inside the neighbor, so no substring of
-        // お土産 straddles the tap boundary: the join alone remains.
-        #expect(candidates.map(\.candidate.text) == ["お", "お土産"])
-    }
-
     @Test("joined-text splits truncate behind the tapped surface's under the cap")
     func joinedSplitsTruncatedBehindTappedSplits() {
         let candidates = JMDictExpansion.candidates(
@@ -377,22 +369,5 @@ final class JMDictExpansionCandidateTests {
         #expect(candidates[0].candidate.reading == "たべ")
         #expect(candidates[1].candidate.text == "食べる")
         #expect(candidates[1].candidate.reading == "たべ")
-    }
-
-    @Test("candidates carry the expansion origin in build order")
-    func originTagging() {
-        let candidates = JMDictExpansion.candidates(
-            segments: segments(("食べ", "食べる"), ("ま", nil), ("した", nil)),
-            tappedAt: 0,
-            sentenceText: "食べました"
-        )
-
-        // The surface leads, the lemma follows with its potential unwrap
-        // behind it, the joins longest-first, the kanji splits trail —
-        // each tagged with its role so the resolution can demote
-        // split-only taps to not-found.
-        #expect(candidates.map(\.origin) == [
-            .tappedSurface, .tappedLemma, .tappedLemma, .join, .join, .split
-        ])
     }
 }

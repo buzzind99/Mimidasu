@@ -92,33 +92,24 @@ final class JMDictLookupTests {
         #expect(entry.common)
     }
 
-    @Test("resolves a fullwidth-Latin tap onto the stored normalized spelling")
-    func fullwidthLatinHit() throws {
+    @Test(
+        "resolves a Latin tap onto the stored normalized spelling in both probe directions",
+        arguments: [("ＴＫＧ", "ＴＫＧ"), ("TKG", "TKG")]
+    )
+    func latinSpellingHit(text: String, matched: String) throws {
         // The search row's headword shape: upstream stores ＴＫＧ fullwidth,
         // ingestion normalizes it to TKG, and the probe folds the tap at the
         // SQL boundary — the direction the shipped database's equality seeks
-        // live or die by.
-        let result = try #require(try engine.lookup(LookupCandidate(text: "ＴＫＧ")))
-        #expect(result.matched == "ＴＫＧ")
+        // live or die by. The expand path then hands the already-canonical
+        // spelling back, which must still find its own row.
+        let result = try #require(try engine.lookup(LookupCandidate(text: text)))
+        #expect(result.matched == matched)
 
         let entry = try #require(result.entries.first)
         #expect(entry.entSeq == 9_990_160)
         #expect(entry.keb == "TKG")
         #expect(entry.reb == "ティー・ケー・ジー")
         #expect(entry.senses[0].glosses == ["tamago kake gohan"])
-    }
-
-    @Test("resolves the ASCII spelling the normalized entry hands back")
-    func normalizedLatinHit() throws {
-        // The expand path: the search row renders the normalized keb, so the
-        // candidate text arrives already canonical and must still find its
-        // own row.
-        let result = try #require(try engine.lookup(LookupCandidate(text: "TKG")))
-
-        let entry = try #require(result.entries.first)
-
-        #expect(entry.entSeq == 9_990_160)
-        #expect(entry.keb == "TKG")
     }
 
     @Test("orders senses by ord and splits the stored joins back apart")
@@ -208,31 +199,22 @@ final class JMDictLookupTests {
         #expect(outcome.also.isEmpty)
     }
 
-    @Test("sorts also results longest match first")
-    func alsoOrderLongestFirst() throws {
-        let outcome = try #require(try lookupOutcome([
-            LookupCandidate(text: "橋"),
-            LookupCandidate(text: "たべる"),
-            LookupCandidate(text: "アルバイト"),
-            LookupCandidate(text: "飴")
-        ]))
+    @Test(
+        "sorts also results longest-first, and equal lengths keep candidate order",
+        arguments: [
+            (["橋", "たべる", "アルバイト", "飴"], ["アルバイト", "たべる", "飴"]),
+            (["橋", "飴", "雨"], ["飴", "雨"])
+        ]
+    )
+    func alsoOrdering(texts: [String], expected: [String]) throws {
+        let outcome = try #require(try lookupOutcome(texts.map { text in
+            LookupCandidate(text: text)
+        }))
 
         #expect(outcome.display.matched == "橋")
         // アルバイト (5) outranks たべる (3) outranks 飴 (1), regardless of
-        // the order the candidates arrived in.
-        #expect(outcome.also.map(\.matched) == ["アルバイト", "たべる", "飴"])
-    }
-
-    @Test("equal-length also results keep candidate order")
-    func alsoEqualLengthKeepsCandidateOrder() throws {
-        let outcome = try #require(try lookupOutcome([
-            LookupCandidate(text: "橋"),
-            LookupCandidate(text: "飴"),
-            LookupCandidate(text: "雨")
-        ]))
-
-        #expect(outcome.display.matched == "橋")
-        #expect(outcome.also.map(\.matched) == ["飴", "雨"])
+        // the order the candidates arrived in; equal-length 飴 and 雨 keep it.
+        #expect(outcome.also.map(\.matched) == expected)
     }
 
     @Test("an out-of-order non-split after splits folds the splits into also")

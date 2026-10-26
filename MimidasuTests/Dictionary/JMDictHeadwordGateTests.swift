@@ -27,37 +27,17 @@ final class JMDictHeadwordGateTests {
         JMDictFixtureDatabase.Built(url: databaseURL).remove()
     }
 
-    @Test("hits for a kanji headword")
-    func kanjiHeadwordHits() throws {
-        #expect(try engine.hasHeadword("食べる"))
-    }
-
-    @Test("hits for a kana-only entry's kana spelling")
-    func kanaOnlyHeadwordHits() throws {
-        // さご exists only as the kana-written entry (no kanji writing).
-        #expect(try engine.hasHeadword("さご"))
-    }
-
-    @Test("hits for a katakana headword spelling")
-    func katakanaHeadwordHits() throws {
-        // Both entries store the katakana shape サゴ alongside さご.
-        #expect(try engine.hasHeadword("サゴ"))
-    }
-
-    @Test("hits for a halfwidth spelling through the internal probe fold")
-    func halfwidthHeadwordHits() throws {
-        // The probe composes at the SQL boundary, so the halfwidth spelling
-        // of the stored パイナップル row answers like its fullwidth form —
-        // voiced/semi-voiced marks included (ﾊﾟ → ハ + ゛ → パ).
-        #expect(try engine.hasHeadword("ﾊﾟｲﾅｯﾌﾟﾙ"))
-    }
-
-    @Test("hits for a fullwidth-Latin spelling folded onto the normalized row")
-    func fullwidthLatinHeadwordHits() throws {
-        // Ingestion normalized ＴＫＧ to TKG, so the gate's folded probe —
-        // the annotator's long-segment protection — must answer through the
-        // same fold instead of fragmenting the surface.
-        #expect(try engine.hasHeadword("ＴＫＧ"))
+    @Test(
+        "hits for a headword spelling folded onto its stored row",
+        arguments: [
+            "食べる", // kanji headword
+            "さご", // kana-only entry, kana spelling
+            "サゴ", // katakana shape stored alongside the hiragana
+            "ＴＫＧ" // fullwidth-Latin normalized to the stored TKG row
+        ]
+    )
+    func headwordSpellingHits(spelling: String) throws {
+        #expect(try engine.hasHeadword(spelling))
     }
 
     @Test("the annotator's gate keeps a halfwidth name whole through the composed fold")

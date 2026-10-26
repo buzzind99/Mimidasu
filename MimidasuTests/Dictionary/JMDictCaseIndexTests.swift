@@ -110,26 +110,21 @@ final class JMDictCaseIndexTests {
         #expect(detail.contains(JMDictCaseIndex.indexName))
     }
 
-    @Test("the non-ASCII load reads the case blocks the ASCII predicate skips")
-    func nonASCIILoadFindsTheGreekName() throws {
+    @Test(
+        "the load reads the non-ASCII and ASCII case blocks",
+        arguments: [
+            ("α", "Α", true),
+            ("activex", "ActiveX", true)
+        ]
+    )
+    func loadFindsTheCaseSpelling(openingFold: String, spelling: String, isExact: Bool) throws {
         let database = try SQLiteDatabase(path: source.url.path)
         defer { database.close() }
         let spellings = try CaseHeadwordSpellings(db: database)
 
-        let greek = try #require(spellings.matches(openingFold: "α").first)
+        let match = try #require(spellings.matches(openingFold: openingFold).first)
 
-        #expect(greek.spelling == "Α")
-        #expect(greek.isExact)
-    }
-
-    @Test("the loaded set reaches the ASCII case through the same door")
-    func asciiLoadFindsTheMixedCaseName() throws {
-        let database = try SQLiteDatabase(path: source.url.path)
-        defer { database.close() }
-        let spellings = try CaseHeadwordSpellings(db: database)
-
-        let mixed = try #require(spellings.matches(openingFold: "activex").first)
-
-        #expect(mixed.spelling == "ActiveX")
+        #expect(match.spelling == spelling)
+        #expect(match.isExact == isExact)
     }
 }

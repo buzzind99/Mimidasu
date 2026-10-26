@@ -255,37 +255,46 @@ final class DictionaryStoreTests {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
+    /// The two artifacts the store prepares through one pipeline, so the
+    /// pipeline's failure, retry, and coalescing tests can drive both without
+    /// restating their bodies.
+    enum PreparedArtifact: CaseIterable, Sendable {
+        case tokenizer
+        case jmDict
+
+        var preparedFileName: String {
+            switch self {
+            case .tokenizer: DictionaryStore.dictionaryFileName
+            case .jmDict: JMDictPin.preparedFileName
+            }
+        }
+
+        func prepare(_ store: DictionaryStore) async throws -> URL {
+            switch self {
+            case .tokenizer: try await store.prepare()
+            case .jmDict: try await store.prepareJMDict()
+            }
+        }
+    }
+
     // MARK: errorDescription
 
-    @Test("explains the plain-text fallback when the library is unavailable")
-    func libraryUnavailableMessage() {
-        let error = DictionaryStore.DictionaryStoreError.libraryUnavailable
-
-        #expect(
-            error.errorDescription
-                == "Dictionary runtime library not found; text renders unannotated."
-        )
-    }
-
-    @Test("names the missing bundled asset")
-    func bundledMissingMessage() {
-        let error = DictionaryStore.DictionaryStoreError.bundledDictionaryMissing
-
-        #expect(error.errorDescription == "Bundled system.dic.zst not found in the app bundle.")
-    }
-
-    @Test("includes the return code when decompression fails")
-    func prepareFailedMessage() {
-        let error = DictionaryStore.DictionaryStoreError.prepareFailed(returnCode: 3)
-
-        #expect(error.errorDescription == "Dictionary decompression failed (return code 3).")
-    }
-
-    @Test("includes the reason when the smoke query fails")
-    func smokeFailedMessage() {
-        let error = DictionaryStore.DictionaryStoreError.smokeTestFailed(reason: "open returned null")
-
-        #expect(error.errorDescription == "Dictionary failed its smoke query: open returned null.")
+    @Test("describes every prepare failure", arguments: [
+        (DictionaryStore.DictionaryStoreError.libraryUnavailable,
+         "Dictionary runtime library not found; text renders unannotated."),
+        (.bundledDictionaryMissing, "Bundled system.dic.zst not found in the app bundle."),
+        (.bundledJMDictMissing,
+         "Bundled \(JMDictPin.bundledFileName) not found in the app bundle."),
+        (.prepareFailed(returnCode: 3), "Dictionary decompression failed (return code 3)."),
+        (.smokeTestFailed(reason: "open returned null"),
+         "Dictionary failed its smoke query: open returned null."),
+        (.indexBuildFailed(reason: "SQLite error 8: attempt to write a readonly database"),
+         "Dictionary index could not be built: SQLite error 8: attempt to write a readonly database.")
+    ])
+    func errorDescriptions(
+        error: DictionaryStore.DictionaryStoreError, expected: String
+    ) {
+        #expect(error.errorDescription == expected)
     }
 
     // MARK: resolve
@@ -426,18 +435,21 @@ final class DictionaryStoreTests {
         #expect(second == prepared, "a successful prepare must never re-decompress")
     }
 
-    @Test("coalesces concurrent callers into one decompression")
-    func concurrentCallersCoalesce() async throws {
+    @Test("coalesces concurrent callers into one decompression",
+          arguments: PreparedArtifact.allCases)
+    func concurrentCallersCoalesce(artifact: PreparedArtifact) async throws {
+        fakePrepareCalls = 0
+        fakePrepareCopySource = artifact == .jmDict ? smokeDatabase : nil
         // Short but guaranteed to overlap: late callers line up behind the
         // in-flight decompression and observe the done phase.
         fakePrepareDelayMs = 50
         let store = makeStore()
 
-        // Call `store.prepare()` directly (not via `self.prepare`) so the
-        // `async let`s only send the Sendable store, not the test instance.
-        async let first = store.prepare()
-        async let second = store.prepare()
-        async let third = store.prepare()
+        // Call `artifact.prepare(store)` directly (not via `self.prepare`) so
+        // the `async let`s only send the Sendable store, not the test instance.
+        async let first = artifact.prepare(store)
+        async let second = artifact.prepare(store)
+        async let third = artifact.prepare(store)
         let results = try await (first, second, third)
 
         #expect(results.0 == results.1 && results.1 == results.2)
@@ -446,30 +458,34 @@ final class DictionaryStoreTests {
 
     // MARK: prepare (fake runtime — failure paths)
 
-    @Test("reports a decompression failure and leaves no partial dictionary")
-    func prepareFailureLeavesNoPartialFile() async throws {
+    @Test("reports a decompression failure and leaves no partial artifact",
+          arguments: PreparedArtifact.allCases)
+    func prepareFailureLeavesNoPartialFile(artifact: PreparedArtifact) async throws {
+        fakePrepareCalls = 0
         let store = makeStore(ffi: makeFakeFFI(prepare: fakePrepareFail))
 
         let error = await #expect(throws: DictionaryStore.DictionaryStoreError.self) {
-            try await prepare(store)
+            try await artifact.prepare(store)
         }
 
         #expect(error == .prepareFailed(returnCode: 1))
         #expect(
             !FileManager.default.fileExists(
-                atPath: destination.appendingPathComponent(DictionaryStore.dictionaryFileName).path
+                atPath: destination.appendingPathComponent(artifact.preparedFileName).path
             ),
-            "a failed prepare must not leave a partial dictionary"
+            "a failed prepare must not leave a partial artifact"
         )
     }
 
-    @Test("re-attempts the decompression on the next call after a failure")
-    func failedPrepareRetries() async throws {
+    @Test("re-attempts the decompression on the next call after a failure",
+          arguments: PreparedArtifact.allCases)
+    func failedPrepareRetries(artifact: PreparedArtifact) async throws {
+        fakePrepareCalls = 0
         let store = makeStore(ffi: makeFakeFFI(prepare: fakePrepareFail))
-        _ = try? await prepare(store)
+        _ = try? await artifact.prepare(store)
 
         let error = await #expect(throws: DictionaryStore.DictionaryStoreError.self) {
-            try await prepare(store)
+            try await artifact.prepare(store)
         }
 
         #expect(error == .prepareFailed(returnCode: 1))
@@ -556,25 +572,5 @@ final class DictionaryStoreTests {
 
         #expect(FileManager.default.fileExists(atPath: url.path))
         print(String(format: "==> first-launch dictionary decompress wall time: %.2fs", elapsed))
-    }
-
-    @Test("is a no-op on the second live prepare, even with the source gone")
-    func liveSecondPrepareIsNoOp() async throws {
-        guard let ffi = DictionaryFFI.load(), let model = repoModelZst else {
-            try Test.cancel("libdictionary.dylib or the fetched model is not available")
-        }
-        // A private copy stands in for the bundle, so it can be removed to
-        // prove the second prepare never reads a source.
-        let sourceCopy = tempRoot.appendingPathComponent("copied-system.dic.zst")
-        try FileManager.default.copyItem(at: model, to: sourceCopy)
-        let store = DictionaryStore(
-            bundledSource: sourceCopy, destinationDirectory: destination, ffi: ffi
-        )
-        let prepared = try await prepare(store)
-        try FileManager.default.removeItem(at: sourceCopy)
-
-        let second = try await prepare(store)
-
-        #expect(second == prepared, "a successful prepare must never re-decompress")
     }
 }
