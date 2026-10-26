@@ -99,13 +99,6 @@ struct CrispASREngineTests {
         #expect(!detail.isEmpty)
     }
 
-    @Test("the native engine is not a mock")
-    func isMockIsFalse() throws {
-        let engine = try requireEngine()
-
-        #expect(!engine.isMock)
-    }
-
     // MARK: - prepare (missing model)
 
     @Test("prepare throws .modelNotFound with the missing model's path")
@@ -146,13 +139,6 @@ struct CrispASREngineTests {
         engine.push([Float](repeating: 0.01, count: 2560))
 
         #expect(engine.pushedSamples == 0, "push without a session must not count samples")
-        #expect(engine.poll() == nil)
-    }
-
-    @Test("poll on an empty inbox returns nil")
-    func pollWhenInboxEmpty() throws {
-        let engine = try requireEngine()
-
         #expect(engine.poll() == nil)
     }
 

@@ -51,17 +51,7 @@ struct MockASREngineTests {
         #expect(engine.poll() == nil)
     }
 
-    // MARK: - isMock / processedSamples
-
-    @Test("reports itself as the mock engine")
-    func isMockIsTrue() {
-        #expect(engine.isMock)
-    }
-
-    @Test("processedSamples is zero before anything is pushed")
-    func processedSamplesStartAtZero() {
-        #expect(engine.processedSamples == 0)
-    }
+    // MARK: - processedSamples
 
     @Test("pushedSamples tracks pushed audio")
     func pushedSamplesTrackPushedAudio() {
@@ -148,8 +138,11 @@ struct MockASREngineTests {
         #expect(final.endSample == 6000, "6 chunks × 1000 samples")
     }
 
-    @Test("the second sentence lands within the random cadence window")
-    func secondSentenceWithinRandomWindow() throws {
+    @Test(
+        "the second sentence lands within the random cadence window",
+        arguments: [false, true]
+    )
+    func secondSentenceWithinRandomWindow(usesFinish: Bool) throws {
         // The next cadence lands 5–12 speech chunks after the first final;
         // 18 pushes guarantee it regardless of the draw.
         for _ in 0 ..< 6 {
@@ -160,10 +153,25 @@ struct MockASREngineTests {
         for _ in 0 ..< 18 {
             pushSpeech()
         }
-        let second = try pollFinal()
+        let endBeforeFinish = engine.processedSamples
+
+        let second: EmittedFinal
+        if usesFinish {
+            let events = engine.finish()
+            #expect(events.count == 1)
+            guard case let .final(text, start, end, lang)? = events.first else {
+                Issue.record("expected a .final event, got \(String(describing: events.first))")
+                return
+            }
+            second = EmittedFinal(text: text, startSample: start, endSample: end, lang: lang)
+        } else {
+            second = try pollFinal()
+        }
 
         #expect(second.text == "これから配信を始めます、よろしくお願いします。")
+        #expect(second.lang == "ja")
         #expect(second.startSample == first.endSample)
+        #expect(second.endSample == endBeforeFinish)
         #expect(second.endSample == engine.processedSamples)
         #expect(second.endSample == 24000, "6 + 18 chunks × 1000 samples")
     }
@@ -178,14 +186,6 @@ struct MockASREngineTests {
         #expect(engine.poll() != nil)
 
         #expect(engine.poll() == nil, "single slot: drained finals are not redelivered")
-    }
-
-    @Test("repeated polls before the cadence return nil each time")
-    func pollBeforeCadenceReturnsNil() {
-        pushSpeech()
-
-        #expect(engine.poll() == nil)
-        #expect(engine.poll() == nil)
     }
 
     @Test("sentences deliver the canned texts in rotation order")
@@ -213,38 +213,6 @@ struct MockASREngineTests {
     }
 
     // MARK: - finish
-
-    @Test("finish with nothing pending returns no events")
-    func finishWithoutPendingReturnsNoEvents() {
-        pushSilence()
-
-        #expect(engine.finish().isEmpty)
-    }
-
-    @Test("finish flushes a pending final with the same span construction as poll")
-    func finishFlushesPendingFinal() {
-        for _ in 0 ..< 6 {
-            pushSpeech()
-        }
-        #expect(engine.poll() != nil) // first cadence drained
-
-        for _ in 0 ..< 18 {
-            pushSpeech()
-        }
-        let endBeforeFinish = engine.processedSamples
-
-        let events = engine.finish()
-
-        #expect(events.count == 1)
-        guard case let .final(text, start, end, lang)? = events.first else {
-            Issue.record("expected a .final event, got \(String(describing: events.first))")
-            return
-        }
-        #expect(text == "これから配信を始めます、よろしくお願いします。")
-        #expect(lang == "ja")
-        #expect(start == 6000) // first final's endSample (6 chunks × 1000)
-        #expect(end == endBeforeFinish)
-    }
 
     @Test("finish clears the pending final: a second finish and later polls are empty")
     func finishClearsPendingFinal() {

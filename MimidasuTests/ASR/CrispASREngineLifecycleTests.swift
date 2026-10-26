@@ -274,25 +274,13 @@ struct CrispASREngineLifecycleTests {
         // ran, so only the RMS backstop knows this buffer is not silent.
         engine.push(Array(loudSecond.prefix(6400)))
         #expect(library.vadCalls.isEmpty, "no VAD pass was due")
+        #expect(engine.processedSamples == 0, "nothing decoded yet")
 
         let drained = engine.flushUtterance()
 
         #expect(drained.count == 1, "a word spoken just before the pause must not be dropped")
         requireFinal(drained.first, text: "短い。", start: 0, end: 6400)
         #expect(library.transcribeCalls.count == 1)
-    }
-
-    @Test("flushUtterance advances processedSamples over the consumed buffer")
-    func flushAdvancesProcessedSamples() throws {
-        let library = FakeCrispASRLibrary()
-        library.transcribeReplies = ["短い。"]
-        let engine = try makePreparedEngine(library)
-
-        engine.push(Array(loudSecond.prefix(6400)))
-        #expect(engine.processedSamples == 0, "nothing decoded yet")
-
-        _ = engine.flushUtterance()
-
         #expect(engine.processedSamples == 6400)
         #expect(engine.processedSamples == engine.pushedSamples, "the backlog must not resurface as latency")
     }
@@ -474,31 +462,16 @@ extension CrispASREngineLifecycleTests {
         return true
     }
 
-    @Test("flushUtterance decodes a loud tail that landed after a speechless VAD pass")
-    func flushDecodesLoudTailAfterSpeechlessVADPass() async throws {
-        let library = FakeCrispASRLibrary()
-        library.transcribeReplies = ["続き。"]
-        let engine = try makePreparedEngine(library)
-
-        try #require(
-            await pushSpeechlessPrefixThenLoudTail(into: engine, library: library),
-            "the speechless VAD pass landed"
-        )
-
-        let drained = engine.flushUtterance()
-
-        #expect(drained.count == 1, "the loud tail after a speechless pass must not be dropped")
-        requireFinal(
-            drained.first,
-            text: "続き。",
-            start: 0,
-            end: CrispASREngine.vadCheckIntervalSamples + CrispASREngine.sampleRate / 10
-        )
-        #expect(library.transcribeCalls.count == 1, "the flush decodes the snapshot exactly once")
+    enum LoudTailEntryPoint: Sendable, CaseIterable {
+        case flush
+        case finish
     }
 
-    @Test("finish decodes a loud tail that landed after a speechless VAD pass")
-    func finishDecodesLoudTailAfterSpeechlessVADPass() async throws {
+    @Test(
+        "a loud tail after a speechless VAD pass decodes on flush or finish",
+        arguments: LoudTailEntryPoint.allCases
+    )
+    func loudTailAfterSpeechlessVADPassDecodes(entryPoint: LoudTailEntryPoint) async throws {
         let library = FakeCrispASRLibrary()
         library.transcribeReplies = ["続き。"]
         let engine = try makePreparedEngine(library)
@@ -508,15 +481,19 @@ extension CrispASREngineLifecycleTests {
             "the speechless VAD pass landed"
         )
 
-        let drained = engine.finish()
+        let drained = switch entryPoint {
+        case .flush: engine.flushUtterance()
+        case .finish: engine.finish()
+        }
 
-        #expect(drained.count == 1, "the loud tail before a stop must not be dropped")
+        #expect(drained.count == 1, "the loud tail must not be dropped")
         requireFinal(
             drained.first,
             text: "続き。",
             start: 0,
             end: CrispASREngine.vadCheckIntervalSamples + CrispASREngine.sampleRate / 10
         )
-        #expect(engine.poll() == nil, "finish drains the inbox")
+        #expect(library.transcribeCalls.count == 1, "the loud-tail snapshot is decoded exactly once")
+        #expect(engine.poll() == nil, "the drain leaves the inbox empty")
     }
 }

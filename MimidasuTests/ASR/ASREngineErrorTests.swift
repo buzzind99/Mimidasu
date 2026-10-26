@@ -6,33 +6,31 @@ import Testing
 @Suite("ASREngineError")
 struct ASREngineErrorTests {
 
-    @Test("runtimeNotFound's description includes the build hint")
-    func runtimeNotFoundIncludesBuildHint() {
-        let error = ASREngineError.runtimeNotFound("dlopen failed: image not found")
+    struct Row: Sendable {
+        let summary: String
+        let error: ASREngineError
+        let expected: String
+    }
 
-        #expect(
-            error.errorDescription
-                == "ASR runtime not found (dlopen failed: image not found). Build it with "
+    @Test("descriptions pin the user-facing copy", arguments: [
+        Row(
+            summary: "runtimeNotFound includes the build hint",
+            error: .runtimeNotFound("dlopen failed: image not found"),
+            expected: "ASR runtime not found (dlopen failed: image not found). Build it with "
                 + "scripts/build_runtime.sh, or drop the GGUF into the models folder to use the mock."
+        ),
+        Row(
+            summary: "modelNotFound includes the path",
+            error: .modelNotFound("/tmp/nope.gguf"),
+            expected: "ASR model not found at /tmp/nope.gguf."
+        ),
+        Row(
+            summary: "createFailed includes the detail",
+            error: .createFailed("crispasr_session_open_explicit failed (backend parakeet)"),
+            expected: "Failed to create ASR recognizer: crispasr_session_open_explicit failed (backend parakeet)"
         )
-    }
-
-    @Test("modelNotFound's description includes the path")
-    func modelNotFoundIncludesPath() {
-        let error = ASREngineError.modelNotFound("/tmp/nope.gguf")
-
-        #expect(error.errorDescription == "ASR model not found at /tmp/nope.gguf.")
-    }
-
-    @Test("createFailed's description includes the detail")
-    func createFailedIncludesDetail() {
-        let error = ASREngineError.createFailed(
-            "crispasr_session_open_explicit failed (backend parakeet)"
-        )
-
-        #expect(
-            error.errorDescription
-                == "Failed to create ASR recognizer: crispasr_session_open_explicit failed (backend parakeet)"
-        )
+    ])
+    func descriptions(row: Row) {
+        #expect(row.error.errorDescription == row.expected, "\(row.summary)")
     }
 }

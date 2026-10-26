@@ -28,6 +28,12 @@ struct ASREngineFactoryTests {
 
     // MARK: - Fixtures
 
+    struct AllowMockRow: Sendable {
+        let summary: String
+        let allowMock: Bool
+        let expectsMock: Bool
+    }
+
     /// Unique per call: the factory's warm cache is keyed on the path string
     /// only, and a fresh path isolates each test from other suites' warm-ups.
     private func uniqueModelURL() -> URL {
@@ -37,19 +43,19 @@ struct ASREngineFactoryTests {
 
     // MARK: - nil model URL
 
-    @Test("a nil model URL with mocks allowed returns a mock")
-    func nilModelURLWithMockAllowedReturnsMock() {
-        let engine = ASREngineFactory.makeEngine(modelURL: nil, allowMock: true)
+    @Test("a nil model URL honors the allow-mock flag", arguments: [
+        AllowMockRow(summary: "mocks allowed return a mock", allowMock: true, expectsMock: true),
+        AllowMockRow(summary: "mocks forbidden return nil", allowMock: false, expectsMock: false)
+    ])
+    func nilModelURLHonorsAllowMock(row: AllowMockRow) {
+        let engine = ASREngineFactory.makeEngine(modelURL: nil, allowMock: row.allowMock)
 
-        #expect(engine is MockASREngine)
-        #expect(engine?.isMock == true)
-    }
-
-    @Test("a nil model URL without mocks returns nil")
-    func nilModelURLWithoutMockReturnsNil() {
-        let engine = ASREngineFactory.makeEngine(modelURL: nil, allowMock: false)
-
-        #expect(engine == nil)
+        if row.expectsMock {
+            #expect(engine is MockASREngine, "\(row.summary)")
+            #expect(engine?.isMock == true)
+        } else {
+            #expect(engine == nil, "\(row.summary)")
+        }
     }
 
     // MARK: - dylib unavailable → mock fallback, no caching
@@ -122,26 +128,22 @@ struct ASREngineFactoryTests {
         )
     }
 
-    @Test("a native engine whose construction fails falls back to the mock")
-    func nativeConstructionFailureFallsBackToMock() {
+    @Test("a native construction failure honors the allow-mock flag", arguments: [
+        AllowMockRow(summary: "mocks allowed fall back to a mock", allowMock: true, expectsMock: true),
+        AllowMockRow(summary: "mocks forbidden return nil", allowMock: false, expectsMock: false)
+    ])
+    func nativeConstructionFailureHonorsAllowMock(row: AllowMockRow) {
         let engine = ASREngineFactory.makeEngine(
             modelURL: uniqueModelURL(),
-            allowMock: true,
+            allowMock: row.allowMock,
             makeNative: { _ in throw ASREngineError.runtimeNotFound("injected") }
         )
 
-        #expect(engine is MockASREngine)
-    }
-
-    @Test("a native engine whose construction fails without mocks returns nil")
-    func nativeConstructionFailureWithoutMockReturnsNil() {
-        let engine = ASREngineFactory.makeEngine(
-            modelURL: uniqueModelURL(),
-            allowMock: false,
-            makeNative: { _ in throw ASREngineError.runtimeNotFound("injected") }
-        )
-
-        #expect(engine == nil)
+        if row.expectsMock {
+            #expect(engine is MockASREngine, "\(row.summary)")
+        } else {
+            #expect(engine == nil, "\(row.summary)")
+        }
     }
 
     // MARK: - retireWarmEngine (quit-time teardown)
@@ -163,24 +165,13 @@ struct ASREngineFactoryTests {
         )
 
         ASREngineFactory.rearmWarmCacheForTesting()
+        let rebuilt = ASREngineFactory.makeEngine(modelURL: url, allowMock: true)
+        #expect(rebuilt != nil, "the factory still builds engines normally after re-arming")
+        #expect(rebuilt?.isMock == false)
         #expect(
-            !(ASREngineFactory.makeEngine(modelURL: url, allowMock: true) === warm),
+            !(rebuilt === warm),
             "re-arming clears the cache: the same path builds a fresh engine"
         )
-    }
-
-    @Test(
-        "retireWarmEngine is a no-op with an empty cache",
-        .enabled(if: TestEnvironment.nativeASRDylibAvailable)
-    )
-    func retireWarmEngineWithEmptyCacheIsNoOp() {
-        defer { ASREngineFactory.retireWarmEngine(shutdownRuntime: {}) }
-        ASREngineFactory.retireWarmEngine(shutdownRuntime: {})
-        ASREngineFactory.rearmWarmCacheForTesting()
-
-        let engine = ASREngineFactory.makeEngine(modelURL: uniqueModelURL(), allowMock: true)
-
-        #expect(engine?.isMock == false, "the factory still builds engines normally afterwards")
     }
 
     @Test(
