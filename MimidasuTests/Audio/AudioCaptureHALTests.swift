@@ -9,28 +9,21 @@ import Testing
 @Suite("AudioCaptureHAL")
 struct AudioCaptureHALTests {
 
-    @Test("a fresh HAL has no stored tap format")
-    func freshHasNoTapFormat() {
+    @Test("a fresh HAL stores a tap format, tracks handles, and no-ops without a rig")
+    func halStateAndOwnerlessCalls() async throws {
         let hal = AudioCaptureHAL()
 
         #expect(hal.currentTapFormat == nil)
-    }
 
-    @Test("a stored tap format round-trips through the getter")
-    func storedTapFormatRoundTrips() throws {
-        let hal = AudioCaptureHAL()
-        let asbd = Self.makeASBD(sampleRate: 48000)
-
-        hal.storeTapFormat(asbd)
-
+        hal.storeTapFormat(Self.makeASBD(sampleRate: 48000))
         let stored = try #require(hal.currentTapFormat)
         #expect(stored.mSampleRate == 48000)
-    }
 
-    @Test("tracking HAL handles does not trap")
-    func tracksHandlesWithoutTrapping() {
-        let hal = AudioCaptureHAL()
+        await hal.stopIO()
+        let status = await hal.startIO()
+        #expect(status == nil, "no tracked aggregate/IOProc reads as no rig, not a status")
 
+        // Tracked handles are consumed by teardown; here they only must not trap.
         hal.trackTap(1)
         hal.trackAggregate(2)
         hal.trackIOProc(fakeIOProc)
@@ -43,16 +36,6 @@ struct AudioCaptureHALTests {
         #expect(error.domain == NSOSStatusErrorDomain)
         #expect(error.code == Int(kAudioHardwareBadDeviceError))
         #expect(error.localizedDescription == "system audio capture device died")
-    }
-
-    @Test("stopIO and startIO no-op without a tracked rig")
-    func pauseHelpersWithoutRigAreNoops() async {
-        let hal = AudioCaptureHAL()
-
-        await hal.stopIO()
-        let status = await hal.startIO()
-
-        #expect(status == nil, "no tracked aggregate/IOProc reads as no rig, not a status")
     }
 
     private static func makeASBD(sampleRate: Double) -> AudioStreamBasicDescription {

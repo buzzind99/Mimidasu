@@ -48,34 +48,19 @@ struct SystemAudioCaptureTests {
         return capture
     }
 
-    // MARK: - Constants
+    // MARK: - Constants and AudioChunk
 
-    @Test("chunk constants target mono 16 kHz 160 ms chunks")
-    func chunkConstants() {
+    @Test("chunk constants target mono 16 kHz 160 ms chunks and chunks snapshot their samples")
+    func chunkConstantsAndValueSemantics() {
         #expect(SystemAudioCapture.outputSampleRate == 16000)
         #expect(SystemAudioCapture.chunkSamples == 2560)
-    }
 
-    // MARK: - AudioChunk
-
-    @Test("a chunk carries its samples and start offset")
-    func chunkCarriesSamplesAndOffset() {
-        let samples: [Float] = [0.1, -0.2, 0.3]
-
+        var samples: [Float] = [0.1, -0.2, 0.3]
         let chunk = AudioChunk(samples: samples, startSample: 5120)
+        samples.append(0.4)
 
-        #expect(chunk.samples == samples)
+        #expect(chunk.samples == [0.1, -0.2, 0.3], "a chunk snapshots the samples it was given")
         #expect(chunk.startSample == 5120)
-    }
-
-    @Test("a chunk snapshots the samples it was given")
-    func chunkSnapshotsSamples() {
-        var samples: [Float] = [1, 2, 3]
-
-        let chunk = AudioChunk(samples: samples, startSample: 0)
-        samples.append(4)
-
-        #expect(chunk.samples == [1, 2, 3])
     }
 
     // MARK: - Lifecycle guards (the HAL shell itself stays excluded)
@@ -89,67 +74,67 @@ struct SystemAudioCaptureTests {
         #expect(!capture.isRunning)
     }
 
-    // MARK: - CaptureError descriptions
+    // MARK: - CaptureError descriptions and start-status classification
 
-    @Test("audioCaptureDenied explains the grant steps and carries the HAL status")
-    func audioCaptureDeniedDescription() {
-        #expect(
-            CaptureError.audioCaptureDenied(kAudioHardwareIllegalOperationError).errorDescription
-                == "System audio recording is not permitted. Grant it in System Settings → "
+    struct ErrorDescriptionRow: Sendable {
+        let summary: String
+        let error: CaptureError
+        let expected: String
+    }
+
+    struct StartStatusRow: Sendable {
+        let summary: String
+        let status: OSStatus
+        let expected: CaptureError
+    }
+
+    @Test("CaptureError descriptions pin the user-facing copy", arguments: [
+        ErrorDescriptionRow(
+            summary: "audioCaptureDenied explains the grant steps and carries the HAL status",
+            error: .audioCaptureDenied(kAudioHardwareIllegalOperationError),
+            expected: "System audio recording is not permitted. Grant it in System Settings → "
                 + "Privacy & Security → Screen & System Audio Recording, then start again. "
                 + "(HAL status \(kAudioHardwareIllegalOperationError))"
+        ),
+        ErrorDescriptionRow(
+            summary: "setupFailed includes the detail",
+            error: .setupFailed("stream stopped"),
+            expected: "Failed to start system audio capture: stream stopped"
+        ),
+        ErrorDescriptionRow(
+            summary: "captureLost names the stopped capture and carries the detail",
+            error: .captureLost("tap revoked"),
+            expected: "System audio capture stopped: tap revoked"
+        ),
+        ErrorDescriptionRow(
+            summary: "formatUnavailable explains the unusable format",
+            error: .formatUnavailable,
+            expected: "Could not process the captured audio format."
         )
+    ])
+    func errorDescriptions(row: ErrorDescriptionRow) {
+        #expect(row.error.errorDescription == row.expected, "\(row.summary)")
     }
 
-    @Test("setupFailed includes the detail")
-    func setupFailedDescription() {
-        #expect(
-            CaptureError.setupFailed("stream stopped").errorDescription
-                == "Failed to start system audio capture: stream stopped"
+    @Test("classifyStartStatus maps refused and other HAL statuses", arguments: [
+        StartStatusRow(
+            summary: "'nope' classifies as audioCaptureDenied",
+            status: kAudioHardwareIllegalOperationError,
+            expected: .audioCaptureDenied(kAudioHardwareIllegalOperationError)
+        ),
+        StartStatusRow(
+            summary: "'!hog' classifies as audioCaptureDenied",
+            status: kAudioDevicePermissionsError,
+            expected: .audioCaptureDenied(kAudioDevicePermissionsError)
+        ),
+        StartStatusRow(
+            summary: "any other status stays a setupFailed with the call and code",
+            status: kAudioHardwareUnspecifiedError,
+            expected: .setupFailed("AudioDeviceStart: \(kAudioHardwareUnspecifiedError)")
         )
-    }
-
-    @Test("captureLost names the stopped capture and carries the detail")
-    func captureLostDescription() {
-        #expect(
-            CaptureError.captureLost("tap revoked").errorDescription
-                == "System audio capture stopped: tap revoked"
-        )
-    }
-
-    @Test("formatUnavailable explains the unusable format")
-    func formatUnavailableDescription() {
-        #expect(
-            CaptureError.formatUnavailable.errorDescription
-                == "Could not process the captured audio format."
-        )
-    }
-
-    // MARK: - CaptureError.classifyStartStatus classification
-
-    @Test("'nope' from AudioDeviceStart classifies as audioCaptureDenied")
-    func nopeStatusClassifiesAsDenied() {
-        let error = CaptureError.classifyStartStatus(kAudioHardwareIllegalOperationError)
-
-        #expect(error == .audioCaptureDenied(kAudioHardwareIllegalOperationError))
-    }
-
-    @Test("'!hog' from AudioDeviceStart classifies as audioCaptureDenied")
-    func permissionsStatusClassifiesAsDenied() {
-        let error = CaptureError.classifyStartStatus(kAudioDevicePermissionsError)
-
-        #expect(error == .audioCaptureDenied(kAudioDevicePermissionsError))
-    }
-
-    @Test("any other status stays a setupFailed with the call and code")
-    func otherStatusStaysSetupFailed() {
-        let error = CaptureError.classifyStartStatus(kAudioHardwareUnspecifiedError)
-
-        #expect(
-            error == .setupFailed(
-                "AudioDeviceStart: \(kAudioHardwareUnspecifiedError)"
-            )
-        )
+    ])
+    func startStatusClassification(row: StartStatusRow) {
+        #expect(CaptureError.classifyStartStatus(row.status) == row.expected, "\(row.summary)")
     }
 
     // MARK: - Data-path guards

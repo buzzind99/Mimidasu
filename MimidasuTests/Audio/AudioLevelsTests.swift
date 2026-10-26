@@ -8,23 +8,29 @@ import Testing
 @Suite("AudioLevels")
 struct AudioLevelsTests {
 
-    @Test("rms of empty input is zero")
-    func emptyIsZero() {
-        #expect(AudioLevels.rms(of: []) == 0)
+    struct Row: Sendable {
+        let summary: String
+        let samples: [Float]?
+        let expected: Float
     }
 
-    @Test("rms of a constant buffer equals its amplitude")
-    func constantEqualsAmplitude() {
-        #expect(AudioLevels.rms(of: .init(repeating: 0.5, count: 100)) == 0.5)
-    }
+    @Test("rms and the silence floor match their documented values", arguments: [
+        Row(summary: "rms of empty input is zero", samples: [], expected: 0),
+        Row(
+            summary: "rms of a constant buffer equals its amplitude",
+            samples: [Float](repeating: 0.5, count: 100),
+            expected: 0.5
+        ),
+        Row(summary: "rms squares before averaging, so sign cancels", samples: [0.5, -0.5], expected: 0.5),
+        Row(summary: "the silence floor pins the -60 dBFS threshold", samples: nil, expected: 0.001)
+    ])
+    func levelsMatchDocumentedValues(row: Row) {
+        let actual: Float = if let samples = row.samples {
+            AudioLevels.rms(of: samples)
+        } else {
+            AudioLevels.silenceFloorRMS
+        }
 
-    @Test("rms squares before averaging, so sign cancels")
-    func signCancels() {
-        #expect(abs(AudioLevels.rms(of: [0.5, -0.5]) - 0.5) < 1e-6)
-    }
-
-    @Test("silence floor pins the -60 dBFS threshold")
-    func silenceFloorPinsThreshold() {
-        #expect(AudioLevels.silenceFloorRMS == 0.001)
+        #expect(abs(actual - row.expected) < 1e-6, "\(row.summary)")
     }
 }

@@ -95,20 +95,10 @@ struct SystemAudioCaptureTeardownTests {
         #expect(recorder.chunks.count == 2)
         #expect(recorder.chunks.map(\.startSample) == [0, 2560])
         #expect(recorder.errors.isEmpty)
-    }
 
-    @Test("sample buffers are dropped after stop() returns")
-    func samplesDroppedAfterStop() {
-        let capture = makeCapture(running: true)
-        let buffer = AudioBufferListSynthesis.make(frames: 2560)
-
+        // A buffer arriving after the fence must not resume delivery.
         capture.handleAudioBufferList(buffer.pointer, format: buffer.asbd)
-        #expect(recorder.chunks.count == 1)
-
-        capture.stop()
-        capture.handleAudioBufferList(buffer.pointer, format: buffer.asbd)
-        #expect(!capture.isRunning)
-        #expect(recorder.chunks.count == 1)
+        #expect(recorder.chunks.count == 2, "sample buffers are dropped after stop() returns")
         #expect(recorder.errors.isEmpty)
     }
 

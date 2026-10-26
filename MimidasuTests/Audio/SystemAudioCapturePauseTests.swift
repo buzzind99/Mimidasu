@@ -32,6 +32,9 @@ struct SystemAudioCapturePauseTests {
         #expect(capture.isPaused)
         #expect(capture.isRunning, "pause suspends, it does not end the session")
 
+        await capture.pause()
+        #expect(capture.isPaused, "a second pause is a no-op")
+
         capture.stop()
 
         #expect(!capture.isPaused)
@@ -45,18 +48,6 @@ struct SystemAudioCapturePauseTests {
         await capture.pause()
 
         #expect(!capture.isPaused)
-    }
-
-    @Test("a second pause is a no-op")
-    func pauseTwiceKeepsPaused() async {
-        let capture = SystemAudioCapture()
-        capture.setRunningForTesting(true)
-        await capture.pause()
-
-        await capture.pause()
-
-        #expect(capture.isPaused)
-        capture.stop()
     }
 
     @Test("resume without a pause fails as not-paused")
