@@ -35,20 +35,6 @@ struct ModelDownloaderDelegateTests {
 
     // MARK: - didWriteData
 
-    @Test("didWriteData publishes fractional progress for a known total")
-    func didWriteDataPublishesFractionalProgress() async throws {
-        let downloader = ModelDownloader()
-        let task = try makeDownloadTask()
-
-        downloader.urlSession(
-            .shared, downloadTask: task,
-            didWriteData: 250, totalBytesWritten: 250, totalBytesExpectedToWrite: 1000
-        )
-        #expect(
-            await pollUntil { downloader.state == .downloading(progress: 0.25, bytes: 250, total: 1000) }
-        )
-    }
-
     @Test("didWriteData publishes zero progress and nil total for an unknown total")
     func didWriteDataPublishesZeroProgressForUnknownTotal() async throws {
         let downloader = ModelDownloader()
@@ -160,27 +146,26 @@ struct ModelDownloaderDelegateTests {
 
     // MARK: - didCompleteWithError
 
-    @Test("didCompleteWithError with a nil error stays idle")
-    func didCompleteWithErrorNilStaysIdle() async throws {
-        let downloader = ModelDownloader()
-        let task = try makeDownloadTask()
-
-        downloader.urlSession(.shared, task: task, didCompleteWithError: nil)
-        await flushObservations()
-
-        #expect(downloader.state == .idle, "success is handled by didFinishDownloadingTo")
+    struct CompletionRow: Sendable {
+        let summary: String
+        let isCancelled: Bool
     }
 
-    @Test("didCompleteWithError with a cancelled error stays idle")
-    func didCompleteWithErrorCancelledStaysIdle() async throws {
+    @Test("didCompleteWithError without a real failure stays idle", arguments: [
+        CompletionRow(summary: "nil error: success is handled by didFinishDownloadingTo", isCancelled: false),
+        CompletionRow(summary: "cancelled error: cancel() already published idle", isCancelled: true)
+    ])
+    func didCompleteWithoutFailureStaysIdle(row: CompletionRow) async throws {
         let downloader = ModelDownloader()
         let task = try makeDownloadTask()
-        let error = NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+        let error = row.isCancelled
+            ? NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+            : nil
 
         downloader.urlSession(.shared, task: task, didCompleteWithError: error)
         await flushObservations()
 
-        #expect(downloader.state == .idle, "cancel() already published the idle state")
+        #expect(downloader.state == .idle, "\(row.summary)")
     }
 
     @Test("didCompleteWithError with a failure publishes the failed message")

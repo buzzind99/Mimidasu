@@ -32,16 +32,16 @@ struct ModelLocatorTests {
                     == ModelLocator.modelsDirectory.appendingPathComponent(choice.ggufFileName)
             )
             #expect(ModelLocator.downloadedURL(for: choice).lastPathComponent == choice.ggufFileName)
+            #expect(
+                ModelLocator.downloadedURL(for: choice).deletingLastPathComponent()
+                    == ModelLocator.modelsDirectory,
+                "both choices live in the shared models directory"
+            )
         }
-    }
-
-    @Test("the two choices resolve to distinct side-by-side files")
-    func choicesAreSideBySide() {
-        let lite = ModelLocator.downloadedURL(for: .lite)
-        let full = ModelLocator.downloadedURL(for: .full)
-
-        #expect(lite != full)
-        #expect(lite.deletingLastPathComponent() == full.deletingLastPathComponent())
+        #expect(
+            ModelLocator.downloadedURL(for: .lite) != ModelLocator.downloadedURL(for: .full),
+            "the two choices resolve to distinct side-by-side files"
+        )
     }
 
     @Test("downloadURL points at the HuggingFace model file for each choice")

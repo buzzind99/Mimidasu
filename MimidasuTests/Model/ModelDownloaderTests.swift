@@ -83,6 +83,9 @@ struct ModelDownloaderTests {
         #expect(
             ModelDownloader(choice: .full, destination: injected).destination == injected
         )
+
+        // The default initializer derives the Lite destination too.
+        #expect(ModelDownloader().destination == ModelLocator.downloadedURL(for: .lite))
     }
 
     @Test(
@@ -297,14 +300,5 @@ struct ModelDownloaderTests {
             },
             "the restart republishes the remembered total, not nil"
         )
-    }
-
-    // MARK: - default construction
-
-    @Test("default construction derives the .lite destination from the default choice")
-    func defaultConstruction() {
-        let downloader = ModelDownloader()
-
-        #expect(downloader.destination == ModelLocator.downloadedURL(for: .lite))
     }
 }

@@ -30,48 +30,25 @@ struct ASRModelSettingsTests {
 
     // MARK: - Persistence
 
-    @Test("a selection persists across instances over the same suite")
-    func selectionPersists() throws {
+    @Test("selections round-trip through the stable storage payload and overwrite each other")
+    func selectionsRoundTripThroughStablePayload() throws {
+        #expect(ASRModelChoice.lite.rawValue == "lite")
+        #expect(ASRModelChoice.full.rawValue == "full")
+
         let defaults = try #require(UserDefaults(suiteName: "test.ASRModelSettings.\(UUID().uuidString)"))
 
         let first = ASRModelSettings(defaults: defaults)
         first.select(.full)
         #expect(first.selected == .full)
+        #expect(defaults.string(forKey: "asr.model") == "full", "the storage key is stable")
 
         let second = ASRModelSettings(defaults: defaults)
+        #expect(second.selected == .full, "a selection persists across instances over the same suite")
 
-        #expect(second.selected == .full)
-    }
-
-    @Test("a Lite selection overwrites a persisted Full selection")
-    func liteSelectionOverwrites() throws {
-        let defaults = try #require(UserDefaults(suiteName: "test.ASRModelSettings.\(UUID().uuidString)"))
-
-        let first = ASRModelSettings(defaults: defaults)
-        first.select(.full)
         first.select(.lite)
+        #expect(defaults.string(forKey: "asr.model") == "lite")
 
-        let second = ASRModelSettings(defaults: defaults)
-
-        #expect(second.selected == .lite)
-    }
-
-    // MARK: - Storage contract
-
-    /// The raw values are the UserDefaults payload; changing them silently
-    /// resets users to the default.
-    @Test("raw values are the stable storage payload")
-    func rawValuesAreStable() {
-        #expect(ASRModelChoice.lite.rawValue == "lite")
-        #expect(ASRModelChoice.full.rawValue == "full")
-    }
-
-    @Test("the storage key is stable")
-    func storageKeyIsStable() throws {
-        let defaults = try #require(UserDefaults(suiteName: "test.ASRModelSettings.\(UUID().uuidString)"))
-        let settings = ASRModelSettings(defaults: defaults)
-        settings.select(.full)
-
-        #expect(defaults.string(forKey: "asr.model") == "full")
+        let third = ASRModelSettings(defaults: defaults)
+        #expect(third.selected == .lite, "a Lite selection overwrites a persisted Full selection")
     }
 }
