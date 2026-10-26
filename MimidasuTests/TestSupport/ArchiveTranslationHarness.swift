@@ -14,16 +14,32 @@ struct ArchiveTranslationSUT {
     let id: Int64
 }
 
-private func metadata(target: String) -> SessionMetadata {
+/// Session metadata for a seeded archive whose stored target is `target`.
+func archiveMetadata(target: String = "fr", startedAt: TimeInterval = 1_000_000) -> SessionMetadata {
     SessionMetadata(
-        startedAt: Date(timeIntervalSince1970: 1_000_000),
+        startedAt: Date(timeIntervalSince1970: startedAt),
         sourceLang: "ja", targetLang: target, model: "test-model", chunkMS: 160
     )
 }
 
-private func sentence(_ index: Int, text: String) -> Sentence {
+/// A stored sentence whose span follows its index.
+func archiveSentence(_ index: Int, text: String) -> Sentence {
     Sentence(index: index, startS: Double(index), endS: Double(index) + 1, lang: "ja", text: text)
 }
+
+/// The open archive's row for `index`.
+@MainActor
+func entrySentence(in model: AppModel, at index: Int) -> Sentence {
+    model.entries.first { entry in entry.sentence.index == index }!.sentence
+}
+
+/// The three rows a full `fr` run of the default fixture lands, in sentence
+/// order.
+let expectedFRLandings: [[SentenceTranslation]] = [
+    [SentenceTranslation(lang: "fr", text: "T:こんにちは", engine: .google)],
+    [SentenceTranslation(lang: "fr", text: "T:さようなら", engine: .google)],
+    [SentenceTranslation(lang: "fr", text: "T:おはよう", engine: .google)]
+]
 
 /// Seeds a finalized three-sentence archive (stored target `fr`) open in the
 /// pane; `translations` seeds pre-existing rows by sentence index.
@@ -38,7 +54,7 @@ func makeSUT(
     var id: Int64?
     for (index, text) in sentences.enumerated() {
         id = store.append(
-            sentence: sentence(index, text: text), sessionID: id, metadata: metadata(target: target)
+            sentence: archiveSentence(index, text: text), sessionID: id, metadata: archiveMetadata(target: target)
         )
     }
     let finalized = id ?? -1
@@ -50,14 +66,7 @@ func makeSUT(
     }
     store.finalize(session: finalized, durationMS: 60000, saved: false)
 
-    let model = AppModel(
-        translationSettings: isolatedTranslationSettings(suite: suite),
-        asrModelSettings: isolatedASRModelSettings(suite: suite),
-        favorites: isolatedFavorites(),
-        archive: store,
-        highFidelityProbe: { _ in false },
-        initialModelResolve: { _ in nil }
-    )
+    let model = makeIdleModel(suite: suite, archive: store)
     await model.initialModelCheck?.value
     model.openArchiveSession(id: finalized)
     return ArchiveTranslationSUT(model: model, store: store, id: finalized)
@@ -73,7 +82,7 @@ func appendArchive(
     var id: Int64?
     for (index, text) in sentences.enumerated() {
         id = store.append(
-            sentence: sentence(index, text: text), sessionID: id, metadata: metadata(target: target)
+            sentence: archiveSentence(index, text: text), sessionID: id, metadata: archiveMetadata(target: target)
         )
     }
     let finalized = id ?? -1
@@ -192,6 +201,38 @@ final class ScriptedArchiveEngine: TranslationEngine, @unchecked Sendable {
 }
 
 // MARK: - Fixtures
+
+/// The job suites' seeds: `count` sentences with indexes 0..<count and texts
+/// "s0"…"sN", bundled into a request.
+@MainActor
+enum ArchiveTranslationJobFixtures {
+    static func makeSentences(_ count: Int) -> [Sentence] {
+        (0 ..< count).map { index in
+            Sentence(
+                index: index, startS: Double(index), endS: Double(index) + 1,
+                lang: "ja", text: "s\(index)"
+            )
+        }
+    }
+
+    static func makeRequest(
+        sentenceCount: Int = 3,
+        translated: Set<Int> = [],
+        scope: ArchiveTranslationJob.Scope = .missing,
+        engine: RetranslateEngine = .google,
+        lang: String = "en",
+        sessionID: Int64 = 42
+    ) -> ArchiveTranslationJob.Request {
+        ArchiveTranslationJob.Request(
+            sessionID: sessionID,
+            lang: lang,
+            engine: engine,
+            sentences: makeSentences(sentenceCount),
+            translated: translated,
+            scope: scope
+        )
+    }
+}
 
 /// The job's event and landing sinks, kept together so a test can script a
 /// one-shot cancel after the Nth landing.

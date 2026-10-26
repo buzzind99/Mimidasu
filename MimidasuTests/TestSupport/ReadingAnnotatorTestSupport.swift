@@ -87,6 +87,13 @@ func describe(_ segments: [ReadingSegment]?) -> [[String?]] {
     segments?.map { segment in [segment.surface, segment.romaji, segment.furigana] } ?? []
 }
 
+/// A headword gate that answers "has entry" only for the listed headwords —
+/// the fake the fragmentation suites drive the pass with.
+func headwordGate(_ headwords: String...) -> @Sendable (String) -> Bool? {
+    let known = Set(headwords)
+    return { surface in known.contains(surface) }
+}
+
 /// Whether a token stream still lines up with the text it was cut from: spans
 /// ascending and contiguous, each surface exactly the scalars its own span
 /// names, nothing dropped and nothing uncovered that is not whitespace. The
