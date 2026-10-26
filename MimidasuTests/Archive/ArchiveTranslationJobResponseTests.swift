@@ -53,10 +53,13 @@ struct ArchiveTranslationJobResponseTests {
 
     // MARK: - Malformed responses
 
-    @Test("an empty translation fails its sentence and the walk continues")
-    func emptyTranslationCountsAsFailure() async {
+    @Test("a malformed answer fails its sentence and the walk continues", arguments: [
+        [""],
+        []
+    ])
+    func malformedAnswerCountsAsFailure(result: [String]) async {
         let job = ArchiveTranslationJob()
-        let engine = FixedResultEngine(result: [""])
+        let engine = FixedResultEngine(result: result)
         job.resolveEngine = { _, _ in .ready(engine: engine, kind: .google) }
         let recorder = Recorder()
         job.onEvent = recorder.recordEvent
@@ -68,24 +71,6 @@ struct ArchiveTranslationJobResponseTests {
         #expect(recorder.landedIndexes.isEmpty, "a malformed answer never lands")
         #expect(job.translatedCount == 0)
         #expect(job.failureIndexes == [0, 1, 2], "every sentence fails")
-        #expect(recorder.events.last == .finished(translated: 0, failedIndexes: [0, 1, 2]))
-    }
-
-    @Test("an answer carrying no result at all fails its sentence")
-    func noResultCountsAsFailure() async {
-        let job = ArchiveTranslationJob()
-        let engine = FixedResultEngine(result: [])
-        job.resolveEngine = { _, _ in .ready(engine: engine, kind: .google) }
-        let recorder = Recorder()
-        job.onEvent = recorder.recordEvent
-        job.land = recorder.recordLanding
-
-        #expect(job.claim(makeRequest()))
-        await job.run()
-
-        #expect(recorder.landedIndexes.isEmpty, "a malformed answer never lands")
-        #expect(job.translatedCount == 0)
-        #expect(job.failureIndexes == [0, 1, 2])
         #expect(recorder.events.last == .finished(translated: 0, failedIndexes: [0, 1, 2]))
     }
 }

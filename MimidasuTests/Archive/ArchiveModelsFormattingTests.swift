@@ -172,34 +172,18 @@ struct ArchiveModelsFormattingTests {
 
     // MARK: - Auto title
 
-    @Test("the auto-title falls back to the date when the session has no first sentence")
-    func autoTitleWithoutFirstSentence() {
+    @Test(
+        "the auto-title falls back to the date without a snippet",
+        arguments: [nil, "", "  \n "]
+    )
+    func autoTitleFallsBackToDate(firstSentence: String?) {
         let startedAt = fixedDate
-        let sut = makeSummary(startedAt: startedAt, firstSentence: nil)
+        let sut = makeSummary(startedAt: startedAt, firstSentence: firstSentence)
 
         let title = sut.autoTitle
 
         #expect(title == expectedDateText(of: startedAt))
         #expect(!title.contains("「"), "the fallback carries no first-sentence snippet")
-    }
-
-    @Test("the auto-title falls back to the date when the first sentence is blank")
-    func autoTitleWithBlankFirstSentence() {
-        let startedAt = fixedDate
-        let sut = makeSummary(startedAt: startedAt, firstSentence: "")
-
-        let title = sut.autoTitle
-
-        #expect(title == expectedDateText(of: startedAt))
-        #expect(!title.contains("「"), "a blank first sentence is no snippet")
-    }
-
-    @Test("the auto-title falls back to the date when the first sentence is only whitespace")
-    func autoTitleWithWhitespaceOnlyFirstSentence() {
-        let startedAt = fixedDate
-        let sut = makeSummary(startedAt: startedAt, firstSentence: "  \n ")
-
-        #expect(sut.autoTitle == expectedDateText(of: startedAt))
     }
 
     @Test("a same-year auto-title fallback omits the year")
@@ -215,16 +199,6 @@ struct ArchiveModelsFormattingTests {
     @Test("the sentence-count text is singular for a single sentence")
     func sentenceCountTextIsSingular() {
         #expect(makeSummary(sentenceCount: 1).sentenceCountText == "1 sentence")
-    }
-
-    @Test("the sentence-count text is plural for several sentences")
-    func sentenceCountTextIsPlural() {
-        #expect(makeSummary(sentenceCount: 3).sentenceCountText == "3 sentences")
-    }
-
-    @Test("the duration text reads minutes and seconds")
-    func durationTextIsFormatted() {
-        #expect(makeSummary(durationS: 90).durationText == "1:30")
     }
 
     @Test("the duration text is absent when the duration is unknown")

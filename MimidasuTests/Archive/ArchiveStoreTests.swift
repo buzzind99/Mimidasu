@@ -72,13 +72,14 @@ struct ArchiveStoreTests {
 
     // MARK: - Lazy creation & persistence
 
-    @Test("an empty store lists nothing and holds no session")
-    func emptyStoreListsNothing() {
+    @Test("an empty store reads nothing")
+    func emptyStoreReadsNothing() {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
 
         #expect(store.list().isEmpty)
         #expect(store.load(id: 1) == nil)
+        #expect(store.summary(id: 999) == nil)
     }
 
     @Test("the first sentence creates the session and later ones reuse it")
@@ -586,13 +587,5 @@ extension ArchiveStoreTests {
         let reopened = ArchiveStore(location: location)
         #expect(reopened.summary(id: id) == nil, "the deleted id can't be queried")
         #expect(try rawRowCount(at: location, table: "session_languages", id: id) == 0, "no orphan membership row survives")
-    }
-
-    @Test("summary returns nil for an unknown id")
-    func summaryUnknownIDIsNil() {
-        let (store, cleanup) = makeStore()
-        defer { cleanup() }
-
-        #expect(store.summary(id: 999) == nil)
     }
 }

@@ -21,33 +21,6 @@ struct ArchiveTranslationJobActivityTests {
         ArchiveTranslationJob()
     }
 
-    /// `count` sentences: indexes 0..<count, texts "s0"…"sN".
-    private func makeSentences(_ count: Int) -> [Sentence] {
-        (0 ..< count).map { index in
-            Sentence(
-                index: index, startS: Double(index), endS: Double(index) + 1,
-                lang: "ja", text: "s\(index)"
-            )
-        }
-    }
-
-    private func makeRequest(
-        sentenceCount: Int = 3,
-        translated: Set<Int> = [],
-        scope: ArchiveTranslationJob.Scope = .missing,
-        engine: RetranslateEngine = .google,
-        lang: String = "en"
-    ) -> ArchiveTranslationJob.Request {
-        ArchiveTranslationJob.Request(
-            sessionID: sessionID,
-            lang: lang,
-            engine: engine,
-            sentences: makeSentences(sentenceCount),
-            translated: translated,
-            scope: scope
-        )
-    }
-
     /// Runs one full successful run so the following non-begun cases can pin
     /// that `lastRun` survives them.
     private func seedSuccessfulRun(
@@ -55,7 +28,7 @@ struct ArchiveTranslationJobActivityTests {
     ) async throws -> ArchiveTranslationJob.LastRun {
         let engine = ScriptedEngine()
         job.resolveEngine = { _, _ in .ready(engine: engine, kind: .google) }
-        try #require(job.claim(makeRequest()))
+        try #require(job.claim(ArchiveTranslationJobFixtures.makeRequest()))
         await job.run()
         return try #require(job.lastRun, "the seed run leaves a record")
     }
@@ -65,13 +38,13 @@ struct ArchiveTranslationJobActivityTests {
     @Test("a claim publishes the claimed activity synchronously and refuses a second claim")
     func claimPublishesClaimedActivitySynchronously() {
         let job = makeJob()
-        let request = makeRequest()
+        let request = ArchiveTranslationJobFixtures.makeRequest()
 
         let claimed = job.claim(request)
 
         #expect(claimed, "the free slot accepts the claim")
         #expect(job.activity == .claimed(request), "the claim is visible before any run")
-        #expect(job.claim(makeRequest()) == false, "a second claim is refused")
+        #expect(job.claim(ArchiveTranslationJobFixtures.makeRequest()) == false, "a second claim is refused")
         #expect(job.activity == .claimed(request), "the refused claim leaves the activity unchanged")
     }
 
@@ -80,7 +53,7 @@ struct ArchiveTranslationJobActivityTests {
         let job = makeJob()
         #expect(job.activity(for: sessionID) == .idle, "a fresh job is idle")
 
-        let request = makeRequest()
+        let request = ArchiveTranslationJobFixtures.makeRequest()
         #expect(job.claim(request))
 
         #expect(job.activity(for: request.sessionID) == .claimed(request))
@@ -100,7 +73,7 @@ struct ArchiveTranslationJobActivityTests {
             return .ready(engine: engine, kind: .google)
         }
         job.land = { _, _ in true }
-        let request = makeRequest()
+        let request = ArchiveTranslationJobFixtures.makeRequest()
 
         #expect(job.claim(request))
 
@@ -110,6 +83,7 @@ struct ArchiveTranslationJobActivityTests {
             "the run parks in engine resolution"
         )
         #expect(job.activity == .claimed(request), "engine resolution keeps the run claimed")
+        #expect(!job.activity.isRunning, "no engine work starts while resolving")
         #expect(job.lastRun == nil, "nothing has begun while the resolver runs")
 
         resolutionGate.open()
@@ -123,6 +97,7 @@ struct ArchiveTranslationJobActivityTests {
                 progress: ArchiveTranslationJob.RunProgress(kind: .google, processed: 0, total: 3)
             )
         )
+        #expect(job.activity.isRunning, "the walk reports running once the engine starts")
         #expect(job.activity(for: request.sessionID) == job.activity, "the running state is scoped to its session")
         #expect(job.activity(for: request.sessionID + 1) == .idle, "a foreign session never sees the walk")
         #expect(
@@ -146,7 +121,7 @@ struct ArchiveTranslationJobActivityTests {
         engine.fail(on: ["s1"])
         job.resolveEngine = { _, _ in .ready(engine: engine, kind: .google) }
         job.land = { _, _ in true }
-        let request = makeRequest(scope: .all)
+        let request = ArchiveTranslationJobFixtures.makeRequest(scope: .all)
 
         #expect(job.claim(request))
         let run = Task { await job.run() }
@@ -200,12 +175,14 @@ struct ArchiveTranslationJobActivityTests {
         job.resolveEngine = { _, _ in .unavailable(reason: reason) }
         let recorder = Recorder()
         job.onEvent = recorder.recordEvent
-        #expect(job.claim(makeRequest(engine: .deepl)))
+        job.land = recorder.recordLanding
+        #expect(job.claim(ArchiveTranslationJobFixtures.makeRequest(engine: .deepl)))
         await job.run()
 
         #expect(job.activity == .idle)
         #expect(job.lastRun == seeded, "the non-begun run leaves the previous record")
         #expect(recorder.events == [.unavailable(reason: reason)])
+        #expect(recorder.landedIndexes.isEmpty, "no result lands on an unavailable run")
     }
 
     @Test("a cancel during resolution ends idle and silently keeps lastRun")
@@ -221,7 +198,8 @@ struct ArchiveTranslationJobActivityTests {
         }
         let recorder = Recorder()
         job.onEvent = recorder.recordEvent
-        #expect(job.claim(makeRequest(engine: .deepl)))
+        job.land = recorder.recordLanding
+        #expect(job.claim(ArchiveTranslationJobFixtures.makeRequest(engine: .deepl)))
         let run = Task { await job.run() }
         #expect(
             await pollUntil(timeout: resultTimeout) { resolutionGate.enteredCount == 1 },
@@ -235,6 +213,8 @@ struct ArchiveTranslationJobActivityTests {
         #expect(job.activity == .idle)
         #expect(job.lastRun == seeded, "the cancelled resolution leaves the record untouched")
         #expect(recorder.events.isEmpty, "a cancelled resolution reports nothing")
+        #expect(recorder.landedIndexes.isEmpty)
+        #expect(engine.recordedBatches.isEmpty, "no engine call starts after the cancel")
     }
 
     @Test("an empty scope finishes at zero, skips the resolver, and keeps lastRun")
@@ -249,7 +229,7 @@ struct ArchiveTranslationJobActivityTests {
         }
         let recorder = Recorder()
         job.onEvent = recorder.recordEvent
-        #expect(job.claim(makeRequest(translated: [0, 1, 2])))
+        #expect(job.claim(ArchiveTranslationJobFixtures.makeRequest(translated: [0, 1, 2])))
         await job.run()
 
         #expect(job.activity == .idle)
@@ -264,7 +244,7 @@ struct ArchiveTranslationJobActivityTests {
         let firstEngine = ScriptedEngine()
         job.resolveEngine = { _, _ in .ready(engine: firstEngine, kind: .google) }
         job.land = { _, _ in true }
-        let first = makeRequest()
+        let first = ArchiveTranslationJobFixtures.makeRequest()
 
         #expect(job.claim(first))
         await job.run()
@@ -275,7 +255,7 @@ struct ArchiveTranslationJobActivityTests {
         let engineGate = AsyncGate()
         let secondEngine = ScriptedEngine(gate: engineGate)
         job.resolveEngine = { _, _ in .ready(engine: secondEngine, kind: .deepl) }
-        let second = makeRequest(sentenceCount: 1, scope: .all, engine: .deepl, lang: "de")
+        let second = ArchiveTranslationJobFixtures.makeRequest(sentenceCount: 1, scope: .all, engine: .deepl, lang: "de")
 
         #expect(job.claim(second))
         #expect(
