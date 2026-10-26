@@ -115,12 +115,9 @@ struct RubyTextViewTests {
 
     // MARK: - Equality and fingerprint
 
-    @Test("== is sensitive to cursor mode and blind to both closures")
-    func equality() {
-        let none = view()
-        let dictionary = view(cursorMode: .dictionary)
-
-        #expect(none != dictionary)
+    @Test("== compares the mode only, never a copy, lookup, popover, or favorite closure")
+    func equalityIsValueOnly() {
+        #expect(view() != view(cursorMode: .dictionary))
 
         let copyA = view(cursorMode: .copy, onCopy: { _ in })
         let copyB = view(cursorMode: .copy, onCopy: { _ in })
@@ -129,47 +126,26 @@ struct RubyTextViewTests {
         let lookupA = view(cursorMode: .dictionary, onLookup: { _ in })
         let lookupB = view(cursorMode: .dictionary, onLookup: { _ in })
         #expect(lookupA == lookupB)
-
         #expect(view() == view(onLookup: { _ in }))
-    }
 
-    @Test("== is blind to the per-word popover host")
-    func equalityIgnoresPopoverHost() {
         let hostedA = view(
-            cursorMode: .dictionary, onLookup: { _ in },
-            lookupPopover: { _ in nil }
+            cursorMode: .dictionary, onLookup: { _ in }, lookupPopover: { _ in nil }
         )
         let hostedB = view(
-            cursorMode: .dictionary, onLookup: { _ in },
-            lookupPopover: { _ in nil }
+            cursorMode: .dictionary, onLookup: { _ in }, lookupPopover: { _ in nil }
         )
-
         #expect(hostedA == hostedB)
-        #expect(
-            hostedA == view(cursorMode: .dictionary, onLookup: { _ in })
-        )
-    }
+        #expect(hostedA == view(cursorMode: .dictionary, onLookup: { _ in }))
 
-    @Test("fingerprint changes with cursor mode so the flow cache invalidates")
-    func fingerprint() {
-        #expect(view().fingerprint != view(cursorMode: .dictionary).fingerprint)
-    }
-
-    @Test("fingerprint changes with the reserved line so the flow cache invalidates")
-    func fingerprintReservation() {
-        #expect(view().fingerprint != view(reservesAnnotationLine: true).fingerprint)
-    }
-
-    @Test("the favorite matcher alone cannot break ==, since == is value-only by design")
-    func equalityIgnoresFavoriteMatcher() {
         let matcherA = view(isFavoriteSegment: { _ in true })
         let matcherB = view(isFavoriteSegment: { _ in false })
-
         #expect(matcherA == matcherB)
     }
 
-    @Test("fingerprint ignores favorites: color paints only, so the flow cache stays valid")
-    func fingerprintIgnoresFavorites() {
+    @Test("the fingerprint tracks cursor mode and the reserved line, never favorites")
+    func fingerprintTracksRenderingInputs() {
+        #expect(view().fingerprint != view(cursorMode: .dictionary).fingerprint)
+        #expect(view().fingerprint != view(reservesAnnotationLine: true).fingerprint)
         #expect(view().fingerprint == view(isFavoriteSegment: { _ in true }).fingerprint)
     }
 

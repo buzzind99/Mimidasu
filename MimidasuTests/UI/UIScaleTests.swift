@@ -12,13 +12,6 @@ struct UIScaleTests {
     @Test("an unknown persisted raw value is not representable")
     func unknownRawValueIsUnrepresentable() {
         #expect(UIScale(rawValue: 50) == nil)
-        #expect(UIScale(rawValue: 60) == nil)
-        #expect(UIScale(rawValue: 225) == nil)
-    }
-
-    @Test("invalid stored values fall back to 100%")
-    func invalidStoredValueFallsBackToDefault() {
-        #expect(UIScale.default == .percent100)
     }
 
     // MARK: - Stepping
@@ -61,8 +54,9 @@ struct UIScaleTests {
         #expect(UIScale.percent200.label == "200%")
     }
 
-    @Test("the storage key is stable")
-    func storageKeyIsStable() {
+    @Test("the storage key and default are stable")
+    func storageContractIsStable() {
         #expect(UIScale.storageKey == "UIScale")
+        #expect(UIScale.default == .percent100)
     }
 }

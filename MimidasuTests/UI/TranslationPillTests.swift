@@ -8,20 +8,20 @@ import Testing
 @Suite("TranslationPill mapping")
 struct TranslationPillTests {
 
-    @Test("healthy ready/translating on-device is green")
-    func readyOnDeviceIsGreen() {
-        let pill = TranslationPill.map(status: .ready, activeEngine: .apple)
+    @Test(
+        "healthy ready/translating is green with the active engine's label",
+        arguments: [
+            (TranslationStatus.ready, ActiveTranslationEngine.apple, "On-device"),
+            (.translating, .apple, "On-device"),
+            (.ready, .external, "External"),
+            (.translating, .external, "External")
+        ]
+    )
+    func healthyIsGreen(status: TranslationStatus, engine: ActiveTranslationEngine, label: String) {
+        let pill = TranslationPill.map(status: status, activeEngine: engine)
 
         #expect(pill.tone == .green)
-        #expect(pill.label == "On-device")
-    }
-
-    @Test("healthy ready/translating external is green")
-    func readyExternalIsGreen() {
-        let pill = TranslationPill.map(status: .translating, activeEngine: .external)
-
-        #expect(pill.tone == .green)
-        #expect(pill.label == "External")
+        #expect(pill.label == label)
     }
 
     @Test("a latched ready is yellow, not green")

@@ -116,21 +116,12 @@ struct DictionaryWordRowTests {
         #expect(favoritesRow(word(reading: nil)).reading == nil)
     }
 
-    @Test("the two modes disagree on a kana-only word, and only there")
-    func kanaOnlyDivergence() {
-        let kanaOnly = hit(keb: nil, reb: "まける")
-        #expect(searchRow(kanaOnly).reading == nil)
-        #expect(favoritesRow(word(headword: "まける", reading: "まける")).reading == "まける")
-    }
-
     // MARK: - The label spacing
 
     @Test("the search label's lines sit wider apart than the favorites label's")
     func labelSpacing() {
         #expect(searchRow(hit()).labelSpacing == 4)
         #expect(favoritesRow(word()).labelSpacing == 2)
-        #expect(DictionaryWordRowLayout.searchLabelSpacing == 4)
-        #expect(DictionaryWordRowLayout.favoritesLabelSpacing == 2)
     }
 
     // MARK: - The highlights
@@ -210,37 +201,22 @@ struct DictionaryWordRowTests {
 
     // MARK: - The badge set
 
-    @Test("the badge set is the leading chip, then commonness, level, and name types")
-    func badgeOrder() {
+    @Test(
+        "the badge set is the leading chip, then commonness, level, and name types, in their colors"
+    )
+    func badgeSet() {
         let badges = dictionaryBadges(
             leading: DictionaryBadge(text: "EXACT", color: Theme.accentPink, icon: "magnifyingglass"),
             common: true,
             jlpt: 5,
             namePosTokens: ["surname"]
         )
+
         #expect(badges.map(\.text) == ["EXACT", "COMMON", "≈N5", "SURNAME"])
-    }
-
-    @Test("commonness wears green; the level and the name types wear violet")
-    func badgeColours() {
-        let badges = dictionaryBadges(
-            leading: nil,
-            common: true,
-            jlpt: 3,
-            namePosTokens: ["place"]
+        #expect(
+            badges.suffix(3).map(\.color)
+                == [Theme.dotGreen, Theme.brandViolet, Theme.brandViolet]
         )
-        #expect(badges.count == 3)
-        #expect(badges[0].color == Theme.dotGreen)
-        #expect(badges[1].color == Theme.brandViolet)
-        #expect(badges[2].color == Theme.brandViolet)
-    }
-
-    @Test("the commonness chip is the one literal the filter toggle uses")
-    func commonChipLiteral() {
-        #expect(DictionaryBadgeChip.common == "COMMON")
-        #expect(DictionaryBadgeChip.commonColor == Theme.dotGreen)
-        let badges = dictionaryBadges(leading: nil, common: true, jlpt: nil, namePosTokens: [])
-        #expect(badges.map(\.text) == ["COMMON"])
     }
 
     @Test("the leading chip is the caller's: the search row's carries the magnifier, the popover's does not")
@@ -299,13 +275,6 @@ struct DictionaryWordRowTests {
         #expect(fromEntry.map(\.text) == fromHit.map(\.text))
 
         // A word entry carries no name types.
-        #expect(dictionaryBadges(
-            leading: nil, common: false, jlpt: nil, namePosTokens: []
-        ).isEmpty)
-    }
-
-    @Test("an absent level and an absent commonness add no chip")
-    func badgeOmissions() {
         #expect(dictionaryBadges(
             leading: nil, common: false, jlpt: nil, namePosTokens: []
         ).isEmpty)

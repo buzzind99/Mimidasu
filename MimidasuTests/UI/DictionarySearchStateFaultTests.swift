@@ -105,17 +105,6 @@ struct DictionarySearchStateFaultTests {
         #expect(state.outcome.isEmpty)
     }
 
-    @Test("the close resets the filters, so a reopen never hides a scope")
-    func resetForCloseResetsFilters() throws {
-        let fixture = try makeState()
-        let state = fixture.state
-
-        state.apply(.setScope(.names))
-        state.resetForClose()
-
-        #expect(state.filters == DictionarySearchFilters())
-    }
-
     @Test("the close wipes a live query, and its filters cannot resurrect it")
     func resetForCloseBeatsALiveQuery() async throws {
         let fixture = try makeState()

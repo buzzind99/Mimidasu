@@ -12,201 +12,103 @@ struct HUDHistoryTests {
         )
     }
 
-    private func entries(_ indexes: Int...) -> [SessionEntry] {
+    private func entries(_ indexes: [Int]) -> [SessionEntry] {
         indexes.map(entry)
     }
 
     // MARK: - displayedIndex
 
-    @Test("displayedIndex returns nil for empty entries")
-    func displayedIndexEmpty() {
-        #expect(HUDHistory.displayedIndex(in: [], pinned: nil) == nil)
-        #expect(HUDHistory.displayedIndex(in: [], pinned: 7) == nil)
-    }
+    @Test(
+        "displayedIndex follows a resolving pin and otherwise shows the newest entry",
+        arguments: [
+            ([Int](), nil, nil),
+            ([Int](), 7, nil),
+            ([0, 1, 2], nil, 2),
+            ([0, 1, 2], 0, 0),
+            ([0, 1, 2], 2, 2),
+            ([0, 1, 2], 99, 2),
+            ([5], nil, 5),
+            ([5], 5, 5),
+            ([5], 3, 5),
+        ]
+    )
+    func displayedIndexMapping(indexes: [Int], pinned: Int?, expected: Int?) {
+        let displayed = HUDHistory.displayedIndex(in: entries(indexes), pinned: pinned)
 
-    @Test("displayedIndex returns the newest entry without a pin")
-    func displayedIndexNoPin() {
-        let entries = entries(0, 1, 2)
-
-        #expect(HUDHistory.displayedIndex(in: entries, pinned: nil) == 2)
-    }
-
-    @Test("displayedIndex follows a pin that still resolves")
-    func displayedIndexValidPin() {
-        let entries = entries(0, 1, 2)
-
-        #expect(HUDHistory.displayedIndex(in: entries, pinned: 0) == 0)
-        #expect(HUDHistory.displayedIndex(in: entries, pinned: 2) == 2)
-    }
-
-    @Test("displayedIndex falls back to newest for a stale pin")
-    func displayedIndexStalePin() {
-        let entries = entries(0, 1, 2)
-
-        #expect(HUDHistory.displayedIndex(in: entries, pinned: 99) == 2)
-    }
-
-    @Test("displayedIndex handles a single entry with any pin")
-    func displayedIndexSingleEntry() {
-        let entries = entries(5)
-
-        #expect(HUDHistory.displayedIndex(in: entries, pinned: nil) == 5)
-        #expect(HUDHistory.displayedIndex(in: entries, pinned: 5) == 5)
-        #expect(HUDHistory.displayedIndex(in: entries, pinned: 3) == 5)
+        #expect(displayed == expected)
     }
 
     // MARK: - cycle
 
-    @Test("cycle on empty entries leaves the pin unchanged")
-    func cycleEmpty() {
-        #expect(HUDHistory.cycle(entries: [], pinned: nil, step: -1) == nil)
-        #expect(HUDHistory.cycle(entries: [], pinned: 3, step: 1) == 3)
-    }
+    @Test(
+        "cycle steps the pin, clears it on the newest, and clamps or holds at the ends",
+        arguments: [
+            ([Int](), nil, -1, nil),
+            ([Int](), 3, 1, 3),
+            ([0, 1, 2], nil, -1, 1),
+            ([0, 1, 2], nil, 1, nil),
+            ([0, 1, 2], 1, 1, nil),
+            ([0, 1, 2], 0, -1, 0),
+            ([0, 1, 2], 42, -1, 42),
+            ([0, 1, 2], 0, 1, 1),
+            ([0, 1, 2], 1, -1, 0),
+            ([0, 1, 2], 2, -1, 1),
+            ([0, 1, 2], 2, 1, 2),
+            ([7], nil, -1, nil),
+            ([7], 7, -1, 7),
+            ([7], 7, 1, 7),
+        ]
+    )
+    func cycleMapping(indexes: [Int], pinned: Int?, step: Int, expected: Int?) {
+        let cycled = HUDHistory.cycle(entries: entries(indexes), pinned: pinned, step: step)
 
-    @Test("cycle with no pin steps from the newest entry")
-    func cycleFromNewestWithoutPin() {
-        let entries = entries(0, 1, 2)
-
-        #expect(HUDHistory.cycle(entries: entries, pinned: nil, step: -1) == 1)
-    }
-
-    @Test("cycle with no pin stepping newer stays re-following latest")
-    func cycleNewerWithoutPin() {
-        let entries = entries(0, 1, 2)
-
-        #expect(HUDHistory.cycle(entries: entries, pinned: nil, step: 1) == nil)
-    }
-
-    @Test("cycle clears the pin when stepping onto the newest entry")
-    func cycleClearsPinAtNewest() {
-        let entries = entries(0, 1, 2)
-
-        #expect(HUDHistory.cycle(entries: entries, pinned: 1, step: 1) == nil)
-    }
-
-    @Test("cycle clamps at the oldest entry")
-    func cycleClampsAtOldest() {
-        let entries = entries(0, 1, 2)
-
-        #expect(HUDHistory.cycle(entries: entries, pinned: 0, step: -1) == 0)
-    }
-
-    @Test("cycle with a stale pin leaves it unchanged")
-    func cycleStalePin() {
-        let entries = entries(0, 1, 2)
-
-        #expect(HUDHistory.cycle(entries: entries, pinned: 42, step: -1) == 42)
-    }
-
-    @Test("cycle steps through the entries", arguments: [
-        // (pinned, step, expected)
-        (0, -1, Optional(0)),
-        (0, 1, Optional(1)),
-        (1, 1, nil),
-        (1, -1, Optional(0)),
-        (2, -1, Optional(1)),
-        (2, 1, Optional(2)),
-    ])
-    func cycleStepping(pinned: Int?, step: Int, expected: Int?) {
-        let entries = entries(0, 1, 2)
-
-        #expect(HUDHistory.cycle(entries: entries, pinned: pinned, step: step) == expected)
-    }
-
-    @Test("cycle on a single entry never moves")
-    func cycleSingleEntry() {
-        let entries = entries(7)
-
-        #expect(HUDHistory.cycle(entries: entries, pinned: nil, step: -1) == nil)
-        #expect(HUDHistory.cycle(entries: entries, pinned: 7, step: -1) == 7)
-        #expect(HUDHistory.cycle(entries: entries, pinned: 7, step: 1) == 7)
+        #expect(cycled == expected)
     }
 
     // MARK: - Enablement
 
-    @Test("enablement on empty entries disables both directions")
-    func enablementEmpty() {
-        #expect(!HUDHistory.canStepNewer(entries: [], pinned: nil))
-        #expect(!HUDHistory.canStepOlder(entries: [], pinned: nil))
-    }
+    @Test(
+        "step enablement allows older only without a pin and disables the ends",
+        arguments: [
+            ([Int](), nil, false, false),
+            ([0], nil, false, false),
+            ([0], 0, false, false),
+            ([0, 1, 2], nil, false, true),
+            ([0, 1, 2], 0, true, false),
+            ([0, 1, 2], 1, true, true),
+            ([0, 1, 2], 2, false, true),
+        ]
+    )
+    func stepEnablement(indexes: [Int], pinned: Int?, canNewer: Bool, canOlder: Bool) {
+        let newer = HUDHistory.canStepNewer(entries: entries(indexes), pinned: pinned)
+        let older = HUDHistory.canStepOlder(entries: entries(indexes), pinned: pinned)
 
-    @Test("enablement on a single entry disables both directions")
-    func enablementSingle() {
-        let entries = entries(0)
-
-        #expect(!HUDHistory.canStepNewer(entries: entries, pinned: nil))
-        #expect(!HUDHistory.canStepOlder(entries: entries, pinned: nil))
-        #expect(!HUDHistory.canStepNewer(entries: entries, pinned: 0))
-        #expect(!HUDHistory.canStepOlder(entries: entries, pinned: 0))
-    }
-
-    @Test("enablement with no pin allows older only")
-    func enablementNoPin() {
-        let entries = entries(0, 1, 2)
-
-        #expect(!HUDHistory.canStepNewer(entries: entries, pinned: nil))
-        #expect(HUDHistory.canStepOlder(entries: entries, pinned: nil))
-    }
-
-    @Test("enablement per pinned position", arguments: [
-        // (pinned, canNewer, canOlder)
-        (0, true, false),
-        (1, true, true),
-        (2, false, true),
-    ])
-    func enablementAtPin(pinned: Int, canNewer: Bool, canOlder: Bool) {
-        let entries = entries(0, 1, 2)
-
-        #expect(HUDHistory.canStepNewer(entries: entries, pinned: pinned) == canNewer)
-        #expect(HUDHistory.canStepOlder(entries: entries, pinned: pinned) == canOlder)
+        #expect(newer == canNewer)
+        #expect(older == canOlder)
     }
 
     // MARK: - Jump enablement
 
-    @Test("jump enablement on empty entries disables both ends")
-    func jumpEnablementEmpty() {
-        #expect(!HUDHistory.canJumpToOldest(entries: [], pinned: nil))
-        #expect(!HUDHistory.canJumpToNewest(entries: [], pinned: nil))
-        #expect(!HUDHistory.canJumpToOldest(entries: [], pinned: 3))
-        #expect(!HUDHistory.canJumpToNewest(entries: [], pinned: 3))
-    }
+    @Test(
+        "jump enablement offers the far end only, and treats a pin on the newest like no pin",
+        arguments: [
+            ([Int](), nil, false, false),
+            ([Int](), 3, false, false),
+            ([5], nil, false, false),
+            ([5], 5, false, false),
+            ([0, 1, 2], nil, true, false),
+            ([0, 1, 2], 0, false, true),
+            ([0, 1, 2], 1, true, true),
+            ([0, 1, 2], 2, true, false),
+        ]
+    )
+    func jumpEnablementAtPin(
+        indexes: [Int], pinned: Int?, canJumpOldest: Bool, canJumpNewest: Bool
+    ) {
+        let oldest = HUDHistory.canJumpToOldest(entries: entries(indexes), pinned: pinned)
+        let newest = HUDHistory.canJumpToNewest(entries: entries(indexes), pinned: pinned)
 
-    @Test("jump enablement on a single entry disables both ends")
-    func jumpEnablementSingle() {
-        let entries = entries(5)
-
-        #expect(!HUDHistory.canJumpToOldest(entries: entries, pinned: nil))
-        #expect(!HUDHistory.canJumpToNewest(entries: entries, pinned: nil))
-        #expect(!HUDHistory.canJumpToOldest(entries: entries, pinned: 5))
-        #expect(!HUDHistory.canJumpToNewest(entries: entries, pinned: 5))
-    }
-
-    @Test("jump enablement with no pin allows oldest only")
-    func jumpEnablementNoPin() {
-        let entries = entries(0, 1, 2)
-
-        #expect(HUDHistory.canJumpToOldest(entries: entries, pinned: nil))
-        #expect(!HUDHistory.canJumpToNewest(entries: entries, pinned: nil))
-    }
-
-    @Test("jump enablement per pinned position", arguments: [
-        // (pinned, canJumpOldest, canJumpNewest)
-        (0, false, true),
-        (1, true, true),
-        (2, true, false),
-    ])
-    func jumpEnablementAtPin(pinned: Int, canJumpOldest: Bool, canJumpNewest: Bool) {
-        let entries = entries(0, 1, 2)
-
-        #expect(HUDHistory.canJumpToOldest(entries: entries, pinned: pinned) == canJumpOldest)
-        #expect(HUDHistory.canJumpToNewest(entries: entries, pinned: pinned) == canJumpNewest)
-    }
-
-    @Test("jump enablement treats a pin on the newest like no pin")
-    func jumpEnablementPinOnNewest() {
-        let entries = entries(0, 1, 2)
-
-        #expect(!HUDHistory.canJumpToNewest(entries: entries, pinned: 2))
-        #expect(HUDHistory.canJumpToOldest(entries: entries, pinned: 2))
+        #expect(oldest == canJumpOldest)
+        #expect(newest == canJumpNewest)
     }
 }

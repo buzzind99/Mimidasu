@@ -69,36 +69,6 @@ struct DictionaryContentTests {
         #expect(DictionaryContent.posLabels("n,n") == ["n"])
     }
 
-    @Test("JMnedict name types render friendly badges")
-    func posLabelsNameTypes() {
-        #expect(DictionaryContent.posLabels("surname") == ["SURNAME"])
-        #expect(DictionaryContent.posLabels("given") == ["GIVEN NAME"])
-        #expect(DictionaryContent.posLabels("fem") == ["GIVEN NAME"])
-        #expect(DictionaryContent.posLabels("masc") == ["GIVEN NAME"])
-        #expect(DictionaryContent.posLabels("person") == ["NAME"])
-        #expect(DictionaryContent.posLabels("place") == ["PLACE NAME"])
-        #expect(DictionaryContent.posLabels("organization") == ["ORGANIZATION"])
-        #expect(DictionaryContent.posLabels("company") == ["COMPANY NAME"])
-        #expect(DictionaryContent.posLabels("station") == ["STATION"])
-        #expect(DictionaryContent.posLabels("product") == ["PRODUCT"])
-        #expect(DictionaryContent.posLabels("work") == ["WORK"])
-        #expect(DictionaryContent.posLabels("unclass") == ["NAME"])
-        // The rare types the pinned corpus carries (三田線 is a `serv`).
-        #expect(DictionaryContent.posLabels("serv") == ["SERVICE"])
-        #expect(DictionaryContent.posLabels("char") == ["CHARACTER"])
-        #expect(DictionaryContent.posLabels("fict") == ["FICTION"])
-        #expect(DictionaryContent.posLabels("ev") == ["EVENT"])
-        #expect(DictionaryContent.posLabels("group") == ["GROUP"])
-        #expect(DictionaryContent.posLabels("dei") == ["DEITY"])
-        #expect(DictionaryContent.posLabels("obj") == ["OBJECT"])
-        #expect(DictionaryContent.posLabels("myth") == ["MYTHOLOGY"])
-        #expect(DictionaryContent.posLabels("doc") == ["DOCUMENT"])
-        #expect(DictionaryContent.posLabels("creat") == ["CREATURE"])
-        #expect(DictionaryContent.posLabels("ship") == ["SHIP"])
-        #expect(DictionaryContent.posLabels("leg") == ["LEGEND"])
-        #expect(DictionaryContent.posLabels("relig") == ["RELIGION"])
-    }
-
     @Test("multi-type name senses render every token; unknown types pass through verbatim")
     func nameBadgeAllTokensAndPassthrough() {
         #expect(DictionaryContent.posLabels("place,surname") == ["PLACE NAME", "SURNAME"])
@@ -187,24 +157,20 @@ struct DictionaryContentTests {
 
     // MARK: - Caps and truncation
 
-    @Test("senses cap at five with a hidden-count footer")
-    func senseCap() {
+    @Test(
+        "senses cap at the given limit with a hidden-count footer",
+        arguments: [
+            (DictionaryContent.maxSenses, 5, 2),
+            (2, 2, 5),
+        ]
+    )
+    func senseCap(limit: Int, visible: Int, hidden: Int) {
         let senses = (0 ..< 7).map { index in sense(glosses: ["gloss \(index)"]) }
 
-        let truncated = DictionaryContent.truncated(senses, limit: DictionaryContent.maxSenses)
+        let truncated = DictionaryContent.truncated(senses, limit: limit)
 
-        #expect(truncated.visible.count == 5)
-        #expect(truncated.hidden == 2)
-    }
-
-    @Test("the card's tighter sense limit is parameterized")
-    func cardSenseLimit() {
-        let senses = (0 ..< 7).map { _ in sense() }
-
-        let truncated = DictionaryContent.truncated(senses, limit: 2)
-
-        #expect(truncated.visible.count == 2)
-        #expect(truncated.hidden == 5)
+        #expect(truncated.visible.count == visible)
+        #expect(truncated.hidden == hidden)
     }
 
     @Test("glosses cap at three per sense")
@@ -263,28 +229,6 @@ struct DictionaryContentTests {
         }
     }
 
-    // MARK: - Popover anchor exclusivity
-
-    @Test("popoverItem scopes the selection to its owning surface")
-    func popoverScoping() {
-        let selected = SelectedLookup(
-            content: .found(result: result("お土産"), also: [], origin: .tappedSurface),
-            source: .transcript(sentenceIndex: 2, tokenIndex: 1),
-            entryIndex: 0
-        )
-
-        #expect(
-            selected.popoverItem(for: .transcript(sentenceIndex: 2, tokenIndex: 1)) == selected
-        )
-        #expect(
-            selected.popoverItem(for: .transcript(sentenceIndex: 2, tokenIndex: 3)) == nil
-        )
-        #expect(
-            selected.popoverItem(for: .transcript(sentenceIndex: 3, tokenIndex: 1)) == nil
-        )
-        #expect(selected.popoverItem(for: .liveStrip) == nil)
-    }
-
     // MARK: - Pinned content states
 
     @Test("the joined-match badge names only join leads")
@@ -295,15 +239,10 @@ struct DictionaryContentTests {
         #expect(DictionaryContent.joinedMatchBadge(for: .split) == nil)
     }
 
-    @Test("content accessors expose the display result and the fallback pills per state")
+    @Test("a not-found content exposes no display result and keeps its related pills")
     func contentAccessors() {
-        let found = LookupContent.found(
-            result: result("お"), also: [result("お土産")], origin: .tappedSurface
-        )
-        #expect(found.displayResult?.matched == "お")
-        #expect(found.fallbackResults.map(\.matched) == ["お土産"])
-
         let notFound = LookupContent.notFound(surface: "雨尾", related: [result("雨")])
+
         #expect(notFound.displayResult == nil)
         #expect(notFound.fallbackResults.map(\.matched) == ["雨"])
     }

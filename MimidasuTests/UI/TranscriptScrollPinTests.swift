@@ -191,10 +191,17 @@ struct TranscriptScrollPinTests {
         #expect(!tick.pinnedAfter)
     }
 
-    @Test("only the live feed's newest row fades in")
-    func onlyTheNewestLiveRowFadesIn() {
-        #expect(TranscriptScrollPin.rowFadesIn(in: .live, isNewest: true))
-        #expect(!TranscriptScrollPin.rowFadesIn(in: .live, isNewest: false))
+    @Test(
+        "only the live feed's newest row fades in",
+        arguments: [
+            (TranscriptScrollPin.Mode.live, true, true),
+            (.live, false, false),
+            (.archive, true, false),
+            (.archive, false, false),
+        ]
+    )
+    func rowFadeMapping(mode: TranscriptScrollPin.Mode, isNewest: Bool, expected: Bool) {
+        #expect(TranscriptScrollPin.rowFadesIn(in: mode, isNewest: isNewest) == expected)
     }
 }
 
@@ -225,12 +232,6 @@ struct TranscriptScrollPinArchiveTests {
     func onlyTheLiveFeedFollowsTheTail() {
         #expect(TranscriptScrollPin.followsTail(in: .live))
         #expect(!TranscriptScrollPin.followsTail(in: .archive))
-    }
-
-    @Test("no record row fades in, newest included")
-    func noRecordRowFadesIn() {
-        #expect(!TranscriptScrollPin.rowFadesIn(in: .archive, isNewest: true))
-        #expect(!TranscriptScrollPin.rowFadesIn(in: .archive, isNewest: false))
     }
 
     @Test("the pin and the tail follow the same mode")
@@ -288,175 +289,21 @@ struct TranscriptScrollPinArchiveTests {
         #expect(!tick.pinnedAfter)
     }
 
-    @Test("a record's down button is offered only while there is content below")
-    func archiveDownButtonFollowsTheContentBelow() {
-        // Flush with the bottom: there is no newer sentence to jump to.
-        #expect(
-            !TranscriptScrollPin.visibility(
-                pinned: false, snapshot: snapshot(offsetY: 600), mode: .archive
-            ).down
-        )
-        // Mid-record: the newest sentence is still below the viewport.
-        #expect(
-            TranscriptScrollPin.visibility(
-                pinned: false, snapshot: snapshot(offsetY: 300), mode: .archive
-            ).down
-        )
-    }
-
-    @Test("a record's down button is offered by the content, not by the pin")
-    func archiveDownButtonIgnoresThePin() {
-        // A record's pin is always released, so the pin must not decide
-        // whether the button is offered.
-        #expect(
-            !TranscriptScrollPin.visibility(
-                pinned: true, snapshot: snapshot(offsetY: 600), mode: .archive
-            ).down
-        )
-        #expect(
-            TranscriptScrollPin.visibility(
-                pinned: true, snapshot: snapshot(offsetY: 300), mode: .archive
-            ).down
-        )
-    }
-
-    // MARK: - The pending top jump
-
-    @Test("the pending jump settles at the content top")
-    func topJumpSettlesAtTheTop() {
-        let decision = TranscriptScrollPin.topJump(
-            old: snapshot(offsetY: 300),
-            new: snapshot(offsetY: 0),
-            jumpInFlight: false
+    @Test(
+        "a record's down button is offered by the content below, not by the pin",
+        arguments: [
+            (false, CGFloat(600), false),
+            (false, CGFloat(300), true),
+            (true, CGFloat(600), false),
+            (true, CGFloat(300), true),
+        ]
+    )
+    func archiveDownButtonFollowsTheContentBelow(pinned: Bool, offsetY: CGFloat, down: Bool) {
+        let visibility = TranscriptScrollPin.visibility(
+            pinned: pinned, snapshot: snapshot(offsetY: offsetY), mode: .archive
         )
 
-        #expect(decision == .settled)
-    }
-
-    @Test("the reader's scroll away from the top cancels the pending jump")
-    func topJumpIsCancelledByTheReader() {
-        // The content grew in the same tick, but the reader moved first:
-        // their place wins over the jump.
-        let decision = TranscriptScrollPin.topJump(
-            old: snapshot(offsetY: 300),
-            new: snapshot(offsetY: 420, contentHeight: 1200),
-            jumpInFlight: false
-        )
-
-        #expect(decision == .cancelled)
-    }
-
-    @Test("the reader's scroll up cancels the pending jump too")
-    func topJumpIsCancelledByAnUpwardScroll() {
-        // Heading for the oldest sentence is still the reader's own move:
-        // the jump must not pull them the rest of the way.
-        let decision = TranscriptScrollPin.topJump(
-            old: snapshot(offsetY: 300),
-            new: snapshot(offsetY: 260),
-            jumpInFlight: false
-        )
-
-        #expect(decision == .cancelled)
-    }
-
-    @Test("the content swap's clamping is not the reader's move")
-    func topJumpSurvivesTheSwapClamp() {
-        // A record shorter than the live feed pulls the offset up as the
-        // rows land: that is the swap's clamping, so the jump is still owed.
-        let decision = TranscriptScrollPin.topJump(
-            old: snapshot(offsetY: 300),
-            new: snapshot(offsetY: 40, contentHeight: 500),
-            jumpInFlight: false
-        )
-
-        #expect(decision == .retry)
-    }
-
-    @Test("the reader's scroll up wins even while the content grows")
-    func topJumpIsCancelledByAnUpwardScrollOverGrowth() {
-        // Growing content never pulls the offset up, so an offset that
-        // moved up while the content grew is the reader's own move.
-        let decision = TranscriptScrollPin.topJump(
-            old: snapshot(offsetY: 300),
-            new: snapshot(offsetY: 120, contentHeight: 1200),
-            jumpInFlight: false
-        )
-
-        #expect(decision == .cancelled)
-    }
-
-    @Test("the jump's flush landing settles even while it is in flight")
-    func topJumpSettlesWhileInFlight() {
-        let decision = TranscriptScrollPin.topJump(
-            old: snapshot(offsetY: 300),
-            new: snapshot(offsetY: 0),
-            jumpInFlight: true
-        )
-
-        #expect(decision == .settled)
-    }
-
-    @Test("the reader's scroll down wins over the jump in flight")
-    func topJumpIsCancelledByTheReaderOverTheJumpInFlight() {
-        // The reader's move is the only thing that moves the offset down:
-        // it is theirs even while the jump is on its way.
-        let decision = TranscriptScrollPin.topJump(
-            old: snapshot(offsetY: 300),
-            new: snapshot(offsetY: 420),
-            jumpInFlight: true
-        )
-
-        #expect(decision == .cancelled)
-    }
-
-    @Test("a move below the tolerance leaves the pending jump alone")
-    func topJumpIgnoresAMoveBelowTheTolerance() {
-        // A move within the settle epsilon is not the reader taking over:
-        // the pending jump stays as it is.
-        let decision = TranscriptScrollPin.topJump(
-            old: snapshot(offsetY: 300),
-            new: snapshot(offsetY: 301.5),
-            jumpInFlight: false
-        )
-
-        #expect(decision == .none)
-    }
-
-    @Test("the jump counts as settled exactly at the settle epsilon")
-    func topJumpSettlesAtExactlyTheEpsilon() {
-        let decision = TranscriptScrollPin.topJump(
-            old: snapshot(offsetY: 300),
-            new: snapshot(offsetY: TranscriptScrollPin.settleEpsilon),
-            jumpInFlight: true
-        )
-
-        #expect(decision == .settled)
-    }
-
-    @Test("the top distance counts the viewport inset")
-    func topJumpSettlesWithAnInset() {
-        // At the content top the raw offset is the negative inset, so the
-        // jump must not read it as a short landing.
-        let decision = TranscriptScrollPin.topJump(
-            old: snapshot(offsetY: 300),
-            new: snapshot(offsetY: -20, insetTop: 20),
-            jumpInFlight: true
-        )
-
-        #expect(decision == .settled)
-    }
-
-    @Test("a small upward settle under growth leaves the jump owed")
-    func topJumpRetriesOnGrowthWithASmallUpwardMove() {
-        // The offset moved up less than the epsilon while the content grew:
-        // that is layout, not the reader, so the jump is still owed.
-        let decision = TranscriptScrollPin.topJump(
-            old: snapshot(offsetY: 300),
-            new: snapshot(offsetY: 298.5, contentHeight: 1200),
-            jumpInFlight: false
-        )
-
-        #expect(decision == .retry)
+        #expect(visibility.down == down)
     }
 
     @Test("a record hides both buttons before its first tick")
@@ -469,35 +316,78 @@ struct TranscriptScrollPinArchiveTests {
         #expect(!visibility.down)
     }
 
-    @Test("content growth under a reader who has not moved retries the jump")
-    func topJumpRetriesOnGrowth() {
+    // MARK: - The pending top jump
+
+    @Test(
+        "the pending jump settles flush at the content top, epsilon and inset included",
+        arguments: [
+            (300, 0, 1000, false, 0),
+            (300, 0, 1000, true, 0),
+            (300, TranscriptScrollPin.settleEpsilon, 1000, true, 0),
+            (300, -20, 1000, true, 20),
+        ]
+    )
+    func topJumpSettlesAtTheTop(
+        oldOffset: CGFloat, newOffset: CGFloat, contentHeight: CGFloat,
+        jumpInFlight: Bool, insetTop: CGFloat
+    ) {
+        let decision = TranscriptScrollPin.topJump(
+            old: snapshot(offsetY: oldOffset),
+            new: snapshot(offsetY: newOffset, contentHeight: contentHeight, insetTop: insetTop),
+            jumpInFlight: jumpInFlight
+        )
+
+        #expect(decision == .settled)
+    }
+
+    @Test(
+        "the reader's own scroll outranks the pending jump, in flight or not",
+        arguments: [
+            (420, 1200, false),
+            (420, 1000, true),
+            (260, 1000, false),
+            (120, 1200, false),
+        ]
+    )
+    func topJumpIsCancelledByTheReader(
+        newOffset: CGFloat, contentHeight: CGFloat, jumpInFlight: Bool
+    ) {
         let decision = TranscriptScrollPin.topJump(
             old: snapshot(offsetY: 300),
-            new: snapshot(offsetY: 300, contentHeight: 1200),
-            jumpInFlight: false
+            new: snapshot(offsetY: newOffset, contentHeight: contentHeight),
+            jumpInFlight: jumpInFlight
+        )
+
+        #expect(decision == .cancelled)
+    }
+
+    @Test(
+        "the jump stays owed after its own short landing or a content move",
+        arguments: [
+            (40, 500, false),
+            (300, 1200, false),
+            (298.5, 1200, false),
+            (40, 1000, true),
+        ]
+    )
+    func topJumpRetriesWhileOwed(newOffset: CGFloat, contentHeight: CGFloat, jumpInFlight: Bool) {
+        let decision = TranscriptScrollPin.topJump(
+            old: snapshot(offsetY: 300),
+            new: snapshot(offsetY: newOffset, contentHeight: contentHeight),
+            jumpInFlight: jumpInFlight
         )
 
         #expect(decision == .retry)
     }
 
-    @Test("the jump's own short landing leaves the retry owed")
-    func topJumpRetriesAfterAShortLanding() {
-        // The jump fired and the viewport is still below the content top:
-        // the movement there is the jump's, not the reader's.
+    @Test(
+        "a tick that moves less than the epsilon leaves the pending jump alone",
+        arguments: [301.5, 300]
+    )
+    func topJumpStaysPendingWhenNothingMoves(newOffset: CGFloat) {
         let decision = TranscriptScrollPin.topJump(
             old: snapshot(offsetY: 300),
-            new: snapshot(offsetY: 40),
-            jumpInFlight: true
-        )
-
-        #expect(decision == .retry)
-    }
-
-    @Test("a tick that moves nothing leaves the pending jump alone")
-    func topJumpStaysPendingWhenNothingMoves() {
-        let decision = TranscriptScrollPin.topJump(
-            old: snapshot(offsetY: 300),
-            new: snapshot(offsetY: 300),
+            new: snapshot(offsetY: newOffset),
             jumpInFlight: false
         )
 

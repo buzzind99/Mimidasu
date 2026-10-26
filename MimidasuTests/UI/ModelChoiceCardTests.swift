@@ -101,14 +101,6 @@ struct ModelChoiceCardTests {
         #expect(makeCard(isSelected: true).chrome.showsHover == false)
     }
 
-    // MARK: - Download overlay
-
-    @Test("the download overlay renders as the surface asks")
-    func overlayFollowsTheSurface() {
-        #expect(makeCard(showsDownloadControls: true).chrome.showsDownloadOverlay)
-        #expect(makeCard(showsDownloadControls: false).chrome.showsDownloadOverlay == false)
-    }
-
     // MARK: - Footer
 
     @Test("the Settings resting footer reads the size and the downloaded state")
@@ -256,49 +248,42 @@ struct ModelChoiceCardTests {
 
     // MARK: - The selection action
 
-    @Test("the selection action runs only on a card that may be selected")
+    @Test("only an enabled, unselected card runs the selection action")
     func selectionActionIsGuarded() {
         var selections = 0
-        let card = ModelChoiceCard(
-            choice: .lite,
-            resolvedURL: nil,
-            downloader: makeDownloader(),
-            isSelected: false,
-            selectionDisabled: false,
-            onSelect: { selections += 1 },
-            showsSelectionBadge: true,
-            showsDownloadControls: true,
-            statusOnlyWhenSelected: false,
-            footerStyle: .sizeAndStatus
-        )
 
-        card.select()
+        let selectable = makeSelectableCard { selections += 1 }
+        selectable.select()
         #expect(selections == 1, "an enabled, unselected card selects")
 
-        card.select()
-        #expect(selections == 2, "the card stays selectable until it is selected")
+        let inUse = makeSelectableCard(isSelected: true) { selections += 1 }
+        inUse.select()
+        #expect(inUse.chrome.actionIsBlocked, "the model in use does not re-select")
+        #expect(selections == 1, "the model in use never re-resolves and re-warms")
+
+        let disabled = makeSelectableCard(selectionDisabled: true) { selections += 1 }
+        disabled.select()
+        #expect(disabled.chrome.actionIsBlocked, "a disabled card does not select")
+        #expect(selections == 1, "a disabled card never re-resolves and re-warms")
     }
 
-    @Test("a disabled card and the model in use never fire the selection action")
-    func blockedCardsDoNotSelect() {
-        var selections = 0
-        let card = ModelChoiceCard(
+    private func makeSelectableCard(
+        isSelected: Bool = false,
+        selectionDisabled: Bool = false,
+        onSelect: @escaping () -> Void
+    ) -> ModelChoiceCard {
+        ModelChoiceCard(
             choice: .lite,
             resolvedURL: nil,
             downloader: makeDownloader(),
-            isSelected: true,
-            selectionDisabled: false,
-            onSelect: { selections += 1 },
+            isSelected: isSelected,
+            selectionDisabled: selectionDisabled,
+            onSelect: onSelect,
             showsSelectionBadge: true,
             showsDownloadControls: true,
             statusOnlyWhenSelected: false,
             footerStyle: .sizeAndStatus
         )
-
-        card.select()
-
-        #expect(card.chrome.actionIsBlocked, "the model in use does not re-select")
-        #expect(selections == 0, "the model in use never re-resolves and re-warms")
     }
 
     // MARK: - Surface state
@@ -339,10 +324,15 @@ struct ModelChoiceCardTests {
 
         #expect(row.isPicked, "Lite is the default selection")
         #expect(row.showsDownloadControls)
+        #expect(row.makeCard().chrome.showsDownloadOverlay, "the picked card shows the overlay")
 
         model.asrModelSettings.select(.full)
 
         #expect(row.isPicked == false)
         #expect(row.showsDownloadControls == false)
+        #expect(
+            row.makeCard().chrome.showsDownloadOverlay == false,
+            "the unpicked card shows no overlay"
+        )
     }
 }

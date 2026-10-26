@@ -408,25 +408,6 @@ struct DictionarySearchStateTests {
         #expect(state.canLoadMore == false)
     }
 
-    @Test("a filter press starts one page deep again")
-    func filterChangeResetsTheDepth() async throws {
-        let fixture = try makePagedState(count: 120)
-        let state = fixture.state
-
-        state.query = "かん"
-        #expect(await pollUntil { state.visibleHits.count == DictionarySearchEngine.pageSize })
-        state.loadMore()
-        #expect(state.visibleLimit == DictionarySearchEngine.pageSize * 2)
-
-        // The depth belonged to the unfiltered answer: the filtered search
-        // starts one page deep, like a new query, instead of running a
-        // 100-row scan and showing 100 rows.
-        state.apply(.toggleCommonOnly)
-        #expect(state.visibleLimit == DictionarySearchEngine.pageSize)
-        #expect(await pollUntil { state.outcome.hits.allSatisfy { hit in hit.common } && state.isSearching == false })
-        #expect(state.outcome.hits.isEmpty == false)
-    }
-
     @Test("paging stops at the ceiling and says to refine instead")
     func pagingStopsAtTheCeiling() async throws {
         let pageSize = DictionarySearchEngine.pageSize
@@ -467,21 +448,6 @@ struct DictionarySearchStateTests {
         // answer now, so the `+` and the button are both gone.
         #expect(state.countText == "42 / 42")
         #expect(state.canLoadMore == false)
-    }
-
-    @Test("entering Names clears COMMON")
-    func namesScopeDropsCommonOnly() throws {
-        let fixture = try makeState()
-        let state = fixture.state
-
-        state.apply(.toggleCommonOnly)
-        state.apply(.setScope(.names))
-
-        // The filter pair answers zero rows by construction (no JMnedict entry
-        // is marked common) and the chip is disabled in that scope, so a state
-        // that kept the flag would be stuck behind chrome that cannot clear it.
-        #expect(state.filters.commonOnly == false)
-        #expect(state.filters.scope == .names)
     }
 
     @Test("the close resets the depth a query was paged to")

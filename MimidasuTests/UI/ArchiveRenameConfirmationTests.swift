@@ -28,41 +28,35 @@ struct ArchiveRenameConfirmationTests {
         )
     }
 
-    @Test("a request prefills the draft with the session's name")
-    func requestPrefillsTheDraft() {
+    @Test(
+        "a request prefills the draft with the session's name, or leaves it empty",
+        arguments: [
+            (Optional("Lecture"), "Lecture"),
+            (nil, ""),
+        ]
+    )
+    func requestPrefillsTheDraft(name: String?, expected: String) {
         let state = ArchiveWindowState()
 
-        state.requestRename(summary(name: "Lecture"))
+        state.requestRename(summary(name: name))
 
-        #expect(state.renameDraft == "Lecture")
+        #expect(state.renameDraft == expected)
         #expect(state.pendingRename?.id == 7)
     }
 
-    @Test("an auto-titled session opens the question with an empty draft")
-    func requestPrefillsAnEmptyDraft() {
+    @Test(
+        "the stored name is trimmed, and a blank draft clears it back to the auto-title",
+        arguments: [
+            ("  Lecture  ", Optional("Lecture")),
+            ("   ", nil),
+        ]
+    )
+    func storedNameIsTrimmed(draft: String, expected: String?) {
         let state = ArchiveWindowState()
 
-        state.requestRename(summary(name: nil))
+        state.renameDraft = draft
 
-        #expect(state.renameDraft.isEmpty)
-    }
-
-    @Test("the stored name is trimmed")
-    func theStoredNameIsTrimmed() {
-        let state = ArchiveWindowState()
-
-        state.renameDraft = "  Lecture  "
-
-        #expect(state.renameValue == "Lecture")
-    }
-
-    @Test("an empty draft clears the name back to the auto-title")
-    func anEmptyDraftClearsTheName() {
-        let state = ArchiveWindowState()
-
-        state.renameDraft = "   "
-
-        #expect(state.renameValue == nil)
+        #expect(state.renameValue == expected)
     }
 }
 
@@ -178,24 +172,9 @@ struct ArchiveRenameConfirmationActionTests {
 @Suite("Archive language badge")
 struct ArchiveLanguageBadgeTests {
 
-    @Test("the badge is the uppercase primary subtag")
-    func badgeIsThePrimarySubtag() {
-        #expect(LanguageBadge.code(for: "en") == "EN")
-        #expect(LanguageBadge.code(for: "zh-Hans") == "ZH")
-    }
-
-    @Test("an unknown code keeps its own badge")
+    @Test("an unknown code keeps its own badge, never the target-language fallback")
     func unknownCodeKeepsItsOwnBadge() {
         #expect(LanguageBadge.code(for: "xx") == "XX")
-        #expect(
-            TargetLanguage(code: "xx").code == "en",
-            "the target-language table falls back to English — the badge must not"
-        )
-    }
-
-    @Test("an archive chip's badge follows the same rule")
-    func chipBadgeFollowsTheSameRule() {
-        #expect(ArchiveLanguageCount(lang: "zh-Hans", translated: 0).badgeCode == "ZH")
         #expect(ArchiveLanguageCount(lang: "xx", translated: 0).badgeCode == "XX")
     }
 }
@@ -206,19 +185,17 @@ struct ArchiveLanguageBadgeTests {
 @Suite("Archive language chip accessibility")
 struct ArchiveLanguageChipAccessibilityTests {
 
-    @Test("the idle chip reads its counts")
-    func idleChipReadsItsCounts() {
-        #expect(
-            ArchiveLanguageCount(lang: "fr", translated: 40)
-                .accessibilityText(of: 183, busy: false) == "FR 40/183"
-        )
-    }
+    @Test(
+        "the chip reads its counts, plus the translating note while a run claims it",
+        arguments: [
+            (false, "FR 40/183"),
+            (true, "FR 40/183, translating")
+        ]
+    )
+    func chipReadsItsCounts(busy: Bool, expected: String) {
+        let text = ArchiveLanguageCount(lang: "fr", translated: 40)
+            .accessibilityText(of: 183, busy: busy)
 
-    @Test("a busy chip adds the translating note")
-    func busyChipAddsTheTranslatingNote() {
-        #expect(
-            ArchiveLanguageCount(lang: "fr", translated: 40)
-                .accessibilityText(of: 183, busy: true) == "FR 40/183, translating"
-        )
+        #expect(text == expected)
     }
 }

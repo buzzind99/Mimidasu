@@ -84,6 +84,7 @@ struct DictionarySearchFilterStateTests {
         fixture.state.apply(.setScope(.names))
 
         #expect(fixture.state.filters.commonOnly == false)
+        #expect(fixture.state.filters.scope == .names)
     }
 
     @Test("a filter press re-pages to the first page")
@@ -107,6 +108,8 @@ struct DictionarySearchFilterStateTests {
             await pollUntil { state.outcome.matchedCount == 40 && state.isSearching == false },
             "the filtered search lands its exact total"
         )
+        #expect(state.outcome.hits.allSatisfy { hit in hit.common })
+        #expect(state.outcome.hits.isEmpty == false)
         #expect(state.outcome.isFloor == false)
     }
 }
