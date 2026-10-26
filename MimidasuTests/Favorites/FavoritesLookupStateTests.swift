@@ -77,7 +77,7 @@ struct FavoritesLookupStateTests {
         })
     }
 
-    @Test("reset collapses an expanded row")
+    @Test("reset collapses an expanded row, idles its phase, and lets it expand again")
     func resetCollapsesExpandedRow() {
         let sut = state()
         sut.toggle(word)
@@ -85,36 +85,14 @@ struct FavoritesLookupStateTests {
         sut.reset()
 
         #expect(!sut.isExpanded(word))
-    }
-
-    @Test("reset returns an expanded row's phase to idle")
-    func resetClearsPhase() {
-        let sut = state()
-        sut.toggle(word)
-
-        sut.reset()
-
         #expect(sut.phase(for: word) == .idle)
-    }
-
-    @Test("a row expands again after a reset")
-    func rowExpandsAfterReset() {
-        let sut = state()
-        sut.toggle(word)
-        sut.reset()
 
         sut.toggle(word)
-
         #expect(sut.isExpanded(word))
-    }
 
-    @Test("reset leaves a never-expanded row alone")
-    func resetLeavesCollapsedRowAlone() {
-        let sut = state()
-
-        sut.reset()
-
-        #expect(sut.phase(for: word) == .idle)
+        let fresh = state()
+        fresh.reset()
+        #expect(fresh.phase(for: word) == .idle)
     }
 
     @Test("removing a deleted row's headword drops its expansion and phase")

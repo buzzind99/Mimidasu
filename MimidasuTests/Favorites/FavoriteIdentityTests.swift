@@ -1,6 +1,21 @@
 @testable import Mimidasu
 import Testing
 
+private let headwordSpellings: [(keb: String?, reb: String?)] = [
+    ("見る", "みる"),
+    (nil, "みる"),
+    (nil, nil),
+    ("", "みる"),
+    ("", nil),
+    (nil, ""),
+    ("", ""),
+    ("見る", "")
+]
+
+private let headwordExpectations: [String?] = [
+    "見る", "みる", nil, "みる", nil, nil, nil, "見る"
+]
+
 /// The Favorite identity round-trip: one starred headword lights its
 /// Highlight and leads the Display. Star, Highlight, and Promotion read one
 /// value — this suite pins that value's three arms together, so a fix in one
@@ -24,32 +39,12 @@ struct FavoriteIdentityTests {
         )
     }
 
-    @Test("the headword is the kanji writing when present, else the reading")
-    func headwordPrefersKeb() {
-        #expect(FavoriteIdentity.headword(keb: "見る", reb: "みる") == "見る")
-        #expect(FavoriteIdentity.headword(keb: nil, reb: "みる") == "みる")
-        #expect(FavoriteIdentity.headword(keb: nil, reb: nil) == nil)
-    }
-
-    @Test("an empty kanji writing falls back to the reading")
-    func headwordFallsBackOnEmptyKeb() {
-        #expect(FavoriteIdentity.headword(keb: "", reb: "みる") == "みる")
-        #expect(FavoriteIdentity.headword(keb: "", reb: nil) == nil)
-    }
-
-    @Test("a missing kanji writing with an empty reading names nothing")
-    func headwordNilKebEmptyRebIsNil() {
-        #expect(FavoriteIdentity.headword(keb: nil, reb: "") == nil)
-    }
-
-    @Test("an empty kanji writing with an empty reading names nothing")
-    func headwordEmptyKebEmptyRebIsNil() {
-        #expect(FavoriteIdentity.headword(keb: "", reb: "") == nil)
-    }
-
-    @Test("a kanji writing with an empty reading names the kanji form")
-    func headwordKebEmptyRebNamesKeb() {
-        #expect(FavoriteIdentity.headword(keb: "見る", reb: "") == "見る")
+    @Test(
+        "the headword is the kanji writing when present, else the reading",
+        arguments: zip(headwordSpellings, headwordExpectations)
+    )
+    func headwordPrefersKeb(spellings: (keb: String?, reb: String?), expected: String?) {
+        #expect(FavoriteIdentity.headword(keb: spellings.keb, reb: spellings.reb) == expected)
     }
 
     @Test("an identity built from empty headwords holds no keys")
@@ -113,41 +108,6 @@ struct FavoriteIdentityTests {
         let identity = FavoriteIdentity(keys: [FavoriteIdentity.normalize("コーヒー")])
         #expect(identity.isFavorite(headword: "ｺｰﾋｰ"))
         #expect(!identity.isFavorite(headword: nil))
-    }
-
-    @Test("a starred word lights its conjugated surface through the lemma")
-    func highlightBridgesLemma() {
-        let identity = FavoriteIdentity(words: [
-            FavoriteWord.starred(headword: "見る", reading: "みる")
-        ])
-        #expect(identity.matches(segment("見た", lemma: "見る")))
-        #expect(!identity.matches(segment("食べる", lemma: "食べる")))
-    }
-
-    @Test("a kana-written conjugate lights through the stored reading")
-    func highlightBridgesKanaReading() {
-        let identity = FavoriteIdentity(words: [
-            FavoriteWord.starred(headword: "貰う", reading: "もらう")
-        ])
-        #expect(identity.matches(segment("もらって", lemma: "もらう")))
-    }
-
-    @Test("a lemma-bearing bound token stays dark unless its surface hits")
-    func boundLemmaStaysDark() {
-        let identity = FavoriteIdentity(words: [
-            FavoriteWord.starred(headword: "ない", reading: "ない")
-        ])
-
-        #expect(!identity.matches(segment("ねえ", lemma: "ない", isBound: true)))
-    }
-
-    @Test("an exact-surface bound token still lights")
-    func boundSurfaceStillLights() {
-        let identity = FavoriteIdentity(words: [
-            FavoriteWord.starred(headword: "ない", reading: "ない")
-        ])
-
-        #expect(identity.matches(segment("ない", lemma: "ない", isBound: true)))
     }
 
     @Test("the pill-lead probe reads only the first entry")

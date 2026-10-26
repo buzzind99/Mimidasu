@@ -65,34 +65,16 @@ struct FavoritesStoreTests {
 
     // MARK: - Membership
 
-    @Test("adding a word records it")
+    @Test("adding a word records it, publishes its headword, and bumps the revision")
     func addRecordsWord() {
-        let (store, cleanup) = makeStore()
-        defer { cleanup() }
-
-        store.toggle(Self.miru)
-
-        #expect(store.count == 1)
-    }
-
-    @Test("adding a word publishes its headword")
-    func addPublishesHeadword() {
-        let (store, cleanup) = makeStore()
-        defer { cleanup() }
-
-        store.toggle(Self.miru)
-
-        #expect(store.words.map(\.headword) == ["見る"])
-    }
-
-    @Test("adding a word bumps the revision the transcript repaints on")
-    func addBumpsRevision() {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
         let before = store.revision
 
         store.toggle(Self.miru)
 
+        #expect(store.count == 1)
+        #expect(store.words.map(\.headword) == ["見る"])
         #expect(store.revision > before)
     }
 
@@ -198,21 +180,13 @@ struct FavoritesStoreTests {
         #expect(store.matches(segment: segment("ありがとう")))
     }
 
-    @Test("a kanji surface stays dark for a favorite sharing only its reading")
-    func kanjiSurfaceStaysDark() {
-        let (store, cleanup) = makeStore()
-        defer { cleanup() }
-        store.toggle(Self.oi)
-
-        #expect(!store.matches(segment: segment("置く", lemma: "置く", furigana: "おく")))
-    }
-
-    @Test("the same favorite lights up its own kana spelling")
+    @Test("a favorite lights its own kana spelling but stays dark for a kanji surface")
     func kanaSpellingMatches() {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
         store.toggle(Self.oi)
 
+        #expect(!store.matches(segment: segment("置く", lemma: "置く", furigana: "おく")))
         #expect(store.matches(segment: segment("おい")))
     }
 
@@ -237,7 +211,7 @@ struct FavoritesStoreTests {
 
     // MARK: - Persistence
 
-    @Test("a second store over the same file sees the rows")
+    @Test("a second store over the same file sees the rows and matches them")
     func persistsAcrossInstances() {
         let (location, cleanup) = makeLocation()
         defer { cleanup() }
@@ -245,15 +219,6 @@ struct FavoritesStoreTests {
         let reopened = FavoritesStore(location: location)
 
         #expect(reopened.words.map(\.headword) == ["見る"])
-    }
-
-    @Test("a reloaded store matches the same segments")
-    func persistsMatchKeys() {
-        let (location, cleanup) = makeLocation()
-        defer { cleanup() }
-        FavoritesStore(location: location).toggle(Self.miru)
-        let reopened = FavoritesStore(location: location)
-
         #expect(reopened.matches(segment: segment("見た", lemma: "見る")))
     }
 
@@ -301,46 +266,34 @@ struct FavoritesStoreTests {
         #expect(store.words.map(\.headword) == ["50%", "食べる", "見る"])
     }
 
-    @Test("two stars in the same millisecond order by headword, as the file orders them")
+    @Test("two stars in the same millisecond order by headword and read back in that order")
     func sameTimestampOrdersByHeadword() {
-        let (store, cleanup) = makeStore()
+        let (location, cleanup) = makeLocation()
         defer { cleanup() }
+        let store = FavoritesStore(location: location)
 
         store.toggle(FavoriteWord(headword: "そら", reading: nil, romaji: nil, addedAt: 500))
         store.toggle(FavoriteWord(headword: "あめ", reading: nil, romaji: nil, addedAt: 500))
 
         #expect(store.words.map(\.headword) == ["あめ", "そら"])
-    }
-
-    @Test("same-timestamp kana words read back in the order shown")
-    func sameTimestampKanaMatchesReopenedOrder() {
-        let (location, cleanup) = makeLocation()
-        defer { cleanup() }
-        let store = FavoritesStore(location: location)
-        store.toggle(FavoriteWord(headword: "そら", reading: nil, romaji: nil, addedAt: 500))
-        store.toggle(FavoriteWord(headword: "あめ", reading: nil, romaji: nil, addedAt: 500))
-
-        let reopened = FavoritesStore(location: location)
-
-        #expect(store.words.map(\.headword) == reopened.words.map(\.headword))
+        #expect(FavoritesStore(location: location).words.map(\.headword) == ["あめ", "そら"])
     }
 
     // MARK: - Degraded store
 
-    @Test("a store whose file cannot open reports degraded, not merely empty")
+    @Test("a store whose file cannot open degrades every file-backed answer")
     func failedLoadReportsDegraded() {
         // A regular file sitting where the store's directory belongs: the
         // open cannot create its parent, the first read fails, and the store
         // degrades terminally.
-        let blocked = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mimidasu-favorites-blocked-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: blocked) }
-        #expect(FileManager.default.createFile(atPath: blocked.path, contents: nil))
-        let store = FavoritesStore(location: blocked.appendingPathComponent("favorites.sqlite"))
+        let (store, cleanup) = makeDegradedStore()
+        defer { cleanup() }
 
         #expect(store.isDegraded)
         #expect(store.words.isEmpty)
         #expect(store.toggle(Self.miru) == .failed)
+        #expect(store.search("見る").isEmpty)
+        #expect(!store.matches(segment: segment("見た", lemma: "見る")))
     }
 
     // MARK: - Ghost rows
@@ -382,32 +335,17 @@ struct FavoritesStoreTests {
 
     // MARK: - Search
 
-    @Test("search hits the headword")
-    func searchByHeadword() {
+    @Test(
+        "search hits the headword, the kana reading, and the romaji",
+        arguments: [("見る", "見る"), ("みる", "見る"), ("miru", "見る")]
+    )
+    func searchByHeadword(query: String, expectedHeadword: String) {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
         store.toggle(Self.miru)
         store.toggle(Self.taberu)
 
-        #expect(store.search("見る").map(\.headword) == ["見る"])
-    }
-
-    @Test("search hits the kana reading")
-    func searchByReading() {
-        let (store, cleanup) = makeStore()
-        defer { cleanup() }
-        store.toggle(Self.miru)
-
-        #expect(store.search("みる").map(\.headword) == ["見る"])
-    }
-
-    @Test("search hits the romaji")
-    func searchByRomaji() {
-        let (store, cleanup) = makeStore()
-        defer { cleanup() }
-        store.toggle(Self.miru)
-
-        #expect(store.search("miru").map(\.headword) == ["見る"])
+        #expect(store.search(query).map(\.headword) == [expectedHeadword])
     }
 
     @Test("an empty query returns everything")
@@ -462,6 +400,7 @@ struct FavoritesStoreTests {
     func refusesPastTheCap() {
         let (store, cleanup) = makeFullStore()
         defer { cleanup() }
+        let before = store.revision
 
         let outcome = store.toggle(
             FavoriteWord(headword: "overflow", reading: nil, romaji: nil, addedAt: 99999)
@@ -469,18 +408,6 @@ struct FavoritesStoreTests {
 
         #expect(outcome == .limitReached)
         #expect(!store.identity.isFavorite(headword: "overflow"))
-    }
-
-    @Test("a refused add leaves the list at the cap and nothing evicted")
-    func refusalKeepsTheList() {
-        let (store, cleanup) = makeFullStore()
-        defer { cleanup() }
-        let before = store.revision
-
-        store.toggle(
-            FavoriteWord(headword: "overflow", reading: nil, romaji: nil, addedAt: 99999)
-        )
-
         #expect(store.count == FavoritesStore.limit)
         #expect(store.revision == before)
     }
@@ -536,24 +463,6 @@ extension FavoritesStoreTests {
         #expect(umlaut < decomposedRing)
         #expect(store.words.map(\.headword) == [decomposedRing, umlaut])
         #expect(FavoritesStore(location: location).words.map(\.headword) == [decomposedRing, umlaut])
-    }
-
-    @Test("a degraded store searches nothing")
-    func degradedSearchIsEmpty() {
-        let (store, cleanup) = makeDegradedStore()
-        defer { cleanup() }
-
-        #expect(store.isDegraded)
-        #expect(store.search("見る").isEmpty)
-    }
-
-    @Test("a degraded store matches nothing")
-    func degradedMatchesNothing() {
-        let (store, cleanup) = makeDegradedStore()
-        defer { cleanup() }
-
-        #expect(store.isDegraded)
-        #expect(!store.matches(segment: segment("見た", lemma: "見る")))
     }
 
     @Test("a removal at the cap still removes")

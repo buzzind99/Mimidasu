@@ -2,6 +2,104 @@ import Foundation
 @testable import Mimidasu
 import Testing
 
+struct PromotionEntrySpec: Sendable {
+    let keb: String?
+    let reb: String?
+    let seq: Int
+}
+
+/// One promotion-table row: the resolved result, the starred headwords, and
+/// the order the promotion must produce.
+struct PromotionCase: Sendable {
+    let matched: String
+    let entries: [PromotionEntrySpec]
+    let favorites: [String]
+    let expectedEntSeqs: [Int]
+    let expectedKebs: [String]
+    let expectedLeadKeb: String
+}
+
+private let promotePromotionCases: [PromotionCase] = [
+    PromotionCase(
+        matched: "ほう",
+        entries: [
+            PromotionEntrySpec(keb: "方", reb: "ほう", seq: 1),
+            PromotionEntrySpec(keb: "報", reb: "ほう", seq: 2)
+        ],
+        favorites: ["報"],
+        expectedEntSeqs: [2, 1],
+        expectedKebs: ["報", "方"],
+        expectedLeadKeb: "報"
+    ),
+    PromotionCase(
+        matched: "ほう",
+        entries: [
+            PromotionEntrySpec(keb: "方", reb: "ほう", seq: 1),
+            PromotionEntrySpec(keb: "報", reb: "ほう", seq: 2),
+            PromotionEntrySpec(keb: "法", reb: "ほう", seq: 3)
+        ],
+        favorites: ["報"],
+        expectedEntSeqs: [2, 1, 3],
+        expectedKebs: ["報", "方", "法"],
+        expectedLeadKeb: "報"
+    )
+]
+
+private let noOpPromotionCases: [PromotionCase] = [
+    PromotionCase(
+        matched: "方",
+        entries: [
+            PromotionEntrySpec(keb: "方", reb: "ほう", seq: 1),
+            PromotionEntrySpec(keb: "辺", reb: "へ", seq: 2)
+        ],
+        favorites: ["辺"],
+        expectedEntSeqs: [1, 2],
+        expectedKebs: ["方", "辺"],
+        expectedLeadKeb: "方"
+    ),
+    PromotionCase(
+        matched: "方",
+        entries: [
+            PromotionEntrySpec(keb: "方", reb: "ほう", seq: 1),
+            PromotionEntrySpec(keb: "方", reb: "かた", seq: 2)
+        ],
+        favorites: ["方"],
+        expectedEntSeqs: [1, 2],
+        expectedKebs: ["方", "方"],
+        expectedLeadKeb: "方"
+    ),
+    PromotionCase(
+        matched: "使う",
+        entries: [PromotionEntrySpec(keb: "使う", reb: "つかう", seq: 1)],
+        favorites: ["使う"],
+        expectedEntSeqs: [1],
+        expectedKebs: ["使う"],
+        expectedLeadKeb: "使う"
+    ),
+    PromotionCase(
+        matched: "ほう",
+        entries: [
+            PromotionEntrySpec(keb: "方", reb: "ほう", seq: 1),
+            PromotionEntrySpec(keb: "報", reb: "ほう", seq: 2)
+        ],
+        favorites: ["見る"],
+        expectedEntSeqs: [1, 2],
+        expectedKebs: ["方", "報"],
+        expectedLeadKeb: "方"
+    ),
+    PromotionCase(
+        matched: "ほう",
+        entries: [
+            PromotionEntrySpec(keb: "報", reb: "ほう", seq: 1),
+            PromotionEntrySpec(keb: "方", reb: "ほう", seq: 2)
+        ],
+        favorites: ["報"],
+        expectedEntSeqs: [1, 2],
+        expectedKebs: ["報", "方"],
+        expectedLeadKeb: "報"
+    )
+]
+
 /// The rule that makes a favorited entry lead the dictionary pager: pure
 /// reordering of an already-resolved lookup, with no store and no database.
 /// Promotion admits only entries that carry the matched text as a writing or
@@ -32,18 +130,32 @@ struct FavoritesPromotionTests {
         FavoriteIdentity(keys: Set(headwords.map(FavoriteIdentity.normalize)))
     }
 
-    @Test("a favorite sharing the matched reading leads the pager")
-    func promotesFavoriteEntry() {
+    private func result(for testCase: PromotionCase) -> LookupResult {
+        LookupResult(
+            matched: testCase.matched,
+            entries: testCase.entries.map { spec in
+                entry(keb: spec.keb, reb: spec.reb, seq: spec.seq)
+            }
+        )
+    }
+
+    private func favoriteIdentity(_ headwords: [String]) -> FavoriteIdentity {
+        FavoriteIdentity(keys: Set(headwords.map(FavoriteIdentity.normalize)))
+    }
+
+    @Test(
+        "a favorite leads while the surrounding order and matched text survive",
+        arguments: promotePromotionCases
+    )
+    func promotesFavoriteEntry(testCase: PromotionCase) {
         let promoted = FavoritesPromotion.promotingFavorites(
-            in: LookupResult(matched: "ほう", entries: [
-                entry(keb: "方", reb: "ほう", seq: 1),
-                entry(keb: "報", reb: "ほう", seq: 2)
-            ]),
-            identity: identity("報")
+            in: result(for: testCase), identity: favoriteIdentity(testCase.favorites)
         )
 
-        #expect(promoted.entries.map(\.entSeq) == [2, 1])
-        #expect(promoted.entries.map(\.keb) == ["報", "方"])
+        #expect(promoted.entries.map(\.entSeq) == testCase.expectedEntSeqs)
+        #expect(promoted.entries.map(\.keb) == testCase.expectedKebs)
+        #expect(promoted.entries.first?.keb == testCase.expectedLeadKeb)
+        #expect(promoted.matched == testCase.matched)
     }
 
     @Test("a halfwidth-katakana matched text folds onto the favorite's reading")
@@ -59,61 +171,21 @@ struct FavoritesPromotionTests {
         #expect(promoted.entries.map(\.entSeq) == [2, 1])
     }
 
-    @Test("a starred sibling spelling never displaces the matched writing")
-    func doesNotHoistAlternateWritingFavorite() {
-        let original = LookupResult(matched: "方", entries: [
-            entry(keb: "方", reb: "ほう", seq: 1),
-            entry(keb: "辺", reb: "へ", seq: 2)
-        ])
+    @Test(
+        "a result with no eligible favorite comes back untouched",
+        arguments: noOpPromotionCases
+    )
+    func leavesUnfavoritedOrLeadingResultAlone(testCase: PromotionCase) {
+        let original = result(for: testCase)
 
         let promoted = FavoritesPromotion.promotingFavorites(
-            in: original, identity: identity("辺")
+            in: original, identity: favoriteIdentity(testCase.favorites)
         )
 
         #expect(promoted == original)
-        #expect(promoted.entries.map(\.entSeq) == [1, 2])
-    }
-
-    @Test("a kanji-matched favorite leads already, so promotion is a no-op")
-    func kanjiMatchedFavoriteIsANoOp() {
-        let original = LookupResult(matched: "方", entries: [
-            entry(keb: "方", reb: "ほう", seq: 1),
-            entry(keb: "方", reb: "かた", seq: 2)
-        ])
-
-        let promoted = FavoritesPromotion.promotingFavorites(
-            in: original, identity: identity("方")
-        )
-
-        #expect(promoted == original)
-    }
-
-    @Test("a lemma-matched favorite already leads, so promotion is a no-op")
-    func lemmaMatchedFavoriteIsANoOp() {
-        let original = LookupResult(matched: "使う", entries: [
-            entry(keb: "使う", reb: "つかう", seq: 1)
-        ])
-
-        let promoted = FavoritesPromotion.promotingFavorites(
-            in: original, identity: identity("使う")
-        )
-
-        #expect(promoted == original)
-        #expect(promoted.entries.first?.keb == "使う")
-    }
-
-    @Test("the other entries keep the order the dictionary ranked them in")
-    func promotionKeepsSurroundingOrder() {
-        let promoted = FavoritesPromotion.promotingFavorites(
-            in: LookupResult(matched: "ほう", entries: [
-                entry(keb: "方", reb: "ほう", seq: 1),
-                entry(keb: "報", reb: "ほう", seq: 2),
-                entry(keb: "法", reb: "ほう", seq: 3)
-            ]),
-            identity: identity("報")
-        )
-
-        #expect(promoted.entries.map(\.entSeq) == [2, 1, 3])
+        #expect(promoted.entries.map(\.entSeq) == testCase.expectedEntSeqs)
+        #expect(promoted.entries.map(\.keb) == testCase.expectedKebs)
+        #expect(promoted.entries.first?.keb == testCase.expectedLeadKeb)
     }
 
     @Test("the first eligible favorite wins the front")
@@ -128,47 +200,6 @@ struct FavoritesPromotionTests {
         )
 
         #expect(promoted.entries.map(\.entSeq) == [2, 1, 3])
-    }
-
-    @Test("a result with no favorite comes back untouched")
-    func leavesUnfavoritedResultAlone() {
-        let original = LookupResult(matched: "ほう", entries: [
-            entry(keb: "方", reb: "ほう", seq: 1),
-            entry(keb: "報", reb: "ほう", seq: 2)
-        ])
-
-        let promoted = FavoritesPromotion.promotingFavorites(
-            in: original, identity: identity("見る")
-        )
-
-        #expect(promoted == original)
-    }
-
-    @Test("a favorite already leading is not moved")
-    func leavesLeadingFavoriteAlone() {
-        let original = LookupResult(matched: "ほう", entries: [
-            entry(keb: "報", reb: "ほう", seq: 1),
-            entry(keb: "方", reb: "ほう", seq: 2)
-        ])
-
-        let promoted = FavoritesPromotion.promotingFavorites(
-            in: original, identity: identity("報")
-        )
-
-        #expect(promoted == original)
-    }
-
-    @Test("the matched text the tap resolved survives the promotion")
-    func keepsMatchedText() {
-        let promoted = FavoritesPromotion.promotingFavorites(
-            in: LookupResult(matched: "ほう", entries: [
-                entry(keb: "方", reb: "ほう", seq: 1),
-                entry(keb: "報", reb: "ほう", seq: 2)
-            ]),
-            identity: identity("報")
-        )
-
-        #expect(promoted.matched == "ほう")
     }
 
     @Test("a favorite inside a demoted also: hit leads that pill's pager")

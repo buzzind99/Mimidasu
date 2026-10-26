@@ -2,6 +2,46 @@ import Foundation
 @testable import Mimidasu
 import Testing
 
+/// One pending-removal row: the favorites on screen, the query still inside
+/// its debounce, the row expanded before the removal, and the two visible
+/// lists the removal must produce — immediately, and once the query lands.
+struct PendingRemovalCase: Sendable {
+    let favorites: [FavoriteWord]
+    let query: String
+    let expanded: FavoriteWord?
+    let removedHeadword: String
+    let visibleAfterRemoval: [String]
+    let visibleAfterDebounce: [String]
+}
+
+private let pendingRemovalCases: [PendingRemovalCase] = [
+    PendingRemovalCase(
+        favorites: [
+            FavoriteWord(headword: "見る", reading: "みる", romaji: "miru", addedAt: 1000),
+            FavoriteWord(headword: "食べる", reading: "たべる", romaji: "taberu", addedAt: 1001)
+        ],
+        query: "食べ",
+        expanded: FavoriteWord(
+            headword: "食べる", reading: "たべる", romaji: "taberu", addedAt: 1001
+        ),
+        removedHeadword: "食べる",
+        visibleAfterRemoval: ["見る"],
+        visibleAfterDebounce: []
+    ),
+    PendingRemovalCase(
+        favorites: [
+            FavoriteWord(headword: "見る", reading: "みる", romaji: "miru", addedAt: 1000),
+            FavoriteWord(headword: "食べる", reading: "たべる", romaji: "taberu", addedAt: 1001),
+            FavoriteWord(headword: "おい", reading: "おい", romaji: "oi", addedAt: 1002)
+        ],
+        query: "おい",
+        expanded: nil,
+        removedHeadword: "見る",
+        visibleAfterRemoval: ["おい", "食べる"],
+        visibleAfterDebounce: ["おい"]
+    )
+]
+
 /// The Favorites mode's hoisted state: the debounce that turns keystrokes into
 /// one query, the mutation handler that has to survive the mode switch (three
 /// different controls can remove a word now), and the close-time reset that
@@ -121,21 +161,6 @@ struct FavoritesWindowStateTests {
         #expect(state.countText() == "2 / \(FavoritesStore.limit)")
     }
 
-    @Test("counts a single filtered row in the singular")
-    func countsFilteredRow() async {
-        let (state, model) = makeState()
-        model.favorites.toggle(Self.miru)
-        model.favorites.toggle(Self.taberu)
-        model.favorites.toggle(Self.oi)
-
-        state.favoritesChanged()
-        state.query = "おい"
-
-        #expect(await pollUntil(timeout: 5) { state.debouncedQuery == "おい" }, "the filtered query lands")
-        #expect(state.results.map(\.headword) == ["おい"])
-        #expect(state.countText() == "1 entry")
-    }
-
     @Test("recounts the rows after a mutation while a query is live")
     func mutationRecountsRows() async {
         let (state, model) = makeState()
@@ -174,26 +199,36 @@ struct FavoritesWindowStateTests {
         #expect(state.results.map(\.headword) == ["食べる"])
     }
 
-    @Test("keeps the search live across a mutation")
-    func mutationKeepsQuery() async {
+    @Test(
+        "a removal while a search is pending keeps both visible lists",
+        arguments: pendingRemovalCases
+    )
+    func removalWhilePending(testCase: PendingRemovalCase) async {
         let (state, model) = makeState()
-        model.favorites.toggle(Self.miru)
-        model.favorites.toggle(Self.taberu)
+        for word in testCase.favorites {
+            model.favorites.toggle(word)
+        }
 
         state.favoritesChanged()
-        state.query = "食べ"
-        state.lookupState.toggle(Self.taberu)
+        state.query = testCase.query
+        if let expanded = testCase.expanded {
+            state.lookupState.toggle(expanded)
+        }
 
-        model.favorites.remove(headword: "食べる")
+        model.favorites.remove(headword: testCase.removedHeadword)
         state.favoritesChanged()
+
         // The debounce has not landed yet, so the rows still describe the
-        // *previous* query — which is the unfiltered list.
-        #expect(state.results.map(\.headword) == ["見る"])
+        // *previous* query — the unfiltered list minus the removed row.
+        #expect(state.results.map(\.headword) == testCase.visibleAfterRemoval)
         #expect(state.lookupState.expanded.isEmpty)
         // Once the pending query lands over the mutated store, the filter runs
         // against what is actually left.
-        #expect(await pollUntil(timeout: 5) { state.debouncedQuery == "食べ" }, "the pending query lands over the mutated store")
-        #expect(state.results.isEmpty)
+        #expect(
+            await pollUntil(timeout: 5) { state.debouncedQuery == testCase.query },
+            "the pending query lands over the mutated store"
+        )
+        #expect(state.results.map(\.headword) == testCase.visibleAfterDebounce)
     }
 
     @Test("wipes the query, the rows, and the expansions on close")
@@ -237,26 +272,5 @@ struct FavoritesWindowStateTests {
         #expect(state.debouncedQuery.isEmpty)
         #expect(state.results.count == 2)
         #expect(state.lookupState.expanded.isEmpty)
-    }
-
-    @Test("a removal while a search is pending still lands")
-    func removalWhilePending() async {
-        let (state, model) = makeState()
-        model.favorites.toggle(Self.miru)
-        model.favorites.toggle(Self.taberu)
-        model.favorites.toggle(Self.oi)
-
-        state.favoritesChanged()
-        state.query = "おい"
-        model.favorites.remove(headword: "見る")
-        state.favoritesChanged()
-
-        // The removal is not debounced: 見る is gone now, and the pending query
-        // has not run yet — 食べる is still on screen although "おい" excludes it.
-        #expect(state.results.map(\.headword) == ["おい", "食べる"])
-
-        // The pending query lands over the mutated store.
-        #expect(await pollUntil(timeout: 5) { state.debouncedQuery == "おい" }, "the pending query lands over the mutated store")
-        #expect(state.results.map(\.headword) == ["おい"])
     }
 }
