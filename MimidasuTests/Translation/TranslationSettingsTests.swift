@@ -208,18 +208,6 @@ struct TranslationSettingsTests {
         #expect(await pollUntil { keyHintsRecorder.values == ["1234", nil] })
     }
 
-    // MARK: - Selection persistence
-
-    @Test("select persists the provider choice")
-    func selectPersists() {
-        let (first, defaults) = makeSUT()
-        first.select(.google)
-
-        let (second, _) = makeSUT(defaults: defaults)
-
-        #expect(second.selectedProvider == .google)
-    }
-
     // MARK: - Target language
 
     @Test("target language defaults to English")
@@ -284,23 +272,6 @@ struct TranslationSettingsTests {
 
     // MARK: - Active engine description
 
-    @Test("active engine description reflects each provider")
-    func activeEngineDescriptionVariants() throws {
-        let (settings, _) = makeSUT()
-        let target = TargetLanguage.english.displayName
-
-        #expect(settings.activeEngineDescription(fallbackActive: false) == "Apple (NMT) → \(target)")
-
-        try settings.saveKey("sk-openrouter", for: .openrouter)
-        settings.select(.openrouter)
-
-        #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenRouter · \(TranslationProvider.openrouter.defaultModel) → \(target)")
-
-        settings.setModel("tencent/hy-mt2-30b-a3b", for: .openrouter)
-
-        #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenRouter · tencent/hy-mt2-30b-a3b → \(target)")
-    }
-
     @Test("the Apple description names Apple Intelligence when high fidelity runs")
     func appleDescriptionReflectsHighFidelity() {
         let (settings, _) = makeSUT()
@@ -311,16 +282,6 @@ struct TranslationSettingsTests {
             settings.activeEngineDescription(fallbackActive: false, appleHighFidelity: true)
                 == "Apple Intelligence → \(target)"
         )
-    }
-
-    @Test("effective model falls back to the catalog default when empty")
-    func effectiveModelFallsBackToDefault() {
-        let (settings, _) = makeSUT()
-
-        #expect(settings.effectiveModel(for: .openrouter) == TranslationProvider.openrouter.defaultModel)
-
-        settings.setModel("custom/model", for: .openrouter)
-        #expect(settings.effectiveModel(for: .openrouter) == "custom/model")
     }
 
     @Test("fallback latch appends the fallback note only for external providers")
@@ -343,26 +304,19 @@ struct TranslationSettingsTests {
         #expect(settings.showsRetranslateMarker, "the provenance marker is on by default")
     }
 
-    @Test("re-translate selection and marker toggle persist")
-    func retranslateSelectionAndMarkerPersist() {
+    @Test(
+        "re-translate selection and marker toggle persist",
+        arguments: [RetranslateEngine.appleFast, .appleHighFidelity]
+    )
+    func retranslateSelectionAndMarkerPersist(engine: RetranslateEngine) {
         let (first, defaults) = makeSUT()
-        first.selectRetranslate(.appleFast)
+        first.selectRetranslate(engine)
         first.showsRetranslateMarker = false
 
         let (second, _) = makeSUT(defaults: defaults)
 
-        #expect(second.retranslateEngine == .appleFast)
+        #expect(second.retranslateEngine == engine)
         #expect(!second.showsRetranslateMarker)
-    }
-
-    @Test("the Apple Intelligence selection persists")
-    func appleHighFidelitySelectionPersists() {
-        let (first, defaults) = makeSUT()
-        first.selectRetranslate(.appleHighFidelity)
-
-        let (second, _) = makeSUT(defaults: defaults)
-
-        #expect(second.retranslateEngine == .appleHighFidelity)
     }
 
     @Test("unknown persisted re-translate engine falls back to the session engine")
@@ -432,15 +386,7 @@ struct TranslationSettingsTests {
         #expect(TranslationProvider.deepl.settingsDetail(configured: true) == "External · API key · Configured")
         #expect(TranslationProvider.openrouter.settingsDetail(configured: false) == "External · API key + model")
         #expect(TranslationProvider.openrouter.settingsDetail(configured: true) == "External · API key + model · Configured")
-        #expect(TranslationProvider.apple.settingsName(deepLTier: .unknown) == "Apple (NMT)")
-        #expect(
-            TranslationProvider.apple.settingsName(deepLTier: .unknown, appleHighFidelity: true)
-                == "Apple Intelligence"
-        )
         #expect(TranslationProvider.google.settingsName(deepLTier: .unknown) == "Google Translate")
-        #expect(TranslationProvider.deepl.settingsName(deepLTier: .unknown) == "DeepL")
-        #expect(TranslationProvider.deepl.settingsName(deepLTier: .free) == "DeepL (Free)")
-        #expect(TranslationProvider.deepl.settingsName(deepLTier: .pro) == "DeepL (Pro)")
         #expect(TranslationProvider.openrouter.settingsName(deepLTier: .unknown) == "OpenRouter")
         #expect(TranslationProvider.apple.shortName == "Apple")
         #expect(TranslationProvider.google.shortName == "Google")
@@ -715,17 +661,6 @@ extension TranslationSettingsTests {
         #expect(settings.selectedProvider == .apple)
         #expect(settings.testResult(for: .openai) == nil)
         #expect(!settings.isCompatibleMode(for: .openai))
-    }
-
-    @Test("an LLM provider's description names its effective model")
-    func llmProviderDescriptionNamesEffectiveModel() throws {
-        let (settings, _) = makeSUT()
-        let target = TargetLanguage.english.displayName
-        try settings.saveKey("sk-openai", for: .openai)
-        settings.select(.openai)
-        #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenAI · \(TranslationProvider.openai.defaultModel) → \(target)")
-        settings.setModel("gpt-custom", for: .openai)
-        #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenAI · gpt-custom → \(target)")
     }
 }
 

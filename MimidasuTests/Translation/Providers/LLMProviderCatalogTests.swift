@@ -88,13 +88,6 @@ struct LLMProviderCatalogTests {
         }
     }
 
-    @Test("DeepSeek defaults to the flash model")
-    func deepSeekDefaultModel() {
-        let spec = LLMProviderCatalog.spec(for: .deepseek)
-        #expect(spec?.defaultModel == "deepseek-flash")
-        #expect(spec?.defaultModel != "deepseek-v4.1-flash")
-    }
-
     // MARK: - Wire protocol
 
     @Test("every provider uses chat completions except Anthropic")

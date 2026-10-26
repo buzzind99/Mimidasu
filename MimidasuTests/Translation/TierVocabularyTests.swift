@@ -2,6 +2,42 @@ import Foundation
 @testable import Mimidasu
 import Testing
 
+private let canonicalTierNames: [(tier: TranslationTier, name: String)] = [
+    (.appleOnDevice, "Apple (NMT)"),
+    (.appleHighFidelity, "Apple Intelligence"),
+    (.google, "Google Translate"),
+    (.deepL(.unknown), "DeepL"),
+    (.deepL(.free), "DeepL (Free)"),
+    (.deepL(.pro), "DeepL (Pro)"),
+    (.openRouter, "OpenRouter"),
+    (.openAI, "OpenAI"),
+    (.anthropic, "Anthropic"),
+    (.moonshot, "Moonshot"),
+    (.zai, "Z.ai"),
+    (.deepSeek, "DeepSeek"),
+    (.xAI, "xAI")
+]
+
+struct EngineSurface: Sendable {
+    let kind: TranslationEngineKind
+    let selection: RetranslateEngine
+    let name: String
+}
+
+private let engineSurfaceNames: [EngineSurface] = [
+    EngineSurface(kind: .appleFast, selection: .appleFast, name: "Apple (NMT)"),
+    EngineSurface(kind: .appleHighFidelity, selection: .appleHighFidelity, name: "Apple Intelligence"),
+    EngineSurface(kind: .google, selection: .google, name: "Google Translate"),
+    EngineSurface(kind: .deepl, selection: .deepl, name: "DeepL"),
+    EngineSurface(kind: .openrouter, selection: .openrouter, name: "OpenRouter"),
+    EngineSurface(kind: .openai, selection: .openai, name: "OpenAI"),
+    EngineSurface(kind: .anthropic, selection: .anthropic, name: "Anthropic"),
+    EngineSurface(kind: .moonshot, selection: .moonshot, name: "Moonshot"),
+    EngineSurface(kind: .zai, selection: .zai, name: "Z.ai"),
+    EngineSurface(kind: .deepseek, selection: .deepseek, name: "DeepSeek"),
+    EngineSurface(kind: .xai, selection: .xai, name: "xAI")
+]
+
 /// Tests the shared engine-tier vocabulary: the one table every provider
 /// and tier name derives from, the tier-aware provider mapping, and the
 /// guarantee that the engine kinds and the re-translate selections read the
@@ -12,41 +48,14 @@ struct TierVocabularyTests {
 
     // MARK: - The canonical table
 
-    @Test("the canonical names are the vocabulary's only spellings")
-    func canonicalNames() {
-        #expect(TranslationTier.appleOnDevice.name == "Apple (NMT)")
-        #expect(TranslationTier.appleHighFidelity.name == "Apple Intelligence")
-        #expect(TranslationTier.google.name == "Google Translate")
-        #expect(TranslationTier.deepL(.unknown).name == "DeepL")
-        #expect(TranslationTier.deepL(.free).name == "DeepL (Free)")
-        #expect(TranslationTier.deepL(.pro).name == "DeepL (Pro)")
-        #expect(TranslationTier.openRouter.name == "OpenRouter")
-        #expect(TranslationTier.openAI.name == "OpenAI")
-        #expect(TranslationTier.anthropic.name == "Anthropic")
-        #expect(TranslationTier.moonshot.name == "Moonshot")
-        #expect(TranslationTier.zai.name == "Z.ai")
-        #expect(TranslationTier.deepSeek.name == "DeepSeek")
-        #expect(TranslationTier.xAI.name == "xAI")
+    @Test("the canonical names are the vocabulary's only spellings", arguments: canonicalTierNames)
+    func canonicalNames(tier: TranslationTier, name: String) {
+        #expect(tier.name == name)
     }
 
     @Test("every tier has a distinct name")
     func tierNamesAreDistinct() {
-        let names = [
-            TranslationTier.appleOnDevice.name,
-            TranslationTier.appleHighFidelity.name,
-            TranslationTier.google.name,
-            TranslationTier.deepL(.unknown).name,
-            TranslationTier.deepL(.free).name,
-            TranslationTier.deepL(.pro).name,
-            TranslationTier.openRouter.name,
-            TranslationTier.openAI.name,
-            TranslationTier.anthropic.name,
-            TranslationTier.moonshot.name,
-            TranslationTier.zai.name,
-            TranslationTier.deepSeek.name,
-            TranslationTier.xAI.name
-        ]
-
+        let names = canonicalTierNames.map(\.name)
         #expect(Set(names).count == names.count)
     }
 
@@ -123,39 +132,9 @@ struct TierVocabularyTests {
         #expect(TranslationEngineKind.xai.tier == .xAI)
     }
 
-    @Test("the new re-translate selections name their tiers")
-    func newRetranslateSelectionsNameTheirTiers() {
-        #expect(RetranslateEngine.openai.displayName == "OpenAI")
-        #expect(RetranslateEngine.anthropic.displayName == "Anthropic")
-        #expect(RetranslateEngine.moonshot.displayName == "Moonshot")
-        #expect(RetranslateEngine.zai.displayName == "Z.ai")
-        #expect(RetranslateEngine.deepseek.displayName == "DeepSeek")
-        #expect(RetranslateEngine.xai.displayName == "xAI")
-    }
-
-    @Test("an engine's name never wears a provider's subscription tier")
-    func engineNamesCarryNoProviderTier() {
-        // The DeepL subscription tier is a **provider** fact. Every engine
-        // surface — the archive engine picker, the re-translate card, the
-        // transcript marker — names the engine "DeepL"; only the provider
-        // rows name the tier.
-        #expect(RetranslateEngine.deepl.displayName == "DeepL")
-        #expect(TranslationEngineKind.deepl.markerName == "DeepL")
-        #expect(TranslationProvider.deepl.settingsName(deepLTier: .pro) == "DeepL (Pro)")
-    }
-
-    @Test("the marker suffix is the tier's canonical name")
-    func markerNamesAreCanonical() {
-        #expect(TranslationEngineKind.appleFast.markerName == "Apple (NMT)")
-        #expect(TranslationEngineKind.appleHighFidelity.markerName == "Apple Intelligence")
-        #expect(TranslationEngineKind.google.markerName == "Google Translate")
-        #expect(TranslationEngineKind.deepl.markerName == "DeepL")
-        #expect(TranslationEngineKind.openrouter.markerName == "OpenRouter")
-        #expect(TranslationEngineKind.openai.markerName == "OpenAI")
-        #expect(TranslationEngineKind.anthropic.markerName == "Anthropic")
-        #expect(TranslationEngineKind.moonshot.markerName == "Moonshot")
-        #expect(TranslationEngineKind.zai.markerName == "Z.ai")
-        #expect(TranslationEngineKind.deepseek.markerName == "DeepSeek")
-        #expect(TranslationEngineKind.xai.markerName == "xAI")
+    @Test("markers and re-translate selections read the tier's canonical name", arguments: engineSurfaceNames)
+    func engineSurfacesReadTheCanonicalName(surface: EngineSurface) {
+        #expect(surface.kind.markerName == surface.name)
+        #expect(surface.selection.displayName == surface.name)
     }
 }

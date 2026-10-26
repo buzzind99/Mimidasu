@@ -246,58 +246,6 @@ struct LLMTranslationEngineTests {
 
 extension LLMTranslationEngineTests {
 
-    @Test("the reply is the translation")
-    func happyPath() async throws {
-        let script = Script(handler: Self.okContent("hello there"))
-        let engine = try makeEngine(script: script)
-
-        let translations = try await engine.translate(["こんにちは"])
-
-        #expect(translations == ["hello there"])
-    }
-
-    @Test("code fences around the translation are stripped")
-    func codeFencesStripped() throws {
-        #expect(try LLMTranslationPrompt.parse("```json\nhello\n```") == "hello")
-        #expect(try LLMTranslationPrompt.parse("```\nhello there\n```") == "hello there")
-    }
-
-    @Test("a fence with no newline still strips the bare markers")
-    func fenceWithoutNewlineStripped() throws {
-        #expect(try LLMTranslationPrompt.parse("```hello```") == "hello")
-        #expect(try LLMTranslationPrompt.parse("```not json") == "not json")
-    }
-
-    @Test("one pair of wrapping quotes is stripped")
-    func wrappingQuotesStripped() throws {
-        #expect(try LLMTranslationPrompt.parse("\"hello\"") == "hello")
-        #expect(try LLMTranslationPrompt.parse("\u{201C}hello\u{201D}") == "hello")
-        #expect(try LLMTranslationPrompt.parse("\u{300C}hello\u{300D}") == "hello")
-    }
-
-    @Test("an unquoted reply is left untouched")
-    func plainReplyUnchanged() throws {
-        #expect(try LLMTranslationPrompt.parse("hello there") == "hello there")
-    }
-
-    @Test("a whitespace-only reply surfaces as badResponse")
-    func emptyTranslationThrows() {
-        #expect(
-            throws: TranslationEngineError.badResponse(
-                "Model returned an empty translation"
-            )
-        ) {
-            try LLMTranslationPrompt.parse("   ")
-        }
-        #expect(
-            throws: TranslationEngineError.badResponse(
-                "Model returned an empty translation"
-            )
-        ) {
-            try LLMTranslationPrompt.parse("")
-        }
-    }
-
     @Test("a 200 response with no choices is retried then surfaces as badResponse")
     func noChoicesThrows() async throws {
         let script = Script(handler: { _ in
@@ -459,10 +407,6 @@ extension LLMTranslationEngineTests {
 
         _ = try await engine.translate(["こんにちは"])
 
-        #expect(
-            LLMReasoningPolicy.options(for: .deepseek, model: model)
-                == LLMRequestOptions()
-        )
         let body = try Self.decodedBody(script.bodies.first)
         #expect(body.reasoningEffort == nil)
         #expect(body.thinking == nil)

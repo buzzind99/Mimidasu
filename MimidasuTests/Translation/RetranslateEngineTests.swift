@@ -123,16 +123,6 @@ struct RetranslateEngineTests {
         #expect(RetranslateEngine.xai.kind == .xai)
     }
 
-    @Test("the new engine kinds name their tiers")
-    func newKindsNameTheirTiers() {
-        #expect(TranslationEngineKind.openai.tier == .openAI)
-        #expect(TranslationEngineKind.anthropic.tier == .anthropic)
-        #expect(TranslationEngineKind.moonshot.tier == .moonshot)
-        #expect(TranslationEngineKind.zai.tier == .zai)
-        #expect(TranslationEngineKind.deepseek.tier == .deepSeek)
-        #expect(TranslationEngineKind.xai.tier == .xAI)
-    }
-
     @Test("disclosure intents identify themselves for the sheet and name their provider")
     func disclosureIntentsIdentifyThemselves() {
         #expect(PendingCloudDisclosure.providerSwitch(.deepl).id == "switch.deepl")

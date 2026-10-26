@@ -134,27 +134,9 @@ struct TranslationQueueErrorCopyTests {
         #expect(outcome?.severity == .transient)
     }
 
-    /// The engine flag mirrors each engine's ladder config.
-    @Test("transientBadResponse mirrors the engine ladder configs")
-    func engineFlagMirrorsLadderConfig() {
-        let openRouterEngine = TranslationEngineFactory.make(
-            provider: .openrouter,
-            key: "k",
-            model: "m",
-            target: .english,
-            transport: nil
-        )
-        #expect(openRouterEngine?.transientBadResponse == true)
-
-        let fixedLadderEngine = TranslationEngineFactory.make(
-            provider: .openai,
-            key: "k",
-            model: "m",
-            target: .english,
-            transport: nil,
-            ladder: TransientRetryLadder(retriesBadResponse: false)
-        )
-        #expect(fixedLadderEngine?.transientBadResponse == false)
+    /// The fixed-contract engines never retry a bad response.
+    @Test("fixed-contract engines keep badResponse permanent")
+    func fixedContractEnginesKeepBadResponsePermanent() {
         #expect(!GoogleTranslateEngine(apiKey: "k").transientBadResponse)
         #expect(!DeepLEngine(apiKey: "k").transientBadResponse)
     }

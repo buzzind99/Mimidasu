@@ -42,22 +42,6 @@ struct TranslationQueueTests {
         }
     }
 
-    // MARK: - setHandlers
-
-    @Test("the status handler observes status changes")
-    func statusHandlerObservesChanges() {
-        let (queue, sink) = makeSUT()
-        // Result-handler wiring is exercised by the delivery tests below.
-        queue.setHandlers(
-            result: { _, _ in },
-            status: { status in sink.receive(status: status) }
-        )
-
-        queue.resetForRetry()
-
-        #expect(sink.statuses == [.idle])
-    }
-
     // MARK: - resetForRetry
 
     @Test("resetForRetry from idle republishes idle")

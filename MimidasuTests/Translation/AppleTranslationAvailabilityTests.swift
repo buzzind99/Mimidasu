@@ -29,20 +29,11 @@ struct AppleTranslationAvailabilityTests {
 
     // MARK: - refresh
 
-    @Test("refresh loads the picker catalog from the probe")
-    func refreshLoadsTargets() async {
-        let availability = await makeLoaded(["ja", "en-US", "fr", "zh-Hans-CN"])
-
-        #expect(availability.isLoaded)
-        assertOrdered(availability.targets)
-        #expect(Set(availability.targets.map(\.code)) == ["en", "fr", "zh-Hans"])
-    }
-
     @Test("ja and its regions never appear as targets")
     func jaDropped() async {
-        let availability = await makeLoaded(["ja", "ja-JP", "en", "th"])
+        let availability = await makeLoaded(["ja", "ja-JP", "en", "fr", "th"])
 
-        #expect(Set(availability.targets.map(\.code)) == ["en", "th"])
+        #expect(Set(availability.targets.map(\.code)) == ["en", "fr", "th"])
     }
 
     @Test("regional variants normalize and dedupe onto their base code")

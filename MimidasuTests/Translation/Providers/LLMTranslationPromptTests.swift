@@ -9,6 +9,7 @@ struct LLMTranslationPromptTests {
     @Test("strips a fenced block")
     func stripsFence() throws {
         #expect(try LLMTranslationPrompt.parse("```\nhello\n```") == "hello")
+        #expect(try LLMTranslationPrompt.parse("```\nhello there\n```") == "hello there")
     }
 
     @Test("strips a fence whose language tag shares the opening line")
@@ -58,8 +59,10 @@ struct LLMTranslationPromptTests {
 
     @Test("keeps a translation that starts on the fence line")
     func keepsFirstLineTranslation() throws {
+        #expect(try LLMTranslationPrompt.parse("```hello```") == "hello")
         #expect(try LLMTranslationPrompt.parse("```hello world```") == "hello world")
         #expect(try LLMTranslationPrompt.parse("```hello\nworld```") == "hello\nworld")
+        #expect(try LLMTranslationPrompt.parse("```not json") == "not json")
         // "The" is not a language code: the first word is content.
         #expect(try LLMTranslationPrompt.parse("```The cat\nsat```") == "The cat\nsat")
     }
@@ -119,9 +122,9 @@ struct LLMTranslationPromptTests {
     }
 
     @Test(
-        "tag-only and wrapper-only replies fail instead of becoming translations",
+        "tag-only, wrapper-only, and blank replies fail instead of becoming translations",
         arguments: [
-            "```json", "```ja", "```json\n", "```ja\n```", "\"\"\"", "```"
+            "```json", "```ja", "```json\n", "```ja\n```", "\"\"\"", "```", "", "   "
         ]
     )
     func wrapperOnlyReplyThrows(reply: String) {

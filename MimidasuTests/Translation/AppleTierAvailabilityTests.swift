@@ -53,45 +53,6 @@ struct AppleTierAvailabilityTests {
         #expect(sut.probe.targetCode == nil)
     }
 
-    @Test("a landing writes the installed flag and its pair")
-    func landingWritesEvidence() {
-        let sut = makeSUT()
-
-        sut.land(installed: true, targetCode: pair)
-
-        #expect(sut.probe.installed)
-        #expect(sut.probe.targetCode == pair)
-    }
-
-    @Test("a landing reports evidence for its pair only")
-    func landingIsPairScoped() {
-        let sut = makeSUT()
-
-        sut.land(installed: true, targetCode: pair)
-
-        #expect(sut.probeLanded(for: pair))
-        #expect(!sut.probeLanded(for: foreignPair))
-    }
-
-    @Test("a not-installed landing reports unavailability for its pair only")
-    func unavailabilityIsPairScoped() {
-        let sut = makeSUT()
-
-        sut.land(installed: false, targetCode: pair)
-
-        #expect(sut.knownUnavailable(for: pair))
-        #expect(!sut.knownUnavailable(for: foreignPair))
-    }
-
-    @Test("an installed landing is not unavailability")
-    func installedLandingIsNotUnavailable() {
-        let sut = makeSUT()
-
-        sut.land(installed: true, targetCode: pair)
-
-        #expect(!sut.knownUnavailable(for: pair))
-    }
-
     // MARK: - Offer and identity
 
     @Test("strategy support follows the OS availability gate")
@@ -104,110 +65,75 @@ struct AppleTierAvailabilityTests {
         #expect(AppleTierAvailability.supportsStrategySelection)
     }
 
-    @Test("high fidelity is offered with no evidence")
-    func offersWithNoEvidence() throws {
+    @Test(
+        "the offer and unavailability tables follow the landed evidence",
+        arguments: [
+            (Evidence.unlanded, true, true, false),
+            (Evidence.installedForPair, true, true, false),
+            (Evidence.notInstalledForPair, false, true, true),
+            (Evidence.installedForForeignPair, true, true, false),
+            (Evidence.notInstalledForForeignPair, true, false, false)
+        ]
+    )
+    func offerAndUnavailabilityFollowEvidence(
+        evidence: Evidence, offers: Bool, offersForeign: Bool, knownUnavailable: Bool
+    ) throws {
         guard #available(macOS 26.4, *) else {
-            try Test.cancel("strategy selection requires macOS 26.4")
+            try Test.cancel("high-fidelity offers require macOS 26.4")
         }
         let sut = makeSUT()
+        seed(evidence, on: sut)
 
-        #expect(sut.offersHighFidelity(for: pair))
+        #expect(sut.offersHighFidelity(for: pair) == offers)
+        #expect(sut.offersHighFidelity(for: foreignPair) == offersForeign)
+        #expect(sut.knownUnavailable(for: pair) == knownUnavailable)
     }
 
-    @Test("a not-installed landing withdraws the offer for its pair")
-    func notInstalledWithdrawsOffer() throws {
+    @Test(
+        "landing evidence is scoped to its own pair",
+        arguments: [
+            (Evidence.unlanded, false, true, false),
+            (Evidence.installedForPair, true, true, false),
+            (Evidence.notInstalledForPair, true, true, false),
+            (Evidence.installedForForeignPair, false, false, false),
+            (Evidence.notInstalledForForeignPair, false, false, true)
+        ]
+    )
+    func landingEvidenceIsPairScoped(
+        evidence: Evidence, landsForPair: Bool, foreignIdentityAbsent: Bool, foreignUnavailable: Bool
+    ) throws {
         guard #available(macOS 26.4, *) else {
-            try Test.cancel("strategy selection requires macOS 26.4")
+            try Test.cancel("pair identity requires macOS 26.4")
         }
         let sut = makeSUT()
+        seed(evidence, on: sut)
 
-        sut.land(installed: false, targetCode: pair)
-
-        #expect(!sut.offersHighFidelity(for: pair))
-        #expect(sut.offersHighFidelity(for: foreignPair))
-    }
-
-    @Test("an installed landing keeps the offer")
-    func installedKeepsOffer() throws {
-        guard #available(macOS 26.4, *) else {
-            try Test.cancel("strategy selection requires macOS 26.4")
-        }
-        let sut = makeSUT()
-
-        sut.land(installed: true, targetCode: pair)
-
-        #expect(sut.offersHighFidelity(for: pair))
-    }
-
-    @Test("identity is unknown before the pair's probe lands")
-    func identityUnknownBeforeLanding() throws {
-        guard #available(macOS 26.4, *) else {
-            try Test.cancel("strategy selection requires macOS 26.4")
-        }
-        let sut = makeSUT()
-
-        #expect(!sut.identityKnown(for: pair))
-    }
-
-    @Test("identity is known after the pair's probe lands")
-    func identityKnownAfterLanding() throws {
-        guard #available(macOS 26.4, *) else {
-            try Test.cancel("strategy selection requires macOS 26.4")
-        }
-        let sut = makeSUT()
-
-        sut.land(installed: false, targetCode: pair)
-
-        #expect(sut.identityKnown(for: pair))
-        #expect(!sut.identityKnown(for: foreignPair))
+        #expect(sut.probeLanded(for: pair) == landsForPair)
+        #expect(sut.identityKnown(for: pair) == landsForPair)
+        #expect(!sut.identityKnown(for: foreignPair) == foreignIdentityAbsent)
+        #expect(sut.knownUnavailable(for: foreignPair) == foreignUnavailable)
     }
 
     // MARK: - Availability
 
-    @Test("availability is false before a landing")
-    func unavailableBeforeLanding() throws {
+    @Test(
+        "availability follows the pair's own installed landing",
+        arguments: [
+            (Evidence.unlanded, false),
+            (Evidence.installedForPair, true),
+            (Evidence.notInstalledForPair, false),
+            (Evidence.installedForForeignPair, false),
+            (Evidence.notInstalledForForeignPair, false)
+        ]
+    )
+    func availabilityFollowsThePairsOwnLanding(evidence: Evidence, available: Bool) throws {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("availability requires macOS 26.4")
         }
         let sut = makeSUT()
+        seed(evidence, on: sut)
 
-        #expect(!sut.available(for: pair))
-    }
-
-    @Test("availability is false when the landing is not installed")
-    func unavailableWhenNotInstalled() throws {
-        guard #available(macOS 26.4, *) else {
-            try Test.cancel("availability requires macOS 26.4")
-        }
-        let sut = makeSUT()
-
-        sut.land(installed: false, targetCode: pair)
-
-        #expect(!sut.available(for: pair))
-    }
-
-    @Test("availability is true when the landing is installed")
-    func availableWhenInstalled() throws {
-        guard #available(macOS 26.4, *) else {
-            try Test.cancel("availability requires macOS 26.4")
-        }
-        let sut = makeSUT()
-
-        sut.land(installed: true, targetCode: pair)
-
-        #expect(sut.available(for: pair))
-    }
-
-    @Test("availability is scoped to the pair's own landing")
-    func availabilityIsPairScoped() throws {
-        guard #available(macOS 26.4, *) else {
-            try Test.cancel("availability requires macOS 26.4")
-        }
-        let sut = makeSUT()
-
-        sut.land(installed: true, targetCode: foreignPair)
-
-        #expect(!sut.available(for: pair))
+        #expect(sut.available(for: pair) == available)
     }
 
     // MARK: - Resolution
@@ -266,8 +192,8 @@ struct AppleTierAvailabilityTests {
         #expect(sut.effectiveKind(.appleHighFidelity, targetCode: pair) == .appleHighFidelity)
     }
 
-    @Test("a not-installed landing degrades the high-fidelity tier")
-    func notInstalledDegradesTier() throws {
+    @Test("a not-installed landing degrades both high-fidelity spellings")
+    func notInstalledLandingDegradesBothSpellings() throws {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("strategy selection requires macOS 26.4")
         }
@@ -276,17 +202,6 @@ struct AppleTierAvailabilityTests {
         sut.land(installed: false, targetCode: pair)
 
         #expect(sut.effectiveTier(.appleHighFidelity, targetCode: pair) == .appleFast)
-    }
-
-    @Test("a not-installed landing degrades the high-fidelity kind")
-    func notInstalledDegradesKind() throws {
-        guard #available(macOS 26.4, *) else {
-            try Test.cancel("strategy selection requires macOS 26.4")
-        }
-        let sut = makeSUT()
-
-        sut.land(installed: false, targetCode: pair)
-
         #expect(sut.effectiveKind(.appleHighFidelity, targetCode: pair) == .appleFast)
     }
 
@@ -325,6 +240,7 @@ struct AppleTierAvailabilityTests {
 
         #expect(await pollUntil { sut.probeLanded(for: pair) }, "the probe lands")
         #expect(sut.probe.installed, "the landing records the answer")
+        #expect(sut.probe.targetCode == pair, "the landing records its pair")
     }
 
     @Test("beginProbe clears evidence synchronously and drops a superseded landing")
@@ -384,8 +300,11 @@ struct AppleTierAvailabilityTests {
 
     // MARK: - Strategy application
 
-    @Test("applies the high-fidelity strategy on macOS 26.4+")
-    func appliesHighFidelityStrategy() throws {
+    @Test(
+        "the preferred strategy follows the requested fidelity on macOS 26.4+",
+        arguments: [true, false]
+    )
+    func appliesRequestedStrategy(highFidelity: Bool) throws {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("preferredStrategy requires macOS 26.4")
         }
@@ -395,25 +314,9 @@ struct AppleTierAvailabilityTests {
             target: Locale.Language(identifier: pair)
         )
 
-        sut.applyPreferredStrategy(to: &config, highFidelity: true)
+        sut.applyPreferredStrategy(to: &config, highFidelity: highFidelity)
 
-        #expect(config.preferredStrategy == .highFidelity)
-    }
-
-    @Test("applies the low-latency strategy on macOS 26.4+")
-    func appliesLowLatencyStrategy() throws {
-        guard #available(macOS 26.4, *) else {
-            try Test.cancel("preferredStrategy requires macOS 26.4")
-        }
-        let sut = makeSUT()
-        var config = TranslationSession.Configuration(
-            source: Locale.Language(identifier: "ja"),
-            target: Locale.Language(identifier: pair)
-        )
-
-        sut.applyPreferredStrategy(to: &config, highFidelity: false)
-
-        #expect(config.preferredStrategy == .lowLatency)
+        #expect(config.preferredStrategy == (highFidelity ? .highFidelity : .lowLatency))
     }
 
     @Test("the configuration follows the OS strategy gate")

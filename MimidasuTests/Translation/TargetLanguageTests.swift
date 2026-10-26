@@ -73,10 +73,7 @@ struct TargetLanguageTests {
         #expect(TargetLanguage(code: "de").nativeName == "Deutsch")
         // CLDR spells the French endonym lowercase; the picker capitalizes it.
         #expect(TargetLanguage(code: "fr").nativeName == "Français")
-    }
-
-    @Test("the Indonesian endonym uses the conventional native name")
-    func nativeNameOverride() {
+        // The OS endonym is "Indonesia"; the conventional native name wins.
         #expect(TargetLanguage(code: "id").nativeName == "Bahasa Indonesia")
     }
 

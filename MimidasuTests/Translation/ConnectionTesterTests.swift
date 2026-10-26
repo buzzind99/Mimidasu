@@ -67,8 +67,11 @@ struct TranslationConnectionTesterTests {
         #expect(compatibleMode == false)
     }
 
-    @Test("Google probes with a one-sentence translate")
-    func googleProbe() async throws {
+    @Test(
+        "Google probes with a one-sentence translate carrying the selected target",
+        arguments: [(TargetLanguage.english, "en"), (TargetLanguage(code: "zh-Hans"), "zh-CN")]
+    )
+    func googleProbe(target: TargetLanguage, wireTarget: String) async throws {
         let script = Script(handler: { _ in
             (
                 Data(#"{"data":{"translations":[{"translatedText":"hello"}]}}"#.utf8),
@@ -78,7 +81,7 @@ struct TranslationConnectionTesterTests {
         let transport = makeTransport(script)
 
         let compatibleMode = try await TranslationConnectionTester.test(
-            provider: .google, key: "k", transport: transport
+            provider: .google, key: "k", target: target, transport: transport
         )
 
         #expect(compatibleMode == false)
@@ -88,10 +91,15 @@ struct TranslationConnectionTesterTests {
         #expect(request.value(forHTTPHeaderField: "X-goog-api-key") == "k")
         let decoded = try JSONDecoder().decode(GoogleProbeBody.self, from: #require(script.bodies.first))
         #expect(decoded.q == ["こんにちは"])
+        #expect(decoded.source == "ja")
+        #expect(decoded.target == wireTarget)
     }
 
-    @Test("DeepL probes with a one-sentence translate against the Pro endpoint")
-    func deeplProbe() async throws {
+    @Test(
+        "DeepL probes with a one-sentence translate on the Pro endpoint carrying the selected target",
+        arguments: [(TargetLanguage.english, "EN"), (TargetLanguage(code: "th"), "TH")]
+    )
+    func deeplProbe(target: TargetLanguage, wireTarget: String) async throws {
         let script = Script(handler: { _ in
             (
                 Data(#"{"translations":[{"detected_source_language":"JA","text":"hello"}]}"#.utf8),
@@ -101,7 +109,7 @@ struct TranslationConnectionTesterTests {
         let transport = makeTransport(script)
 
         let compatibleMode = try await TranslationConnectionTester.test(
-            provider: .deepl, key: "k", transport: transport
+            provider: .deepl, key: "k", target: target, transport: transport
         )
 
         #expect(compatibleMode == false)
@@ -112,49 +120,7 @@ struct TranslationConnectionTesterTests {
         let decoded = try JSONDecoder().decode(DeepLProbeBody.self, from: #require(script.bodies.first))
         #expect(decoded.text == ["こんにちは"])
         #expect(decoded.sourceLang == "JA")
-        #expect(decoded.targetLang == "EN")
-    }
-
-    @Test("the Google probe carries the selected target's wire code")
-    func googleProbeForwardsTarget() async throws {
-        let script = Script(handler: { _ in
-            (
-                Data(#"{"data":{"translations":[{"translatedText":"你好"}]}}"#.utf8),
-                Self.httpResponse(GoogleTranslateEngine.endpoint, 200)
-            )
-        })
-        let transport = makeTransport(script)
-
-        try await TranslationConnectionTester.test(
-            provider: .google, key: "k",
-            target: TargetLanguage(code: "zh-Hans"), transport: transport
-        )
-
-        let decoded = try JSONDecoder().decode(
-            GoogleProbeTargetBody.self, from: #require(script.bodies.first)
-        )
-        #expect(decoded.source == "ja")
-        #expect(decoded.target == "zh-CN")
-    }
-
-    @Test("the DeepL probe carries the selected target's wire code")
-    func deeplProbeForwardsTarget() async throws {
-        let script = Script(handler: { _ in
-            (
-                Data(#"{"translations":[{"detected_source_language":"JA","text":"สวัสดี"}]}"#.utf8),
-                Self.httpResponse(DeepLEngine.proEndpoint, 200)
-            )
-        })
-        let transport = makeTransport(script)
-
-        try await TranslationConnectionTester.test(
-            provider: .deepl, key: "k",
-            target: TargetLanguage(code: "th"), transport: transport
-        )
-
-        let decoded = try JSONDecoder().decode(DeepLProbeBody.self, from: #require(script.bodies.first))
-        #expect(decoded.sourceLang == "JA")
-        #expect(decoded.targetLang == "TH")
+        #expect(decoded.targetLang == wireTarget)
     }
 
     @Test("OpenRouter probes a chat-completions translation with its catalog default model")
@@ -226,61 +192,36 @@ struct TranslationConnectionTesterTests {
 
     // MARK: - Failures
 
-    @Test("an invalid Google key fails with invalidKey")
-    func googleInvalidKey() async {
-        let script = Script(handler: { _ in (Data(), Self.httpResponse(GoogleTranslateEngine.endpoint, 403)) })
-        let transport = makeTransport(script)
-
-        let thrown = await #expect(throws: TranslationEngineError.self) {
-            _ = try await TranslationConnectionTester.test(provider: .google, key: "k", transport: transport)
-        }
-
-        #expect(thrown == .invalidKey)
-        #expect(script.requestCount == 1)
-    }
-
-    @Test("an invalid DeepL key fails with invalidKey without retrying")
-    func deeplInvalidKey() async {
-        let script = Script(handler: { _ in (Data(), Self.httpResponse(DeepLEngine.proEndpoint, 403)) })
-        let transport = makeTransport(script)
-
-        let thrown = await #expect(throws: TranslationEngineError.self) {
-            _ = try await TranslationConnectionTester.test(provider: .deepl, key: "k", transport: transport)
-        }
-
-        #expect(thrown == .invalidKey)
-        #expect(script.requestCount == 1)
-    }
-
-    /// A transient failure is *not* retried: the probe ladder runs with zero
-    /// retries so a failed Test settles in a single round-trip.
-    @Test("a transient probe failure is not retried")
-    func transientProbeFailureIsNotRetried() async {
-        let script = Script(handler: { _ in (Data(), Self.httpResponse(DeepLEngine.proEndpoint, 429)) })
-        let transport = makeTransport(script)
-
-        let thrown = await #expect(throws: TranslationEngineError.self) {
-            _ = try await TranslationConnectionTester.test(provider: .deepl, key: "k", transport: transport)
-        }
-
-        #expect(thrown == .rateLimited)
-        #expect(script.requestCount == 1, "the probe ladder has zero retries")
-    }
-
-    @Test("a server failure on an LLM probe settles in exactly one request")
-    func llmProbeFailureIsNotRetried() async {
-        let script = Script(handler: { _ in
-            (Data(), Self.httpResponse(Self.openAIEndpoint, 500))
-        })
+    @Test(
+        "a failed probe surfaces its engine error in exactly one request",
+        arguments: [
+            (TranslationProvider.google, "", GoogleTranslateEngine.endpoint, 403,
+             TranslationEngineError.invalidKey),
+            (TranslationProvider.deepl, "", DeepLEngine.proEndpoint, 403,
+             TranslationEngineError.invalidKey),
+            (TranslationProvider.deepl, "", DeepLEngine.proEndpoint, 429,
+             TranslationEngineError.rateLimited),
+            (TranslationProvider.openai, "gpt-6-luna", Self.openAIEndpoint, 500,
+             TranslationEngineError.serverError(500))
+        ]
+    )
+    func failedProbeSurfacesItsEngineError(
+        provider: TranslationProvider,
+        model: String,
+        endpoint: URL,
+        status: Int,
+        expected: TranslationEngineError
+    ) async {
+        let script = Script(handler: { _ in (Data(), Self.httpResponse(endpoint, status)) })
         let transport = makeTransport(script)
 
         let thrown = await #expect(throws: TranslationEngineError.self) {
             _ = try await TranslationConnectionTester.test(
-                provider: .openai, key: "k", model: "gpt-6-luna", transport: transport
+                provider: provider, key: "k", model: model, transport: transport
             )
         }
 
-        #expect(thrown == .serverError(500))
+        #expect(thrown == expected)
         #expect(script.requestCount == 1, "the probe ladder has zero retries")
     }
 
@@ -367,9 +308,6 @@ struct TranslationConnectionTesterTests {
 
 private struct GoogleProbeBody: Decodable {
     let q: [String]
-}
-
-private struct GoogleProbeTargetBody: Decodable {
     let source: String
     let target: String
 }

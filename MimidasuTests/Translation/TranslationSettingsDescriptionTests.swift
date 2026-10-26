@@ -79,17 +79,4 @@ struct TranslationSettingsDescriptionTests {
                 == "\(provider.tier().name) · custom/model → \(target)"
         )
     }
-
-    @Test("Apple and Google descriptions carry no model suffix")
-    func onDeviceAndFixedContractDescriptionsCarryNoModel() throws {
-        let settings = makeSUT()
-        let target = TargetLanguage.english.displayName
-
-        settings.select(.apple)
-        #expect(settings.activeEngineDescription(fallbackActive: false) == "Apple (NMT) → \(target)")
-
-        try settings.saveKey("sk-google", for: .google)
-        settings.select(.google)
-        #expect(settings.activeEngineDescription(fallbackActive: false) == "Google Translate → \(target)")
-    }
 }

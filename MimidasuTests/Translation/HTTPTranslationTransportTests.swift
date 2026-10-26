@@ -55,9 +55,18 @@ struct HTTPTranslationTransportTests {
 
     // MARK: - Error classification
 
-    @Test("non-2xx responses surface the provider's classification with Retry-After")
-    func non2xxClassifiedWithRetryAfter() async throws {
-        let transport = makeTransport { _ in (Data(), Self.response(429, headers: ["Retry-After": "30"])) }
+    @Test(
+        "non-2xx responses surface the provider's classification with Retry-After",
+        arguments: [
+            ("30", TimeInterval(10)),
+            ("2", TimeInterval(2)),
+            ("soon", TimeInterval?.none)
+        ]
+    )
+    func non2xxClassifiedWithRetryAfter(
+        header: String, expectedRetryAfter: TimeInterval?
+    ) async throws {
+        let transport = makeTransport { _ in (Data(), Self.response(429, headers: ["Retry-After": header])) }
         let request = try URLRequest(url: #require(URL(string: "https://provider.test/translate")))
 
         let thrown = await #expect(throws: HTTPTranslationTransport.Failure.self) {
@@ -66,57 +75,18 @@ struct HTTPTranslationTransportTests {
 
         let failure = try #require(thrown)
         #expect(failure.engineError == .rateLimited)
-        // Retry-After capped at 10 s even though the header said 30.
-        #expect(failure.retryAfter == 10)
-    }
-
-    @Test("Retry-After passes through when under the cap")
-    func retryAfterUnderCap() async throws {
-        let transport = makeTransport { _ in (Data(), Self.response(429, headers: ["Retry-After": "2"])) }
-        let request = try URLRequest(url: #require(URL(string: "https://provider.test/translate")))
-
-        let thrown = await #expect(throws: HTTPTranslationTransport.Failure.self) {
-            try await transport.send(request) { _, _ in .rateLimited }
-        }
-
-        #expect(try #require(thrown).retryAfter == 2)
-    }
-
-    @Test("Retry-After parsing failures degrade to nil")
-    func retryAfterUnparseable() async throws {
-        let transport = makeTransport { _ in (Data(), Self.response(429, headers: ["Retry-After": "soon"])) }
-        let request = try URLRequest(url: #require(URL(string: "https://provider.test/translate")))
-
-        let thrown = await #expect(throws: HTTPTranslationTransport.Failure.self) {
-            try await transport.send(request) { _, _ in .rateLimited }
-        }
-
-        #expect(try #require(thrown).retryAfter == nil)
+        #expect(failure.retryAfter == expectedRetryAfter)
     }
 
     // MARK: - Transport-level failures
 
-    @Test("generic URLSession errors map to network")
-    func urlErrorMapsToNetwork() async throws {
+    @Test(
+        "transport-level URL errors map to network",
+        arguments: [URLError.Code.notConnectedToInternet, .timedOut]
+    )
+    func urlErrorMapsToNetwork(code: URLError.Code) async throws {
         let transport = makeTransport { _ in
-            throw URLError(.notConnectedToInternet)
-        }
-        let request = try URLRequest(url: #require(URL(string: "https://provider.test/translate")))
-
-        let thrown = await #expect(throws: TranslationEngineError.self) {
-            try await transport.send(request) { _, _ in nil }
-        }
-
-        #expect(thrown == .network)
-    }
-
-    /// A per-provider request timeout must surface as a classified
-    /// `.network` error — the queue renders it as clear status copy, never a
-    /// hang or a raw `URLError`.
-    @Test("a request timeout maps to network")
-    func requestTimeoutMapsToNetwork() async throws {
-        let transport = makeTransport { _ in
-            throw URLError(.timedOut)
+            throw URLError(code)
         }
         let request = try URLRequest(url: #require(URL(string: "https://provider.test/translate")))
 

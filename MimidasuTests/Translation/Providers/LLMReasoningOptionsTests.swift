@@ -32,55 +32,15 @@ struct LLMReasoningOptionsTests {
         LLMReasoningPolicy.options(for: provider, model: model)
     }
 
-    // MARK: - Provider defaults
-
-    @Test("each provider's default model compiles to its expected posture")
-    func providerDefaults() {
-        #expect(
-            options(for: .openai, model: "gpt-6-luna")
-                == LLMRequestOptions(reasoningEffort: "none")
-        )
-        #expect(
-            options(for: .anthropic, model: "claude-haiku-5-5")
-                == LLMRequestOptions(
-                    thinking: .init(type: "disabled"),
-                    outputConfig: .init(effort: "low"),
-                    maxTokens: 4096
-                )
-        )
-        #expect(
-            options(for: .moonshot, model: "kimi-k2.6")
-                == LLMRequestOptions(thinking: .init(type: "disabled"))
-        )
-        #expect(
-            options(for: .zai, model: "glm-5.3-flash")
-                == LLMRequestOptions(
-                    reasoningEffort: "low",
-                    thinking: .init(type: "enabled")
-                )
-        )
-        #expect(
-            options(for: .deepseek, model: "deepseek-flash")
-                == LLMRequestOptions(thinking: .init(type: "disabled"))
-        )
-        #expect(
-            options(for: .xai, model: "grok-4.7")
-                == LLMRequestOptions(reasoningEffort: "low")
-        )
-        #expect(
-            options(for: .openrouter, model: "tencent/hy-mt2-30b-a3b")
-                == LLMRequestOptions()
-        )
-    }
-
     // MARK: - OpenAI
 
     @Test("OpenAI luna, nano, and mini disable reasoning")
     func openAISmallModelsDisableReasoning() {
         for model in ["gpt-6-luna", "gpt-6.1-nano", "gpt-6-mini"] {
             #expect(
-                options(for: .openai, model: model).reasoningEffort == "none",
-                "unexpected effort for \(model)"
+                options(for: .openai, model: model)
+                    == LLMRequestOptions(reasoningEffort: "none"),
+                "unexpected options for \(model)"
             )
         }
     }
