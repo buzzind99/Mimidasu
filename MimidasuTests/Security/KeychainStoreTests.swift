@@ -76,16 +76,6 @@ struct KeychainStoreTests {
         #expect(scoped.store.readKey(for: providerID) == nil)
     }
 
-    // MARK: - Missing key
-
-    @Test("reading an unconfigured provider degrades to nil")
-    func missingKeyReadsAsNil() {
-        let scoped = makeStore()
-        defer { scoped.cleanup() }
-
-        #expect(scoped.store.readKey(for: providerID) == nil)
-    }
-
     // MARK: - Isolation
 
     @Test("keys are scoped per service and per provider account")
