@@ -86,16 +86,6 @@ struct ReadingAlignmentTests {
         #expect(runs(surface: surface, reading: reading) == expected)
     }
 
-    @Test("compatibility normalization composes halfwidth voiced kana (shared NFKC helper)")
-    func compatibilityComposedFoldsHalfwidthVoicing() {
-        // The compatibility mapping alone stops at ハ + ゛; canonical
-        // composition must finish the fold onto the precomposed spellings
-        // the dictionary stores.
-        #expect(ReadingAlignment.compatibilityComposed("ﾊﾟｲﾅｯﾌﾟﾙ") == "パイナップル")
-        #expect(ReadingAlignment.compatibilityComposed("ｶﾞ") == "ガ")
-        #expect(ReadingAlignment.compatibilityComposed("パイナップル") == "パイナップル")
-    }
-
     @Test("repeated surface kana resolve left to right (食べて/たべて)")
     func repeatedKana() {
         #expect(runs(surface: "食べて", reading: "たべて") == [

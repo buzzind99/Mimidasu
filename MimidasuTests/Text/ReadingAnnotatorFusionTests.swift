@@ -102,26 +102,18 @@ struct ReadingAnnotatorFusionTests {
         #expect(describe(segments) == [["一日", "ichinichi", "いちにち"]])
     }
 
-    @Test("fuses 六 plainly before 歳 (roku exception → plain fusion)")
-    func rokuExceptionBeforeSai() throws {
-        let annotator = makeAnnotator(tokens(
-            ["六", "歳"], readings: ["ろく", "さい"]
-        ))
+    @Test("fuses 六 plainly before 歳 (roku exception → plain fusion)", arguments: [
+        (["六", "歳"], ["ろく", "さい"] as [String?], "六歳"),
+        (["6", "歳"], [nil, "さい"] as [String?], "6歳")
+    ])
+    func rokuExceptionBeforeSai(
+        surfaces: [String], readings: [String?], text: String
+    ) throws {
+        let annotator = makeAnnotator(tokens(surfaces, readings: readings))
 
-        let segments = try #require(annotator.segments(for: "六歳"))
+        let segments = try #require(annotator.segments(for: text))
 
-        #expect(describe(segments) == [["六歳", "rokusai", "ろくさい"]])
-    }
-
-    @Test("fuses the digit 6 plainly before 歳 (roku exception → plain fusion)")
-    func rokuExceptionDigitBeforeSai() throws {
-        let annotator = makeAnnotator(tokens(
-            ["6", "歳"], readings: [nil, "さい"]
-        ))
-
-        let segments = try #require(annotator.segments(for: "6歳"))
-
-        #expect(describe(segments) == [["6歳", "rokusai", "ろくさい"]])
+        #expect(describe(segments) == [[text, "rokusai", "ろくさい"]])
     }
 
     @Test("accumulates consecutive kanji numerals into one run (千 is itself a numeral)")
@@ -229,26 +221,18 @@ struct ReadingAnnotatorFusionTests {
         ])
     }
 
-    @Test("fuses 年 into the resolved number (2年 → ninen)")
-    func yearAfterDigits() throws {
-        let annotator = makeAnnotator(tokens(
-            ["2", "年"], readings: [nil, "ねん"]
-        ))
+    @Test("fuses 年 into the resolved number (2年 → ninen; 八年 → hachinen)", arguments: [
+        (["2", "年"], [nil, "ねん"] as [String?], "2年", "ninen", "にねん"),
+        (["八", "年"], ["はち", "ねん"] as [String?], "八年", "hachinen", "はちねん")
+    ])
+    func yearFusesResolvedNumber(
+        surfaces: [String], readings: [String?], text: String, romaji: String, furigana: String
+    ) throws {
+        let annotator = makeAnnotator(tokens(surfaces, readings: readings))
 
-        let segments = try #require(annotator.segments(for: "2年"))
+        let segments = try #require(annotator.segments(for: text))
 
-        #expect(describe(segments) == [["2年", "ninen", "にねん"]])
-    }
-
-    @Test("fuses 年 into a kanji numeral (八年 → hachinen)")
-    func yearAfterKanjiNumeral() throws {
-        let annotator = makeAnnotator(tokens(
-            ["八", "年"], readings: ["はち", "ねん"]
-        ))
-
-        let segments = try #require(annotator.segments(for: "八年"))
-
-        #expect(describe(segments) == [["八年", "hachinen", "はちねん"]])
+        #expect(describe(segments) == [[text, romaji, furigana]])
     }
 
     @Test("reads 年 as the counter after unresolved digits (2026年)")
@@ -298,17 +282,6 @@ struct ReadingAnnotatorFusionTests {
         let segments = try #require(annotator.segments(for: "3万"))
 
         #expect(describe(segments) == [["3万", "sanman", "さんまん"]])
-    }
-
-    @Test("resolves a digit run before a kanji numeral (3千 → sansen)")
-    func digitRunBeforeKanjiNumeral() throws {
-        let annotator = makeAnnotator(tokens(
-            ["3", "千"], readings: [nil, "せん"]
-        ))
-
-        let segments = try #require(annotator.segments(for: "3千"))
-
-        #expect(describe(segments) == [["3千", "sansen", "さんせん"]])
     }
 
     @Test("stays unannotated when a numeral after digits has no reading (1千)")

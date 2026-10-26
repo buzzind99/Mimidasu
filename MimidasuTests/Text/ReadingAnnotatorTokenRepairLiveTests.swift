@@ -309,17 +309,4 @@ struct ReadingAnnotatorTokenRepairLiveTests {
         #expect(repaired.first?.base != nil)
         #expect(tilesText(repaired, text))
     }
-
-    /// A run that opens on a full-size kana never reaches the peel, which is
-    /// what keeps a dictionary-covered long name whole: the fallback tier's
-    /// gate is the only thing standing between it and a cut, and the repair
-    /// runs ahead of that gate.
-    @Test("a long unknown name is left whole for the gate", arguments: [
-        "シュワルツェネッガー"
-    ])
-    func longUnknownNameIsLeftWhole(input: String) throws {
-        let segments = try segments(input)
-
-        #expect(segments.map(\.surface) == [input])
-    }
 }

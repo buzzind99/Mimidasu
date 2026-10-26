@@ -50,24 +50,6 @@ struct ReadingAnnotatorTokenRepairTests {
         })
     }
 
-    @Test("the left kana neighbour is rewritten: ち bound to ちる becomes ちょっと")
-    func kanaLeftNeighbourIsPulledIn() {
-        let fake = FakeCollapseTokenizer(collapseWindows())
-
-        let repaired = ReadingAnnotator.repairedTokens(
-            collapsedDebugSentence, of: debugSentence, tokenize: { text in fake.tokenize(text) }
-        )
-
-        #expect(repaired.first?.text == "ちょっと")
-        #expect(repaired.first?.base == "ちょっと")
-        #expect(repaired.first?.start == 0)
-        // The bare region is tried first and only then the one that grows
-        // left — the growth loop is load-bearing, not a formality.
-        #expect(fake.windows == [
-            "ょっとまあいいんだけどさ", "ちょっとまあいいんだけど", "さなんでや"
-        ])
-    }
-
     @Test("repeats of real words are recovered too (あいいいいいいいい → five tappable pieces)")
     func repeatedRealWordsAreRecovered() throws {
         // The whole string collapses, and the one window the repair re-decodes
@@ -483,7 +465,8 @@ struct ReadingAnnotatorTokenRepairTests {
     /// attempt below this one in the ladder — only runs on what left context
     /// could not reach. Scripting the peeled remainder as a clean decode proves
     /// the order: had the peel gone first this same sentence would have come
-    /// back as a stranded `ょっ` plus `とまあ…`, and never as one ちょっと.
+    /// back as a stranded `ょっ` plus `とまあ…`, and never as one ちょっと. The
+    /// rewritten first token also keeps its base and its offset.
     @Test("growing left wins: the peel only runs where left context gave up")
     func leftContextIsTriedBeforeThePeel() {
         let text = debugSentence
@@ -505,5 +488,7 @@ struct ReadingAnnotatorTokenRepairTests {
             "ょっとまあいいんだけどさ", "ちょっとまあいいんだけど", "さなんでや"
         ])
         #expect(repaired.first?.text == "ちょっと")
+        #expect(repaired.first?.base == "ちょっと")
+        #expect(repaired.first?.start == 0)
     }
 }

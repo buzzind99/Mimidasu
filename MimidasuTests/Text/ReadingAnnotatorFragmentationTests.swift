@@ -12,12 +12,6 @@ import Testing
 @Suite("ReadingAnnotator fragmentation")
 struct ReadingAnnotatorFragmentationTests {
 
-    /// A gate that answers `true` only for the listed headwords.
-    private static func gate(_ headwords: String...) -> @Sendable (String) -> Bool? {
-        let known = Set(headwords)
-        return { surface in known.contains(surface) }
-    }
-
     private func segments(
         _ surfaces: [String], readings: [String?] = [],
         base: String? = nil, pos: String? = nil,
@@ -42,7 +36,7 @@ struct ReadingAnnotatorFragmentationTests {
     @Test("あいいいいいいいい: dictionary lead hit + period-1 tail chunks")
     func dictionaryLeadHitThenPeriodOneTail() throws {
         let segments = try segments(
-            ["あいいいいいいいい"], gate: Self.gate("あい")
+            ["あいいいいいいいい"], gate: headwordGate("あい")
         )
 
         #expect(describe(segments) == [
@@ -55,7 +49,7 @@ struct ReadingAnnotatorFragmentationTests {
     @Test("モいモいモいもいモい: no period, no hits → balanced cap 5+5")
     func balancedCapFiveFive() throws {
         let segments = try segments(
-            ["モいモいモいもいモい"], gate: Self.gate()
+            ["モいモいモいもいモい"], gate: headwordGate()
         )
 
         #expect(describe(segments) == [
@@ -67,7 +61,7 @@ struct ReadingAnnotatorFragmentationTests {
     @Test("のじゃのじゃのじゃ: repetition period 3 → three segments")
     func repetitionPeriodThree() throws {
         let segments = try segments(
-            ["のじゃのじゃのじゃ"], gate: Self.gate()
+            ["のじゃのじゃのじゃ"], gate: headwordGate()
         )
 
         #expect(describe(segments) == [
@@ -79,7 +73,7 @@ struct ReadingAnnotatorFragmentationTests {
     @Test("ソラシナソラシカ: exactly-threshold run still splits 4+4")
     func exactlyThresholdRunSplits() throws {
         let segments = try segments(
-            ["ソラシナソラシカ"], gate: Self.gate()
+            ["ソラシナソラシカ"], gate: headwordGate()
         )
 
         #expect(describe(segments) == [
@@ -91,7 +85,7 @@ struct ReadingAnnotatorFragmentationTests {
     @Test("いいいいいいいい: period-1 chunks win over period 2 (3+3+2)")
     func periodOneBeatsPeriodTwo() throws {
         let segments = try segments(
-            ["いいいいいいいい"], gate: Self.gate()
+            ["いいいいいいいい"], gate: headwordGate()
         )
 
         #expect(describe(segments) == [
@@ -103,7 +97,7 @@ struct ReadingAnnotatorFragmentationTests {
     @Test("ではではではでは: repetition split renders each では as dewa (override chain)")
     func repetitionRenderedThroughOverrideChain() throws {
         let segments = try segments(
-            ["ではではではでは"], gate: Self.gate()
+            ["ではではではでは"], gate: headwordGate()
         )
 
         #expect(describe(segments) == [
@@ -116,24 +110,15 @@ struct ReadingAnnotatorFragmentationTests {
     @Test("・・・・・・・・: middle dots cut as other → single piece stays whole")
     func middleDotRowStaysWhole() throws {
         let segments = try segments(
-            ["・・・・・・・・"], gate: Self.gate()
+            ["・・・・・・・・"], gate: headwordGate()
         )
 
         #expect(describe(segments) == [["・・・・・・・・", "・・・・・・・・", nil]])
     }
 
-    @Test("the splitter yields a single piece for an other-only run (the guard keeps it whole)")
-    func otherOnlyRunSplitsIntoOnePiece() {
-        let annotator = makeAnnotator(
-            tokens(["・・・・・・・・"], readings: [nil]), headwordGate: { _ in false }
-        )
-
-        #expect(annotator.fragments(of: "・・・・・・・・", gate: { _ in false }) == ["・・・・・・・・"])
-    }
-
     @Test("halfwidth punctuation breaks the run as other; the kana sides still fragment")
     func halfwidthPunctuationRunBreaker() throws {
-        let segments = try segments(["ｱｱｱｱ､ｱｱｱｱｱｱ"], gate: Self.gate())
+        let segments = try segments(["ｱｱｱｱ､ｱｱｱｱｱｱ"], gate: headwordGate())
 
         #expect(describe(segments) == [
             ["ｱｱ", "aa", nil], ["ｱｱ", "aa", nil], ["､", "､", nil],
@@ -173,7 +158,7 @@ struct ReadingAnnotatorFragmentationTests {
     @Test("a JMDict-covered long name stays whole")
     func gateProtectedSurfaceStaysWhole() throws {
         let segments = try segments(
-            ["シュワルツェネッガー"], gate: Self.gate("シュワルツェネッガー")
+            ["シュワルツェネッガー"], gate: headwordGate("シュワルツェネッガー")
         )
 
         #expect(describe(segments) == [["シュワルツェネッガー", "shuwarutseneggaa", nil]])
@@ -182,7 +167,7 @@ struct ReadingAnnotatorFragmentationTests {
     @Test("a known token with a base form is ineligible at the lemma check")
     func knownTokenWithLemmaStaysWhole() throws {
         let segments = try segments(
-            ["ダミーダミーダミー"], readings: ["だみー"], base: "ダミー", pos: "名詞", gate: Self.gate()
+            ["ダミーダミーダミー"], readings: ["だみー"], base: "ダミー", pos: "名詞", gate: headwordGate()
         )
 
         #expect(describe(segments) == [["ダミーダミーダミー", "damii", nil]])
@@ -192,37 +177,25 @@ struct ReadingAnnotatorFragmentationTests {
     @Test("a known token with furigana is ineligible even lemma-less")
     func knownTokenWithFuriganaStaysWhole() throws {
         let segments = try segments(
-            ["灼熱灼熱灼熱灼熱"], readings: ["しゃくねつ"], base: "灼熱", gate: Self.gate()
+            ["灼熱灼熱灼熱灼熱"], readings: ["しゃくねつ"], base: "灼熱", gate: headwordGate()
         )
 
         #expect(describe(segments) == [["灼熱灼熱灼熱灼熱", "shakunetsu", "しゃくねつ"]])
     }
 
-    @Test("an Arabic digit run is skipped before the gate")
-    func arabicRunSkipped() throws {
+    @Test("numeral runs are skipped before the gate", arguments: [
+        "1234567890123", "一二三四五六七八九十"
+    ])
+    func numeralRunsSkipped(text: String) throws {
         let consulted = Mutex(false)
         let segments = try segments(
-            ["1234567890123"], gate: { _ in
+            [text], gate: { _ in
                 consulted.withLock { flag in flag = true }
                 return false
             }
         )
 
-        #expect(describe(segments) == [["1234567890123", "1234567890123", nil]])
-        #expect(!consulted.withLock { flag in flag })
-    }
-
-    @Test("kanji numerals are skipped before the gate")
-    func kanjiNumeralsSkipped() throws {
-        let consulted = Mutex(false)
-        let segments = try segments(
-            ["一二三四五六七八九十"], gate: { _ in
-                consulted.withLock { flag in flag = true }
-                return false
-            }
-        )
-
-        #expect(describe(segments) == [["一二三四五六七八九十", "一二三四五六七八九十", nil]])
+        #expect(describe(segments) == [[text, text, nil]])
         #expect(!consulted.withLock { flag in flag })
     }
 
@@ -244,7 +217,7 @@ struct ReadingAnnotatorFragmentationTests {
     @Test("a sub-threshold surface stays whole (7 chars)")
     func belowThresholdStaysWhole() throws {
         let segments = try segments(
-            ["あいうえおかき"], gate: Self.gate()
+            ["あいうえおかき"], gate: headwordGate()
         )
 
         #expect(describe(segments) == [["あいうえおかき", "aiueokaki", nil]])
@@ -254,7 +227,7 @@ struct ReadingAnnotatorFragmentationTests {
     func consecutiveDictionaryHits() throws {
         let segments = try segments(
             ["あいうえおかきくさしすせそたちつてと"],
-            gate: Self.gate("あいうえおかきく", "さしすせそたちつ")
+            gate: headwordGate("あいうえおかきく", "さしすせそたちつ")
         )
 
         #expect(describe(segments) == [
@@ -268,7 +241,7 @@ struct ReadingAnnotatorFragmentationTests {
     @Test("a mid-length dictionary hit leaves a sub-threshold tail whole")
     func dictionaryHitShortTailStaysWhole() throws {
         let segments = try segments(
-            ["あいいいいい" + "いいい"], gate: Self.gate("あいいいいい")
+            ["あいいいいい" + "いいい"], gate: headwordGate("あいいいいい")
         )
 
         #expect(describe(segments) == [
@@ -281,7 +254,7 @@ struct ReadingAnnotatorFragmentationTests {
     func repeatedKanjiTailBelowCapStaysWhole() throws {
         let segments = try segments(
             ["鰭鯛鰭鯛鰭鯛鰭" + "鰭鰭鰭鰭鰭"],
-            gate: Self.gate("鰭鯛鰭鯛鰭鯛鰭")
+            gate: headwordGate("鰭鯛鰭鯛鰭鯛鰭")
         )
 
         #expect(describe(segments) == [
@@ -293,7 +266,7 @@ struct ReadingAnnotatorFragmentationTests {
     @Test("a period-1 candidate with a stray scalar stays whole below the cap")
     func nearPeriodOneTailStaysWhole() throws {
         let segments = try segments(
-            ["あいいいいい" + "いいおいい"], gate: Self.gate("あいいいいい")
+            ["あいいいいい" + "いいおいい"], gate: headwordGate("あいいいいい")
         )
 
         #expect(describe(segments) == [
@@ -305,7 +278,7 @@ struct ReadingAnnotatorFragmentationTests {
     func kanjiRepetitionFallbackHit() throws {
         let segments = try segments(
             ["鰭鰭鰭鰭鰭鰭鰭鰭"],
-            gate: Self.gate(),
+            gate: headwordGate(),
             readingFallback: { surface in surface == "鰭鰭" ? "ひれ" : nil }
         )
 
@@ -319,7 +292,7 @@ struct ReadingAnnotatorFragmentationTests {
     @Test("kanji repetition splits with a fallback miss stays self-transcribed")
     func kanjiRepetitionFallbackMiss() throws {
         let segments = try segments(
-            ["鰭鯛鰭鯛鰭鯛鰭鯛"], gate: Self.gate()
+            ["鰭鯛鰭鯛鰭鯛鰭鯛"], gate: headwordGate()
         )
 
         #expect(describe(segments) == [
@@ -333,7 +306,7 @@ struct ReadingAnnotatorFragmentationTests {
         "ああああああああA"
     ])
     func otherRunBreaksIntoItsOwnFragment(input: String) throws {
-        let segments = try segments([input], gate: Self.gate())
+        let segments = try segments([input], gate: headwordGate())
 
         #expect(describe(segments) == [
             ["あああ", "aaa", nil], ["あああ", "aaa", nil], ["ああ", "aa", nil], ["A", "A", nil]
@@ -368,40 +341,11 @@ struct ReadingAnnotatorFragmentationTests {
     @Test("fragments carry no lemma and the source segment's part of speech")
     func fragmentsCarryPosButNoLemma() throws {
         let segments = try segments(
-            ["モいモいモいもいモい"], pos: "名詞", gate: Self.gate()
+            ["モいモいモいもいモい"], pos: "名詞", gate: headwordGate()
         )
 
         #expect(segments.map(\.pos) == ["名詞", "名詞"])
         #expect(segments.map(\.lemma) == [nil, nil])
-    }
-
-    @Test("the threshold constant boundary: 7 untouched, 8 split")
-    func thresholdBoundary() throws {
-        let seven = try segments(["さしすせそたち"], gate: Self.gate())
-        let eight = try segments(["さしすせそたちつ"], gate: Self.gate())
-
-        #expect(seven.map(\.surface) == ["さしすせそたち"])
-        #expect(eight.map(\.surface) == ["さしすせ", "そたちつ"])
-    }
-
-    @Test("fragments of a fragmenting surface always number at least two")
-    func eligibleSurfacesYieldAtLeastTwoFragments() throws {
-        let surfaces = [
-            "あいいいいいいいい", "モいモいモいもいモい", "のじゃのじゃのじゃ",
-            "ソラシナソラシカ", "いいいいいいいい", "ではではではでは"
-        ]
-        for surface in surfaces {
-            let annotator = makeAnnotator(
-                tokens([surface], readings: [nil]), headwordGate: { _ in false }
-            )
-            let segments = try #require(annotator.segments(for: surface))
-
-            #expect(
-                segments.count >= 2,
-                "\(surface) fragmented into \(segments.count) segments"
-            )
-            #expect(segments.map(\.surface).joined() == surface)
-        }
     }
 }
 
@@ -412,12 +356,6 @@ struct ReadingAnnotatorFragmentationTests {
 /// cutting, rendering, and the gate's folding probe like fullwidth does.
 @Suite("ReadingAnnotator fragmentation seams")
 struct ReadingAnnotatorSeamFragmentationTests {
-
-    /// A gate that answers `true` only for the listed headwords.
-    private static func gate(_ headwords: String...) -> @Sendable (String) -> Bool? {
-        let known = Set(headwords)
-        return { surface in known.contains(surface) }
-    }
 
     private func segments(
         _ surface: String, gate: @escaping @Sendable (String) -> Bool?
@@ -505,7 +443,7 @@ struct ReadingAnnotatorSeamFragmentationTests {
 
     @Test("halfwidth garble fragments like its fullwidth counterpart (repetition halves)")
     func halfwidthGarbleFragments() throws {
-        let segments = try segments("ｱｲｳｴｵｱｲｳｴｵ", gate: Self.gate())
+        let segments = try segments("ｱｲｳｴｵｱｲｳｴｵ", gate: headwordGate())
 
         #expect(describe(segments) == [
             ["ｱｲｳｴｵ", "aiueo", nil], ["ｱｲｳｴｵ", "aiueo", nil]
@@ -515,7 +453,7 @@ struct ReadingAnnotatorSeamFragmentationTests {
 
     @Test("a halfwidth name the dictionary covers (by its fullwidth spelling) stays whole")
     func halfwidthGateFoldedStaysWhole() throws {
-        let segments = try segments("ﾊﾟｲﾅｯﾌﾟﾙ", gate: Self.gate("パイナップル"))
+        let segments = try segments("ﾊﾟｲﾅｯﾌﾟﾙ", gate: headwordGate("パイナップル"))
 
         #expect(describe(segments) == [["ﾊﾟｲﾅｯﾌﾟﾙ", "painappuru", nil]])
     }

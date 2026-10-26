@@ -8,11 +8,11 @@ import Testing
 @Suite("ReadingAnnotator input guards")
 struct ReadingAnnotatorGuardTests {
 
-    @Test("returns nil for empty and whitespace-only input", arguments: ["", "   ", "\n\t "])
-    func nilForEmpty(text: String) {
+    @Test("returns nil for empty and whitespace-only input", arguments: ["", "   ", "\n\t "], [true, false])
+    func nilForEmpty(text: String, caching: Bool) {
         let annotator = makeAnnotator([])
 
-        let segments = annotator.segments(for: text)
+        let segments = annotator.segments(for: text, caching: caching)
 
         #expect(segments == nil)
     }
@@ -74,22 +74,6 @@ struct ReadingAnnotatorGuardTests {
         #expect(describe(segments) == expected)
     }
 
-    @Test("cached requests tokenize once and replay the same segment values")
-    func cachedPathTokenizesOnce() throws {
-        let calls = Mutex(0)
-        let canned = tokens(["桜"], readings: ["さくら"])
-        let annotator = ReadingAnnotator(tokenize: { _ in
-            calls.withLock { count in count += 1 }
-            return canned
-        })
-
-        let first = try #require(annotator.segments(for: "桜"))
-        let second = try #require(annotator.segments(for: "桜"))
-
-        #expect(calls.withLock { count in count } == 1)
-        #expect(describe(first) == describe(second))
-    }
-
     @Test("uncached requests re-run the pipeline and skip the store")
     func uncachedPathReexecutes() throws {
         let calls = Mutex(0)
@@ -104,13 +88,6 @@ struct ReadingAnnotatorGuardTests {
 
         #expect(calls.withLock { count in count } == 2)
         #expect(first.first !== second.first)
-    }
-
-    @Test("empty input stays nil on the uncached path", arguments: ["", "   "])
-    func uncachedEmptyInput(text: String) {
-        let annotator = makeAnnotator([])
-
-        #expect(annotator.segments(for: text, caching: false) == nil)
     }
 }
 

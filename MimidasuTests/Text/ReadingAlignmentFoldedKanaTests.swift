@@ -29,7 +29,9 @@ struct ReadingAlignmentFoldedKanaTests {
         ("ｶﾞ", "が"),
         ("ﾊﾟ", "ぱ"),
         ("ｦ", "を"),
-        ("ｰ", "ー")
+        ("ｰ", "ー"),
+        ("ﾊﾟｲﾅｯﾌﾟﾙ", "ぱいなっぷる"),
+        ("パイナップル", "ぱいなっぷる")
     ])
     func foldsHalfwidthKatakana(input: String, expected: String) {
         #expect(ReadingAlignment.foldedKana(input) == expected)

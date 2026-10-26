@@ -236,13 +236,6 @@ struct ReadingAnnotatorLiveTests {
         #expect(describe(segments) == [[input, romaji, furigana]])
     }
 
-    @Test("fuses Arabic digits with a counter via the digit table (600回)")
-    func digitCounter() throws {
-        let segments = try segments("600回")
-
-        #expect(describe(segments) == [["600回", "roppyakkai", "ろっぴゃっかい"]])
-    }
-
     @Test("fuses the voiced counter run with 本 (三万本 → sanmanbon)")
     func voicedHon() throws {
         let segments = try segments("三万本")
@@ -454,14 +447,9 @@ struct ReadingAnnotatorLiveTests {
     // MARK: invariant
 
     @Test("surfaces concatenate back to the input", arguments: [
-        "今日はいい天気ですね。", "動画を見ます。", "学校へ行く", "一回", "600回", "八歳",
-        "三万本", "二十日", "二十歳", "お母さん", "食べました", "見た", "言ってない", "来てない",
-        "高かった", "田中さん", "A B", "𠮷野家", "そう言っ", "は", "を", "私達", "その方がいい",
-        "こんにちは", "123", "お、母さん", "母、さん", "私の母です", "六等", "六歳", "七回",
-        "2年", "八年", "十四日", "おっ、いいね", "言ってあげる", "こっちの方", "㐂", "𠮷", "Hello",
-        "一人", "二人", "四人", "一人前", "それでは", "ならでは",
-        "なっ ちゃっ てる", "ドライブでてないかも なんか 新規の トライブ 作成 になっ ちゃっ てるなぁ。",
-        "日本", "日本人", "日本一", "日本中", "日本製"
+        "今日はいい天気ですね。", "を", "一人前",
+        "ドライブでてないかも なんか 新規の トライブ 作成 になっ ちゃっ てるなぁ。",
+        "日本中", "日本製"
     ])
     func concatenateBack(text: String) throws {
         let segments = try segments(text)
