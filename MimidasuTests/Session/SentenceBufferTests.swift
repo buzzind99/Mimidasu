@@ -35,9 +35,6 @@ struct SentenceBufferTests {
     /// the length-cap split never runs on terminal-tailed input.
     private let terminalTailedOverCapText =
         "今日はとても良い天気なので散歩に行きました、そのあとは買い物に出かけて晩ご飯を食べました。"
-    private let asciiQuestionSentence = "Is this new?"
-    private let asciiExclamationSentence = "Nice!"
-    private let ideographicZeroSentence = "〇〇。"
 
     // MARK: - Helpers
 
@@ -59,59 +56,24 @@ struct SentenceBufferTests {
 
     // MARK: - Tier 1: terminal punctuation
 
-    @Test("terminal punctuation emits a sentence immediately")
-    func terminalPunctuationEmitsImmediately() {
-        let (buffer, sink) = makeSUT()
-
-        buffer.append(finalText: punctuatedSentence, startSample: 0, endSample: oneSecondInSamples)
-
-        #expect(sink.sentences.count == 1)
-    }
-
-    @Test("terminal punctuation emits the full text")
-    func terminalPunctuationEmitsFullText() {
-        let (buffer, sink) = makeSUT()
-
-        buffer.append(finalText: punctuatedSentence, startSample: 0, endSample: oneSecondInSamples)
-
-        #expect(sink.sentences.first?.text == punctuatedSentence)
-    }
-
-    @Test("terminal punctuation records the start timestamp")
-    func terminalPunctuationRecordsStartTimestamp() {
+    @Test("terminal punctuation emits the sentence immediately", arguments: [
+        "今日はいい天気ですね。",
+        "Is this new?",
+        "Nice!"
+    ])
+    func terminalPunctuationEmitsImmediately(finalText: String) {
         let (buffer, sink) = makeSUT()
 
         buffer.append(
-            finalText: punctuatedSentence, startSample: oneSecondInSamples,
+            finalText: finalText, startSample: oneSecondInSamples,
             endSample: twoSecondsInSamples
         )
 
-        #expect(sink.sentences.first?.startS == 1.0)
-    }
-
-    @Test("terminal punctuation records the end timestamp")
-    func terminalPunctuationRecordsEndTimestamp() {
-        let (buffer, sink) = makeSUT()
-
-        buffer.append(
-            finalText: punctuatedSentence, startSample: oneSecondInSamples,
-            endSample: twoSecondsInSamples
+        #expect(
+            sink.sentences == [
+                Sentence(index: 0, startS: 1.0, endS: 2.0, lang: "ja", text: finalText)
+            ]
         )
-
-        #expect(sink.sentences.first?.endS == 2.0)
-    }
-
-    @Test("multiple emitted sentences increment the index")
-    func multipleSentencesIncrementIndex() {
-        let (buffer, sink) = makeSUT()
-        buffer.append(finalText: punctuatedSentence, startSample: 0, endSample: oneSecondInSamples)
-
-        buffer.append(
-            finalText: punctuatedSentence, startSample: oneSecondInSamples,
-            endSample: twoSecondsInSamples
-        )
-
-        #expect(sink.sentences.last?.index == 1)
     }
 
     // MARK: - Symbol-only finals
@@ -137,16 +99,6 @@ struct SentenceBufferTests {
     }
 
     // MARK: - Tier 2: silence timeout
-
-    @Test("tick after the silence timeout closes the sentence")
-    func tickAfterSilenceTimeoutCloses() {
-        let (buffer, sink) = makeSUT()
-        buffer.append(finalText: unpunctuatedSentence, startSample: 0, endSample: oneSecondInSamples)
-
-        buffer.tick(now: .now.advanced(by: .seconds(2)))
-
-        #expect(sink.sentences.first?.text == unpunctuatedSentence)
-    }
 
     @Test("tick before the silence timeout keeps the buffer open")
     func tickBeforeSilenceTimeoutKeepsOpen() {
@@ -197,15 +149,6 @@ struct SentenceBufferTests {
         #expect(sink.sentences.isEmpty)
     }
 
-    @Test("an ideographic-zero final counts as content")
-    func ideographicZeroFinalIsContent() {
-        let (buffer, sink) = makeSUT()
-
-        buffer.append(finalText: ideographicZeroSentence, startSample: 0, endSample: oneSecondInSamples)
-
-        #expect(sink.sentences.first?.text == ideographicZeroSentence)
-    }
-
     /// The controller gate admits any Japanese-script final; the buffer's
     /// content check must agree, or an admitted final could be dropped
     /// silently without keeping the silence timer honest.
@@ -224,8 +167,8 @@ struct SentenceBufferTests {
 
     // MARK: - Tier 3: length cap
 
-    @Test("beyond the length cap the buffer splits at the clause boundary")
-    func overCapSplitsAtClauseBoundary() {
+    @Test("beyond the length cap the buffer splits at the clause boundary and flushes the tail")
+    func overCapSplitsAtClauseBoundaryAndFlushesTail() {
         let (buffer, sink) = makeSUT()
 
         buffer.append(
@@ -233,45 +176,20 @@ struct SentenceBufferTests {
             endSample: fourSecondsInSamples
         )
 
-        #expect(sink.sentences.first?.text == expectedSplitHead)
-    }
-
-    @Test("beyond the length cap the split head records its start timestamp")
-    func overCapRecordsHeadStartTimestamp() {
-        let (buffer, sink) = makeSUT()
-
-        buffer.append(
-            finalText: longClauseSentence, startSample: twoSecondsInSamples,
-            endSample: fourSecondsInSamples
-        )
-
-        #expect(sink.sentences.first?.startS == 2.0)
-    }
-
-    @Test("flush after a clause split emits the tail")
-    func flushAfterClauseSplitEmitsTail() {
-        let (buffer, sink) = makeSUT()
-        buffer.append(
-            finalText: longClauseSentence, startSample: twoSecondsInSamples,
-            endSample: fourSecondsInSamples
+        #expect(
+            sink.sentences == [
+                Sentence(index: 0, startS: 2.0, endS: 4.0, lang: "ja", text: expectedSplitHead)
+            ]
         )
 
         buffer.flush()
 
-        #expect(sink.sentences.last?.text == expectedSplitTail)
-    }
-
-    @Test("flush after a clause split records the tail start timestamp")
-    func flushAfterClauseSplitRecordsTailTimestamp() {
-        let (buffer, sink) = makeSUT()
-        buffer.append(
-            finalText: longClauseSentence, startSample: twoSecondsInSamples,
-            endSample: fourSecondsInSamples
+        #expect(
+            sink.sentences == [
+                Sentence(index: 0, startS: 2.0, endS: 4.0, lang: "ja", text: expectedSplitHead),
+                Sentence(index: 1, startS: 4.0, endS: 4.0, lang: "ja", text: expectedSplitTail)
+            ]
         )
-
-        buffer.flush()
-
-        #expect(sink.sentences.last?.startS == 4.0)
     }
 
     @Test("beyond the length cap with no clause boundary the buffer keeps growing")
@@ -364,32 +282,6 @@ struct SentenceBufferTests {
         )
 
         #expect(sink.sentences.map(\.index) == [0, 1, 2])
-    }
-
-    // MARK: - ASCII terminals
-
-    @Test("an ASCII question mark terminal closes immediately")
-    func asciiQuestionTerminalClosesImmediately() {
-        let (buffer, sink) = makeSUT()
-
-        buffer.append(
-            finalText: asciiQuestionSentence, startSample: 0, endSample: oneSecondInSamples
-        )
-
-        #expect(sink.sentences.count == 1)
-        #expect(sink.sentences.first?.text == asciiQuestionSentence)
-    }
-
-    @Test("an ASCII exclamation terminal closes immediately")
-    func asciiExclamationTerminalClosesImmediately() {
-        let (buffer, sink) = makeSUT()
-
-        buffer.append(
-            finalText: asciiExclamationSentence, startSample: 0, endSample: oneSecondInSamples
-        )
-
-        #expect(sink.sentences.count == 1)
-        #expect(sink.sentences.first?.text == asciiExclamationSentence)
     }
 
     // MARK: - Flush

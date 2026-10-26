@@ -26,7 +26,7 @@ struct SessionControllerTransitionsTests {
         flush: [ASREvent] = [],
         finish: [ASREvent] = []
     ) -> TransitionSUT {
-        let log = TransitionCallLog()
+        let log = CallLog()
         let engine = TransitionScriptedEngine(log: log, flush: flush, finish: finish)
         let capture = TransitionScriptedCapture(
             log: log, name: "capture", pauseGate: pauseGate, resumeGate: resumeGate
@@ -35,7 +35,7 @@ struct SessionControllerTransitionsTests {
             log: log, name: "rebuilt", startGate: rebuiltStartGate
         )
         var available = [capture, rebuilt]
-        let sentences = TransitionSentenceSink()
+        let sentences = SentenceSink()
         let controller = SessionController(
             live: LivePartialState(), latency: LatencyState(),
             translationQueue: TranslationQueue(),
@@ -272,31 +272,8 @@ struct SessionControllerTransitionsTests {
 private struct TransitionSUT {
     let controller: SessionController
     let engine: TransitionScriptedEngine
-    let log: TransitionCallLog
+    let log: CallLog
     var sentences: () -> [Sentence]
-}
-
-private final class TransitionCallLog: @unchecked Sendable {
-    private let lock = NSLock()
-    private var entries: [String] = []
-
-    func record(_ name: String) {
-        lock.withLock { entries.append(name) }
-    }
-
-    var names: [String] {
-        lock.withLock { entries }
-    }
-
-    func contains(inOrder needle: [String]) -> Bool {
-        var index = 0
-        for entry in names where index < needle.count {
-            if entry == needle[index] {
-                index += 1
-            }
-        }
-        return index == needle.count
-    }
 }
 
 private final class TransitionScriptedEngine: ASREngine, @unchecked Sendable {
@@ -305,14 +282,14 @@ private final class TransitionScriptedEngine: ASREngine, @unchecked Sendable {
     var processedSamples = 0
     var pushedSamples = 0
 
-    private let log: TransitionCallLog
+    private let log: CallLog
     private let flushScript: [ASREvent]
     private let finishScript: [ASREvent]
     /// Set by a race test: the call parks until `open()`.
     var flushPark: FlushPark?
     var finishPark: FlushPark?
 
-    init(log: TransitionCallLog, flush: [ASREvent] = [], finish: [ASREvent] = []) {
+    init(log: CallLog, flush: [ASREvent] = [], finish: [ASREvent] = []) {
         self.log = log
         flushScript = flush
         finishScript = finish
@@ -346,13 +323,13 @@ private final class TransitionScriptedCapture: AudioCapturing, @unchecked Sendab
     var onIOError: ((CaptureError) -> Void)?
 
     let name: String
-    private let log: TransitionCallLog
+    private let log: CallLog
     private let pauseGate: PermitGate?
     private let resumeGate: PermitGate?
     private let startGate: PermitGate?
 
     init(
-        log: TransitionCallLog, name: String,
+        log: CallLog, name: String,
         pauseGate: PermitGate? = nil, resumeGate: PermitGate? = nil,
         startGate: PermitGate? = nil
     ) {
@@ -389,19 +366,6 @@ private final class TransitionScriptedCapture: AudioCapturing, @unchecked Sendab
             await resumeGate.acquire()
         }
         log.record("\(name).resumeReturned")
-    }
-}
-
-private final class TransitionSentenceSink: @unchecked Sendable {
-    private let lock = NSLock()
-    private var sentences: [Sentence] = []
-
-    func record(_ sentence: Sentence) {
-        lock.withLock { sentences.append(sentence) }
-    }
-
-    var all: [Sentence] {
-        lock.withLock { sentences }
     }
 }
 

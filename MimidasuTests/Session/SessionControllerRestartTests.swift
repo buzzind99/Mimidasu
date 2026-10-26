@@ -18,19 +18,6 @@ struct SessionControllerRestartTests {
     private let sessionModelID = "test-model-GGUF"
     private let captureFailureDetail = "boom"
 
-    private final class CallLog: @unchecked Sendable {
-        private let lock = NSLock()
-        private var entries: [String] = []
-
-        func record(_ name: String) {
-            lock.withLock { entries.append(name) }
-        }
-
-        var names: [String] {
-            lock.withLock { entries }
-        }
-    }
-
     private final class ScriptedASREngine: ASREngine, @unchecked Sendable {
         let isMock = true
         var onEngineError: ((String) -> Void)?

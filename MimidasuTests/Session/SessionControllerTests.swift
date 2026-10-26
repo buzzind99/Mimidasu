@@ -34,51 +34,17 @@ struct SessionControllerTests {
         try? await Task.sleep(for: .milliseconds(200))
     }
 
-    /// Pumps the main runloop in short slices for `seconds` total so the
-    /// controller's scheduled timers fire, giving the main actor slots
-    /// between slices to run the tasks their closures enqueue. For the
-    /// absence-of-activity tests, which have no observable success state.
-    private func pumpTimers(seconds: TimeInterval) async {
-        let deadline = Date().addingTimeInterval(seconds)
-        while Date() < deadline {
-            pumpRunLoop(seconds: 0.05)
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-    }
-
-    /// Condition-driven timer pump: pumps until `condition` holds or the
-    /// timeout expires, so assertions never hinge on a fixed delay outrunning
-    /// timer-fire scheduling under load. Returns false on timeout.
-    private func pumpTimers(
-        timeout: TimeInterval = 2,
-        until condition: @autoclosure () -> Bool
-    ) async -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition() {
-            guard Date() < deadline else { return false }
-            pumpRunLoop(seconds: 0.05)
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        return true
-    }
-
-    /// Sync wrapper around the noasync-annotated `RunLoop.run(until:)`:
-    /// `Task.sleep` does not spin the main runloop, so the scheduled
-    /// poll/tick timers never fire without this deliberate pump.
-    private nonisolated func pumpRunLoop(seconds: TimeInterval) {
-        RunLoop.main.run(until: Date().addingTimeInterval(seconds))
-    }
-
     private func makeSUT(
         resolveEngine: Bool = true,
         poll: [ASREvent] = [],
         finish: [ASREvent] = [],
-        captureStartError: (any Error)? = nil
+        captureStartError: (any Error)? = nil,
+        isMock: Bool = true
     ) -> SUT {
         let live = LivePartialState()
         let latency = LatencyState()
         let log = CallLog()
-        let engine = ScriptedASREngine(log: log, poll: poll, finish: finish)
+        let engine = ScriptedASREngine(log: log, poll: poll, finish: finish, isMock: isMock)
         let capture = ScriptedCapture(log: log, startError: captureStartError)
         let controller = SessionController(
             live: live, latency: latency, translationQueue: TranslationQueue(),
@@ -170,58 +136,28 @@ struct SessionControllerTests {
 
     // MARK: - stop() without a session
 
-    @Test("stop without a session clears the live partial")
-    func stopWithoutSessionClearsLivePartial() async {
+    @Test("stop without a session clears the partial, keeps metadata nil, and is safe twice")
+    func stopWithoutSession() async {
         let sut = makeSUT()
         sut.live.partial = pendingPartial
 
         await sut.controller.stop()
-
-        #expect(sut.live.partial == "")
-    }
-
-    @Test("stop without a session keeps the session metadata nil")
-    func stopWithoutSessionKeepsMetadataNil() async {
-        let sut = makeSUT()
-
         await sut.controller.stop()
 
+        #expect(sut.live.partial == "")
         #expect(sut.controller.sessionMetadata == nil)
-    }
-
-    @Test("stop without a session is safe when called twice")
-    func stopWithoutSessionTwiceIsSafe() async {
-        let sut = makeSUT()
-        sut.live.partial = pendingPartial
-
-        await sut.controller.stop()
-        await sut.controller.stop()
-
-        #expect(sut.live.partial == "")
     }
 
     // MARK: - Timer lifecycle
 
-    @Test("timers firing without a session are a no-op")
-    func timersWithoutSessionAreNoOp() async {
+    @Test("timers fire without a session as a no-op and stop tears them down")
+    func timersWithoutSessionAreNoOpAndStopTearsDown() async {
         let sut = makeSUT()
 
         sut.controller.startTimers()
-        await pumpTimers(seconds: 0.3)
+        await TimerPump.pumpTimers(seconds: 0.3)
         await sut.controller.stop()
-
-        #expect(sut.live.partial == "")
-        #expect(sut.controller.sessionMetadata == nil)
-    }
-
-    @Test("stop tears down the timers")
-    func stopTearsDownTimers() async {
-        let sut = makeSUT()
-
-        sut.controller.startTimers()
-        await pumpTimers(seconds: 0.3)
-        await sut.controller.stop()
-        await pumpTimers(seconds: 0.3)
+        await TimerPump.pumpTimers(seconds: 0.3)
 
         #expect(sut.live.partial == "")
         #expect(sut.controller.sessionMetadata == nil)
@@ -254,39 +190,24 @@ struct SessionControllerTests {
         #expect(sut.latency.seconds == 0)
     }
 
-    @Test("begin records mock session metadata")
-    func beginCapturesMockMetadata() async throws {
-        let sut = makeSUT()
+    @Test("begin records the mock marker or the passed modelID in the session metadata", arguments: [
+        (isMock: true, expectedModel: "mock", targetLang: "zh-Hans"),
+        (isMock: false, expectedModel: "test-model-GGUF", targetLang: "en")
+    ])
+    func beginRecordsModelMetadata(
+        isMock: Bool, expectedModel: String, targetLang: String
+    ) async throws {
+        let sut = makeSUT(isMock: isMock)
 
         _ = try await sut.controller.begin(
-            modelURL: warmUpModelURL, modelID: sessionModelID, targetLang: "zh-Hans"
+            modelURL: warmUpModelURL, modelID: sessionModelID, targetLang: targetLang
         )
         let metadata = try #require(sut.controller.sessionMetadata)
 
-        #expect(metadata.model == "mock")
+        #expect(metadata.model == expectedModel)
         #expect(metadata.sourceLang == "ja")
-        #expect(metadata.targetLang == "zh-Hans")
+        #expect(metadata.targetLang == targetLang)
         #expect(metadata.chunkMS == 160)
-    }
-
-    @Test("begin records the passed modelID for a non-mock engine's metadata")
-    func beginCapturesNonMockModelID() async throws {
-        let live = LivePartialState()
-        let latency = LatencyState()
-        let log = CallLog()
-        let engine = ScriptedASREngine(log: log, isMock: false)
-        let capture = ScriptedCapture(log: log)
-        let controller = SessionController(
-            live: live, latency: latency, translationQueue: TranslationQueue(),
-            makeEngine: { _, _ in engine },
-            makeCapture: { capture },
-            warmUpEnabled: { false }
-        )
-
-        _ = try await controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
-        let metadata = try #require(controller.sessionMetadata)
-
-        #expect(metadata.model == sessionModelID)
     }
 
     @Test("begin reports needsModel when no engine resolves")
@@ -329,19 +250,6 @@ struct SessionControllerTests {
         #expect(sut.engine.allPushedChunks == [[0.1, -0.2, 0.3]])
     }
 
-    @Test("capture chunks update the latency readback on the poll tick")
-    func captureChunksUpdateLatency() async throws {
-        let sut = makeSUT()
-        _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
-
-        sut.capture.onChunk?(AudioChunk(samples: [Float](repeating: 0.1, count: 2560), startSample: 0))
-        sut.controller.startTimers()
-        let surfaced = await pumpTimers(until: sut.latency.seconds == 0.2)
-
-        #expect(surfaced, "the poll tick must surface the latency readback")
-        #expect(sut.latency.seconds == 0.2)
-    }
-
     /// Coverage for the DEBUG `logIngressEnergy` body: driven to its 50-chunk
     /// print boundary and beyond is unreachable without real audio; the log
     /// line itself is not asserted.
@@ -356,7 +264,7 @@ struct SessionControllerTests {
             )
         }
         sut.controller.startTimers()
-        let surfaced = await pumpTimers(until: sut.latency.seconds == 8.0)
+        let surfaced = await TimerPump.pumpTimers(until: sut.latency.seconds == 8.0)
 
         #expect(surfaced, "the poll tick must accumulate the full ingress latency")
         #expect(sut.engine.allPushedChunks.count == 50)
@@ -397,7 +305,7 @@ struct SessionControllerTests {
         let sut = makeSUT(poll: [.partial(text: pendingPartial)])
         _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
         sut.controller.startTimers()
-        let surfaced = await pumpTimers(until: sut.live.partial == pendingPartial)
+        let surfaced = await TimerPump.pumpTimers(until: sut.live.partial == pendingPartial)
         #expect(surfaced, "the poll timer must surface the scripted partial")
         let surfacedPartial = sut.live.partial
 
@@ -422,7 +330,7 @@ struct SessionControllerTests {
         sut.controller.onSentence = { sentence in sentences.append(sentence) }
         _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
         sut.controller.startTimers()
-        let emitted = await pumpTimers(until: !sentences.isEmpty)
+        let emitted = await TimerPump.pumpTimers(until: !sentences.isEmpty)
         await sut.controller.stop()
 
         #expect(emitted, "the poll timer must route the final into the sentence pipeline")
@@ -447,7 +355,7 @@ struct SessionControllerTests {
         sut.controller.onSentence = { sentence in sentences.append(sentence) }
         _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
         sut.controller.startTimers()
-        await pumpTimers(seconds: 0.5)
+        await TimerPump.pumpTimers(seconds: 0.5)
         await sut.controller.stop()
 
         #expect(sentences.isEmpty)
@@ -491,19 +399,6 @@ private struct SUT {
     let engine: ScriptedASREngine
     let capture: ScriptedCapture
     let log: CallLog
-}
-
-private final class CallLog: @unchecked Sendable {
-    private let lock = NSLock()
-    private var entries: [String] = []
-
-    func record(_ name: String) {
-        lock.withLock { entries.append(name) }
-    }
-
-    var names: [String] {
-        lock.withLock { entries }
-    }
 }
 
 private final class ScriptedASREngine: ASREngine, @unchecked Sendable {

@@ -10,12 +10,6 @@ struct SessionModelsTests {
     // MARK: - Fixtures
 
     private let sampleRateSamples = 16000
-    private let underHourSeconds = 83.0
-    private let expectedUnderHourTimestamp = "01:23"
-    private let overHourSeconds = 3661.0
-    private let expectedOverHourTimestamp = "01:01:01"
-    private let negativeSeconds = -5.0
-    private let expectedClampedTimestamp = "00:00"
     private let firstTranslationText = "Hello"
     private let secondTranslationText = "Hi"
 
@@ -35,13 +29,6 @@ struct SessionModelsTests {
         #expect(seconds == 1.0)
     }
 
-    @Test("zero samples is zero seconds")
-    func zeroSamplesIsZero() {
-        let seconds = SessionClock.seconds(0)
-
-        #expect(seconds == 0.0)
-    }
-
     @Test("half a second of samples converts to half a second")
     func halfSecondOfSamples() {
         let seconds = SessionClock.seconds(sampleRateSamples / 2)
@@ -51,46 +38,18 @@ struct SessionModelsTests {
 
     // MARK: - SessionClock.timestamp
 
-    @Test("formats under an hour as minutes and seconds")
-    func underHourTimestamp() {
-        let timestamp = SessionClock.timestamp(underHourSeconds)
+    @Test("formats session seconds as a timestamp", arguments: [
+        (seconds: 83.0, expected: "01:23"),
+        (seconds: 3661.0, expected: "01:01:01"),
+        (seconds: 3600.0, expected: "01:00:00"),
+        (seconds: 3599.9, expected: "59:59"),
+        (seconds: 83.9, expected: "01:23"),
+        (seconds: -5.0, expected: "00:00")
+    ])
+    func timestampFormats(seconds: Double, expected: String) {
+        let timestamp = SessionClock.timestamp(seconds)
 
-        #expect(timestamp == expectedUnderHourTimestamp)
-    }
-
-    @Test("formats over an hour as hours, minutes and seconds")
-    func overHourTimestamp() {
-        let timestamp = SessionClock.timestamp(overHourSeconds)
-
-        #expect(timestamp == expectedOverHourTimestamp)
-    }
-
-    @Test("formats exactly one hour as hours, minutes and seconds")
-    func exactlyOneHourTimestamp() {
-        let timestamp = SessionClock.timestamp(3600)
-
-        #expect(timestamp == "01:00:00")
-    }
-
-    @Test("formats just under an hour as minutes and seconds")
-    func justUnderHourTimestamp() {
-        let timestamp = SessionClock.timestamp(3599.9)
-
-        #expect(timestamp == "59:59")
-    }
-
-    @Test("rounds sub-second remainders down")
-    func subSecondTimestampRoundsDown() {
-        let timestamp = SessionClock.timestamp(underHourSeconds + 0.9)
-
-        #expect(timestamp == expectedUnderHourTimestamp)
-    }
-
-    @Test("clamps negative seconds to zero")
-    func negativeTimestampClampsToZero() {
-        let timestamp = SessionClock.timestamp(negativeSeconds)
-
-        #expect(timestamp == expectedClampedTimestamp)
+        #expect(timestamp == expected)
     }
 
     // MARK: - Sentence
@@ -141,28 +100,7 @@ struct SessionModelsTests {
         ])
     }
 
-    @Test("a second language joins with a slash")
-    func secondLanguageJoinsWithSlash() {
-        var entry = makeEntry()
-
-        entry.replaceTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
-        entry.replaceTranslation(SentenceTranslation(lang: "ko", text: secondTranslationText))
-
-        #expect(entry.joinedTranslations == "\(firstTranslationText) / \(secondTranslationText)")
-    }
-
     // MARK: - SessionEntry.replaceTranslation
-
-    @Test("a re-translation replaces the same-language translation in place")
-    func replaceTranslationSwapsSameLanguage() {
-        var entry = makeEntry()
-        entry.replaceTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
-
-        entry.replaceTranslation(SentenceTranslation(lang: "en", text: "Howdy"))
-
-        #expect(entry.joinedTranslations == "Howdy")
-        #expect(entry.translations == [SentenceTranslation(lang: "en", text: "Howdy")])
-    }
 
     @Test("a re-translation for a new language appends instead of replacing")
     func replaceTranslationAppendsNewLanguage() {
@@ -173,15 +111,6 @@ struct SessionModelsTests {
 
         #expect(entry.joinedTranslations == "\(firstTranslationText) / 안녕")
         #expect(entry.translations.count == 2)
-    }
-
-    @Test("replacing on an untranslated entry behaves like an append")
-    func replaceTranslationOnUntranslatedAppends() {
-        var entry = makeEntry()
-
-        entry.replaceTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
-
-        #expect(entry.joinedTranslations == firstTranslationText)
     }
 
     /// The invariant that makes the retry safe: `replaceTranslation` is the

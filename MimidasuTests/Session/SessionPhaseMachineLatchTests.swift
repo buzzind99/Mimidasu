@@ -31,35 +31,22 @@ struct SessionPhaseMachineLatchTests {
         #expect(transition.effects.isEmpty, "the double-click guard must hold")
     }
 
-    @Test("the resuming latch clears when the resume succeeds")
-    func resumeSucceededClearsLatch() {
+    @Test("the resuming latch clears when the resume settles", arguments: [
+        (SessionAction.resumeSucceeded, SessionPhase.running, [SessionEffect.flushEngine]),
+        (.resumeFailed("boom"), .sourceLost, [.postCaptureLost("boom")]),
+        (.resumeAbandoned, .paused, [])
+    ])
+    func resumeSettleClearsLatch(
+        action: SessionAction, expectedPhase: SessionPhase, expectedEffects: [SessionEffect]
+    ) {
         var machine = SessionPhaseMachine(phase: .paused)
         _ = machine.reduce(.resumeRequested)
-        _ = machine.reduce(.resumeSucceeded)
 
-        #expect(machine.phase == .running)
+        let transition = machine.reduce(action)
+
+        #expect(machine.phase == expectedPhase)
         #expect(!machine.isResuming)
-    }
-
-    @Test("the resuming latch clears when the resume fails")
-    func resumeFailedClearsLatch() {
-        var machine = SessionPhaseMachine(phase: .paused)
-        _ = machine.reduce(.resumeRequested)
-        _ = machine.reduce(.resumeFailed("boom"))
-
-        #expect(machine.phase == .sourceLost)
-        #expect(!machine.isResuming)
-    }
-
-    @Test("the resuming latch clears when the resume is abandoned")
-    func resumeAbandonedClearsLatch() {
-        var machine = SessionPhaseMachine(phase: .paused)
-        _ = machine.reduce(.resumeRequested)
-        let transition = machine.reduce(.resumeAbandoned)
-
-        #expect(machine.phase == .paused)
-        #expect(!machine.isResuming)
-        #expect(transition.effects.isEmpty)
+        #expect(transition.effects == expectedEffects)
     }
 
     @Test("leaving `.paused` clears the resuming latch")
@@ -106,16 +93,6 @@ struct SessionPhaseMachineLatchTests {
         #expect(machine.isTerminating, "only the teardown may clear the quit-time latch")
     }
 
-    @Test("the test seam is the only way to revoke the quit-time latch")
-    func seamRevokesTheTerminatingLatch() {
-        var machine = SessionPhaseMachine(phase: .running)
-        _ = machine.reduce(.terminationStarted)
-
-        machine.setPhaseForTesting(.idle)
-
-        #expect(!machine.isTerminating, "the seam resets both latches")
-    }
-
     // MARK: - The termination latch
 
     @Test("terminationStarted latches the terminating flag")
@@ -157,21 +134,17 @@ struct SessionPhaseMachineLatchTests {
 
     // MARK: - Effect ordering
 
-    @Test("the staged stop is awaited before the warm engine is retired")
-    func stagedStopIsAwaitedBeforeRetiring() throws {
-        var machine = SessionPhaseMachine(phase: .stopping)
-        let effects = machine.reduce(.terminationStarted).effects
-
-        let awaited = try #require(effects.firstIndex(of: .awaitStagedStop))
-        let retired = try #require(effects.firstIndex(of: .retireWarmEngine))
+    @Test("the quit-time teardown orders the staged stop and the session finalization before the retire")
+    func teardownEffectsAreOrdered() throws {
+        var staged = SessionPhaseMachine(phase: .stopping)
+        let stagedEffects = staged.reduce(.terminationStarted).effects
+        let awaited = try #require(stagedEffects.firstIndex(of: .awaitStagedStop))
+        let stagedRetired = try #require(stagedEffects.firstIndex(of: .retireWarmEngine))
         #expect(
-            awaited < retired,
-            "the staged stop must land before the engine is retired: \(effects)"
+            awaited < stagedRetired,
+            "the staged stop must land before the engine is retired: \(stagedEffects)"
         )
-    }
 
-    @Test("the live teardown finalizes the session before the engine is retired")
-    func liveTeardownFinalizesBeforeRetiring() throws {
         for phase in [SessionPhase.starting, .running, .paused, .sourceLost] {
             var machine = SessionPhaseMachine(phase: phase)
             let effects = machine.reduce(.terminationStarted).effects

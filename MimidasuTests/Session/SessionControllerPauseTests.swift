@@ -18,30 +18,6 @@ struct SessionControllerPauseTests {
 
     private let flushTailSentence = "終わりです"
 
-    /// Thread-safe ordered call log (main actor + the detached flush).
-    private final class CallLog: @unchecked Sendable {
-        private let lock = NSLock()
-        private var entries: [String] = []
-
-        func record(_ name: String) {
-            lock.withLock { entries.append(name) }
-        }
-
-        var names: [String] {
-            lock.withLock { entries }
-        }
-
-        func contains(inOrder needle: [String]) -> Bool {
-            var index = 0
-            for entry in names where index < needle.count {
-                if entry == needle[index] {
-                    index += 1
-                }
-            }
-            return index == needle.count
-        }
-    }
-
     private final class ScriptedASREngine: ASREngine, @unchecked Sendable {
         let isMock = true
         var onEngineError: ((String) -> Void)?
@@ -153,19 +129,6 @@ struct SessionControllerPauseTests {
             engine: engine, capture: capture, log: log,
             sentences: { sentences.all }
         )
-    }
-
-    private final class SentenceSink: @unchecked Sendable {
-        private let lock = NSLock()
-        private var sentences: [Sentence] = []
-
-        func record(_ sentence: Sentence) {
-            lock.withLock { sentences.append(sentence) }
-        }
-
-        var all: [Sentence] {
-            lock.withLock { sentences }
-        }
     }
 
     // MARK: - Pause

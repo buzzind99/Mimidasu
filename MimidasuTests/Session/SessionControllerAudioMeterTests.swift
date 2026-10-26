@@ -33,40 +33,6 @@ struct SessionControllerAudioMeterTests {
         return SUT(controller: controller, audioLevel: audioLevel, capture: capture)
     }
 
-    /// Pumps the main runloop in short slices for `seconds` total so the
-    /// controller's scheduled timers fire, giving the main actor slots
-    /// between slices to run the tasks their closures enqueue.
-    private func pumpTimers(seconds: TimeInterval) async {
-        let deadline = Date().addingTimeInterval(seconds)
-        while Date() < deadline {
-            pumpRunLoop(seconds: 0.05)
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-    }
-
-    /// Condition-driven pump (same rationale as `pumpTimers(seconds:)`):
-    /// assertions never hinge on a fixed delay outrunning timer-fire
-    /// scheduling under load. Returns false on timeout.
-    private func pumpTimers(
-        timeout: TimeInterval = 2,
-        until condition: @autoclosure () -> Bool
-    ) async -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition() {
-            guard Date() < deadline else { return false }
-            pumpRunLoop(seconds: 0.05)
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        return true
-    }
-
-    /// Sync wrapper around the noasync-annotated `RunLoop.run(until:)`:
-    /// `Task.sleep` does not spin the main runloop, so the scheduled
-    /// poll/tick timers never fire without this deliberate pump.
-    private nonisolated func pumpRunLoop(seconds: TimeInterval) {
-        RunLoop.main.run(until: Date().addingTimeInterval(seconds))
-    }
-
     // MARK: - Meter feed
 
     /// The pre-timer assertion is deterministic — no timers, no drain: the
@@ -83,7 +49,7 @@ struct SessionControllerAudioMeterTests {
         )
 
         sut.controller.startTimers()
-        let surfaced = await pumpTimers(until: (sut.audioLevel.levels.last ?? 0) > 0)
+        let surfaced = await TimerPump.pumpTimers(until: (sut.audioLevel.levels.last ?? 0) > 0)
 
         #expect(surfaced, "the poll tick must drain the staged RMS into the meter")
         #expect(abs(sut.audioLevel.dBFS + 20) < 0.01, "RMS 0.1 maps to −20 dBFS")
@@ -100,7 +66,7 @@ struct SessionControllerAudioMeterTests {
 
         _ = try await sut.controller.begin(modelURL: modelURL, modelID: "meter-test-GGUF")
         sut.controller.startTimers()
-        await pumpTimers(seconds: 0.3)
+        await TimerPump.pumpTimers(seconds: 0.3)
 
         #expect(
             sut.audioLevel.levels.allSatisfy { level in level == 0 },
