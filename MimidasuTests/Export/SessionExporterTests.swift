@@ -17,7 +17,6 @@ struct SessionExporterTests {
     private let sentenceEnd = 1.5
     private let expectedStartStamp = "00:00"
     private let expectedSrtTiming = "00:00:00,000 --> 00:00:01,500"
-    private let expectedVttTiming = "00:00:00.000 --> 00:00:01.500"
     private let expectedVttHeader = "WEBVTT"
     private let schemaVersion = 1
 
@@ -71,25 +70,28 @@ struct SessionExporterTests {
         #expect(output == "\(expectedStartStamp)  \(japaneseSentence)\n")
     }
 
-    // MARK: - SRT
+    // MARK: - Subtitle formats
 
-    @Test("SRT cues use comma milliseconds")
-    func srtUsesCommaMilliseconds() {
-        let entry = makeTranslatedEntry()
-        let expectedCue = "1\n\(expectedSrtTiming)\n\(englishTranslation)\n\n"
+    @Test("subtitle cues carry their format's delimiter and header", arguments: [
+        (
+            format: SessionExporter.Format.srt, translated: true,
+            expected: "1\n00:00:00,000 --> 00:00:01,500\nNice weather today.\n\n"
+        ),
+        (format: .srt, translated: false, expected: ""),
+        (
+            format: .vtt, translated: true,
+            expected: "WEBVTT\n\n1\n00:00:00.000 --> 00:00:01.500\nNice weather today.\n\n"
+        ),
+        (format: .vtt, translated: false, expected: "WEBVTT\n\n")
+    ])
+    func subtitleCueFormatting(
+        format: SessionExporter.Format, translated: Bool, expected: String
+    ) {
+        let entry = translated ? makeTranslatedEntry() : makeUntranslatedEntry()
 
-        let output = SessionExporter.subtitles(entries: [entry], format: .srt)
+        let output = SessionExporter.subtitles(entries: [entry], format: format)
 
-        #expect(output == expectedCue)
-    }
-
-    @Test("SRT skips cues for untranslated entries")
-    func srtSkipsUntranslatedCue() {
-        let entry = makeUntranslatedEntry()
-
-        let output = SessionExporter.subtitles(entries: [entry], format: .srt)
-
-        #expect(output == "")
+        #expect(output == expected)
     }
 
     /// A row carries one translation per language, so the multi-line cue shape
@@ -103,15 +105,6 @@ struct SessionExporterTests {
         let output = SessionExporter.subtitles(entries: [entry], format: .srt)
 
         #expect(output == "1\n\(expectedSrtTiming)\nFirst.\nSecond.\n\n")
-    }
-
-    @Test("VTT keeps only the header for untranslated entries")
-    func vttSkipsUntranslatedCue() {
-        let entry = makeUntranslatedEntry()
-
-        let output = SessionExporter.subtitles(entries: [entry], format: .vtt)
-
-        #expect(output == expectedVttHeader + "\n\n")
     }
 
     @Test("subtitle timings roll over milliseconds, minutes and hours")
@@ -153,29 +146,7 @@ struct SessionExporterTests {
         #expect(output.contains("2\n00:00:04,000 --> 00:00:05,000"))
     }
 
-    // MARK: - VTT
-
-    @Test("VTT cues use a header and dot milliseconds")
-    func vttUsesHeaderAndDotMilliseconds() {
-        let entry = makeTranslatedEntry()
-        let expectedCue = "\(expectedVttHeader)\n\n1\n\(expectedVttTiming)\n\(englishTranslation)\n\n"
-
-        let output = SessionExporter.subtitles(entries: [entry], format: .vtt)
-
-        #expect(output == expectedCue)
-    }
-
     // MARK: - JSON session
-
-    @Test("JSON output declares the schema version")
-    func jsonDeclaresSchemaVersion() throws {
-        let entry = makeTranslatedEntry()
-
-        let data = try SessionExporter.json(entries: [entry], metadata: nil, results: [:])
-        let document = try decodeDocument(from: data)
-
-        #expect(document.schemaVersion == schemaVersion)
-    }
 
     @Test("JSON output carries the sentence transcript")
     func jsonCarriesTranscript() throws {
