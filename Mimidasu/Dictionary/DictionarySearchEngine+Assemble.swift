@@ -54,7 +54,7 @@ extension DictionarySearchEngine {
     ///
     /// Note what is *not* here: the caller's window. Every row the stages
     /// found is ranked and counted, up to `maxRows` built — the window is the
-    /// UI's slice (`DictionarySearchState.visibleHits`), and building a row
+    /// UI's slice (`DictionarySearchPage.hits`), and building a row
     /// costs a couple of dictionary lookups against rows this search already
     /// holds. What costs a search is the scans, which happen upstream of this
     /// file.

@@ -268,7 +268,7 @@ struct ReferenceWindowView: View {
     /// is". Its total carries a `+` when the search stopped short, so
     /// the two halves do not read as equal claims. Empty while the query is
     /// empty — `0 / 0` on an untouched field is noise — while a search is in
-    /// flight, when the outcome still belongs to the previous query, and
+    /// flight, when the page still belongs to the previous query, and
     /// whenever the card beside it says the dictionary was never consulted
     /// (a missing database or a fault), where `0 / 0` would be that same
     /// denial in numbers.
@@ -283,7 +283,7 @@ struct ReferenceWindowView: View {
                !dictionaryState.unavailable,
                dictionaryState.fault == nil
             {
-                countText(dictionaryState.countText)
+                countText(dictionaryState.page.countText)
             }
         }
     }

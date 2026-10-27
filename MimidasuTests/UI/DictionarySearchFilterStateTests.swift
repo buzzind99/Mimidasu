@@ -88,7 +88,7 @@ struct DictionarySearchFilterStateTests {
     }
 
     @Test("a filter press re-pages to the first page")
-    func filterPressResetsVisibleLimit() async throws {
+    func filterPressResetsTheWindow() async throws {
         let fixture = try DictionarySearchStateFixture(extraWords: JMDictFixtureDatabase.bulkWords(
             count: 120, readingPrefix: "かん", startingAt: 9_993_000
         ))
@@ -97,13 +97,13 @@ struct DictionarySearchFilterStateTests {
         state.query = "かん"
         #expect(await pollUntil { state.outcome.hits.count == 120 }, "the paged search lands")
         state.loadMore()
-        #expect(state.visibleHits.count == 2 * DictionarySearchEngine.pageSize)
+        #expect(state.page.hits.count == 2 * DictionarySearchEngine.pageSize)
 
         // Without the reset this press runs a 100-row scan and shows 100
         // rows; with it the filtered answer starts one page deep.
         state.apply(.toggleCommonOnly)
 
-        #expect(state.visibleLimit == DictionarySearchEngine.pageSize, "a filter press re-pages")
+        #expect(state.window.limit == DictionarySearchEngine.pageSize, "a filter press re-pages")
         #expect(
             await pollUntil { state.outcome.matchedCount == 40 && state.isSearching == false },
             "the filtered search lands its exact total"

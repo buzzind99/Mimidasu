@@ -305,7 +305,7 @@ struct DictionarySearchHit: Identifiable, Equatable, Sendable {
 struct DictionarySearchOutcome: Equatable, Sendable {
     /// Every row the stages that ran found, ranked, bounded at
     /// `DictionarySearchEngine.maxRows`. The window is the UI's slice of this
-    /// (`DictionarySearchState.visibleHits`) — paging reveals rows from here
+    /// (`DictionarySearchPage.hits`) — paging reveals rows from here
     /// rather than searching again, so rows below the window cost nothing to
     /// show.
     let hits: [DictionarySearchHit]
@@ -344,8 +344,9 @@ struct DictionarySearchOutcome: Equatable, Sendable {
     /// only one of them is actionable. Both bounds are constants, not
     /// functions of the caller's `limit`, so **no window lifts them**: a deeper
     /// search returns the identical truncated answer. Reading this as
-    /// saturation would put `canLoadMore`'s probe arm and `loadMore`'s
-    /// re-search on a path that can only re-pay full price for the same rows.
+    /// saturation would put the footer's probe arm and
+    /// `DictionarySearchState.loadMore`'s re-search on a path that can only
+    /// re-pay full price for the same rows.
     ///
     /// Entry-level filters lift the bounds instead: a search carrying
     /// `requiresExactCount` scans unbounded, so its total is exact — never a

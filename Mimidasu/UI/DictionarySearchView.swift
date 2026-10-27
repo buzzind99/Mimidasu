@@ -130,20 +130,33 @@ struct DictionarySearchView: View {
             faultCard
         } else if state.debouncedQuery.isEmpty {
             hintCard
-        } else if state.outcome.isEmpty {
-            // Gated on `isSearching`: while a search is in flight the outcome
-            // still belongs to the previous query, so an empty outcome reads
+        } else if state.page.isEmpty {
+            // Gated on `isSearching`: while a search is in flight the page
+            // still belongs to the previous query, so an empty page reads
             // as a wait — never as a denial of the new query.
-            messageCard(state.isSearching ? "Searching…" : "No matches for “\(state.debouncedQuery)”.")
+            messageCard(emptyMessage)
         } else {
             rowList
+        }
+    }
+
+    /// The message an empty page shows: a wait while the search still runs, a
+    /// floor-aware hint when nothing was found in what was scanned, and the
+    /// plain denial otherwise.
+    private var emptyMessage: String {
+        if state.isSearching {
+            "Searching…"
+        } else if state.page.emptyState == .noMatchesInScannedWindow {
+            "No matches in the scanned results — refine your search."
+        } else {
+            "No matches for “\(state.debouncedQuery)”."
         }
     }
 
     private var rowList: some View {
         ScrollView {
             LazyVStack(spacing: 10) {
-                ForEach(state.visibleHits) { hit in
+                ForEach(state.page.hits) { hit in
                     hitCard(hit)
                 }
                 footer
@@ -152,17 +165,20 @@ struct DictionarySearchView: View {
         }
     }
 
-    /// One page deeper while a page can still be had, and only then the plain
-    /// statement that the list is the *top* of a larger answer — so the ceiling
-    /// reads as a ranking decision rather than as the dictionary's size. The
-    /// header count says the same thing numerically; the wording says it in
-    /// words.
+    /// What the page offers below its last row: one more page while one can
+    /// still be had, otherwise the plain statement that the list is the *top*
+    /// of a larger answer — so the ceiling reads as a ranking decision rather
+    /// than as the dictionary's size. The header count says the same thing
+    /// numerically; the wording says it in words.
     @ViewBuilder
     private var footer: some View {
-        if state.canLoadMore {
+        switch state.page.footer {
+        case .loadMore:
             loadMoreButton
-        } else if state.isAtCeiling {
+        case .ceiling:
             truncationFooter
+        case .none:
+            EmptyView()
         }
     }
 
@@ -177,7 +193,7 @@ struct DictionarySearchView: View {
     /// keep it, where the count is the answer to a question the user asked.
     private var loadMoreButton: some View {
         let loading = state.isSearching
-        let helpText = "Load \(DictionarySearchEngine.pageSize) more results"
+        let helpText = "Load \(DictionarySearchWindow.pageSize) more results"
         return Button {
             state.loadMore()
         } label: {
@@ -201,7 +217,7 @@ struct DictionarySearchView: View {
     private var truncationFooter: some View {
         // Keyed off what is on screen: a filter press at the ceiling can leave
         // fewer survivors than the constant, and the footer must name those.
-        Text("Showing top \(state.visibleHits.count) — refine your search")
+        Text("Showing top \(state.page.hits.count) — refine your search")
             .font(.system(size: 11))
             .foregroundStyle(Theme.secondaryText)
             .frame(maxWidth: .infinity, alignment: .center)

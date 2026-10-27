@@ -26,6 +26,15 @@ struct DictionarySearchStateFaultTests {
         )
     }
 
+    /// Whether the page offers another page below its rows.
+    private func isLoadingMore(_ footer: DictionarySearchPage.Footer) -> Bool {
+        if case .loadMore = footer {
+            true
+        } else {
+            false
+        }
+    }
+
     @Test("a closed-database fault names itself instead of showing no matches")
     func closedDatabaseIsAFault() async {
         let engine = DictionarySearchEngine(resolveDatabase: {
@@ -197,13 +206,13 @@ struct DictionarySearchStateFaultTests {
         )
         #expect(await pollUntil { state.isSearching == false }, "the search settles")
 
-        #expect(state.countText == "\(DictionarySearchEngine.pageSize) / 2667")
-        #expect(state.visibleHits.count == DictionarySearchEngine.pageSize)
+        #expect(state.page.countText == "\(DictionarySearchEngine.pageSize) / 2667")
+        #expect(state.page.hits.count == DictionarySearchEngine.pageSize)
         #expect(state.outcome.matchedCount == 2667)
         #expect(state.outcome.truncated == false)
         #expect(state.outcome.saturated == false)
         #expect(state.outcome.isFloor == false)
-        #expect(state.countText.contains("+") == false)
+        #expect(state.page.countText.contains("+") == false)
     }
 
     @Test("a saturated ceiling counts its own rows, so hidden rows still read")
@@ -221,21 +230,21 @@ struct DictionarySearchStateFaultTests {
 
         // Every click is a reveal, not a re-search: the first landing already
         // holds all 1000 rows, so the window simply widens over rows in hand.
-        while state.canLoadMore {
+        while isLoadingMore(state.page.footer) {
             state.loadMore()
             #expect(await pollUntil { state.isSearching == false })
         }
 
         // The exact tier filled the window at every depth, so the outcome is a
         // floor with `matchedCount` landed exactly on the ceiling: the old
-        // `matchedCount > visibleLimit` condition alone said "nothing hidden"
+        // `matchedCount > window.limit` condition alone said "nothing hidden"
         // and the footer vanished over a list whose prefix stage never ran.
-        #expect(state.visibleLimit == ceiling)
-        #expect(state.visibleHits.count == ceiling)
+        #expect(state.window.limit == ceiling)
+        #expect(state.page.hits.count == ceiling)
         #expect(state.outcome.hits.count == ceiling)
         #expect(state.outcome.matchedCount == ceiling)
         #expect(state.outcome.isFloor)
-        #expect(state.canLoadMore == false)
-        #expect(state.isAtCeiling)
+        #expect(isLoadingMore(state.page.footer) == false)
+        #expect(state.page.footer == .ceiling)
     }
 }

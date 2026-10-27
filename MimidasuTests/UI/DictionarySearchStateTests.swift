@@ -62,6 +62,15 @@ struct DictionarySearchStateTests {
         )
     }
 
+    /// Whether the page offers another page below its rows.
+    private func isLoadingMore(_ footer: DictionarySearchPage.Footer) -> Bool {
+        if case .loadMore = footer {
+            true
+        } else {
+            false
+        }
+    }
+
     /// A state whose engine points at a path that is not there, so every search
     /// lands as the missing-database fault.
     private func makeUnavailableState() -> DictionarySearchState {
@@ -288,11 +297,11 @@ struct DictionarySearchStateTests {
 
         state.query = "たべる"
         #expect(await pollUntil { state.outcome.hits.isEmpty == false })
-        #expect(state.canLoadMore == false)
+        #expect(isLoadingMore(state.page.footer) == false)
 
         // A click with nothing behind it is a no-op, not a re-search.
         state.loadMore()
-        #expect(state.visibleLimit == DictionarySearchEngine.pageSize)
+        #expect(state.window.limit == DictionarySearchEngine.pageSize)
     }
 
     @Test("load-more reveals rows the search already holds, without re-running it")
@@ -305,24 +314,26 @@ struct DictionarySearchStateTests {
         // Every one of the 120 rows is in the outcome; the window is a slice of
         // them, so the first page costs nothing to hold.
         #expect(state.outcome.hits.count == 120)
-        #expect(state.visibleHits.count == DictionarySearchEngine.pageSize)
-        #expect(state.canLoadMore)
+        #expect(state.page.hits.count == DictionarySearchEngine.pageSize)
+        #expect(isLoadingMore(state.page.footer))
+        #expect(state.page.footer == .loadMore(.reveal))
 
         state.loadMore()
         // Nothing was searched: the rows were already built, so no page is
         // loading and the control never dims.
         #expect(state.isSearching == false)
         #expect(state.outcome.hits.count == 120)
-        #expect(state.visibleLimit == DictionarySearchEngine.pageSize * 2)
-        #expect(state.visibleHits.count == DictionarySearchEngine.pageSize * 2)
+        #expect(state.window.limit == DictionarySearchEngine.pageSize * 2)
+        #expect(state.page.hits.count == DictionarySearchEngine.pageSize * 2)
+        #expect(state.page.footer == .loadMore(.reveal))
 
         // Past the last row the button goes away rather than re-running a search
         // that already saw everything it can see.
         state.loadMore()
         #expect(state.isSearching == false)
-        #expect(state.visibleLimit == DictionarySearchEngine.pageSize * 3)
-        #expect(state.visibleHits.count == 120)
-        #expect(state.canLoadMore == false)
+        #expect(state.window.limit == DictionarySearchEngine.pageSize * 3)
+        #expect(state.page.hits.count == 120)
+        #expect(isLoadingMore(state.page.footer) == false)
     }
 
     @Test("load-more re-searches only when a stage was skipped, and appends")
@@ -337,8 +348,9 @@ struct DictionarySearchStateTests {
         // else — and says so, rather than claiming 50 was all there is.
         #expect(state.outcome.hits.count == 60)
         #expect(state.outcome.matchedCount == 60)
-        #expect(state.countText == "50 / 60+")
-        let firstPage = Array(state.visibleHits)
+        #expect(state.page.countText == "50 / 60+")
+        #expect(state.page.footer == .loadMore(.rescan))
+        let firstPage = Array(state.page.hits)
 
         // This click is the one that pays: the window now outgrows the rows in
         // hand, so the skipped stage runs.
@@ -347,11 +359,11 @@ struct DictionarySearchStateTests {
         #expect(await pollUntil { state.isSearching == false })
         #expect(state.outcome.saturated == false)
         #expect(state.outcome.hits.count == 260)
-        #expect(state.visibleHits.count == DictionarySearchEngine.pageSize * 2)
+        #expect(state.page.hits.count == DictionarySearchEngine.pageSize * 2)
         // The rows on screen did not move to make room for the stage the
         // narrower window had skipped.
-        #expect(Array(state.visibleHits.prefix(firstPage.count)) == firstPage)
-        #expect(state.countText == "100 / 260")
+        #expect(Array(state.page.hits.prefix(firstPage.count)) == firstPage)
+        #expect(state.page.countText == "100 / 260")
     }
 
     @Test("a complete answer says so, with no `+`")
@@ -361,10 +373,10 @@ struct DictionarySearchStateTests {
 
         state.query = "かん"
         #expect(await pollUntil { state.outcome.hits.isEmpty == false })
-        #expect(state.countText == "50 / 120")
+        #expect(state.page.countText == "50 / 120")
 
         state.loadMore()
-        #expect(state.countText == "100 / 120")
+        #expect(state.page.countText == "100 / 120")
     }
 
     @Test("a truncated total is marked, and paging it never re-runs the search")
@@ -380,14 +392,14 @@ struct DictionarySearchStateTests {
         // The header says the total is short of the answer. Without the `+` this
         // reads as `50 / 8000` and `8000` is the entire truth about `ま`, which
         // is 21,532 entries.
-        #expect(state.countText == "50 / \(headroom)+")
+        #expect(state.page.countText == "50 / \(headroom)+")
         // No stage was skipped, so the button is a reveal rather than a probe:
         // a re-search would run the same scan, stop at the same constant, and
         // land on the same rows for full price.
         #expect(state.outcome.saturated == false)
         state.loadMore()
         #expect(state.isSearching == false)
-        #expect(state.countText == "100 / \(headroom)+")
+        #expect(state.page.countText == "100 / \(headroom)+")
     }
 
     @Test("a new query starts one page deep again")
@@ -398,14 +410,14 @@ struct DictionarySearchStateTests {
         state.query = "かん"
         #expect(await pollUntil { state.outcome.hits.isEmpty == false })
         state.loadMore()
-        #expect(state.visibleLimit == DictionarySearchEngine.pageSize * 2)
+        #expect(state.window.limit == DictionarySearchEngine.pageSize * 2)
 
         state.query = "あめ"
         #expect(await pollUntil { state.debouncedQuery == "あめ" })
-        #expect(state.visibleLimit == DictionarySearchEngine.pageSize)
+        #expect(state.window.limit == DictionarySearchEngine.pageSize)
         #expect(await pollUntil { state.outcome.hits.isEmpty == false && state.isSearching == false })
-        #expect(state.visibleHits.count <= DictionarySearchEngine.pageSize)
-        #expect(state.canLoadMore == false)
+        #expect(state.page.hits.count <= DictionarySearchEngine.pageSize)
+        #expect(isLoadingMore(state.page.footer) == false)
     }
 
     @Test("paging stops at the ceiling and says to refine instead")
@@ -420,15 +432,15 @@ struct DictionarySearchStateTests {
         #expect(await pollUntil { state.outcome.hits.isEmpty == false })
         // The whole way down is reveals: the search holds every row it can
         // build, so the clicks land without waiting for a landing.
-        while state.canLoadMore {
+        while isLoadingMore(state.page.footer) {
             state.loadMore()
             #expect(state.isSearching == false)
         }
-        #expect(state.visibleLimit == ceiling)
-        #expect(state.visibleHits.count == ceiling)
+        #expect(state.window.limit == ceiling)
+        #expect(state.page.hits.count == ceiling)
         #expect(state.outcome.hits.count == ceiling)
-        #expect(state.canLoadMore == false)
-        #expect(state.isAtCeiling)
+        #expect(isLoadingMore(state.page.footer) == false)
+        #expect(state.page.footer == .ceiling)
         // The rows past the ceiling are still there, and still counted.
         #expect(state.outcome.matchedCount == ceiling + pageSize)
     }
@@ -446,8 +458,8 @@ struct DictionarySearchStateTests {
         // The reported case: `mak` with COMMON on read `36 / 36+` and its
         // load-more re-ran the same search forever. The count is the whole
         // answer now, so the `+` and the button are both gone.
-        #expect(state.countText == "42 / 42")
-        #expect(state.canLoadMore == false)
+        #expect(state.page.countText == "42 / 42")
+        #expect(isLoadingMore(state.page.footer) == false)
     }
 
     @Test("the close resets the depth a query was paged to")
@@ -458,12 +470,12 @@ struct DictionarySearchStateTests {
         state.query = "かん"
         #expect(await pollUntil { state.outcome.hits.isEmpty == false })
         state.loadMore()
-        #expect(await pollUntil { state.visibleLimit == DictionarySearchEngine.pageSize * 2 })
+        #expect(await pollUntil { state.window.limit == DictionarySearchEngine.pageSize * 2 })
 
         state.resetForClose()
-        #expect(state.visibleLimit == DictionarySearchEngine.pageSize)
-        #expect(state.canLoadMore == false)
-        #expect(state.isAtCeiling == false)
+        #expect(state.window.limit == DictionarySearchEngine.pageSize)
+        #expect(isLoadingMore(state.page.footer) == false)
+        #expect(state.page.footer != .ceiling)
     }
 }
 

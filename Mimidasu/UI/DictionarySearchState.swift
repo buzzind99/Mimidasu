@@ -71,7 +71,7 @@ final class DictionarySearchState {
             // depth belonged to the previous answer, and without the reset a
             // filter press after Load-more runs a 100-row scan and shows 100
             // rows instead of the first page.
-            visibleLimit = DictionarySearchEngine.pageSize
+            window = .initial
             pruneLookupState()
             run(trimmed: debouncedQuery, filters: filters)
         }
@@ -98,10 +98,10 @@ final class DictionarySearchState {
 
     private(set) var outcome = DictionarySearchOutcome.empty
     private(set) var isSearching = false
-    /// How deep the window has been paged. One page to begin with;
-    /// `loadMore()` adds another. It slices `outcome.hits` — it is a *view* of
-    /// what the search found, not a request the engine has to answer again.
-    private(set) var visibleLimit = DictionarySearchEngine.pageSize
+    /// How deep the list may read the current answer. One page to begin with;
+    /// `loadMore()` advances it. The page projects `outcome` through this same
+    /// value, so the width shown and the depth requested cannot disagree.
+    private(set) var window = DictionarySearchWindow.initial
     /// The prepared database is not on disk. A fault the view names, never an
     /// empty result — and the launch-time dictionary kick-off is re-fired, so
     /// the next keystroke can find it.
@@ -157,75 +157,33 @@ final class DictionarySearchState {
             debouncedQuery = trimmed
             // A new query starts one page deep, whatever the previous one had
             // been paged to: the depth belonged to that answer.
-            visibleLimit = DictionarySearchEngine.pageSize
+            window = .initial
             run(trimmed: trimmed, filters: filters)
         }
     }
 
-    /// The rows on screen: the window's prefix of everything the search found.
-    ///
-    /// An `ArraySlice` so paging costs no copy and the list keeps one
-    /// identity as it grows — the rows above the window never move, and a
-    /// re-search that finds more only ever appends.
-    var visibleHits: ArraySlice<DictionarySearchHit> {
-        outcome.hits.prefix(visibleLimit)
+    /// The current answer as one pure page value: visible slice, total, floor,
+    /// footer kind, and empty state, all projected from the window on screen.
+    var page: DictionarySearchPage {
+        DictionarySearchPage(outcome: outcome, window: window)
     }
 
-    /// The header's `displayed / matched` count. The total carries a `+`
-    /// whenever it is a floor — a stage the search skipped, or a headword scan
-    /// that stopped at one of its own bounds. A total that says `51+` is the
-    /// honest reading of a search that found 51 and declined to look for the
-    /// rest; only the first of those two grows when the user pages.
-    var countText: String {
-        "\(visibleHits.count) / \(outcome.matchedCount)\(outcome.isFloor ? "+" : "")"
-    }
-
-    /// Whether one more page can be reached — either the search already holds
-    /// rows below the window (a reveal, which costs nothing), or it skipped a
-    /// stage that a wider window would run (a probe). False at the ceiling.
+    /// Advances one page, following the footer the page already shows.
     ///
-    /// The saturated arm is what a gloss-only query never needs: its total is
-    /// complete on the first search, so its clicks are all reveals and its last
-    /// page simply ends the list with no footer at all. A `commonOnly` search
-    /// is never saturated either — the ladder cannot measure that window
-    /// before the join that resolves `common`, so it runs every stage and its
-    /// probe arm can only ever fire on rows it already holds.
-    var canLoadMore: Bool {
-        visibleLimit < DictionarySearchEngine.maxRows
-            && (outcome.hits.count > visibleLimit || outcome.saturated)
-    }
-
-    /// The window is as deep as it may go and rows remain — the only state in
-    /// which refining beats scrolling. At the ceiling the held rows cannot
-    /// outnumber the window, so `matchedCount > visibleLimit` says so directly;
-    /// a floor total (`saturated` or `truncated`) counts too: under saturation
-    /// `matchedCount` is short of the answer, so rows behind the skipped stage
-    /// are possible even when the count lands exactly on the ceiling.
-    var isAtCeiling: Bool {
-        visibleLimit >= DictionarySearchEngine.maxRows
-            && (outcome.matchedCount > visibleLimit || outcome.isFloor)
-    }
-
-    /// Reveals another page, re-searching only when a stage was skipped.
+    /// The page decides what the click means: it either reveals rows the
+    /// search already holds — the free common case, which never calls the
+    /// engine — or re-runs a stage the search skipped, because running a
+    /// wider window is the only way those rows become reachable. A truncated
+    /// answer never re-runs: its bounds are constants, so the same scan would
+    /// return the identical rows.
     ///
-    /// Rows the search already built are shown for free, which is the common
-    /// case: a gloss-only query found its whole answer on the first search and
-    /// every click is a reveal rather than a re-run of a 50 ms scan.
-    ///
-    /// The re-run is gated on `saturated` as well as on outgrowing the rows in
-    /// hand, because that is the *only* way a deeper window finds anything: it
-    /// changes nothing but which stages the ladder was allowed to skip. A search
-    /// that skipped nothing has already seen every row it can see, so asking it
-    /// again would pay full price for the same answer.
-    ///
-    /// Either way the rows already on screen do not move — a stage is skipped
+    /// Either way the rows above the window never move — a stage is skipped
     /// only when its rows rank below every row in the window it was measured
     /// against, so a deeper window can only append.
     func loadMore() {
-        let next = min(visibleLimit + DictionarySearchEngine.pageSize, DictionarySearchEngine.maxRows)
-        guard next > visibleLimit, canLoadMore else { return }
-        visibleLimit = next
-        guard outcome.saturated, next > outcome.hits.count else { return }
+        guard case let .loadMore(action) = page.footer else { return }
+        window = window.advanced
+        guard action == .rescan else { return }
         run(trimmed: debouncedQuery, filters: filters)
     }
 
@@ -252,7 +210,7 @@ final class DictionarySearchState {
         fault = nil
         isSearching = true
         let engine = engine
-        let limit = visibleLimit
+        let limit = window.limit
         let work = Task.detached(priority: .userInitiated) { () -> DictionarySearchResponse in
             DictionarySearchResponse.run {
                 try engine.search(trimmed, filters: filters, limit: limit)
@@ -397,7 +355,7 @@ final class DictionarySearchState {
             // rather than searching the query just wiped.
             filters = DictionarySearchFilters()
             filtersExpanded = false
-            visibleLimit = DictionarySearchEngine.pageSize
+            window = .initial
             entryIndices.removeAll()
             entryLeads.removeAll()
             lookupState.reset()
