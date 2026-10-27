@@ -4,7 +4,8 @@ import Testing
 
 /// Value tests for one lookup presentation: fallback promotion, origin and
 /// identity preservation, pager clamping, and popover anchor matching. Pure
-/// transforms — no engine, database, or app state.
+/// transforms — no engine, database, or app state — plus the one routing
+/// rule a presentation depends on: only a pinnable answer ever becomes one.
 @Suite("LookupPresentation")
 struct LookupPresentationTests {
 
@@ -56,7 +57,7 @@ struct LookupPresentationTests {
         )
     }
 
-    private func twoEntryFound() -> LookupContent {
+    private func twoEntryFound() -> LookupAnswer {
         .found(result: result(["飴", "雨"]), also: [], origin: .tappedSurface)
     }
 
@@ -67,7 +68,7 @@ struct LookupPresentationTests {
         let display = result(["お", "御"])
         let firstFallback = result(["お土産"])
         let secondFallback = result(["土産"])
-        let content = LookupContent.found(
+        let content = LookupAnswer.found(
             result: display, also: [firstFallback, secondFallback], origin: .tappedSurface
         )
         let presentation = LookupPresentation(content: content, entryIndex: 1, anchor: .liveStrip)
@@ -90,7 +91,7 @@ struct LookupPresentationTests {
             entry(keb: "別", reb: "あめ", seq: 3),
             entry(keb: "雨", reb: "あめ", seq: 4)
         ])
-        let content = LookupContent.notFound(surface: "雨尾", related: [tapped, sibling])
+        let content = LookupAnswer.notFound(surface: "雨尾", related: [tapped, sibling])
         let favorites = FavoriteIdentity(keys: [FavoriteIdentity.normalize("雨")])
         let presentation = LookupPresentation(content: content, entryIndex: 0, anchor: .liveStrip)
 
@@ -113,7 +114,7 @@ struct LookupPresentationTests {
             entry(keb: "飴", reb: "あめ", seq: 1),
             entry(keb: "雨", reb: "あめ", seq: 2)
         ])
-        let content = LookupContent.found(result: joined, also: [], origin: .join)
+        let content = LookupAnswer.found(result: joined, also: [], origin: .join)
         let favorites = FavoriteIdentity(keys: [FavoriteIdentity.normalize("雨")])
         let presentation = LookupPresentation(content: content, entryIndex: 1, anchor: .liveStrip)
 
@@ -136,7 +137,7 @@ struct LookupPresentationTests {
     func crossPillRoundTripDropsJoinOrigin() throws {
         let joined = result(["お土産"])
         let single = result(["お"])
-        let content = LookupContent.found(result: joined, also: [single], origin: .join)
+        let content = LookupAnswer.found(result: joined, also: [single], origin: .join)
         let presentation = LookupPresentation(content: content, entryIndex: 0, anchor: .liveStrip)
 
         let moved = try #require(presentation.promoting(single, favorites: .empty))
@@ -295,7 +296,7 @@ struct LookupPresentationTests {
 
     @Test("a dismissed presentation keeps its content and entry, and promotion keeps it dismissed")
     func dismissedPresentationKeepsContentAndEntry() throws {
-        let content = LookupContent.found(
+        let content = LookupAnswer.found(
             result: result(["お", "御"]), also: [result(["お土産"])], origin: .tappedSurface
         )
         let presentation = LookupPresentation(content: content, entryIndex: 1, anchor: nil)
@@ -308,5 +309,86 @@ struct LookupPresentationTests {
         #expect(promoted.content.displayResult?.matched == "お土産")
         #expect(promoted.entryIndex == 0)
         #expect(promoted.anchor == nil)
+    }
+
+    // MARK: - What may be stored
+
+    /// Hands out one answer per landing, in order, so a test can pin first and
+    /// then throw verdicts at the session.
+    private actor SequenceResolver: TapLookupResolving {
+        private var answers: [LookupAnswer?]
+
+        init(_ answers: [LookupAnswer?]) {
+            self.answers = answers
+        }
+
+        func resolve(
+            _ request: TapLookupRequest, favorites: FavoriteIdentity
+        ) async -> LookupAnswer? {
+            guard !answers.isEmpty else { return nil }
+            return answers.removeFirst()
+        }
+    }
+
+    private func tapRequest(_ surface: String) -> TapLookupRequest {
+        TapLookupRequest(
+            segments: [LookupSegment(surface: surface)],
+            tappedAt: 0,
+            sentenceText: surface,
+            surface: surface
+        )
+    }
+
+    @Test("a bare miss, a failure, or a dropped answer never sets a presentation")
+    @MainActor
+    func unpinnableAnswersNeverSetPresentation() async {
+        let verdicts: [LookupAnswer?] = [
+            LookupAnswer.noHit(surface: "xyz"),
+            LookupAnswer.failure(.databaseMissing),
+            nil
+        ]
+
+        for verdict in verdicts {
+            let session = TapLookupSession(resolver: SequenceResolver([verdict]))
+            let task = session.tap(
+                tapRequest("xyz"), anchor: .liveStrip, favorites: .empty
+            )
+            await task.value
+
+            #expect(session.presentation == nil)
+        }
+    }
+
+    @Test("a bare miss, a failure, or a dropped answer leaves a pin unchanged")
+    @MainActor
+    func unpinnableAnswersLeaveAPinUnchanged() async throws {
+        let pinned = LookupAnswer.found(
+            result: result(["飴", "雨"]), also: [], origin: .tappedSurface
+        )
+        let firstLanding: LookupAnswer? = pinned
+        let verdicts: [LookupAnswer?] = [
+            LookupAnswer.noHit(surface: "xyz"),
+            LookupAnswer.failure(.databaseMissing),
+            nil
+        ]
+        let session = TapLookupSession(resolver: SequenceResolver([firstLanding] + verdicts))
+
+        let pinning = session.tap(
+            tapRequest("あめ"), anchor: .liveStrip, favorites: .empty
+        )
+        await pinning.value
+        let shown = try #require(session.presentation)
+
+        for _ in verdicts {
+            let task = session.tap(
+                tapRequest("xyz"), anchor: .transcript(sentenceIndex: 3, tokenIndex: 0),
+                favorites: .empty
+            )
+            await task.value
+        }
+
+        #expect(session.presentation == shown)
+        #expect(session.presentation?.content == pinned)
+        #expect(session.presentation?.entryIndex == 0)
     }
 }

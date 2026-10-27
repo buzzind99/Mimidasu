@@ -384,7 +384,7 @@ final class DictionarySearchEngineTests {
         let sut = DictionarySearchEngine(resolveDatabase: { missing })
         defer { sut.close() }
 
-        #expect(throws: DictionarySearchError.databaseMissing) {
+        #expect(throws: DictionaryError.databaseMissing) {
             try sut.search("食べる", filters: DictionarySearchFilters())
         }
     }
@@ -395,7 +395,7 @@ final class DictionarySearchEngineTests {
 
         sut.close()
 
-        #expect(throws: DictionarySearchError.databaseClosed) {
+        #expect(throws: DictionaryError.databaseClosed) {
             try sut.search("食べる", filters: DictionarySearchFilters())
         }
         // Idempotent, like `JMDictLookup.close()`.
@@ -404,10 +404,10 @@ final class DictionarySearchEngineTests {
 
     @Test("maps an unavailable database onto the same missing case a path does")
     func errorTranslation() {
-        #expect(DictionarySearchError(.unavailable) == .databaseMissing)
+        #expect(DictionaryError(.unavailable) == .databaseMissing)
         let failure = SQLiteDatabase.Error.sqlite(code: 11, message: "database disk image is malformed")
-        #expect(DictionarySearchError(failure)
-            == .sqlite(code: 11, message: "database disk image is malformed"))
+        #expect(DictionaryError(failure)
+            == .sqliteError(code: 11, message: "database disk image is malformed"))
     }
 
     @Test("translates a SQLite failure onto the typed error")
@@ -419,7 +419,7 @@ final class DictionarySearchEngineTests {
         let sut = DictionarySearchEngine(resolveDatabase: { corrupt })
         defer { sut.close() }
 
-        #expect(throws: DictionarySearchError.self) {
+        #expect(throws: DictionaryError.self) {
             try sut.search("食べる", filters: DictionarySearchFilters())
         }
     }

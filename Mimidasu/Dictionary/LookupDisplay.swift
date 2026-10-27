@@ -1,7 +1,7 @@
 import Foundation
 
-/// Tap-to-verdict resolver: everything from a tap request to the display
-/// content the session presents — resolution, defensive re-anchoring,
+/// Tap-to-verdict resolver: everything from a tap request to the answer the
+/// session presents — resolution, defensive re-anchoring,
 /// Display/Also/Related classification, and favorites promotion applied at
 /// resolve time.
 ///
@@ -16,7 +16,7 @@ import Foundation
 /// dispatches the tap, and favorites cross as one Favorite identity
 /// snapshot taken before dispatch — the engine receives no
 /// favorites parameter, so it cannot learn favorites exist. Queries run off
-/// the main actor on a detached task; the session applies outcomes back on
+/// the main actor on a detached task; the session applies answers back on
 /// the main actor.
 final class LookupDisplay: Sendable {
     private let lookup: JMDictLookup
@@ -27,34 +27,35 @@ final class LookupDisplay: Sendable {
         self.lookup = lookup
     }
 
-    /// Resolves one tap to its effect. An empty surface faults as
+    /// Resolves one tap to its answer. An empty surface fails as
     /// annotator-unavailable whatever the segments carry — no empty-named
-    /// pill ever posts; a nil-segments request otherwise warns with the
-    /// tapped surface, and an empty-segments request (the annotator ran
-    /// without its dictionary) faults as annotator-unavailable. Otherwise
+    /// pill ever posts; a nil-segments request otherwise answers a no-hit
+    /// with the tapped surface, and an empty-segments request (the annotator
+    /// ran without its dictionary) fails as annotator-unavailable. Otherwise
     /// the stored index re-anchors against drift — failing closed to no-hit
     /// through the expansion's bounds guard — and the engine lookup runs
-    /// off-main on a detached task. A found resolution promotes favorites
-    /// into the returned content; a not-found resolves only when its related
-    /// suggestions are non-empty (a bare miss warns instead), promoting each
-    /// related hit in place while the content itself stays not-found with no
-    /// display result; any throw faults.
-    func resolve(_ request: TapLookupRequest, favorites: FavoriteIdentity) async -> TapLookupEffect {
+    /// off-main on a detached task. A found answer promotes favorites into
+    /// the returned content; a not-found resolves only when its related
+    /// suggestions are non-empty (a bare miss answers no-hit instead),
+    /// promoting each related hit in place while the content itself stays
+    /// not-found with no display result; any throw fails; a cancellation
+    /// answers nil so the session drops it silently.
+    func resolve(_ request: TapLookupRequest, favorites: FavoriteIdentity) async -> LookupAnswer? {
         guard !request.surface.isEmpty else {
-            return .fault(.annotatorUnavailable)
+            return .failure(.annotatorUnavailable)
         }
         guard let segments = request.segments else {
-            return .warnNoHit(surface: request.surface)
+            return .noHit(surface: request.surface)
         }
         guard !segments.isEmpty else {
-            return .fault(.annotatorUnavailable)
+            return .failure(.annotatorUnavailable)
         }
         let tappedAt = Self.reAnchoredTapIndex(
             stored: request.tappedAt, surface: request.surface, in: segments
         )
         let engine = lookup
         let sentenceText = request.sentenceText
-        let resolved: LookupResolution
+        let resolved: LookupAnswer
         do {
             // Detached by design (off-main even when the host is already
             // backgrounded): inherits no cancellation, so rapid double-taps
@@ -70,16 +71,16 @@ final class LookupDisplay: Sendable {
                 )
             }.value
         } catch is CancellationError {
-            return .cancelled
+            return nil
         } catch {
-            return .fault(TapLookupFault(error))
+            return .failure(DictionaryError(error))
         }
         guard let content = Self.content(
             for: resolved, surface: request.surface, favorites: favorites
         ) else {
-            return .warnNoHit(surface: request.surface)
+            return .noHit(surface: request.surface)
         }
-        return .show(content: content, entryIndex: 0)
+        return content
     }
 
     /// The tap-time index for a tap request's stored render-time index.
@@ -110,28 +111,28 @@ final class LookupDisplay: Sendable {
 
     /// The content a resolved tap returns, or nil when nothing resolved at
     /// all — a not-found resolution without related hits is a bare miss, and
-    /// warns instead of presenting an empty card. A found content also leads
-    /// on a favorited entry written or read as the tapped word where one
-    /// exists, so tapping a word the user has studied opens the study instead
-    /// of the homograph above it. A not-found result stays not-found with no
-    /// display result, but each related suggestion is promoted the same way,
-    /// so a buried eligible favorite leads its pill before any re-select.
+    /// answers a no-hit instead of presenting an empty card. A found content
+    /// also leads on a favorited entry written or read as the tapped word
+    /// where one exists, so tapping a word the user has studied opens the
+    /// study instead of the homograph above it. A not-found result stays
+    /// not-found with no display result, but each related suggestion is
+    /// promoted the same way, so a buried eligible favorite leads its pill
+    /// before any re-select. The not-found surface is restamped from the
+    /// request — the tapped word the user asked about, which is what every
+    /// host names. The engine answers only found and not-found, so a no-hit
+    /// or a failure reaching this point passes through untouched.
     private static func content(
-        for resolved: LookupResolution, surface: String, favorites: FavoriteIdentity
-    ) -> LookupContent? {
+        for resolved: LookupAnswer, surface: String, favorites: FavoriteIdentity
+    ) -> LookupAnswer? {
         switch resolved {
-        case let .found(outcome):
-            FavoritesPromotion.promotingFavorites(
-                in: .found(
-                    result: outcome.display, also: outcome.also,
-                    origin: outcome.displayOrigin
-                ),
-                identity: favorites
-            )
-        case let .notFound(related):
+        case .found:
+            FavoritesPromotion.promotingFavorites(in: resolved, identity: favorites)
+        case let .notFound(_, related):
             related.isEmpty ? nil : .notFound(surface: surface, related: related.map { result in
                 FavoritesPromotion.promotingFavorites(in: result, identity: favorites)
             })
+        case .noHit, .failure:
+            resolved
         }
     }
 }

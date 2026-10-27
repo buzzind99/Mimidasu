@@ -26,10 +26,10 @@ final class LookupDisplayReanchorTests {
             surface: "お"
         )
 
-        let effect = await display.resolve(request, favorites: .empty)
+        let answer = await display.resolve(request, favorites: .empty)
 
-        guard case let .show(content, _) = effect else {
-            Issue.record("expected show, got \(effect)")
+        guard let content = requirePinnable(answer) else {
+            Issue.record("expected a pinnable answer, got \(String(describing: answer))")
             return
         }
         #expect(content.displayResult?.matched == "お")

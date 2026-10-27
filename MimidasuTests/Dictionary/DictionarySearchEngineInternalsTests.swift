@@ -490,7 +490,7 @@ final class DictionarySearchEngineInternalsTests {
         // anywhere — a closed handle answers before the resolver is ever
         // consulted.
         sut.close()
-        #expect(throws: DictionarySearchError.databaseClosed) {
+        #expect(throws: DictionaryError.databaseClosed) {
             try sut.search("ま", filters: DictionarySearchFilters())
         }
     }

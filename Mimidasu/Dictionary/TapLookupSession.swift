@@ -1,19 +1,19 @@
 import Foundation
 import Observation
 
-/// The lookup engine behind a tap: resolves one request to an effect. The
+/// The lookup engine behind a tap: resolves one request to an answer. The
 /// dictionary layer's adapter is `LookupDisplay`; tests substitute a stub so
 /// the session's dispatch and routing can be driven without a database.
 protocol TapLookupResolving: Sendable {
-    func resolve(_ request: TapLookupRequest, favorites: FavoriteIdentity) async -> TapLookupEffect
+    func resolve(_ request: TapLookupRequest, favorites: FavoriteIdentity) async -> LookupAnswer?
 }
 
-/// Where a lookup effect's user-facing feedback goes: a no-hit warning or a
-/// fault returns through this port instead of the session owning notice copy.
+/// Where a lookup answer's user-facing feedback goes: a no-hit warning or a
+/// failure returns through this port instead of the session owning notice copy.
 @MainActor
 protocol TapLookupFeedbackSink: AnyObject {
     func tapLookupDidWarnNoHit(surface: String)
-    func tapLookupDidFail(_ fault: TapLookupFault)
+    func tapLookupDidFail(_ fault: DictionaryError)
 }
 
 /// Owns one tap-to-pin lifecycle: resolution dispatch, generation drops,
@@ -31,7 +31,7 @@ final class TapLookupSession {
     /// The one lookup both the popover and the pinned card read; nil when no
     /// lookup has landed or after a clear.
     private(set) var presentation: LookupPresentation?
-    /// Staleness token: every tap and clear advances it, and a landing effect
+    /// Staleness token: every tap and clear advances it, and a landing answer
     /// applies only when its captured value still matches.
     private var generation = 0
     @ObservationIgnored weak var feedback: (any TapLookupFeedbackSink)?
@@ -52,9 +52,9 @@ final class TapLookupSession {
         let capturedGeneration = generation
         return Task { @MainActor [weak self] in
             guard let self else { return }
-            let effect = await resolver.resolve(request, favorites: favorites)
+            let answer = await resolver.resolve(request, favorites: favorites)
             guard capturedGeneration == generation else { return }
-            apply(effect, anchor: anchor)
+            apply(answer, anchor: anchor)
         }
     }
 
@@ -94,16 +94,20 @@ final class TapLookupSession {
         presentation?.popoverItem(for: anchor)
     }
 
-    private func apply(_ effect: TapLookupEffect, anchor: LookupAnchor) {
-        switch effect {
-        case let .show(content, entryIndex):
-            presentation = .initial(content: content, entryIndex: entryIndex, anchor: anchor)
-        case let .warnNoHit(surface):
+    /// Routes a landed answer: only the pinnable two pin, at the first entry
+    /// (the popover and the pinned card page together from there); a no-hit
+    /// warns and a failure toasts through the feedback sink; a dropped
+    /// (nil) answer — a superseded lookup — applies nothing at all: no pin,
+    /// no warning, no toast. Cancellation never surfaces as feedback.
+    private func apply(_ answer: LookupAnswer?, anchor: LookupAnchor) {
+        guard let answer else { return }
+        switch answer {
+        case .found, .notFound:
+            presentation = .initial(content: answer, entryIndex: 0, anchor: anchor)
+        case let .noHit(surface):
             feedback?.tapLookupDidWarnNoHit(surface: surface)
-        case let .fault(fault):
-            feedback?.tapLookupDidFail(fault)
-        case .cancelled:
-            break
+        case let .failure(error):
+            feedback?.tapLookupDidFail(error)
         }
     }
 }

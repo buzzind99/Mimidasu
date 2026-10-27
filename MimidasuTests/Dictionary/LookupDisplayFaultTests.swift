@@ -2,12 +2,12 @@ import Foundation
 @testable import Mimidasu
 import Testing
 
-/// The Lookup Display module's fault map, driven over the fixture database:
+/// The Lookup Display module's failure map, driven over the fixture database:
 /// the infrastructure failures — missing, closed, corrupt — plus
-/// the empty-segments and empty-surface gates land on their typed faults;
-/// nil segments warn instead.
+/// the empty-segments and empty-surface gates land on their typed failures;
+/// nil segments answer a no-hit instead.
 /// A generic internal error stays covered at the pure map in
-/// `TapLookupFaultTests`: the engine is concrete, so no throwing stub seam
+/// `DictionaryErrorTests`: the engine is concrete, so no throwing stub seam
 /// exists for it here and none is introduced.
 @Suite("LookupDisplay faults")
 final class LookupDisplayFaultTests {
@@ -24,16 +24,16 @@ final class LookupDisplayFaultTests {
             segments: nil, tappedAt: 0, sentenceText: "", surface: "お"
         )
 
-        let effect = await display.resolve(request, favorites: .empty)
+        let answer = await display.resolve(request, favorites: .empty)
 
-        #expect(effect == .warnNoHit(surface: "お"))
+        #expect(answer == .noHit(surface: "お"))
     }
 
     @Test("nil segments with an empty surface fault as annotator-unavailable")
     func nilSegmentsEmptySurfaceFaults() async {
         let request = TapLookupRequest(segments: nil, tappedAt: 0, sentenceText: "", surface: "")
-        let effect = await harness.makeDisplay().resolve(request, favorites: .empty)
-        #expect(effect == .fault(.annotatorUnavailable))
+        let answer = await harness.makeDisplay().resolve(request, favorites: .empty)
+        #expect(answer == .failure(.annotatorUnavailable))
     }
 
     @Test("empty segments fault as annotator-unavailable")
@@ -43,9 +43,9 @@ final class LookupDisplayFaultTests {
             segments: [], tappedAt: 0, sentenceText: "お土産", surface: "お"
         )
 
-        let effect = await display.resolve(request, favorites: .empty)
+        let answer = await display.resolve(request, favorites: .empty)
 
-        #expect(effect == .fault(.annotatorUnavailable))
+        #expect(answer == .failure(.annotatorUnavailable))
     }
 
     @Test("an empty surface faults even when segments are present")
@@ -56,18 +56,18 @@ final class LookupDisplayFaultTests {
             sentenceText: "あめ", surface: ""
         )
 
-        let effect = await display.resolve(request, favorites: .empty)
+        let answer = await display.resolve(request, favorites: .empty)
 
-        #expect(effect == .fault(.annotatorUnavailable))
+        #expect(answer == .failure(.annotatorUnavailable))
     }
 
     @Test("a missing database faults as database-missing")
     func missingDatabaseFaults() async {
         let display = harness.makeDisplay(resolveDatabase: { nil })
 
-        let effect = await display.resolve(harness.requestO(), favorites: .empty)
+        let answer = await display.resolve(harness.requestO(), favorites: .empty)
 
-        #expect(effect == .fault(.databaseMissing))
+        #expect(answer == .failure(.databaseMissing))
     }
 
     @Test("a closed engine faults as database-closed")
@@ -77,9 +77,9 @@ final class LookupDisplayFaultTests {
         engine.close()
         let display = LookupDisplay(lookup: engine)
 
-        let effect = await display.resolve(harness.requestO(), favorites: .empty)
+        let answer = await display.resolve(harness.requestO(), favorites: .empty)
 
-        #expect(effect == .fault(.databaseClosed))
+        #expect(answer == .failure(.databaseClosed))
     }
 
     @Test("a warmed engine faults as database-closed after close")
@@ -88,15 +88,15 @@ final class LookupDisplayFaultTests {
         let engine = JMDictLookup(resolveDatabase: { [url] in url })
         let display = LookupDisplay(lookup: engine)
         let first = await display.resolve(harness.requestO(), favorites: .empty)
-        guard case .show = first else {
-            Issue.record("expected show, got \(first)")
+        guard requirePinnable(first) != nil else {
+            Issue.record("expected a pinnable answer, got \(String(describing: first))")
             return
         }
         engine.close()
 
-        let effect = await display.resolve(harness.requestO(), favorites: .empty)
+        let answer = await display.resolve(harness.requestO(), favorites: .empty)
 
-        #expect(effect == .fault(.databaseClosed))
+        #expect(answer == .failure(.databaseClosed))
     }
 
     @Test("a corrupt database faults as a sqlite error")
@@ -107,14 +107,14 @@ final class LookupDisplayFaultTests {
         defer { try? FileManager.default.removeItem(at: garbage) }
         let display = harness.makeDisplay(resolveDatabase: { [garbage] in garbage })
 
-        let effect = await display.resolve(harness.requestO(), favorites: .empty)
+        let answer = await display.resolve(harness.requestO(), favorites: .empty)
 
-        guard case let .fault(fault) = effect else {
-            Issue.record("expected fault, got \(effect)")
+        guard case let .failure(error) = answer else {
+            Issue.record("expected a failure, got \(String(describing: answer))")
             return
         }
-        guard case let .sqliteError(code, message) = fault else {
-            Issue.record("expected sqlite error, got \(fault)")
+        guard case let .sqliteError(code, message) = error else {
+            Issue.record("expected sqlite error, got \(error)")
             return
         }
         #expect(code != 0)
@@ -140,8 +140,8 @@ final class LookupDisplayFaultTests {
             surface: "孤語"
         )
 
-        let effect = await display.resolve(request, favorites: .empty)
+        let answer = await display.resolve(request, favorites: .empty)
 
-        #expect(effect == .fault(.databaseCorrupt))
+        #expect(answer == .failure(.databaseCorrupt))
     }
 }

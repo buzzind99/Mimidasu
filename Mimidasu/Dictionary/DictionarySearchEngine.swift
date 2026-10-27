@@ -169,7 +169,7 @@ final class DictionarySearchEngine: Sendable {
                 )
             }
         } catch let error as SQLiteDatabase.Error {
-            throw DictionarySearchError(error)
+            throw DictionaryError(error)
         }
     }
 
@@ -191,18 +191,18 @@ final class DictionarySearchEngine: Sendable {
         case let .open(database, spellings):
             return Open(db: database, caseHeadwords: spellings)
         case .closed:
-            throw DictionarySearchError.databaseClosed
+            throw DictionaryError.databaseClosed
         case .idle:
             break
         }
         guard let url = resolveDatabase(), FileManager.default.fileExists(atPath: url.path) else {
-            throw DictionarySearchError.databaseMissing
+            throw DictionaryError.databaseMissing
         }
         let database: SQLiteDatabase
         do {
             database = try SQLiteDatabase(path: url.path)
         } catch {
-            throw DictionarySearchError(error)
+            throw DictionaryError(error)
         }
         // Read once, here, where the handle first exists: the case-bearing
         // spellings are 2,357 rows of the pinned corpus, answered by binary

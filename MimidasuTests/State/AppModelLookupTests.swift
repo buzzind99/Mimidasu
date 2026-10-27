@@ -160,7 +160,7 @@ final class AppModelLookupTests {
         #expect(toast.key == ToastKey.dictionaryLookup)
         #expect(toast.style == .yellowAuto)
         #expect(toast.title == "Dictionary lookup failed")
-        #expect(toast.body == TapLookupFault.annotatorUnavailable.localizedDescription)
+        #expect(toast.body == DictionaryError.annotatorUnavailable.localizedDescription)
         #expect(faulted.notices.message == nil, "a fault never posts the pill")
         #expect(faulted.lookupPresentation == nil)
     }

@@ -7,7 +7,7 @@ import Foundation
 /// was written in, then commonness), never has to know that favorites exist.
 enum FavoritesPromotion {
 
-    /// `content` with an eligible favorited entry moved to the front of the
+    /// `answer` with an eligible favorited entry moved to the front of the
     /// found display result's pager and of every demoted fallback result's
     /// pager. A fallback pill labels itself with its result's lead entry, so
     /// promotion inside an `also:` result is what makes a buried eligible
@@ -19,11 +19,12 @@ enum FavoritesPromotion {
     /// so a buried eligible favorite leads its pill before any re-select.
     /// Everything else is untouched: the display result still leads, and a
     /// not-found pin keeps its related splits as suggestions (a split hit
-    /// never presents as the tapped word).
+    /// never presents as the tapped word). A bare miss and a failure carry
+    /// no results to promote and pass through unchanged.
     static func promotingFavorites(
-        in content: LookupContent, identity: FavoriteIdentity
-    ) -> LookupContent {
-        switch content {
+        in answer: LookupAnswer, identity: FavoriteIdentity
+    ) -> LookupAnswer {
+        switch answer {
         case let .found(result, also, origin):
             .found(
                 result: promotingFavorites(in: result, identity: identity),
@@ -37,6 +38,8 @@ enum FavoritesPromotion {
                     promotingFavorites(in: result, identity: identity)
                 }
             )
+        case .noHit, .failure:
+            answer
         }
     }
 

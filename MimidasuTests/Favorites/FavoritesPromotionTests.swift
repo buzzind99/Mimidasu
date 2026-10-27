@@ -219,7 +219,7 @@ struct FavoritesPromotionTests {
         let plainPill = LookupResult(matched: "ほ", entries: [
             entry(keb: "穂", reb: "ほ", seq: 7)
         ])
-        let content = LookupContent.found(
+        let content = LookupAnswer.found(
             result: display, also: [favoritePill, siblingPill, plainPill],
             origin: .tappedSurface
         )
@@ -247,7 +247,7 @@ struct FavoritesPromotionTests {
 
     @Test("also: hits without an eligible favorite come through unchanged")
     func leavesUnfavoritedAlsoHitsAlone() {
-        let content = LookupContent.found(
+        let content = LookupAnswer.found(
             result: LookupResult(matched: "あめ", entries: [
                 entry(keb: "飴", reb: "あめ", seq: 1),
                 entry(keb: "雨", reb: "あめ", seq: 2)
@@ -277,7 +277,7 @@ struct FavoritesPromotionTests {
 
     @Test("the origin the display result came from is carried through")
     func keepsDisplayOrigin() {
-        let content = LookupContent.found(
+        let content = LookupAnswer.found(
             result: LookupResult(matched: "ほう", entries: [
                 entry(keb: "方", reb: "ほう", seq: 1),
                 entry(keb: "報", reb: "ほう", seq: 2)
@@ -299,7 +299,7 @@ struct FavoritesPromotionTests {
 
     @Test("a not-found pin stays not-found while its related pills promote")
     func promotesRelatedPillsWhilePinStaysNotFound() {
-        let content = LookupContent.notFound(
+        let content = LookupAnswer.notFound(
             surface: "雨尾",
             related: [LookupResult(matched: "ほう", entries: [
                 entry(keb: "方", reb: "ほう", seq: 1),
@@ -318,6 +318,19 @@ struct FavoritesPromotionTests {
         #expect(surface == "雨尾")
         #expect(related.map(\.matched) == ["ほう"])
         #expect(related.map { row in row.entries.map(\.entSeq) } == [[2, 1]])
+    }
+
+    @Test("a bare miss and a failure carry no results and pass through untouched")
+    func passesThroughAnswersWithoutResults() {
+        let noHit = LookupAnswer.noHit(surface: "雨尾")
+        let failure = LookupAnswer.failure(.databaseMissing)
+
+        #expect(
+            FavoritesPromotion.promotingFavorites(in: noHit, identity: identity("雨")) == noHit
+        )
+        #expect(
+            FavoritesPromotion.promotingFavorites(in: failure, identity: identity("雨")) == failure
+        )
     }
 
     @Test("a kana-only entry promotes on its reading")

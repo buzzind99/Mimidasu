@@ -74,7 +74,7 @@ final class JMDictHeadwordGateTests {
             .appendingPathComponent("mimidasu-jmdict-missing-\(UUID().uuidString).sqlite")
         let sut = JMDictLookup(resolveDatabase: { missing })
 
-        let thrown = #expect(throws: JMDictLookupError.self) {
+        let thrown = #expect(throws: DictionaryError.self) {
             try sut.hasHeadword("食べる")
         }
 
@@ -90,7 +90,7 @@ final class JMDictHeadwordGateTests {
         let sut = JMDictLookup(resolveDatabase: { corrupt })
 
         let thrown = try #require(
-            #expect(throws: JMDictLookupError.self) {
+            #expect(throws: DictionaryError.self) {
                 try sut.hasHeadword("食べる")
             }
         )

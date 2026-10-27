@@ -486,7 +486,7 @@ struct ReadingAnnotatorHeadwordGateMemoTests {
         let gate = ReadingAnnotator.memoizedHeadwordGate { _ in
             probes.withLock { count in count += 1 }
             if throwing.withLock({ state in state }) {
-                throw JMDictLookupError.databaseMissing
+                throw DictionaryError.databaseMissing
             }
             return false
         }

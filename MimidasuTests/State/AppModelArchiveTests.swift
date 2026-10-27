@@ -7,8 +7,8 @@ import Testing
 private struct StubTapLookupResolver: TapLookupResolving {
     func resolve(
         _ request: TapLookupRequest, favorites: FavoriteIdentity
-    ) async -> TapLookupEffect {
-        .show(content: .notFound(surface: request.surface, related: []), entryIndex: 0)
+    ) async -> LookupAnswer? {
+        .notFound(surface: request.surface, related: [])
     }
 }
 

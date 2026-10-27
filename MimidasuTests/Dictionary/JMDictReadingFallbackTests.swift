@@ -77,7 +77,7 @@ final class JMDictReadingFallbackTests {
             .appendingPathComponent("mimidasu-jmdict-missing-\(UUID().uuidString).sqlite")
         let sut = JMDictLookup(resolveDatabase: { missing })
 
-        #expect(throws: JMDictLookupError.self) {
+        #expect(throws: DictionaryError.self) {
             try sut.reading(forWriting: "食べる")
         }
     }
@@ -91,7 +91,7 @@ final class JMDictReadingFallbackTests {
         let sut = JMDictLookup(resolveDatabase: { corrupt })
 
         let thrown = try #require(
-            #expect(throws: JMDictLookupError.self) {
+            #expect(throws: DictionaryError.self) {
                 try sut.reading(forWriting: "食べる")
             }
         )

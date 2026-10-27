@@ -367,29 +367,3 @@ struct DictionarySearchOutcome: Equatable, Sendable {
         hits.isEmpty
     }
 }
-
-/// Why a search could not run at all. Deliberately distinct from "no matches":
-/// the view shows a fault for this and a result card for that, because a
-/// dictionary that failed to open is not an answer.
-enum DictionarySearchError: Error, Equatable, Sendable {
-    /// The prepared database is not on disk yet (still preparing, or never
-    /// built).
-    case databaseMissing
-    /// `close()` was called on this engine.
-    case databaseClosed
-    /// SQLite reported a failure.
-    case sqlite(code: Int32, message: String)
-}
-
-extension DictionarySearchError {
-    /// Maps the generic SQLite failure onto the search's typed error surface —
-    /// the same translation `JMDictLookup` performs for its own queries.
-    init(_ error: SQLiteDatabase.Error) {
-        switch error {
-        case .unavailable:
-            self = .databaseMissing
-        case let .sqlite(code, message):
-            self = .sqlite(code: code, message: message)
-        }
-    }
-}

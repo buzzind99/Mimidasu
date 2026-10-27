@@ -69,28 +69,35 @@ final class JMDictLookup: Sendable {
     /// nothing matches.
     func lookup(_ candidate: LookupCandidate) throws -> LookupResult? {
         let expansion = ExpansionCandidate(candidate: candidate, origin: .tappedSurface)
-        guard case let .found(outcome) = try lookup([expansion]) else { return nil }
-        return outcome.display
+        guard case let .found(result, _, _) = try lookup([expansion]) else { return nil }
+        return result
     }
 
     /// Resolves expansion candidates in order, classifying by origin: the
     /// tapped word's surface or lemma — or the join it leads — makes the
-    /// found outcome (first hit displays; later hits adding new entries are
+    /// found answer (first hit displays; later hits adding new entries are
     /// retained as "also:", longest match first with ties keeping candidate
     /// order, and a candidate that only re-hits already-returned entries is
     /// redundant and skipped). A split can never lead: a tap whose first
     /// hit is a split resolves not-found, every split hit demoted to the
     /// related list (same redundancy rule — a hit only re-resolving known
     /// entries is skipped), longest match first. Every candidate missing →
-    /// `.notFound(related: [])`; any infrastructure error aborts the whole
-    /// lookup as a throw (never downgraded to a miss). Each candidate
-    /// checks for cancellation before its indexed query, and each row
-    /// drain checks per row — defensive today, since no caller cancels the
-    /// detached tasks that run the engine, but a future caller that retains
-    /// a task handle gets a prompt abort instead of a run to completion.
-    /// Stale landings drop via the host generation guard; a cancelled query
-    /// drops silently at its landing site.
-    func lookup(_ candidates: [ExpansionCandidate]) throws -> LookupResolution {
+    /// `.notFound(surface:related: [])`, the surface naming the leading
+    /// candidate's text (the word the expansion walked from; an empty
+    /// candidate list answers the empty string); any infrastructure error
+    /// aborts the whole lookup as a throw (never downgraded to a miss).
+    ///
+    /// The engine answers only the two pinnable cases — `.found` and
+    /// `.notFound`. `.noHit` and `.failure` are the display layer's own
+    /// verdicts (a bare miss naming the request's surface, a typed fault)
+    /// and are never constructed here. Each candidate checks for
+    /// cancellation before its indexed query, and each row drain checks per
+    /// row — defensive today, since no caller cancels the detached tasks
+    /// that run the engine, but a future caller that retains a task handle
+    /// gets a prompt abort instead of a run to completion. Stale landings
+    /// drop via the host generation guard; a cancelled query drops silently
+    /// at its landing site.
+    func lookup(_ candidates: [ExpansionCandidate]) throws -> LookupAnswer {
         var display: LookupResult?
         var displayOrigin: ExpansionOrigin?
         var also: [LookupResult] = []
@@ -128,12 +135,16 @@ final class JMDictLookup: Sendable {
             seenEntryIDs.formUnion(entryIDs)
         }
         if let display, let displayOrigin {
-            return .found(LookupOutcome(
-                display: display, displayOrigin: displayOrigin,
-                also: Self.longestFirst(also)
-            ))
+            return .found(
+                result: display,
+                also: Self.longestFirst(also),
+                origin: displayOrigin
+            )
         }
-        return .notFound(related: Self.longestFirst(related))
+        return .notFound(
+            surface: candidates.first?.candidate.text ?? "",
+            related: Self.longestFirst(related)
+        )
     }
 
     /// Longest match first, explicitly stable: candidates arrive in
@@ -182,7 +193,7 @@ final class JMDictLookup: Sendable {
                 return ReadingAlignment.foldedKana(reb)
             }
         } catch let error as SQLiteDatabase.Error {
-            throw JMDictLookupError(error)
+            throw DictionaryError(error)
         }
     }
 
@@ -203,7 +214,7 @@ final class JMDictLookup: Sendable {
                 return try statement.step()
             }
         } catch let error as SQLiteDatabase.Error {
-            throw JMDictLookupError(error)
+            throw DictionaryError(error)
         }
     }
 
@@ -267,7 +278,7 @@ final class JMDictLookup: Sendable {
                 return LookupResult(matched: candidate.text, entries: ranked.map(\.entry))
             }
         } catch let error as SQLiteDatabase.Error {
-            throw JMDictLookupError(error)
+            throw DictionaryError(error)
         }
     }
 
@@ -312,7 +323,7 @@ final class JMDictLookup: Sendable {
             // parent is a corrupt database, not a miss — and never a
             // code-0 sqliteError (a clean SQLITE_DONE leaves "not an error"
             // in lastError, which mislabels the toast).
-            throw JMDictLookupError.databaseCorrupt
+            throw DictionaryError.databaseCorrupt
         }
         let keb = entryStatement.optionalText(0)
         let reb = entryStatement.optionalText(1)
@@ -372,12 +383,12 @@ final class JMDictLookup: Sendable {
         case let .open(database):
             return database
         case .closed:
-            throw JMDictLookupError.databaseClosed
+            throw DictionaryError.databaseClosed
         case .idle:
             break
         }
         guard let url = resolveDatabase(), FileManager.default.fileExists(atPath: url.path) else {
-            throw JMDictLookupError.databaseMissing
+            throw DictionaryError.databaseMissing
         }
         let database: SQLiteDatabase
         do {
@@ -385,9 +396,9 @@ final class JMDictLookup: Sendable {
         } catch let error as SQLiteDatabase.Error {
             switch error {
             case .unavailable:
-                throw JMDictLookupError.sqliteError(code: -1, message: "failed to open JMDict database")
+                throw DictionaryError.sqliteError(code: -1, message: "failed to open JMDict database")
             case .sqlite:
-                throw JMDictLookupError(error)
+                throw DictionaryError(error)
             }
         }
         current = .open(database)
@@ -431,22 +442,5 @@ final class JMDictLookup: Sendable {
               let list = try? JSONDecoder().decode([String].self, from: data)
         else { return nil }
         return list.contains("*") ? nil : list
-    }
-}
-
-extension JMDictLookupError {
-    /// Maps a generic SQLite failure onto the lookup's typed error surface.
-    /// The open path never routes an unopenable handle through here: a file
-    /// that exists but fails to open reports `.sqliteError(code: -1, ...)`
-    /// there, never `.databaseMissing` — missing stays reserved for a nil
-    /// URL or an absent file. This mapping stays as-is for the reading and
-    /// headword-probe paths, where `.unavailable` still reads as missing.
-    init(_ error: SQLiteDatabase.Error) {
-        switch error {
-        case .unavailable:
-            self = .databaseMissing
-        case let .sqlite(code, message):
-            self = .sqliteError(code: code, message: message)
-        }
     }
 }

@@ -3,12 +3,12 @@ import Foundation
 import Testing
 
 /// A resolver that parks every lookup on a checked continuation until the test
-/// lands an effect. Parking makes the interleaving explicit: the suite decides
+/// lands an answer. Parking makes the interleaving explicit: the suite decides
 /// which tap resolves first, never the scheduler.
 private actor GatedTapLookupResolver: TapLookupResolving {
     private struct Pending {
         let request: TapLookupRequest
-        let continuation: CheckedContinuation<TapLookupEffect, Never>
+        let continuation: CheckedContinuation<LookupAnswer?, Never>
     }
 
     private var pending: [Pending] = []
@@ -20,24 +20,24 @@ private actor GatedTapLookupResolver: TapLookupResolving {
 
     func resolve(
         _ request: TapLookupRequest, favorites: FavoriteIdentity
-    ) async -> TapLookupEffect {
-        guard !isCancelled else { return .cancelled }
+    ) async -> LookupAnswer? {
+        guard !isCancelled else { return nil }
         return await withCheckedContinuation { continuation in
             pending.append(Pending(request: request, continuation: continuation))
         }
     }
 
-    /// Resumes the parked lookup for `surface` with `effect`. A surface with
+    /// Resumes the parked lookup for `surface` with `answer`. A surface with
     /// no parked call is ignored; the bounded wait, not this method, is what
     /// catches a tap that never reached the resolver.
-    func land(_ effect: TapLookupEffect, surface: String) {
+    func land(_ answer: LookupAnswer?, surface: String) {
         guard let index = pending.firstIndex(where: { entry in
             entry.request.surface == surface
         }) else { return }
-        pending.remove(at: index).continuation.resume(returning: effect)
+        pending.remove(at: index).continuation.resume(returning: answer)
     }
 
-    /// Releases every parked call as `.cancelled` and makes later calls cancel
+    /// Releases every parked call as a drop (nil) and makes later calls drop
     /// immediately. The timeout path uses this so a failed wait cannot leak a
     /// checked continuation or leave a tap task parked forever.
     func cancelAll() {
@@ -45,7 +45,7 @@ private actor GatedTapLookupResolver: TapLookupResolving {
         pending.removeAll()
         isCancelled = true
         for entry in parked {
-            entry.continuation.resume(returning: .cancelled)
+            entry.continuation.resume(returning: nil)
         }
     }
 }
@@ -55,13 +55,13 @@ private actor GatedTapLookupResolver: TapLookupResolving {
 @MainActor
 private final class TapLookupFeedbackSpy: TapLookupFeedbackSink {
     private(set) var warnings: [String] = []
-    private(set) var faults: [TapLookupFault] = []
+    private(set) var faults: [DictionaryError] = []
 
     func tapLookupDidWarnNoHit(surface: String) {
         warnings.append(surface)
     }
 
-    func tapLookupDidFail(_ fault: TapLookupFault) {
+    func tapLookupDidFail(_ fault: DictionaryError) {
         faults.append(fault)
     }
 }
@@ -113,16 +113,16 @@ private func waitOrCancel(
     }
 }
 
-/// Lands `effect` on `surface` and waits for the tap task to finish, so the
+/// Lands `answer` on `surface` and waits for the tap task to finish, so the
 /// next interleaving starts from a settled session.
 @MainActor
 private func landAndWait(
-    _ effect: TapLookupEffect,
+    _ answer: LookupAnswer?,
     surface: String,
     on task: Task<Void, Never>,
     resolver: GatedTapLookupResolver
 ) async {
-    await resolver.land(effect, surface: surface)
+    await resolver.land(answer, surface: surface)
     await task.value
 }
 
@@ -153,7 +153,7 @@ private func entry(_ headword: String, seq: Int) -> JMDictEntry {
 }
 
 /// One hand-built hit: one entry per headword, ranked as given.
-private func found(_ headwords: [String]) -> LookupContent {
+private func found(_ headwords: [String]) -> LookupAnswer {
     let entries = headwords.enumerated().map { index, headword in
         entry(headword, seq: index + 1)
     }
@@ -167,7 +167,7 @@ private func found(_ headwords: [String]) -> LookupContent {
 /// Interleaving coverage for the tap session: a landing whose generation moved
 /// on is dropped whole, and a clear at a session boundary invalidates whatever
 /// is in flight. Every lookup is parked on a test-controlled continuation so
-/// ordering is deterministic; ordinary effect routing stays in
+/// ordering is deterministic; ordinary answer routing stays in
 /// `TapLookupSessionTests`.
 @MainActor
 @Suite("TapLookupSession races")
@@ -175,8 +175,8 @@ struct TapLookupSessionRaceTests {
 
     // MARK: - Landing order
 
-    @Test("a stale show loses to the newer landing that resolved first")
-    func staleShowDrops() async throws {
+    @Test("a stale pinnable answer loses to the newer landing that resolved first")
+    func staleAnswerDrops() async throws {
         let harness = TapLookupRaceHarness()
         let staleContent = found(["雨"])
         let currentContent = found(["飴"])
@@ -192,7 +192,7 @@ struct TapLookupSessionRaceTests {
         try await waitOrCancel(2, in: harness.resolver)
 
         await landAndWait(
-            .show(content: currentContent, entryIndex: 0),
+            currentContent,
             surface: "飴",
             on: currentTask,
             resolver: harness.resolver
@@ -201,7 +201,7 @@ struct TapLookupSessionRaceTests {
         #expect(harness.session.presentation?.anchor == currentAnchor)
 
         await landAndWait(
-            .show(content: staleContent, entryIndex: 0),
+            staleContent,
             surface: "雨",
             on: staleTask,
             resolver: harness.resolver
@@ -217,11 +217,11 @@ struct TapLookupSessionRaceTests {
     @Test(
         "a stale warning or fault posts no feedback",
         arguments: [
-            TapLookupEffect.warnNoHit(surface: "雨"),
-            TapLookupEffect.fault(.databaseMissing)
+            LookupAnswer.noHit(surface: "雨"),
+            LookupAnswer.failure(.databaseMissing)
         ]
     )
-    func staleFeedbackDrops(_ staleEffect: TapLookupEffect) async throws {
+    func staleFeedbackDrops(_ staleAnswer: LookupAnswer) async throws {
         let harness = TapLookupRaceHarness()
         let currentContent = found(["飴"])
         let currentAnchor = LookupAnchor.transcript(sentenceIndex: 0, tokenIndex: 1)
@@ -235,13 +235,13 @@ struct TapLookupSessionRaceTests {
         try await waitOrCancel(2, in: harness.resolver)
 
         await landAndWait(
-            .show(content: currentContent, entryIndex: 0),
+            currentContent,
             surface: "飴",
             on: currentTask,
             resolver: harness.resolver
         )
         await landAndWait(
-            staleEffect,
+            staleAnswer,
             surface: "雨",
             on: staleTask,
             resolver: harness.resolver
@@ -269,13 +269,13 @@ struct TapLookupSessionRaceTests {
         try await waitOrCancel(2, in: harness.resolver)
 
         await landAndWait(
-            .show(content: secondContent, entryIndex: 0),
+            secondContent,
             surface: "飴",
             on: secondTask,
             resolver: harness.resolver
         )
         await landAndWait(
-            .show(content: firstContent, entryIndex: 0),
+            firstContent,
             surface: "雨",
             on: firstTask,
             resolver: harness.resolver
@@ -291,8 +291,8 @@ struct TapLookupSessionRaceTests {
 
     // MARK: - Session boundaries
 
-    @Test("clear while a show is in flight drops the landing")
-    func clearDropsInFlightShow() async throws {
+    @Test("clear while a pinnable answer is in flight drops the landing")
+    func clearDropsInFlightAnswer() async throws {
         let harness = TapLookupRaceHarness()
         let content = found(["あめ"])
         let anchor = LookupAnchor.liveStrip
@@ -304,7 +304,7 @@ struct TapLookupSessionRaceTests {
 
         harness.session.clear()
         await landAndWait(
-            .show(content: content, entryIndex: 0),
+            content,
             surface: "あめ",
             on: task,
             resolver: harness.resolver
@@ -327,7 +327,7 @@ struct TapLookupSessionRaceTests {
 
         harness.session.clear()
         await landAndWait(
-            .warnNoHit(surface: "xyz"),
+            .noHit(surface: "xyz"),
             surface: "xyz",
             on: task,
             resolver: harness.resolver

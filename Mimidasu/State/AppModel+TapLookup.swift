@@ -11,7 +11,7 @@ extension AppModel: TapLookupFeedbackSink {
         )
     }
 
-    func tapLookupDidFail(_ fault: TapLookupFault) {
+    func tapLookupDidFail(_ fault: DictionaryError) {
         toasts.post(
             key: ToastKey.dictionaryLookup, style: .yellowAuto,
             title: "Dictionary lookup failed", body: fault.localizedDescription

@@ -51,9 +51,9 @@ final class LookupDisplayHarness {
 
     func shownContent(
         for request: TapLookupRequest, favorites: FavoriteIdentity = .empty
-    ) async throws -> LookupContent {
-        let effect = await makeDisplay().resolve(request, favorites: favorites)
-        guard case let .show(content, _) = effect else {
+    ) async throws -> LookupAnswer {
+        let answer = await makeDisplay().resolve(request, favorites: favorites)
+        guard let content = requirePinnable(answer) else {
             throw ResolutionMismatch()
         }
         return content
@@ -109,6 +109,31 @@ final class LookupDisplayHarness {
     }
 }
 
+/// Unwraps a pinnable resolve landing — `.found` or `.notFound` — and records
+/// the actual landing when it is anything else (a bare miss, a failure, or a
+/// dropped tap), so each caller keeps its own expectation about what it asked
+/// for.
+func requirePinnable(_ answer: LookupAnswer?) -> LookupAnswer? {
+    guard let answer else {
+        Issue.record("expected a pinnable answer, got nil")
+        return nil
+    }
+    switch answer {
+    case .found, .notFound:
+        return answer
+    case .noHit, .failure:
+        Issue.record("expected a pinnable answer, got \(answer)")
+        return nil
+    }
+}
+
+/// The entry index a pinnable answer pins at: the pager start the session
+/// opens on — the popover and the pinned card page together from the first
+/// entry.
+func pagerStart(for answer: LookupAnswer) -> Int {
+    LookupPresentation.initial(content: answer, entryIndex: 0, anchor: .liveStrip).entryIndex
+}
+
 @Suite("LookupDisplay")
 final class LookupDisplayTests {
     private let harness: LookupDisplayHarness
@@ -121,13 +146,13 @@ final class LookupDisplayTests {
     func foundTapShowsDisplayWithAlso() async {
         let display = harness.makeDisplay()
 
-        let effect = await display.resolve(harness.requestO(), favorites: .empty)
+        let answer = await display.resolve(harness.requestO(), favorites: .empty)
 
-        guard case let .show(content, entryIndex) = effect else {
-            Issue.record("expected show, got \(effect)")
+        guard let content = requirePinnable(answer) else {
+            Issue.record("expected a pinnable answer, got \(String(describing: answer))")
             return
         }
-        #expect(entryIndex == 0)
+        #expect(pagerStart(for: content) == 0)
         #expect(content.displayResult?.matched == "お")
         #expect(content.fallbackResults.map(\.matched) == ["お土産"])
         guard case let .found(_, _, origin) = content else {
@@ -150,13 +175,13 @@ final class LookupDisplayTests {
             surface: "お土"
         )
 
-        let effect = await display.resolve(request, favorites: .empty)
+        let answer = await display.resolve(request, favorites: .empty)
 
-        guard case let .show(content, entryIndex) = effect else {
-            Issue.record("expected show, got \(effect)")
+        guard let content = requirePinnable(answer) else {
+            Issue.record("expected a pinnable answer, got \(String(describing: answer))")
             return
         }
-        #expect(entryIndex == 0)
+        #expect(pagerStart(for: content) == 0)
         #expect(content.displayResult?.matched == "お土産")
         guard case let .found(_, _, origin) = content else {
             Issue.record("expected found content")
@@ -179,23 +204,23 @@ final class LookupDisplayTests {
         let plain = await display.resolve(request, favorites: .empty)
         let favorited = await display.resolve(request, favorites: favorites)
 
-        guard case let .show(plainContent, plainIndex) = plain,
+        guard let plainContent = requirePinnable(plain),
               case let .found(plainResult, _, plainOrigin) = plainContent
         else {
-            Issue.record("expected found show, got \(plain)")
+            Issue.record("expected a found answer, got \(String(describing: plain))")
             return
         }
-        #expect(plainIndex == 0)
+        #expect(pagerStart(for: plainContent) == 0)
         #expect(plainResult.matched == "食べる")
         #expect(plainOrigin == .tappedLemma)
 
-        guard case let .show(content, entryIndex) = favorited,
+        guard let content = requirePinnable(favorited),
               case let .found(result, _, origin) = content
         else {
-            Issue.record("expected found show, got \(favorited)")
+            Issue.record("expected a found answer, got \(String(describing: favorited))")
             return
         }
-        #expect(entryIndex == 0)
+        #expect(pagerStart(for: content) == 0)
         #expect(origin == .tappedLemma)
         #expect(result.matched == "食べる")
         #expect(result.entries.first?.keb == "食べる")
@@ -216,10 +241,10 @@ final class LookupDisplayTests {
         let plain = await display.resolve(request, favorites: .empty)
         let favorited = await display.resolve(request, favorites: favorites)
 
-        guard case let .show(plainContent, plainIndex) = plain,
-              case let .show(favoritedContent, favoritedIndex) = favorited
+        guard let plainContent = requirePinnable(plain),
+              let favoritedContent = requirePinnable(favorited)
         else {
-            Issue.record("expected show, got \(plain) / \(favorited)")
+            Issue.record("expected pinnable answers, got \(String(describing: plain)) / \(String(describing: favorited))")
             return
         }
         guard case let .notFound(plainSurface, plainRelated) = plainContent,
@@ -228,8 +253,8 @@ final class LookupDisplayTests {
             Issue.record("expected not-found content")
             return
         }
-        #expect(plainIndex == 0)
-        #expect(favoritedIndex == 0)
+        #expect(pagerStart(for: plainContent) == 0)
+        #expect(pagerStart(for: favoritedContent) == 0)
         #expect(plainSurface == "雨尾")
         #expect(surface == "雨尾")
         #expect(related.map(\.matched) == ["雨", "尾"])
@@ -253,11 +278,11 @@ final class LookupDisplayTests {
             surface: "前无"
         )
         let favorites = FavoriteIdentity(keys: [FavoriteIdentity.normalize("先")])
-        let effect = await harness.makeDisplay().resolve(request, favorites: favorites)
-        guard case let .show(content, _) = effect,
+        let answer = await harness.makeDisplay().resolve(request, favorites: favorites)
+        guard let content = requirePinnable(answer),
               case let .notFound(surface, related) = content
         else {
-            Issue.record("expected not-found show, got \(effect)")
+            Issue.record("expected a not-found answer, got \(String(describing: answer))")
             return
         }
         #expect(surface == "前无")
@@ -277,9 +302,9 @@ final class LookupDisplayTests {
             surface: "xyz"
         )
 
-        let effect = await display.resolve(request, favorites: .empty)
+        let answer = await display.resolve(request, favorites: .empty)
 
-        #expect(effect == .warnNoHit(surface: "xyz"))
+        #expect(answer == .noHit(surface: "xyz"))
     }
 
     @Test("a drifted tap fails closed to the warning pill")
@@ -295,9 +320,9 @@ final class LookupDisplayTests {
             surface: "xyz"
         )
 
-        let effect = await display.resolve(request, favorites: .empty)
+        let answer = await display.resolve(request, favorites: .empty)
 
-        #expect(effect == .warnNoHit(surface: "xyz"))
+        #expect(answer == .noHit(surface: "xyz"))
     }
 
     @Test("a sentence-drifted tap suppresses joins but keeps singles")
@@ -313,10 +338,10 @@ final class LookupDisplayTests {
             surface: "お"
         )
 
-        let effect = await display.resolve(request, favorites: .empty)
+        let answer = await display.resolve(request, favorites: .empty)
 
-        guard case let .show(content, _) = effect else {
-            Issue.record("expected show, got \(effect)")
+        guard let content = requirePinnable(answer) else {
+            Issue.record("expected a pinnable answer, got \(String(describing: answer))")
             return
         }
         #expect(content.displayResult?.matched == "お")
@@ -328,15 +353,15 @@ final class LookupDisplayTests {
         let display = harness.makeDisplay()
         let request = harness.requestAme()
 
-        let effect = await display.resolve(
+        let answer = await display.resolve(
             request, favorites: FavoriteIdentity(keys: [FavoriteIdentity.normalize("雨")])
         )
 
-        guard case let .show(content, entryIndex) = effect else {
-            Issue.record("expected show, got \(effect)")
+        guard let content = requirePinnable(answer) else {
+            Issue.record("expected a pinnable answer, got \(String(describing: answer))")
             return
         }
-        #expect(entryIndex == 0)
+        #expect(pagerStart(for: content) == 0)
         #expect(content.displayResult?.entries.first?.keb == "雨")
     }
 }

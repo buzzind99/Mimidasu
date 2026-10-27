@@ -1,6 +1,22 @@
 import Foundation
 import Observation
 
+/// What one detached row query hands back to the main actor.
+///
+/// An enum because the three landings are genuinely different: a value, a
+/// cancelled query whose row must collapse, and a typed failure. Mirrors
+/// `DictionarySearchResponse`. `Sendable` on purpose — the query runs on a
+/// detached task, where a raw untyped error cannot cross (it is not
+/// `Sendable`), so `DictionaryError` crosses in its place; the mapping
+/// (cancellation first, then the typed fault, then the total
+/// `DictionaryError` wrap) happens inside the detached closure. Declared at
+/// file scope so it stays nonisolated and can be built off the main actor.
+private enum RowLanding: Sendable {
+    case resolved(LookupResult?)
+    case cancelled
+    case failure(DictionaryError)
+}
+
 /// Per-row expansion state for the dictionary windows' rows: which cards are
 /// open and what each one's live JMDict lookup resolved to.
 ///
@@ -131,13 +147,20 @@ final class FavoritesLookupState {
             // and remove bump the generation instead of cancelling, so rapid
             // cycles pile serial work behind the engine while only the latest
             // lands.
-            let result: Result<LookupResult?, Error> = await Task.detached(
+            let landing: RowLanding = await Task.detached(
                 priority: .userInitiated
             ) {
                 do {
-                    return try .success(row(candidate))
-                } catch {
+                    return try .resolved(row(candidate))
+                } catch is CancellationError {
+                    // Intercepted before the typed wrap: a cancelled query is
+                    // not a failure, and `DictionaryError` would erase the
+                    // distinction into `.internalError`.
+                    return .cancelled
+                } catch let error as DictionaryError {
                     return .failure(error)
+                } catch {
+                    return .failure(DictionaryError(error))
                 }
             }.value
             guard let self else { return }
@@ -145,22 +168,20 @@ final class FavoritesLookupState {
                 discardedLandings += 1
                 return
             }
-            switch result {
-            case let .success(resolved):
+            switch landing {
+            case let .resolved(resolved):
                 phases[key] = resolved.map(Phase.resolved) ?? .notFound
-            case let .failure(error):
-                if error is CancellationError {
-                    // A cancelled query means the lookup was torn down, not
-                    // that it failed: collapse the row so it reads as never
-                    // opened rather than as failed. Writes no counter — the
-                    // generation guard above is its only writer.
-                    expanded.removeAll { open in open == key }
-                    phases[key] = nil
-                } else {
-                    phases[key] = .failed(
-                        TapLookupFault(error).errorDescription ?? error.localizedDescription
-                    )
-                }
+            case .cancelled:
+                // A cancelled query means the lookup was torn down, not
+                // that it failed: collapse the row so it reads as never
+                // opened rather than as failed. Writes no counter — the
+                // generation guard above is its only writer.
+                expanded.removeAll { open in open == key }
+                phases[key] = nil
+            case let .failure(fault):
+                phases[key] = .failed(
+                    fault.errorDescription ?? fault.localizedDescription
+                )
             }
         }
     }

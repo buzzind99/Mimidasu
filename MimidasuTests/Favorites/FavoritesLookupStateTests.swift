@@ -135,6 +135,35 @@ struct FavoritesLookupStateTests {
         #expect(sut.discardedLandings == 0)
     }
 
+    /// An error the dictionary surface never typed — the total wrap carries
+    /// its message, so the row's `.failed` text is pinned to the single
+    /// copy authority rather than to a bare or mislabeled description.
+    private struct Boom: LocalizedError {
+        var errorDescription: String? {
+            "boom"
+        }
+    }
+
+    @Test("a failed landing pins the exact message text")
+    func failedLandingCarriesExactText() async {
+        // An unrecognized error maps through the typed surface and keeps its
+        // message: never a bare `localizedDescription`, never a forged SQLite
+        // label.
+        let unknown = FavoritesLookupState(lookupRow: { _ in throw Boom() })
+        unknown.toggle(word)
+        #expect(await pollUntil(timeout: 5) { unknown.phase(for: word) != .loading })
+        #expect(unknown.phase(for: word) == .failed("Unexpected dictionary error: boom."))
+        #expect(unknown.discardedLandings == 0)
+
+        // A typed fault passes through untouched and answers with the single
+        // copy authority's text.
+        let typed = FavoritesLookupState(lookupRow: { _ in throw DictionaryError.databaseClosed })
+        typed.toggle(word)
+        #expect(await pollUntil(timeout: 5) { typed.phase(for: word) != .loading })
+        #expect(typed.phase(for: word) == .failed("JMDict database has been closed."))
+        #expect(typed.discardedLandings == 0)
+    }
+
     @Test("a landed lookup resolves the row's phase")
     func landedLookupResolves() async throws {
         let fixture = try JMDictFixtureDatabase.build()

@@ -22,14 +22,23 @@ final class JMDictLookupTests {
         JMDictFixtureDatabase.Built(url: databaseURL).remove()
     }
 
+    /// The pinnable half of a found answer — the display result, the origin
+    /// it came from, and the retained "also:" hits — so the assertions below
+    /// keep naming them the way the lookup reports them.
+    private struct FoundOutcome {
+        let display: LookupResult
+        let displayOrigin: ExpansionOrigin
+        let also: [LookupResult]
+    }
+
     /// Runs the typed expansion entry point with every candidate treated as
-    /// the tapped word, unwrapping a found resolution; nil for a miss.
-    private func lookupOutcome(_ candidates: [LookupCandidate]) throws -> LookupOutcome? {
-        let resolution = try engine.lookup(candidates.map { candidate in
+    /// the tapped word, unwrapping a found answer; nil for a miss.
+    private func lookupOutcome(_ candidates: [LookupCandidate]) throws -> FoundOutcome? {
+        let answer = try engine.lookup(candidates.map { candidate in
             ExpansionCandidate(candidate: candidate, origin: .tappedSurface)
         })
-        guard case let .found(outcome) = resolution else { return nil }
-        return outcome
+        guard case let .found(result, also, origin) = answer else { return nil }
+        return FoundOutcome(display: result, displayOrigin: origin, also: also)
     }
 
     // MARK: Hits
@@ -223,7 +232,7 @@ final class JMDictLookupTests {
         // that violates it must not drop the split hits already collected.
         // Lives here, not in the display suite: it drives the engine's typed
         // candidate interface directly, which resolve never produces.
-        let resolution = try engine.lookup([
+        let answer = try engine.lookup([
             ExpansionCandidate(
                 candidate: LookupCandidate(text: "雨"), origin: .split
             ),
@@ -232,12 +241,12 @@ final class JMDictLookupTests {
             )
         ])
 
-        guard case let .found(outcome) = resolution else {
-            Issue.record("expected found, got \(resolution)")
+        guard case let .found(result, also, _) = answer else {
+            Issue.record("expected found, got \(answer)")
             return
         }
-        #expect(outcome.display.matched == "お")
-        #expect(outcome.also.map(\.matched) == ["雨"])
+        #expect(result.matched == "お")
+        #expect(also.map(\.matched) == ["雨"])
     }
 
     // MARK: Candidate kind
@@ -261,7 +270,7 @@ final class JMDictLookupTests {
             .appendingPathComponent("mimidasu-jmdict-missing-\(UUID().uuidString).sqlite")
         let sut = JMDictLookup(resolveDatabase: { missing })
 
-        let thrown = #expect(throws: JMDictLookupError.self) {
+        let thrown = #expect(throws: DictionaryError.self) {
             try sut.lookup(LookupCandidate(text: "食べる"))
         }
 
@@ -273,7 +282,7 @@ final class JMDictLookupTests {
         _ = try engine.lookup(LookupCandidate(text: "食べる"))
         engine.close()
 
-        let thrown = #expect(throws: JMDictLookupError.self) {
+        let thrown = #expect(throws: DictionaryError.self) {
             try engine.lookup(LookupCandidate(text: "食べる"))
         }
 
@@ -289,7 +298,7 @@ final class JMDictLookupTests {
         let sut = JMDictLookup(resolveDatabase: { corrupt })
 
         let thrown = try #require(
-            #expect(throws: JMDictLookupError.self) {
+            #expect(throws: DictionaryError.self) {
                 try sut.lookup(LookupCandidate(text: "食べる"))
             }
         )
@@ -298,26 +307,6 @@ final class JMDictLookupTests {
             Issue.record("expected .sqliteError, got \(thrown)")
             return
         }
-    }
-
-    @Test("error descriptions are actionable copy per case")
-    func errorDescriptions() {
-        #expect(
-            JMDictLookupError.databaseMissing.errorDescription
-                == "JMDict database not found; the dictionary may still be preparing."
-        )
-        #expect(
-            JMDictLookupError.databaseClosed.errorDescription
-                == "JMDict database has been closed."
-        )
-        #expect(
-            JMDictLookupError.databaseCorrupt.errorDescription
-                == "JMDict database is corrupt."
-        )
-        #expect(
-            JMDictLookupError.sqliteError(code: 11, message: "corrupt").errorDescription
-                == "JMDict database error 11: corrupt."
-        )
     }
 
     @Test("default database resolution prefers the prepared location, then the debug checkout")
@@ -373,9 +362,9 @@ final class JMDictLookupTests {
     /// One lookup against `sut`. SQLite surfaces an unopenable path as
     /// either the typed missing case or a CANTOPEN sqlite error, depending
     /// on whether it handed back a handle — both are accepted here.
-    private func thrownForOneLookup(_ sut: JMDictLookup) throws -> JMDictLookupError {
+    private func thrownForOneLookup(_ sut: JMDictLookup) throws -> DictionaryError {
         let thrown = try #require(
-            #expect(throws: JMDictLookupError.self) {
+            #expect(throws: DictionaryError.self) {
                 try sut.lookup(LookupCandidate(text: "食べる"))
             }
         )
@@ -386,7 +375,7 @@ final class JMDictLookupTests {
         return thrown
     }
 
-    private func isSQLiteError(_ error: JMDictLookupError) -> Bool {
+    private func isSQLiteError(_ error: DictionaryError) -> Bool {
         if case .sqliteError = error {
             return true
         }
@@ -407,7 +396,7 @@ final class JMDictLookupTests {
         }
 
         let thrown = try #require(
-            #expect(throws: JMDictLookupError.self) {
+            #expect(throws: DictionaryError.self) {
                 try sut.lookup(LookupCandidate(text: "孤語"))
             }
         )
@@ -443,9 +432,9 @@ final class JMDictLookupTests {
 extension JMDictLookupTests {
     @Test("maps SQLite errors onto the typed lookup errors")
     func sqliteErrorMapping() {
-        #expect(JMDictLookupError(SQLiteDatabase.Error.unavailable) == .databaseMissing)
+        #expect(DictionaryError(SQLiteDatabase.Error.unavailable) == .databaseMissing)
         #expect(
-            JMDictLookupError(SQLiteDatabase.Error.sqlite(code: 11, message: "corrupt"))
+            DictionaryError(SQLiteDatabase.Error.sqlite(code: 11, message: "corrupt"))
                 == .sqliteError(code: 11, message: "corrupt")
         )
     }

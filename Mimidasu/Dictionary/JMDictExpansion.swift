@@ -390,15 +390,17 @@ extension JMDictLookup {
     /// Looks up a tap with forward expansion: builds the expansion
     /// candidates from the rendered segments (`JMDictExpansion.candidates`)
     /// and resolves them in order. The tapped word's own surface or lemma
-    /// hit leads the found outcome; a join hit also leads, its outcome
+    /// hit leads the found answer; a join hit also leads, its answer
     /// carrying the join origin so the UI can label the compound match; a
     /// tap whose only hits are kanji splits resolves not-found with the
     /// split hits demoted to the related list — never displayed as the
     /// tapped word. An infrastructure error on any query aborts the tap as
-    /// a throw — never a miss.
+    /// a throw — never a miss. The engine answers only the two pinnable
+    /// cases; a bare miss and a typed fault are the display layer's to
+    /// name.
     func lookup(
         segments: [LookupSegment], tappedAt: Int, sentenceText: String
-    ) throws -> LookupResolution {
+    ) throws -> LookupAnswer {
         try lookup(JMDictExpansion.candidates(
             segments: segments, tappedAt: tappedAt, sentenceText: sentenceText
         ))

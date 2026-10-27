@@ -21,15 +21,24 @@ final class JMDictLookupExpansionTests {
 
     private struct ResolutionMismatch: Error {}
 
-    /// Unwraps a found resolution — recording a failure for a not-found
+    /// The pinnable half of a found answer — the display result, the origin
+    /// it came from, and the retained "also:" hits — so the assertions below
+    /// keep naming them the way the lookup reports them.
+    private struct FoundOutcome {
+        let display: LookupResult
+        let displayOrigin: ExpansionOrigin
+        let also: [LookupResult]
+    }
+
+    /// Unwraps a found answer — recording a failure for a not-found
     /// one (the split-only demotion) so the expectation stays in the
     /// assertion that asked for it.
-    private func foundOutcome(_ resolution: LookupResolution) throws -> LookupOutcome {
-        guard case let .found(outcome) = resolution else {
-            Issue.record("expected .found, got \(resolution)")
+    private func foundOutcome(_ answer: LookupAnswer) throws -> FoundOutcome {
+        guard case let .found(result, also, origin) = answer else {
+            Issue.record("expected .found, got \(answer)")
             throw ResolutionMismatch()
         }
-        return outcome
+        return FoundOutcome(display: result, displayOrigin: origin, also: also)
     }
 
     @Test("displays the tapped piece and keeps the longer-join hit in also")
@@ -108,7 +117,7 @@ final class JMDictLookupExpansionTests {
 
     @Test("a whole-word miss resolved only by splits is not-found with related hits")
     func splitOnlyResolutionIsNotFound() throws {
-        let resolution = try engine.lookup(
+        let answer = try engine.lookup(
             segments: [LookupSegment(surface: "雨尾")],
             tappedAt: 0,
             sentenceText: "雨尾"
@@ -117,10 +126,11 @@ final class JMDictLookupExpansionTests {
         // 雨尾 is no headword: the split candidates resolve both kanji —
         // but neither leads the display result. The demoted hits travel
         // as related, longest match first (ties keep candidate order).
-        guard case let .notFound(related) = resolution else {
-            Issue.record("expected .notFound, got \(resolution)")
+        guard case let .notFound(surface, related) = answer else {
+            Issue.record("expected .notFound, got \(answer)")
             return
         }
+        #expect(surface == "雨尾")
 
         #expect(related.map(\.matched) == ["雨", "尾"])
         #expect(related.map { hit in hit.entries.map(\.entSeq) } == [[9_990_030], [9_990_040]])
@@ -128,7 +138,7 @@ final class JMDictLookupExpansionTests {
 
     @Test("related drops a later split hit that only re-resolves known entries")
     func relatedDeduplicatesByEntries() throws {
-        let resolution = try engine.lookup(
+        let answer = try engine.lookup(
             segments: [LookupSegment(surface: "前先")],
             tappedAt: 0,
             sentenceText: "前先"
@@ -137,10 +147,11 @@ final class JMDictLookupExpansionTests {
         // 前先 is no headword: both single-kanji splits resolve — but 先 is
         // an alternate writing of the entry 前 already resolved, so it is a
         // duplicate pill, not a new one.
-        guard case let .notFound(related) = resolution else {
-            Issue.record("expected .notFound, got \(resolution)")
+        guard case let .notFound(surface, related) = answer else {
+            Issue.record("expected .notFound, got \(answer)")
             return
         }
+        #expect(surface == "前先")
         #expect(related.map(\.matched) == ["前"])
         #expect(related.map { hit in hit.entries.map(\.entSeq) } == [[9_990_060, 9_990_050]])
     }
@@ -192,13 +203,13 @@ final class JMDictLookupExpansionTests {
 
     @Test("every candidate missing is an empty not-found, not an error")
     func noHitReturnsEmptyNotFound() throws {
-        let resolution = try engine.lookup(
+        let answer = try engine.lookup(
             segments: [LookupSegment(surface: "きのこっぷ")],
             tappedAt: 0,
             sentenceText: "きのこっぷ"
         )
 
-        #expect(resolution == .notFound(related: []))
+        #expect(answer == .notFound(surface: "きのこっぷ", related: []))
     }
 
     @Test("an infrastructure error on any query aborts the tap as a throw")
@@ -206,7 +217,7 @@ final class JMDictLookupExpansionTests {
         _ = try engine.lookup(LookupCandidate(text: "食べる"))
         engine.close()
 
-        let thrown = #expect(throws: JMDictLookupError.self) {
+        let thrown = #expect(throws: DictionaryError.self) {
             try engine.lookup(
                 segments: [LookupSegment(surface: "食べ", lemma: "食べる"), LookupSegment(surface: "ま")],
                 tappedAt: 0,

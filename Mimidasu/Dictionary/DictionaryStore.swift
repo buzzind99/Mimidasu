@@ -499,7 +499,7 @@ final class DictionaryStore: Sendable {
     }
 
     /// SQLite's own words for a failed index build, in the same
-    /// code-and-message shape `JMDictLookupError` reports its failures in.
+    /// code-and-message shape `DictionaryError` reports its failures in.
     private static func describe(_ error: SQLiteDatabase.Error) -> String {
         switch error {
         case .unavailable: "database unavailable"
@@ -543,7 +543,7 @@ final class DictionaryStore: Sendable {
                     reason: "no entry for \(Self.smokeWord)"
                 )
             }
-        } catch let error as JMDictLookupError {
+        } catch let error as DictionaryError {
             throw DictionaryStoreError.smokeTestFailed(reason: error.localizedDescription)
         }
         guard indexed else { return }
