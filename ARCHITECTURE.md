@@ -384,22 +384,34 @@ packaged apps in `Contents/Frameworks/`.
   resolved in that order, validated against the sentence's render text
   (drift fails closed: an un-re-anchorable tap becomes a No hit with no
   tapped query). A Join hit may
-  lead the card (literal JOINED MATCH badge); a split-only tap resolves as a
-  Bare miss with the Split hits demoted to Related pills — a Split never
+  lead the card (literal JOINED MATCH badge); a split-only tap resolves as
+  not-found with the Split hits demoted to Related pills — a Split never
   presents itself as the tapped word.
 - **Display module:** `LookupDisplay` is the `TapLookupResolving` resolver —
   a `Sendable` final class holding a `JMDictLookup`, running async queries on
-  detached tasks, and turning one `TapLookupRequest` into a `TapLookupEffect`
-  (content, no-hit warning, fault, or cancellation). It owns resolution,
-  defensive re-anchoring of the request's stored index when it disagrees with
-  the segments it carries (drift fails closed), the found / join-lead /
-  lemma-lead / split-only / bare-miss verdicts, and favorites promotion at
-  resolve time — the display entry plus each related pill. It no longer owns
-  fallback promotion or pager stepping: `LookupPresentation` holds those rules,
-  and `TapLookupSession` applies them. `TapLookupEffect` stays the resolver's
-  return type until a later answer-ladder collapse. Sense rows map stored POS
-  tags through the name-type label vocabulary and dedupe equal labels (stored
-  order), and the pinned card stacks a multi-tag sense's tags above its gloss.
+  detached tasks, and turning one `TapLookupRequest` into a `LookupAnswer?`:
+  `.found(result:also:origin:)` (the pinnable answer — display result,
+  retained "also:" hits, origin label), `.notFound(surface:related:)` (the
+  tapped word has no entry; split hits demoted to related),
+  `.noHit(surface:)` (nothing resolved → the amber warning names the
+  surface), or `.failure(DictionaryError)` (typed fault → toast, never a
+  warning pill); nil means the tap was dropped or cancelled — silent, never
+  toasted. `DictionaryError` is the one dictionary error type
+  (`.annotatorUnavailable` / `.databaseMissing` / `.databaseClosed` /
+  `.databaseCorrupt` / `.sqliteError(code:message:)` /
+  `.internalError(message:)`) with a single `errorDescription` authority and
+  a single `SQLiteDatabase.Error` mapper; unknown errors map to
+  `.internalError`, never a forged SQLite error, and cancellation is
+  intercepted upstream as a silent drop (the pure total map still routes it
+  to `.internalError`). It owns resolution, defensive re-anchoring of the
+  request's stored index when it disagrees with the segments it carries
+  (drift fails closed), the found / join-lead / lemma-lead / split-only /
+  bare-miss verdicts, and favorites promotion at resolve time — the display
+  entry plus each related pill. It no longer owns fallback promotion or
+  pager stepping: `LookupPresentation` holds those rules, and
+  `TapLookupSession` applies them. Sense rows map stored POS tags through
+  the name-type label vocabulary and dedupe equal labels (stored order),
+  and the pinned card stacks a multi-tag sense's tags above its gloss.
 - **Tap interaction:** cursor modes None / Dictionary / Copy. The tap site
   builds one `TapLookupRequest` from the row's rendered segments — all of
   them, the tapped index and surface, and the sentence text — so no second
@@ -410,22 +422,75 @@ packaged apps in `Contents/Frameworks/`.
   nil when the popover is dismissed while the card keeps the content and page),
   fallback promotion, pager clamping, dismissal ownership (only the anchor that
   owns the popover clears it), and clearing at session and archive boundaries.
-  The session decides warn / fault / none and reports it through a weak
-  `TapLookupFeedbackSink`; `AppModel` implements the sink with the notice and
-  toast copy. Hosts read `lookupPresentation` (and `popoverItem(for:)` keyed
+  The Presentation's content is a `LookupAnswer` holding only the pinnable
+  `.found`/`.notFound` cases — a pinned presentation never stores
+  `.noHit`/`.failure` (a tested invariant). The session applies the answer —
+  `.noHit` warns, `.failure` toasts — and reports it through a weak
+  `TapLookupFeedbackSink` carrying the `DictionaryError`; `AppModel`
+  implements the sink with the fixed no-hit notice and the toast body from
+  the one `errorDescription` authority. Tap and row expansion agree through
+  that single authority and one shared bare-miss classifier — proven by
+  `LookupCrossPathConsistencyTests`; the Favorites row keeps its own
+  `.resolved`/`.notFound`/`.failed` phases — it queries a single candidate
+  and can never produce the tap's full answer. Hosts read
+  `lookupPresentation` (and `popoverItem(for:)` keyed
   by their `LookupAnchor`) and own no ordering: one popover exists app-wide,
-  anchored at a transcript word or the live strip. Both hosts still render
-  their own content switch into the shared entry view; only the state is now
-  one value. A tap pins the Pinned card in the sidebar plus that popover;
+  anchored at a transcript word or the live strip. Both hosts render through
+  one shared pinned-content switch (`dictionaryPinnedContent`): the found
+  entry goes through the one definition module with that host's plan
+  (below), and neither keeps a content switch of its own. The state is one
+  value. A tap pins the
+  Pinned card in the sidebar plus that popover;
   homograph entries walk via the `◀ i/N ▶` pager, Also hits surface as capped
   (9) "also:" pills (a forward-Join *Display* lead wears the JOINED MATCH
   badge; split-only taps show "related:" pills), and selecting a pill promotes
   its chosen Entry as the Display (origin reset to the tapped word,
-  `FavoritesPromotion` re-applied) while keeping the current anchor. A No hit
-  posts the amber notice pill, and an infrastructure failure posts a toast.
+  `FavoritesPromotion` re-applied) while keeping the current anchor. A `.noHit`
+  answer posts the amber notice pill naming the surface; a `.failure` posts
+  its `DictionaryError` toast — never a warning pill.
   Name entries render type badges (SURNAME / GIVEN NAME / PLACE NAME / …) and
   drop the romanization-echo gloss. Favorite entries lead every pager via
   `FavoritesPromotion` (below).
+- **Definition rendering:** `DictionaryEntryContentView` is the one
+  definition module — fed a plan, the host's live data, and, from the card,
+  a viewport — and all four definition surfaces render their found entry
+  through it: the popover, the pinned card, the favorites row, and the
+  search row. One mode enum, `DictionaryDefinitionMode`, names the surface
+  being rendered (`.popover` / `.sidebarCard` / `.favoritesRow` /
+  `.searchRow`); the `DictionaryDefinitionPlan` built from that mode
+  replaces the per-host rendering flags and carries every rendering
+  decision: entry selection (`DictionaryEntrySelectionPolicy`), pager
+  visibility and placement (`DictionaryPagerPlacement`), headword and badge
+  suppression, star style, copy placement, sense and gloss limits, and
+  `wrapsSensePOS`.
+  Entry selection is mode-owned: the popover and the card page together
+  from `presentation.entryIndex`; the favorites row opens on the lead of
+  its favorite-promoted list; the search row validates its stored page
+  against the promoted lead and falls back to its own entry position — the
+  plan's `rowValidatedFallback` rule in `displayEntryIndex`. Pager placement
+  is mode-owned too:
+  the popover draws it in the definition's header row, the card on its
+  DICTIONARY label row, and neither list row draws one (the search row's
+  header-row request is inert because it suppresses the headword). The
+  plan carries no live state: the entry its selection resolved, the entry
+  count/page, the "also:" hits, the badge origin, the star membership, the
+  action closures, and — from the card — the viewport all arrive from the
+  host, which also keeps its layout chrome. The card's `GeometryReader`,
+  the `sensesViewportHeight` derived from its measured chrome, the three
+  height probes the module reports through, and the `openWindow`/popover
+  bindings stay where they are. The four mode rows of `init(mode:)` are
+  pinned by `DictionaryDefinitionPlanTests`. The popover's and the card's
+  duplicated content switches collapse into one shared
+  `dictionaryPinnedContent` switch (total over `LookupAnswer`; its
+  `.noHit`/`.failure` arms render blank because a stored presentation
+  never holds them), their two identical `requestRemovalIfPending` helpers
+  into one `AppModel` helper, and the card's own dead `onStepEntry` wiring
+  is gone — the shared switch wires the module's pager once, and the
+  card's plan places its pager on the label row. Nothing rendered moves:
+  no string, layout, or visual change, host view signatures and mounts
+  unchanged, and the one divergence — a found answer whose page lands
+  nowhere renders blank in the popover but shows the card's `emptyHint`
+  (the switch's `emptyDefinition`) — is preserved as-is.
 
 ### Dictionary search (`Dictionary/`, reference window)
 - **Engine:** `DictionarySearchEngine` — a second read-only handle over
@@ -471,17 +536,18 @@ packaged apps in `Contents/Frameworks/`.
   Hits render as Favorite-style cards (Match kind chip first, then
   COMMON / JLPT / name-type badges, scalar-offset match highlight, 2-line
   gloss preview, copy → star → chevron) that expand in place into the
-  shared entry view with a per-row pager; expansion is keyed by entry
+  shared definition module; expansion is keyed by entry
   (`String(entSeq)`), so homograph rows sharing a headword expand
   independently, and an untouched row opens on its own entry rather than
   the lookup's ranked first. A starred entry written or read as the row's
-  word is promoted to lead the expanded pager (`FavoritesPromotion` —
-  reorder only, count unchanged), and the pager steps to absolute entry
-  indexes. Each mode runs its own
+  word is promoted to lead the expanded entry list (`FavoritesPromotion` —
+  reorder only, count unchanged). Each mode runs its own
   lookup handle, so a slow row expansion can't stall a tap or the other
   mode. Load-more reveals pages up to the 1,000-row ceiling ("Showing top
-  N — refine your search"). The window stays up until explicitly closed —
-  it does not dismiss on outside clicks.
+  N — refine your search"). A faulting query parks a typed
+  `DictionaryError` in the search state and renders the hardcoded fault
+  card — that card's copy is frozen. The window stays up until explicitly
+  closed — it does not dismiss on outside clicks.
 
 ### Favorites (`Favorites/`)
 - **Star surface:** the dictionary popover, the pinned card, the search
@@ -493,8 +559,8 @@ packaged apps in `Contents/Frameworks/`.
   `FavoriteRemovalConfirmation`, one alert per window: the main window
   owns the question for the popover + pinned card, the reference window
   owns one for its search and Favorite rows, and a `.popover` never
-  presents the alert. A Bare miss carries no star; an `also:` pill
-  stars only through its promoted lead Entry (the Bare-miss host passes no
+  presents the alert. A not-found card carries no star; an `also:` pill
+  stars only through its promoted lead Entry (the not-found host passes no
   Favorites probe).
 - **Model + persistence:** `FavoriteWord`
   `{headword, reading, romaji, addedAt}` in
@@ -537,8 +603,8 @@ packaged apps in `Contents/Frameworks/`.
   footprint, one debounce, and one close-time reset. An explainer card, a
   debounced search against the SQLite list (LIKE with escaped wildcards
   across headword / reading / romaji), and Favorite rows
-  (copy → star → chevron) that expand into the shared Entry view via live
-  `JMDictLookup` queries (`FavoritesLookupState` — row-keyed phases behind
+  (copy → star → chevron) that expand into the shared definition module via
+  live `JMDictLookup` queries (`FavoritesLookupState` — row-keyed phases behind
   generation tokens: headword here, entry id in search; deliberately never
   the app-wide popover/card pipeline). Opened by the floating star over
   the transcript (top-trailing,
@@ -548,11 +614,11 @@ packaged apps in `Contents/Frameworks/`.
 - **Favorite-first lookup:** `FavoritesPromotion` reorders an
   already-resolved Lookup once so a starred Entry written or read as the
   looked-up word leads the Display's pager, every `also:` Hit's
-  pager, and each expanded search row's pager — a fallback pill labels
-  itself with its lead Entry, so the promotion is what makes an eligible
-  pill readable and starred, and `selectAlsoPill` re-promotes the content
-  it rebuilds. A starred sibling spelling — matched through another
-  writing — stays where the engine ranked it. Bare-miss pins stay that way
+  pager, and the entry list an expanded search row selects from — a fallback
+  pill labels itself with its lead Entry, so the promotion is what makes an
+  eligible pill readable and starred, and `selectAlsoPill` re-promotes the
+  content it rebuilds. A starred sibling spelling — matched through another
+  writing — stays where the engine ranked it. Not-found pins stay that way
   with no Display (a Split hit must never present itself
   as the tapped word), though each Related set is promoted the
   same way, so a buried eligible Favorite leads its pill before any
