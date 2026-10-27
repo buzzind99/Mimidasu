@@ -344,6 +344,92 @@ func forwardRemovalRequest(_ outcome: FavoriteToggle, to onRequest: (String) -> 
     }
 }
 
+extension AppModel {
+    /// The un-star step every pinned dictionary host runs: the model has
+    /// already decided whether a press was an add or a removal still to be
+    /// confirmed, and only the latter is worth a question. Filing the
+    /// question is the window's job, so the headword goes out and the host
+    /// keeps nothing. One copy, reached through `dictionaryPinnedContent`,
+    /// so the popover and the card cannot drift into two wirings.
+    func requestRemovalIfPending(_ entry: JMDictEntry, to onRequest: (String) -> Void) {
+        forwardRemovalRequest(toggleFavorite(entry), to: onRequest)
+    }
+}
+
+/// The pinned lookup's content, shared by the popover and the sidebar card:
+/// one switch over the presentation's answer, so the two hosts can never
+/// drift on which state renders what. The found branch resolves the entry
+/// through the plan's selection policy — the presentation's page, read
+/// directly, in bounds or not — and renders the shared definition; a
+/// selection that lands nowhere falls back to `emptyDefinition`, the
+/// popover drawing nothing and the card its hint. The not-found branch
+/// measures itself into the host's top-section probe and zeroes the probes
+/// the state does not mount. A `.noHit`/`.failure` answer never pins (see
+/// `LookupPresentation.content`); it renders blank so the switch stays
+/// total without trapping.
+@MainActor
+@ViewBuilder
+func dictionaryPinnedContent(
+    for presentation: LookupPresentation,
+    plan: DictionaryDefinitionPlan,
+    model: AppModel,
+    onFavoriteRemovalRequest: @escaping (String) -> Void,
+    sensesViewportHeight: CGFloat? = nil,
+    onTopSectionHeightChange: @escaping (CGFloat) -> Void = { _ in },
+    onAlsoHeightChange: @escaping (CGFloat) -> Void = { _ in },
+    onSensesHeightChange: @escaping (CGFloat) -> Void = { _ in },
+    @ViewBuilder emptyDefinition: () -> some View
+) -> some View {
+    switch presentation.content {
+    case let .found(result, also, origin):
+        if let index = plan.displayEntryIndex(
+            in: result.entries, requestedIndex: presentation.entryIndex
+        ) {
+            let entry = result.entries[index]
+            DictionaryEntryContentView(
+                plan: plan,
+                entry: entry,
+                entryCount: result.entries.count,
+                entryIndex: index,
+                also: also,
+                displayOrigin: origin,
+                isFavorite: model.isFavorite(entry),
+                sensesViewportHeight: sensesViewportHeight,
+                onTopSectionHeightChange: onTopSectionHeightChange,
+                onAlsoHeightChange: onAlsoHeightChange,
+                onSensesHeightChange: onSensesHeightChange,
+                onToggleFavorite: {
+                    model.requestRemovalIfPending(entry, to: onFavoriteRemovalRequest)
+                },
+                onCopy: { model.copySnippet(entry.headword ?? "") },
+                onSelectAlso: { result in model.selectAlsoPill(result) },
+                isFavoritePillLead: { result in model.isFavoriteLead(result) },
+                onStepEntry: { index in model.stepLookupEntry(to: index) }
+            )
+        } else {
+            emptyDefinition()
+        }
+    case let .notFound(surface, related):
+        DictionaryNotFoundView(
+            surface: surface, related: related, copyPlacement: plan.copyPlacement,
+            onSelectRelated: { result in model.selectAlsoPill(result) },
+            onCopy: { model.copySnippet(surface) }
+        )
+        .onHeightChange { height in onTopSectionHeightChange(height) }
+        .onAppear {
+            // Probes this state doesn't mount keep the viewport
+            // math at their zero-content values.
+            onAlsoHeightChange(0)
+            onSensesHeightChange(0)
+        }
+    case .noHit, .failure:
+        // Unreachable: a stored presentation only ever holds the
+        // pinnable answers. Rendered blank so the switch stays total
+        // without trapping.
+        EmptyView()
+    }
+}
+
 /// The popover presented by the surface that owns the presentation: the shared
 /// entry content with the icon copy control, or the not-found state with
 /// its related suggestions.
@@ -358,47 +444,16 @@ struct DictionaryPopoverView: View {
     let onFavoriteRemovalRequest: (String) -> Void
 
     var body: some View {
-        Group {
-            switch presentation.content {
-            case let .found(result, also, origin):
-                if let entry = result.entries[safe: presentation.entryIndex] {
-                    DictionaryEntryContentView(
-                        entry: entry,
-                        entryCount: result.entries.count,
-                        entryIndex: presentation.entryIndex,
-                        also: also,
-                        displayOrigin: origin,
-                        senseLimit: nil,
-                        glossLimit: nil,
-                        copyPlacement: .icon,
-                        isFavorite: model.isFavorite(entry),
-                        favoriteStyle: .popover,
-                        onToggleFavorite: { requestRemovalIfPending(entry) },
-                        onCopy: {
-                            model.copySnippet(entry.headword ?? "")
-                        },
-                        onSelectAlso: { result in model.selectAlsoPill(result) },
-                        isFavoritePillLead: { result in model.isFavoriteLead(result) },
-                        onStepEntry: { index in model.stepLookupEntry(to: index) }
-                    )
-                }
-            case let .notFound(surface, related):
-                DictionaryNotFoundView(
-                    surface: surface, related: related, copyPlacement: .icon,
-                    onSelectRelated: { result in model.selectAlsoPill(result) },
-                    onCopy: { model.copySnippet(surface) }
-                )
-            }
-        }
+        dictionaryPinnedContent(
+            for: presentation,
+            plan: DictionaryDefinitionPlan(mode: .popover),
+            model: model,
+            onFavoriteRemovalRequest: onFavoriteRemovalRequest,
+            emptyDefinition: { EmptyView() }
+        )
         .padding(16)
         .frame(width: 400, alignment: .topLeading)
         .background(Theme.toastBackground)
-    }
-
-    /// The model decides whether a press was an add or a removal to confirm;
-    /// only a removal raises the question.
-    private func requestRemovalIfPending(_ entry: JMDictEntry) {
-        forwardRemovalRequest(model.toggleFavorite(entry), to: onFavoriteRemovalRequest)
     }
 }
 
@@ -441,12 +496,14 @@ struct DictionaryCardView: View {
 
     private func card(freeHeight: CGFloat) -> some View {
         let presentation = model.lookupPresentation
+        let plan = DictionaryDefinitionPlan(mode: .sidebarCard)
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 dictionaryOpener
                 Spacer(minLength: 8)
                 if let presentation,
                    case let .found(result, _, _) = presentation.content,
+                   plan.rendersEntryPager,
                    result.entries.count > 1
                 {
                     DictionaryEntryPager(
@@ -461,7 +518,7 @@ struct DictionaryCardView: View {
             .frame(height: DictionaryEntryPager.height)
             .onHeightChange { height in labelHeight = height }
             if let presentation {
-                pinnedContent(presentation, freeHeight: freeHeight)
+                pinnedContent(presentation, plan: plan, freeHeight: freeHeight)
             } else {
                 emptyHint
             }
@@ -469,12 +526,6 @@ struct DictionaryCardView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardSurface()
-    }
-
-    /// The model decides whether a press was an add or a removal to confirm;
-    /// only a removal raises the question.
-    private func requestRemovalIfPending(_ entry: JMDictEntry) {
-        forwardRemovalRequest(model.toggleFavorite(entry), to: onFavoriteRemovalRequest)
     }
 
     /// The card's kicker doubles as the card's opener: the card holds one
@@ -508,62 +559,25 @@ struct DictionaryCardView: View {
         isHovering ? Theme.accentPink : Theme.secondaryText
     }
 
-    /// The pinned content per state: the shared entry view for a found
-    /// lookup, the not-found state with its related suggestions otherwise.
-    /// The not-found block feeds the top-section probe so the (sense-less)
-    /// viewport math stays settled while it is up.
-    @ViewBuilder
+    /// The pinned content per state: the shared module's switch, fed the
+    /// card's plan and the card's viewport. The module routes the not-found
+    /// block through the top-section probe so the (sense-less) viewport
+    /// math stays settled while it is up, and falls back to the card's hint
+    /// when a stale page leaves the found state with no entry to show.
     private func pinnedContent(
-        _ presentation: LookupPresentation, freeHeight: CGFloat
+        _ presentation: LookupPresentation, plan: DictionaryDefinitionPlan, freeHeight: CGFloat
     ) -> some View {
-        switch presentation.content {
-        case let .found(result, also, origin):
-            if let entry = result.entries[safe: presentation.entryIndex] {
-                DictionaryEntryContentView(
-                    entry: entry,
-                    entryCount: result.entries.count,
-                    entryIndex: presentation.entryIndex,
-                    also: also,
-                    displayOrigin: origin,
-                    senseLimit: nil,
-                    glossLimit: nil,
-                    // The card is the narrow host — a multi-tag sense
-                    // stacks its tags above the gloss only when the inline
-                    // row doesn't fit (see the flag).
-                    wrapsSensePOS: true,
-                    sensesViewportHeight: sensesViewport(freeHeight: freeHeight),
-                    onTopSectionHeightChange: { height in topSectionHeight = height },
-                    onAlsoHeightChange: { height in alsoHeight = height },
-                    onSensesHeightChange: { height in sensesContentHeight = height },
-                    copyPlacement: .icon,
-                    showsEntryPager: false,
-                    isFavorite: model.isFavorite(entry),
-                    favoriteStyle: .card,
-                    onToggleFavorite: { requestRemovalIfPending(entry) },
-                    onCopy: {
-                        model.copySnippet(entry.headword ?? "")
-                    },
-                    onSelectAlso: { result in model.selectAlsoPill(result) },
-                    isFavoritePillLead: { result in model.isFavoriteLead(result) },
-                    onStepEntry: { index in model.stepLookupEntry(to: index) }
-                )
-            } else {
-                emptyHint
-            }
-        case let .notFound(surface, related):
-            DictionaryNotFoundView(
-                surface: surface, related: related, copyPlacement: .icon,
-                onSelectRelated: { result in model.selectAlsoPill(result) },
-                onCopy: { model.copySnippet(surface) }
-            )
-            .onHeightChange { height in topSectionHeight = height }
-            .onAppear {
-                // Probes this state doesn't mount keep the viewport
-                // math at their zero-content values.
-                alsoHeight = 0
-                sensesContentHeight = 0
-            }
-        }
+        dictionaryPinnedContent(
+            for: presentation,
+            plan: plan,
+            model: model,
+            onFavoriteRemovalRequest: onFavoriteRemovalRequest,
+            sensesViewportHeight: sensesViewport(freeHeight: freeHeight),
+            onTopSectionHeightChange: { height in topSectionHeight = height },
+            onAlsoHeightChange: { height in alsoHeight = height },
+            onSensesHeightChange: { height in sensesContentHeight = height },
+            emptyDefinition: { emptyHint }
+        )
     }
 
     private var emptyHint: some View {

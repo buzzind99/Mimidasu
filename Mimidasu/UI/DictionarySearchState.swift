@@ -6,14 +6,34 @@ import SwiftUI
 /// An enum because the three landings are genuinely different: results, a
 /// fault the user must be told about, and a scan the user typed past.
 /// `Sendable` on purpose — the work runs on a detached task and `any Error` is
-/// not `Sendable`, so the engine's typed fault crosses the boundary in place of
-/// the raw error rather than as one.
+/// not `Sendable`, so `DictionaryError` crosses the boundary in place of
+/// the raw error rather than as one; an unrecognized error becomes
+/// `.internalError`, never a forged SQLite label.
 enum DictionarySearchResponse: Sendable {
     case success(DictionarySearchOutcome)
-    case failure(DictionarySearchError)
+    case failure(DictionaryError)
     /// The keystroke was superseded (or the window closed) while the scan ran.
     /// Never applied: the generation guard below drops it.
     case cancelled
+
+    /// One search's crossing: runs the scan and lands it as a typed response —
+    /// the engine's typed fault passes through, cancellation lands as
+    /// `.cancelled`, and anything unrecognized lands as an internal error
+    /// carrying the underlying message. An unknown error is not evidence of a
+    /// database failure, so no path may label one a SQLite error.
+    static func run(
+        _ body: () throws -> DictionarySearchOutcome
+    ) -> DictionarySearchResponse {
+        do {
+            return try .success(body())
+        } catch let error as DictionaryError {
+            return .failure(error)
+        } catch is CancellationError {
+            return .cancelled
+        } catch {
+            return .failure(.internalError(message: error.localizedDescription))
+        }
+    }
 }
 
 /// Dictionary mode's search state: the query, the filters, the ranked outcome,
@@ -91,7 +111,7 @@ final class DictionarySearchState {
     /// swapped the file, a closed engine). The view names it with a fault
     /// card, never as "no matches" — a dictionary that failed to open is not
     /// an answer.
-    private(set) var fault: DictionarySearchError?
+    private(set) var fault: DictionaryError?
     /// Results dropped by the generation guard — the guard's observable half,
     /// the same contract `FavoritesLookupState.discardedLandings` offers.
     private(set) var discardedLandings = 0
@@ -234,14 +254,8 @@ final class DictionarySearchState {
         let engine = engine
         let limit = visibleLimit
         let work = Task.detached(priority: .userInitiated) { () -> DictionarySearchResponse in
-            do {
-                return try .success(engine.search(trimmed, filters: filters, limit: limit))
-            } catch let error as DictionarySearchError {
-                return .failure(error)
-            } catch is CancellationError {
-                return .cancelled
-            } catch {
-                return .failure(.sqlite(code: -1, message: error.localizedDescription))
+            DictionarySearchResponse.run {
+                try engine.search(trimmed, filters: filters, limit: limit)
             }
         }
         search = work
@@ -332,16 +346,19 @@ final class DictionarySearchState {
     /// promoted ordering — the stored page returns on that star press
     /// rather than a pager touch. That is the accepted trade of the
     /// absolute-target pager, where storage deliberately lags a display
-    /// reset until the next press. Nothing is written here; `stepEntry`
+    /// reset until the next press. The rule itself is
+    /// `DictionaryDefinitionPlan`'s row-validated policy; this method only
+    /// supplies the live per-row memory. Nothing is written here; `stepEntry`
     /// persists the lead and index when the user presses, so body evaluation
     /// never mutates the state it reads.
     func validatedIndex(for key: String, in promoted: LookupResult, fallback: Int = 0) -> Int {
-        let ceiling = max(promoted.entries.count - 1, 0)
-        guard entryLeads[key] == promoted.entries.first?.entSeq else {
-            return min(max(fallback, 0), ceiling)
-        }
-        let stored = entryIndices[key] ?? 0
-        return min(max(stored, 0), ceiling)
+        let plan = DictionaryDefinitionPlan(mode: .searchRow)
+        return plan.displayEntryIndex(
+            in: promoted.entries,
+            rowEntryIndex: fallback,
+            storedIndex: entryIndices[key],
+            storedLead: entryLeads[key]
+        ) ?? 0
     }
 
     /// The expanded row's pager step: the absolute target index the pager

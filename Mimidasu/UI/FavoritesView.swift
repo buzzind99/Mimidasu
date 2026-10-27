@@ -194,30 +194,27 @@ struct FavoritesView: View {
     /// column) and no pager: nothing pages a window row.
     @ViewBuilder
     private func favoriteEntry(_ word: FavoriteWord, result: LookupResult) -> some View {
+        let plan = DictionaryDefinitionPlan(mode: .favoritesRow)
         // Favorite-first: a starred entry leads, so the row opens on the word
-        // the user kept. Entry order only — the pager stays off and the
-        // "also:" pills stay empty, as below.
+        // the user kept — the plan's promoted-lead policy reads the lead of
+        // this reordered list. Entry order only; the pager and the "also:"
+        // pills stay off, as below.
         let promoted = FavoritesPromotion.promotingFavorites(
             in: result, identity: model.favorites.identity
         )
-        if let entry = promoted.entries.first {
-            // No favorite or copy arguments: `showsHeadword: false` drops the
-            // header row, which is the only place either is rendered, so
-            // passing them would assert a control the expanded block cannot
-            // show. The row's own header above carries both. `also: []` is the
-            // same kind of empty: the pager and the "also:" pills both live in
-            // the header row, and nothing may promote a window row's lookup —
-            // threading real hits through would render pills whose taps do
-            // nothing.
+        if let index = plan.displayEntryIndex(in: promoted.entries) {
+            // `also: []` is the same kind of empty as the suppressed header:
+            // the pager and the "also:" pills both live in the header row,
+            // and nothing may promote a window row's lookup — threading
+            // real hits through would render pills whose taps do nothing.
+            // The plan carries the rest of the row's table — no headword,
+            // no copy or star chrome, badges kept, every sense inline.
             DictionaryEntryContentView(
-                entry: entry,
+                plan: plan,
+                entry: promoted.entries[index],
                 entryCount: promoted.entries.count,
-                entryIndex: 0,
-                also: [],
-                senseLimit: nil,
-                glossLimit: nil,
-                showsEntryPager: false,
-                showsHeadword: false
+                entryIndex: index,
+                also: []
             )
         } else {
             dictionaryUnavailableText(surface: word.headword)

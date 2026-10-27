@@ -73,13 +73,31 @@ struct DictionarySearchStateFaultTests {
         state.query = "食べる"
 
         #expect(await pollUntil { state.fault != nil })
-        guard case .sqlite = state.fault else {
+        guard case .sqliteError = state.fault else {
             Issue.record("expected .sqlite, got \(String(describing: state.fault))")
             return
         }
         #expect(state.unavailable == false)
         #expect(state.outcome.isEmpty)
         #expect(state.isSearching == false)
+    }
+
+    /// An error the engine never typed — the crossing must say "internal",
+    /// never forge a SQLite label for a failure that is not evidence of one.
+    private struct UnknownSearchFailure: Error {}
+
+    @Test("an unknown search failure lands as an internal error, never a SQLite label")
+    func unknownFailureIsNeverLabeledSQLite() {
+        let response = DictionarySearchResponse.run { throw UnknownSearchFailure() }
+
+        guard case let .failure(fault) = response else {
+            Issue.record("expected a typed failure, got \(response)")
+            return
+        }
+        #expect(fault == .internalError(message: UnknownSearchFailure().localizedDescription))
+        if case .sqliteError = fault {
+            Issue.record("an unknown error was mislabeled a SQLite failure: \(fault)")
+        }
     }
 
     @Test("a filter press re-runs the debounced query, not the cleared field")

@@ -241,7 +241,7 @@ struct DictionaryContentTests {
 
     @Test("a not-found content exposes no display result and keeps its related pills")
     func contentAccessors() {
-        let notFound = LookupContent.notFound(surface: "雨尾", related: [result("雨")])
+        let notFound = LookupAnswer.notFound(surface: "雨尾", related: [result("雨")])
 
         #expect(notFound.displayResult == nil)
         #expect(notFound.fallbackResults.map(\.matched) == ["雨"])

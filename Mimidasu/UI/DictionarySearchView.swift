@@ -327,6 +327,7 @@ private extension DictionarySearchView {
     private func entryBlock(
         _ hit: DictionarySearchHit, result: LookupResult
     ) -> some View {
+        let plan = DictionaryDefinitionPlan(mode: .searchRow)
         // Favorite-first: a starred entry leads the pager — reorders only,
         // the count unchanged. An unstepped row lands on its own entry.
         let promoted = FavoritesPromotion.promotingFavorites(
@@ -336,22 +337,18 @@ private extension DictionarySearchView {
         let fallback = DictionarySearchState.rowEntryIndex(for: hit, in: promoted)
         let index = state.validatedIndex(for: key, in: promoted, fallback: fallback)
         if let entry = promoted.entries[safe: index] {
+            // The plan carries the row's table: headword and badges
+            // suppressed — the collapsed header above already carries this
+            // row's badges (match reason, commonness, level, and name types)
+            // and names the word — senses inline, no copy or star chrome.
+            // The pager flag it asks for is inert: the pager lives in the
+            // headword block the row suppresses.
             DictionaryEntryContentView(
+                plan: plan,
                 entry: entry,
                 entryCount: promoted.entries.count,
                 entryIndex: index,
-                also: [],
-                senseLimit: nil,
-                glossLimit: nil,
-                showsEntryPager: true,
-                showsHeadword: false,
-                // The collapsed header above already carries this row's badges —
-                // match reason, commonness, level, and name types — so the
-                // expanded block repeats none of them.
-                showsBadges: false,
-                onStepEntry: { step in
-                    state.stepEntry(key, to: step, in: promoted)
-                }
+                also: []
             )
         } else {
             dictionaryUnavailableText(surface: hit.headword ?? "")

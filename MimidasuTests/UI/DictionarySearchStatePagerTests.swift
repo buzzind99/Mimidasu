@@ -91,6 +91,13 @@ extension DictionarySearchStateTests {
         #expect(state.validatedIndex(for: "飴", in: baseline) == 0)
         state.stepEntry("飴", to: 1, in: baseline)
         #expect(state.validatedIndex(for: "飴", in: baseline) == 1)
+        // The plan pins the same keep at the render seam: same stored lead,
+        // stored page wins.
+        let plan = DictionaryDefinitionPlan(mode: .searchRow)
+        #expect(plan.displayEntryIndex(
+            in: baseline.entries, rowEntryIndex: 0,
+            storedIndex: state.entryIndex(for: "飴"), storedLead: 1
+        ) == 1)
 
         // A promotion reorder moves another entry to the front; the stored
         // page belonged to the old order, so the display restarts at the
@@ -102,6 +109,12 @@ extension DictionarySearchStateTests {
         #expect(reordered.entries.map(\.entSeq) == [2, 1])
         #expect(state.validatedIndex(for: "飴", in: reordered) == 0)
         #expect(state.entryIndex(for: "飴") == 1)
+        // The plan pins the same restart: the changed lead falls back to the
+        // row's own entry rather than retargeting the stale page.
+        #expect(plan.displayEntryIndex(
+            in: reordered.entries, rowEntryIndex: 0,
+            storedIndex: state.entryIndex(for: "飴"), storedLead: 1
+        ) == 0)
     }
 
     @Test("the pager clamps when the lead is unchanged")
@@ -115,5 +128,11 @@ extension DictionarySearchStateTests {
         #expect(state.validatedIndex(for: "飴", in: promoted) == 2)
         // The clamp persists, so the stored index and the shown page agree.
         #expect(state.entryIndex(for: "飴") == 2)
+        // The plan pins the same clamp at the render seam.
+        let plan = DictionaryDefinitionPlan(mode: .searchRow)
+        #expect(plan.displayEntryIndex(
+            in: promoted.entries, rowEntryIndex: 0,
+            storedIndex: state.entryIndex(for: "飴"), storedLead: 1
+        ) == 2)
     }
 }

@@ -82,12 +82,24 @@ extension DictionarySearchStateTests {
         )
         let secondKey = DictionarySearchState.lookupKey(for: hits[1])
         let fallback = DictionarySearchState.rowEntryIndex(for: hits[1], in: shared)
+        let plan = DictionaryDefinitionPlan(mode: .searchRow)
 
         #expect(fallback == 1)
         #expect(state.validatedIndex(for: secondKey, in: shared, fallback: fallback) == 1)
+        // The plan pins the same untouched-row chain at the render seam: no
+        // stored page, so the row's own entry opens.
+        #expect(plan.displayEntryIndex(
+            in: shared.entries, rowEntryIndex: fallback
+        ) == 1)
 
         // A pager touch stores the absolute page, which wins from then on.
         state.stepEntry(secondKey, to: 0, in: shared)
         #expect(state.validatedIndex(for: secondKey, in: shared, fallback: fallback) == 0)
+        // The plan pins the same keep: the stepped page wins while the lead
+        // it was stored against still leads.
+        #expect(plan.displayEntryIndex(
+            in: shared.entries, rowEntryIndex: fallback,
+            storedIndex: state.entryIndex(for: secondKey), storedLead: 9_994_901
+        ) == 0)
     }
 }

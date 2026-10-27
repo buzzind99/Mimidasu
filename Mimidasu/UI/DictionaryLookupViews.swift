@@ -165,34 +165,35 @@ struct DictionaryCopyButton: View {
 /// The full dictionary entry composition — headword (+ reading), romaji,
 /// badge row, pitch pill, numbered POS-labeled senses, "also:" pills, entry
 /// pager — rendered by the popover, the sidebar card, and the two list
-/// hosts; `wrapsSensePOS` is the card's one divergence: a multi-tag sense
-/// keeps its tags inline while the whole row fits one line, and stacks them
-/// above the wrapping gloss otherwise. The card host scrolls only the
-/// sense rows (see `sensesViewportHeight`); everything above them and the
-/// "also:" row below stay fixed.
+/// hosts. What each host *decides* (pager visibility, headword/badge
+/// suppression, star style, copy placement, sense/gloss limits, sense-POS
+/// wrapping) arrives as one `DictionaryDefinitionPlan`; what each host
+/// *supplies* is the data this render shows — the entry its selection
+/// policy resolved, its count and page, the "also:" hits, the badge origin,
+/// the live star membership — and, from the sidebar card, the viewport: the
+/// senses frame height and the three height probes its scroll math feeds.
 struct DictionaryEntryContentView: View {
+    /// This host's rendering stance, resolved from its mode. The host never
+    /// re-states these decisions as flags.
+    let plan: DictionaryDefinitionPlan
+    /// The entry this render shows — the one the plan's entry-selection
+    /// policy resolved at the call site (direct page, promoted lead, or the
+    /// row's validated fallback).
     let entry: JMDictEntry
     let entryCount: Int
+    /// The displayed entry's page within `entryCount` — the pager's `i` in
+    /// `i/N`.
     let entryIndex: Int
     let also: [LookupResult]
     /// The candidate role the display result came from. A join lead shows
     /// the joined-match badge — the compound matched, not the tapped word.
     var displayOrigin: ExpansionOrigin?
-    /// Senses rendered (nil = every sense). Both hosts pass nil — long
-    /// entries expand in full; the constant default serves tests and any
-    /// future capped host.
-    var senseLimit: Int? = DictionaryContent.maxSenses
-    /// Glosses per sense (nil = every gloss); same host story as `senseLimit`.
-    var glossLimit: Int? = DictionaryContent.maxGlossesPerSense
-    /// When true, a sense carrying more than one POS tag keeps the number,
-    /// tags, and gloss on one baseline while that whole row fits; when it
-    /// doesn't, the tags move to a line of their own and the gloss spans the
-    /// row beneath them. With a single tag — or false — the number, tags,
-    /// and gloss always share a baseline. The sidebar card opts in: its 254pt
-    /// of content is the narrowest a sense row is ever drawn, so an inline
-    /// row that overflows would leave the gloss a column too thin to read.
-    /// The popover and the two list hosts stay inline.
-    var wrapsSensePOS = false
+    /// Membership of the displayed entry's headword. Recomputed by each host
+    /// on every render rather than carried across lookups — a related-pill
+    /// promotion repins both hosts to a *different* entry, and a cached value
+    /// would show the previous one's membership until it happened to be
+    /// replaced.
+    var isFavorite = false
     /// When set, the sense rows render inside a vertical ScrollView framed
     /// to exactly this height — they scroll only when taller than it. The
     /// host derives it from the free sidebar space minus the fixed chrome.
@@ -204,37 +205,16 @@ struct DictionaryEntryContentView: View {
     /// Natural height of every sense row — the unclamped content height the
     /// viewport clamps against.
     var onSensesHeightChange: (CGFloat) -> Void = { _ in }
-    var copyPlacement: DictionaryCopyPlacement = .none
-    /// When false the host renders the entry pager itself (the sidebar card
-    /// puts it on the DICTIONARY label row to free headword width).
-    var showsEntryPager = true
-    /// False hides the headword block — headword, inline reading, romaji, and
-    /// the header row's controls. For a host that already renders that
-    /// identity directly above (a favorites row expanding its own definition):
-    /// repeating it costs a line of the row and reads as a mistake. The badge
-    /// row is a separate flag — `showsBadges` — because a host can suppress one
-    /// without the other.
-    var showsHeadword = true
-    /// False hides the badge row, for a host whose own header already carries
-    /// the badges directly above this view (a search row: its collapsed header
-    /// shows the match badge, commonness, level, and name types). Without this
-    /// the expanded block repeats them verbatim a line below the divider.
-    /// Independent of `showsHeadword`: the Favorites window shows no badges in
-    /// its collapsed header, so it sets only that one.
-    var showsBadges = true
-    /// Membership of the displayed entry's headword. Recomputed by each host
-    /// on every render rather than carried across lookups — a related-pill
-    /// promotion repins both hosts to a *different* entry, and a cached value
-    /// would show the previous one's membership until it happened to be
-    /// replaced.
-    var isFavorite = false
-    var favoriteStyle: DictionaryFavoriteStyle = .card
     var onToggleFavorite: () -> Void = {}
     var onCopy: () -> Void = {}
     var onSelectAlso: (LookupResult) -> Void = { _ in }
     /// Favorites probe for the "also:" pill row's star (nil = starless) —
     /// forwarded to `DictionaryResultPillRow.isFavoriteLead` unchanged.
     var isFavoritePillLead: ((LookupResult) -> Bool)?
+    /// The header pager's step target. Reachable only while the plan puts
+    /// the pager in this view's own header row; a host-placed pager (the
+    /// sidebar card's label row) is the host's chrome and never routes
+    /// here.
     var onStepEntry: (Int) -> Void = { _ in }
 
     var body: some View {
@@ -287,12 +267,12 @@ struct DictionaryEntryContentView: View {
                 stackedHeadword
             }
             Spacer(minLength: 8)
-            if entryCount > 1, showsEntryPager {
+            if entryCount > 1, plan.showsEntryPager {
                 entryPager
             }
             // Both hosts lead with copy and follow with the star, so the reading order
             // is the same in the narrow sidebar column and the wider popover.
-            // Only the glyph differs by `favoriteStyle`: the card's is a
+            // Only the glyph differs by the plan's star style: the card's is a
             // tiled 14pt mark that pairs with the copy tile, the popover's a
             // bare 18pt glyph that keeps the header one line so the romaji
             // below never moves.
@@ -328,7 +308,7 @@ struct DictionaryEntryContentView: View {
 
     private var copyButton: some View {
         DictionaryCopyButton(
-            placement: copyPlacement, help: "Copy the headword", action: onCopy
+            placement: plan.copyPlacement, help: "Copy the headword", action: onCopy
         )
     }
 
@@ -336,7 +316,7 @@ struct DictionaryEntryContentView: View {
         DictionaryFavoriteButton(
             isFavorite: isFavorite,
             subject: headword,
-            style: favoriteStyle,
+            style: plan.favoriteStyle,
             action: onToggleFavorite
         )
     }
@@ -397,7 +377,7 @@ struct DictionaryEntryContentView: View {
     /// matches the outer VStack so the inline (popover) layout is unchanged.
     private var topSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if showsHeadword {
+            if plan.showsHeadword {
                 VStack(alignment: .leading, spacing: 2) {
                     headerRow
                     if let romaji = DictionaryContent.romaji(for: entry) {
@@ -409,7 +389,7 @@ struct DictionaryEntryContentView: View {
                     }
                 }
             }
-            if showsBadges {
+            if plan.showsBadges {
                 badgeRow
             }
             if let pitch = DictionaryContent.pitchPill(for: entry) {
@@ -441,7 +421,7 @@ struct DictionaryEntryContentView: View {
         if entry.isName {
             nameGlossRows
         } else {
-            let truncated = DictionaryContent.truncated(entry.senses, limit: senseLimit)
+            let truncated = DictionaryContent.truncated(entry.senses, limit: plan.senseLimit)
             if !truncated.visible.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
                     ForEach(Array(truncated.visible.enumerated()), id: \.offset) { index, sense in
@@ -463,7 +443,7 @@ struct DictionaryEntryContentView: View {
     @ViewBuilder
     private var nameGlossRows: some View {
         let truncated = DictionaryContent.truncated(
-            DictionaryContent.nameGlosses(for: entry), limit: glossLimit
+            DictionaryContent.nameGlosses(for: entry), limit: plan.glossLimit
         )
         if !truncated.visible.isEmpty {
             VStack(alignment: .leading, spacing: 5) {
@@ -488,7 +468,7 @@ struct DictionaryEntryContentView: View {
     @ViewBuilder
     private func senseRow(number: Int, sense: JMDictSense) -> some View {
         let labels = DictionaryContent.posLabels(sense.pos)
-        let glosses = DictionaryContent.truncated(sense.glosses, limit: glossLimit)
+        let glosses = DictionaryContent.truncated(sense.glosses, limit: plan.glossLimit)
         // Visible glosses join into one text; a hidden tail closes with an
         // ellipsis. The inline form holds it to one line, the stacked form
         // lets it wrap beneath the tags.
@@ -499,7 +479,7 @@ struct DictionaryEntryContentView: View {
         .font(.system(size: 12))
         .foregroundStyle(Theme.primaryText)
         .textSelection(.disabled)
-        if wrapsSensePOS, labels.count > 1 {
+        if plan.wrapsSensePOS, labels.count > 1 {
             // Inline while the number, tags, and whole gloss fit one line;
             // only then does the row fall back to the stacked form. The
             // number leads the tag line only; the gloss starts at the tags'
@@ -564,8 +544,9 @@ struct DictionaryEntryContentView: View {
 }
 
 extension Collection where Index == Int {
-    /// The element at `index` when in bounds — popover/card paging reads a
-    /// selection that a newer tap may have replaced concurrently.
+    /// The element at `index` when in bounds — the search row reads a
+    /// validated page against a promoted list a star press may have
+    /// reordered concurrently.
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
     }
