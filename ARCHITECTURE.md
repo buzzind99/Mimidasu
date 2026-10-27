@@ -387,25 +387,44 @@ packaged apps in `Contents/Frameworks/`.
   lead the card (literal JOINED MATCH badge); a split-only tap resolves as a
   Bare miss with the Split hits demoted to Related pills — a Split never
   presents itself as the tapped word.
-- **Display module:** `LookupDisplay` (resolve → promote → pager math) is
-  a `Sendable` final class holding a `JMDictLookup` and running async
-  detached queries beside `TapLookupRequest` / `TapLookupEffect` /
-  `TapLookupFault`. `AppModelLookup` wires effects to state, toasts, and
-  notices, but also re-resolves segments, snapshots `FavoriteIdentity`, and
-  owns the generation guard. Sense rows map stored POS tags through the
-  name-type label vocabulary and dedupe equal labels (stored order), and
-  the pinned card stacks a multi-tag sense's tags above its gloss.
-- **Tap interaction:** cursor modes None / Dictionary / Copy. A tap resolves
-  through the pipeline and pins the Pinned card in the sidebar plus a
-  popover anchored at the word; homograph entries walk via the `◀ i/N ▶` pager,
-  Also hits surface as capped (9) "also:" pills (a forward-Join *Display*
-  lead wears the JOINED MATCH badge; split-only taps show "related:" pills),
-  pills are selectable and re-pin their chosen Entry as the Display (origin
-  reset to the tapped word, `FavoritesPromotion` re-applied), a No hit
+- **Display module:** `LookupDisplay` is the `TapLookupResolving` resolver —
+  a `Sendable` final class holding a `JMDictLookup`, running async queries on
+  detached tasks, and turning one `TapLookupRequest` into a `TapLookupEffect`
+  (content, no-hit warning, fault, or cancellation). It owns resolution,
+  defensive re-anchoring of the request's stored index when it disagrees with
+  the segments it carries (drift fails closed), the found / join-lead /
+  lemma-lead / split-only / bare-miss verdicts, and favorites promotion at
+  resolve time — the display entry plus each related pill. It no longer owns
+  fallback promotion or pager stepping: `LookupPresentation` holds those rules,
+  and `TapLookupSession` applies them. `TapLookupEffect` stays the resolver's
+  return type until a later answer-ladder collapse. Sense rows map stored POS
+  tags through the name-type label vocabulary and dedupe equal labels (stored
+  order), and the pinned card stacks a multi-tag sense's tags above its gloss.
+- **Tap interaction:** cursor modes None / Dictionary / Copy. The tap site
+  builds one `TapLookupRequest` from the row's rendered segments — all of
+  them, the tapped index and surface, and the sentence text — so no second
+  annotation pass runs; the host adds the `LookupAnchor`, and `LookupToken` is
+  gone. `TapLookupSession` owns the rest: resolver dispatch,
+  generation/staleness (a stale landing drops state and feedback), the one
+  optional `LookupPresentation` (content, entry index, and an anchor that is
+  nil when the popover is dismissed while the card keeps the content and page),
+  fallback promotion, pager clamping, dismissal ownership (only the anchor that
+  owns the popover clears it), and clearing at session and archive boundaries.
+  The session decides warn / fault / none and reports it through a weak
+  `TapLookupFeedbackSink`; `AppModel` implements the sink with the notice and
+  toast copy. Hosts read `lookupPresentation` (and `popoverItem(for:)` keyed
+  by their `LookupAnchor`) and own no ordering: one popover exists app-wide,
+  anchored at a transcript word or the live strip. Both hosts still render
+  their own content switch into the shared entry view; only the state is now
+  one value. A tap pins the Pinned card in the sidebar plus that popover;
+  homograph entries walk via the `◀ i/N ▶` pager, Also hits surface as capped
+  (9) "also:" pills (a forward-Join *Display* lead wears the JOINED MATCH
+  badge; split-only taps show "related:" pills), and selecting a pill promotes
+  its chosen Entry as the Display (origin reset to the tapped word,
+  `FavoritesPromotion` re-applied) while keeping the current anchor. A No hit
   posts the amber notice pill, and an infrastructure failure posts a toast.
-  Name entries
-  render type badges (SURNAME / GIVEN NAME / PLACE NAME / …) and drop the
-  romanization-echo gloss. Favorite entries lead every pager via
+  Name entries render type badges (SURNAME / GIVEN NAME / PLACE NAME / …) and
+  drop the romanization-echo gloss. Favorite entries lead every pager via
   `FavoritesPromotion` (below).
 
 ### Dictionary search (`Dictionary/`, reference window)
