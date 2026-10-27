@@ -526,6 +526,27 @@ packaged apps in `Contents/Frameworks/`.
   `DictionarySearchState.apply(_:)` is the single funnel, and the
   transition owns the scope carry-over, the All-scope exclusions, the
   Match kind floor, and the COMMON-under-Names canonicalization.
+- **Paging:** `DictionarySearchWindow` is the one depth value — the list's
+  visible depth and the ladder's stage-skip horizon in a single window,
+  clamped 0…1,000 and advanced 50 rows at a time, because a stage may be
+  skipped only against the rows the user is guaranteed to see. The engine
+  still returns the whole ranked `DictionarySearchOutcome` for the window
+  it is asked for; `DictionarySearchPage` is a pure projection of
+  `(outcome, window)`, computed by `DictionarySearchState.page` and never
+  stored. It owns the visible prefix, the total, the floor, the footer
+  kind, the next load-more action, and the empty state. Its `countText` is
+  the header's `displayed / matched(+)`, and the footer's N is the same
+  slice count.
+- **Footer and empty state:** `.none` when the answer is complete and
+  entirely visible; `.loadMore(.reveal)` when rows are already held below
+  the window (a free reveal, no scan); `.loadMore(.rescan)` only when the
+  answer saturated and the next window outgrows the held rows (one skipped
+  stage re-run); `.ceiling` when a non-empty list has no page left while
+  the answer is still a floor or holds rows below the slice — including a
+  truncated answer below the 1,000-row cap. The ceiling line is "Showing
+  top N — refine your search". An empty page whose total is a floor says
+  "No matches in the scanned results — refine your search."; an empty
+  complete answer keeps "No matches for …".
 - **Reference window:** one fixed 460×775.6 window (`Window("Dictionary")`)
   with two persisted modes — **Dictionary** (default) and **Favorites** —
   flipped by a header button, one shared 150 ms search debounce, focus
@@ -543,11 +564,12 @@ packaged apps in `Contents/Frameworks/`.
   word is promoted to lead the expanded entry list (`FavoritesPromotion` —
   reorder only, count unchanged). Each mode runs its own
   lookup handle, so a slow row expansion can't stall a tap or the other
-  mode. Load-more reveals pages up to the 1,000-row ceiling ("Showing top
-  N — refine your search"). A faulting query parks a typed
-  `DictionaryError` in the search state and renders the hardcoded fault
-  card — that card's copy is frozen. The window stays up until explicitly
-  closed — it does not dismiss on outside clicks.
+  mode. Load-more follows the page's footer — a free reveal of held rows,
+  or a skipped stage re-run when a wider window can still add rows — and
+  the ceiling shows "Showing top N — refine your search". A faulting query
+  parks a typed `DictionaryError` in the search state and renders the
+  hardcoded fault card — that card's copy is frozen. The window stays up
+  until explicitly closed — it does not dismiss on outside clicks.
 
 ### Favorites (`Favorites/`)
 - **Star surface:** the dictionary popover, the pinned card, the search
