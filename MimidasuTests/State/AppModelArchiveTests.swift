@@ -2,6 +2,16 @@ import Foundation
 @testable import Mimidasu
 import Testing
 
+/// A resolver that lands a not-found presentation for any request, so the
+/// archive-boundary tests can seed a lookup without a dictionary fixture.
+private struct StubTapLookupResolver: TapLookupResolving {
+    func resolve(
+        _ request: TapLookupRequest, favorites: FavoriteIdentity
+    ) async -> TapLookupEffect {
+        .show(content: .notFound(surface: request.surface, related: []), entryIndex: 0)
+    }
+}
+
 /// `AppModel`'s archive-mode surface over a seeded in-temp store: the
 /// open/close of a stored session into the transcript pane (rows, metadata,
 /// anchors, HUD), the availability gate against live phases, the
@@ -36,7 +46,8 @@ struct AppModelArchiveTests {
     /// duration, seeded into `store` (a fresh isolated one by default).
     private func makeModel(
         sentences: [String] = ["こんにちは", "さようなら"],
-        store: ArchiveStore = isolatedArchive()
+        store: ArchiveStore = isolatedArchive(),
+        tapLookupResolver: (any TapLookupResolving)? = nil
     ) async -> (AppModel, Int64) {
         var id: Int64?
         for (index, text) in sentences.enumerated() {
@@ -49,6 +60,7 @@ struct AppModelArchiveTests {
         }
         let model = AppModel(
             favorites: isolatedFavorites(), archive: store,
+            tapLookupResolver: tapLookupResolver,
             initialModelResolve: { _ in nil }
         )
         await model.initialModelCheck?.value
@@ -57,6 +69,16 @@ struct AppModelArchiveTests {
 
     private func entry(_ text: String) -> SessionEntry {
         SessionEntry(sentence: sentence(0, text: text))
+    }
+
+    /// Lands one lookup so a boundary can be proven to clear real state.
+    private func seedLookup(_ model: AppModel) async {
+        await model.handleLookupTap(
+            TapLookupRequest(
+                segments: nil, tappedAt: 0, sentenceText: "雨", surface: "雨"
+            ),
+            anchor: .liveStrip
+        ).value
     }
 
     /// A store whose database path sits under a regular file, so the open
@@ -121,13 +143,15 @@ struct AppModelArchiveTests {
 
     @Test("opening swaps in the rows, metadata, and anchors")
     func openLoadsRowsAndResetsAnchors() async {
-        let (model, id) = await makeModel()
+        let (model, id) = await makeModel(tapLookupResolver: StubTapLookupResolver())
         model.entries = [entry("live row")]
         model.sessionCharacterCount = 42
         model.hudVisible = true
         model.translationOverlayVisible = true
         model.sessionStartedAt = ContinuousClock.now
         model.sessionEndedAt = ContinuousClock.now
+        await seedLookup(model)
+        #expect(model.lookupPresentation != nil)
 
         let opened = model.openArchiveSession(id: id)
 
@@ -136,8 +160,7 @@ struct AppModelArchiveTests {
         #expect(model.entries.map { entry in entry.sentence.text } == ["こんにちは", "さようなら"])
         #expect(model.entryPositionBySentence == [0: 0, 1: 1])
         #expect(model.sessionCharacterCount == "こんにちは".count + "さようなら".count)
-        #expect(model.selectedLookup == nil)
-        #expect(model.pinnedLookup == nil)
+        #expect(model.lookupPresentation == nil)
         #expect(!model.hudVisible)
         #expect(!model.translationOverlayVisible)
         #expect(model.sessionStartedAt == nil)
@@ -158,9 +181,11 @@ struct AppModelArchiveTests {
 
     @Test("closing empties the pane without restoring the live rows")
     func closeEmptiesPane() async {
-        let (model, id) = await makeModel()
+        let (model, id) = await makeModel(tapLookupResolver: StubTapLookupResolver())
         model.openArchiveSession(id: id)
         #expect(!model.entries.isEmpty)
+        await seedLookup(model)
+        #expect(model.lookupPresentation != nil)
 
         model.closeArchive()
 
@@ -168,6 +193,7 @@ struct AppModelArchiveTests {
         #expect(model.entries.isEmpty)
         #expect(model.entryPositionBySentence.isEmpty)
         #expect(model.sessionCharacterCount == 0)
+        #expect(model.lookupPresentation == nil)
     }
 
     // MARK: - Bulk-run boundaries

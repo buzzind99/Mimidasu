@@ -7,7 +7,7 @@ import Testing
 /// the body plan (flow units, or the plain fallback that keeps the row
 /// filled when the annotator yields nothing), the activation rule that
 /// keeps the HUD on the legacy path, equality and fingerprint
-/// mode-sensitivity, and the tap payload construction.
+/// mode-sensitivity, and the tap request construction.
 @Suite("RubyTextView dictionary mode")
 @MainActor
 struct RubyTextViewTests {
@@ -27,7 +27,7 @@ struct RubyTextViewTests {
     private func view(
         cursorMode: CursorMode = .none,
         onCopy: ((String) -> Void)? = nil,
-        onLookup: ((LookupToken) -> Void)? = nil,
+        onLookup: ((TapLookupRequest) -> Void)? = nil,
         lookupPopover: ((Int) -> RubyTextView.LookupPopover?)? = nil,
         reservesAnnotationLine: Bool = false,
         isFavoriteSegment: ((ReadingSegment) -> Bool)? = nil
@@ -245,32 +245,38 @@ struct RubyTextViewTests {
         ])
     }
 
-    // MARK: - Tap payload
+    // MARK: - Tap request
 
-    @Test("lookupToken carries surface, index, and sentence text")
-    func payloadFields() {
+    @Test("lookupRequest carries the tapped surface, index, sentence text, and every rendered segment")
+    func requestFields() {
         let segments = [
-            segment("食べました", furigana: "たべました", lemma: "食べる"),
-            segment("。")
+            segment("ご飯", romaji: "gohan", furigana: "ごはん", lemma: "ご飯"),
+            segment("を", romaji: "wo", lemma: "を"),
+            segment("食べました", romaji: "tabemashita", furigana: "たべました", lemma: "食べる")
         ]
 
-        let token = RubyTextView.lookupToken(
-            at: 0, text: "食べました。", segments: segments
+        let request = RubyTextView.lookupRequest(
+            at: 2, text: "ご飯を食べました", segments: segments
         )
 
-        #expect(token == LookupToken(
-            surface: "食べました",
-            tokenIndex: 0,
-            sentenceText: "食べました。"
+        #expect(request == TapLookupRequest(
+            segments: [
+                LookupSegment(surface: "ご飯", lemma: "ご飯", reading: "ごはん"),
+                LookupSegment(surface: "を", lemma: "を", reading: "を"),
+                LookupSegment(surface: "食べました", lemma: "食べる", reading: "たべました")
+            ],
+            tappedAt: 2,
+            sentenceText: "ご飯を食べました",
+            surface: "食べました"
         ))
     }
 
-    @Test("lookupToken fails closed on nil segments and out-of-range indices")
-    func payloadFailClosed() {
+    @Test("lookupRequest fails closed on nil segments and out-of-range indices")
+    func requestFailClosed() {
         let segments = [segment("今日", lemma: "今日")]
 
-        #expect(RubyTextView.lookupToken(at: 0, text: "今日", segments: nil) == nil)
-        #expect(RubyTextView.lookupToken(at: 1, text: "今日", segments: segments) == nil)
-        #expect(RubyTextView.lookupToken(at: -1, text: "今日", segments: segments) == nil)
+        #expect(RubyTextView.lookupRequest(at: 0, text: "今日", segments: nil) == nil)
+        #expect(RubyTextView.lookupRequest(at: 1, text: "今日", segments: segments) == nil)
+        #expect(RubyTextView.lookupRequest(at: -1, text: "今日", segments: segments) == nil)
     }
 }

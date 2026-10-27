@@ -26,13 +26,14 @@ struct TranscriptRow: View {
     let scale: UIScale
     let cursorMode: CursorMode
     let onCopy: (String) -> Void
-    /// Invoked with the tapped word when cursor mode is `.dictionary`;
-    /// nil keeps `.dictionary` on the legacy rendering path.
-    var onLookup: ((LookupToken) -> Void)?
+    /// Invoked with the lookup request built from the rendered segments when
+    /// cursor mode is `.dictionary`; nil keeps `.dictionary` on the legacy
+    /// rendering path.
+    var onLookup: ((TapLookupRequest) -> Void)?
     /// Per-word popover presentation resolver, invoked with a word unit's
     /// segment index (`RubyTextView.LookupPopover`). Invoked from
-    /// `RubyTextView`'s body, which is where the selection reads register the
-    /// observation that refreshes the owning word's popover.
+    /// `RubyTextView`'s body, which is where the presentation reads register
+    /// the observation that refreshes the owning word's popover.
     var lookupPopover: ((Int) -> RubyTextView.LookupPopover)?
     var isFavorite: ((ReadingSegment) -> Bool)?
     /// Invoked with the row's sentence when the hover retry button fires.

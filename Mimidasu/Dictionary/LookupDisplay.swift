@@ -1,9 +1,9 @@
 import Foundation
 
-/// Tap-to-pinnable-content: everything from a tap to the display the
-/// popover, the pinned card, and the pill row read — resolution,
-/// Display/Also/Related classification, favorite-first promotion, pill
-/// re-promotion, and pager clamping.
+/// Tap-to-verdict resolver: everything from a tap request to the display
+/// content the session presents — resolution, defensive re-anchoring,
+/// Display/Also/Related classification, and favorites promotion applied at
+/// resolve time.
 ///
 /// The dictionary lookup engine core, the expansion tables, and the
 /// promotion rule are composed unchanged — behavior moved here, ranking
@@ -12,12 +12,12 @@ import Foundation
 /// not-found content with those hits demoted to related suggestions, the
 /// demotion the engine already performs.
 ///
-/// Stateless by design: stale-generation drops stay caller-side (each host
-/// scope keeps its own guard), and favorites cross as one Favorite identity
+/// Stateless by design: stale-generation drops belong to the session that
+/// dispatches the tap, and favorites cross as one Favorite identity
 /// snapshot taken before dispatch — the engine receives no
 /// favorites parameter, so it cannot learn favorites exist. Queries run off
-/// the main actor on a detached task; hosts apply outcomes back on the main
-/// actor.
+/// the main actor on a detached task; the session applies outcomes back on
+/// the main actor.
 final class LookupDisplay: Sendable {
     private let lookup: JMDictLookup
 
@@ -32,14 +32,13 @@ final class LookupDisplay: Sendable {
     /// pill ever posts; a nil-segments request otherwise warns with the
     /// tapped surface, and an empty-segments request (the annotator ran
     /// without its dictionary) faults as annotator-unavailable. Otherwise
-    /// the stored index
-    /// re-anchors against drift — failing closed to no-hit through the
-    /// expansion's bounds guard — and the engine lookup runs off-main on a
-    /// detached task. A found resolution promotes favorites into the pinned
-    /// content; a not-found pins only when its related suggestions are
-    /// non-empty (a bare miss warns instead), promoting each related hit's
-    /// pager in place while the pin itself stays not-found with no display
-    /// result; any throw faults.
+    /// the stored index re-anchors against drift — failing closed to no-hit
+    /// through the expansion's bounds guard — and the engine lookup runs
+    /// off-main on a detached task. A found resolution promotes favorites
+    /// into the returned content; a not-found resolves only when its related
+    /// suggestions are non-empty (a bare miss warns instead), promoting each
+    /// related hit in place while the content itself stays not-found with no
+    /// display result; any throw faults.
     func resolve(_ request: TapLookupRequest, favorites: FavoriteIdentity) async -> TapLookupEffect {
         guard !request.surface.isEmpty else {
             return .fault(.annotatorUnavailable)
@@ -83,60 +82,11 @@ final class LookupDisplay: Sendable {
         return .show(content: content, entryIndex: 0)
     }
 
-    /// Re-selects a fallback pill — an "also:" hit on a found card, or a
-    /// "related:" suggestion on a not-found one: the content switches to
-    /// that result as found, and the pill row recomputes from the retained
-    /// results relative to the new selection — no new query runs. The
-    /// promoted result carries the tapped-surface origin: an explicitly
-    /// chosen hit is never labeled a fallback lead. The rebuilt content
-    /// runs through the same favorites promotion a fresh tap gets, so a
-    /// "related:" selection — which left its pin unpromoted — still opens
-    /// on a favorited entry, when the favorite is written or read as the
-    /// selection's word, and hands out starred, relabeled pills.
-    /// A re-selected fallback opens as the tapped word; a compound formed
-    /// with following words loses its joined-match badge on a cross-pill
-    /// move and regains nothing on the way back. Same-display re-select
-    /// preserves origin. Promoting a foreign result — one the tap never
-    /// resolved — fails closed by returning the content unchanged.
-    func promote(
-        _ choice: LookupResult, in content: LookupContent, favorites: FavoriteIdentity
-    ) -> LookupContent {
-        guard content.allResults.contains(choice) else { return content }
-        if let display = content.displayResult, choice == display,
-           case let .found(_, _, origin) = content
-        {
-            return FavoritesPromotion.promotingFavorites(
-                in: .found(
-                    result: choice,
-                    also: content.allResults.filter { candidate in candidate != choice },
-                    origin: origin
-                ),
-                identity: favorites
-            )
-        }
-        let others = content.allResults.filter { candidate in candidate != choice }
-        return FavoritesPromotion.promotingFavorites(
-            in: .found(result: choice, also: others, origin: .tappedSurface),
-            identity: favorites
-        )
-    }
-
-    /// The paged entry index for `index` (clamped): nil when there is no
-    /// content, or when the content is not-found and has no entries — the
-    /// pager is inert there. Returns an index into the display result's
-    /// entries, not an entry itself, despite the name (kept for the
-    /// resolve / promote / steppedEntry trio).
-    func steppedEntry(in content: LookupContent?, to index: Int) -> Int? {
-        guard let entries = content?.displayResult?.entries, !entries.isEmpty
-        else { return nil }
-        return min(max(index, 0), entries.count - 1)
-    }
-
-    /// The tap-time index for a tap payload's stored render-time index.
-    /// TEST SEAM — hosts call resolve, never this. Hosts must not
+    /// The tap-time index for a tap request's stored render-time index.
+    /// TEST SEAM — the session calls resolve, never this. Callers must not
     /// re-implement drift logic — resolve is the only production caller.
-    /// Kept verbatim while the re-resolved segments still agree with the
-    /// payload — the overwhelmingly common case. A resolution that drifted
+    /// Kept verbatim while the request's segments still agree with the
+    /// stored index — the overwhelmingly common case. A request that drifted
     /// (a fragmentation decision that flipped across a dictionary-state
     /// transition) re-anchors to the first segment whose surface matches
     /// the tapped surface — the accepted recovery for in-bounds drift and
@@ -158,14 +108,14 @@ final class LookupDisplay: Sendable {
             ?? segments.count
     }
 
-    /// The content a resolved tap pins, or nil when nothing resolved at all —
-    /// a not-found resolution without related hits is a bare miss, and warns
-    /// instead of pinning an empty card. A found content also leads on a
-    /// favorited entry written or read as the tapped word where one exists,
-    /// so tapping a word the user has studied opens the study instead of the
-    /// homograph above it. A not-found pin stays not-found with no display
-    /// result, but each related suggestion is promoted the same way, so a
-    /// buried eligible favorite leads its pill before any re-select.
+    /// The content a resolved tap returns, or nil when nothing resolved at
+    /// all — a not-found resolution without related hits is a bare miss, and
+    /// warns instead of presenting an empty card. A found content also leads
+    /// on a favorited entry written or read as the tapped word where one
+    /// exists, so tapping a word the user has studied opens the study instead
+    /// of the homograph above it. A not-found result stays not-found with no
+    /// display result, but each related suggestion is promoted the same way,
+    /// so a buried eligible favorite leads its pill before any re-select.
     private static func content(
         for resolved: LookupResolution, surface: String, favorites: FavoriteIdentity
     ) -> LookupContent? {

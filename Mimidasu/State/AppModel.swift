@@ -103,24 +103,14 @@ final class AppModel {
     /// availability refresh lives there).
     var isCheckingModel = true
 
-    /// The popover's current anchor: the surface (transcript row or live
-    /// strip) whose tap owns the app's single dictionary popover, with the
-    /// content shown and the paged entry index. Nil when no popover is up.
-    var selectedLookup: SelectedLookup?
-    /// The pinned sidebar DICTIONARY card content: the last lookup of the
-    /// session — found or not-found — with the paged entry index.
-    /// Persists after the popover dismisses; cleared on session clear.
-    /// Mutated by the lookup lifecycle in the dictionary surface and the
-    /// session-begin reset below.
-    var pinnedLookup: PinnedLookup?
-    /// Staleness token for in-flight lookups: each new tap invalidates the
-    /// previous one, so a slow lookup that lands after a newer tap (or a
-    /// session clear) never presents stale state. Mutated by the lookup
-    /// lifecycle in the dictionary surface and the session-begin bump below.
-    var lookupGeneration = 0
     /// The JMDict lookup engine behind dictionary taps; injectable so tests
     /// drive a fixture database (the default resolves the prepared store).
     let jmDictLookup: JMDictLookup
+    /// The one tap-to-pin lifecycle: resolution dispatch, generation drops,
+    /// the presentation both dictionary hosts read, fallback promotion, pager
+    /// clamping, and dismissal. Its state is session-scoped — session begin
+    /// and the archive pane's open/close clear it.
+    let tapLookup: TapLookupSession
     /// The full-dictionary search engine behind the reference window's
     /// Dictionary mode; injectable on the same terms as `jmDictLookup`. It
     /// owns its own read-only handle rather than sharing `jmDictLookup`'s, so
@@ -162,8 +152,8 @@ final class AppModel {
     /// across launches. Switching applies at the next session start.
     let asrModelSettings: ASRModelSettings
     /// The user's starred words, persisted in their own SQLite file and
-    /// outliving sessions (unlike `pinnedLookup`/`selectedLookup`, which
-    /// `wireSessionController` resets). Every mutation runs on the main
+    /// outliving sessions (unlike the tap-lookup presentation, which
+    /// `wireSessionController` clears). Every mutation runs on the main
     /// actor; the transcript render path probes the store's in-memory
     /// match set, never the database.
     let favorites: FavoritesStore
@@ -322,6 +312,7 @@ final class AppModel {
         highFidelityProbe: @escaping @Sendable (String) async -> Bool =
             AppleTierAvailability.check(targetCode:),
         jmDictLookup: JMDictLookup? = nil,
+        tapLookupResolver: (any TapLookupResolving)? = nil,
         dictionarySearch: DictionarySearchEngine? = nil,
         initialModelResolve: @escaping @Sendable (ASRModelChoice) -> URL? = { choice in
             ModelLocator.resolve(for: choice)
@@ -336,7 +327,9 @@ final class AppModel {
         self.favorites = favorites ?? FavoritesStore()
         self.archive = archive ?? ArchiveStore()
         archiveRead = ArchiveReadModel(store: self.archive)
-        self.jmDictLookup = jmDictLookup ?? JMDictLookup()
+        let jmDict = jmDictLookup ?? JMDictLookup()
+        self.jmDictLookup = jmDict
+        tapLookup = TapLookupSession(resolver: tapLookupResolver ?? LookupDisplay(lookup: jmDict))
         self.dictionarySearch = dictionarySearch ?? DictionarySearchEngine()
         modelResolve = initialModelResolve
         self.retireWarmEngine = retireWarmEngine
@@ -384,6 +377,7 @@ final class AppModel {
         // phase, toasts, and the row landing through the host port.
         translationSession.host = self
         retranslate.host = self
+        tapLookup.feedback = self
         // Extends the model's lifetime until the first availability pass
         // completes (fast in tests, bounded in production) — intentional.
         initialModelCheck = Task { await refreshModelAvailability() }
@@ -449,11 +443,8 @@ final class AppModel {
             // Archive persistence is per session too: a previous session's
             // write latch must not disable this one.
             archiveWriteFailed = false
-            // Dictionary state is per session too: the popover anchor and
-            // the pinned card reset, and any in-flight lookup is dropped.
-            selectedLookup = nil
-            pinnedLookup = nil
-            lookupGeneration &+= 1
+            // Dictionary state is per session too; a new session starts clean.
+            tapLookup.clear()
         }
         sessionController.onEngineChosen = { [weak self] isMock, url in
             self?.engineIsMock = isMock

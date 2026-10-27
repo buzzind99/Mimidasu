@@ -16,7 +16,7 @@ import Observation
 ///
 /// Deliberately *above* the store and off `AppModel`: an expansion must not
 /// re-pin the sidebar card or re-anchor the popover, so it reaches
-/// `JMDictLookup` directly and never `runLookup`/`presentLookup`.
+/// `JMDictLookup` directly instead of the tap-to-pin session.
 @Observable
 @MainActor
 final class FavoritesLookupState {

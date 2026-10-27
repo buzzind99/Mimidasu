@@ -84,12 +84,12 @@ struct TranscriptView: View {
                         scale: uiScale,
                         cursorMode: cursorMode,
                         onCopy: { text in model.copySnippet(text) },
-                        onLookup: { token in
+                        onLookup: { request in
                             model.handleLookupTap(
-                                token,
-                                source: .transcript(
+                                request,
+                                anchor: .transcript(
                                     sentenceIndex: entry.sentence.index,
-                                    tokenIndex: token.tokenIndex
+                                    tokenIndex: request.tappedAt
                                 )
                             )
                         },
@@ -280,26 +280,26 @@ struct TranscriptView: View {
     }
 
     /// Per-word popover presentation for the row's word units: the
-    /// binding is true only while this exact word is the selection's
+    /// binding is true only while this exact word is the presentation's
     /// anchor (a different-word retap dismisses and re-presents), and the
     /// content is the shared entry view once the async lookup has landed.
     ///
     /// Handed to each row as a closure that `RubyTextView`'s body invokes at
-    /// layout time, so the `model.selectedLookup` reads below register the
+    /// layout time, so the `model.lookupPresentation` reads below register the
     /// observation on the node that has to repaint — the word units — rather
     /// than on this body, which never calls it.
     private func lookupPopover(
         _ sentenceIndex: Int, _ tokenIndex: Int
     ) -> RubyTextView.LookupPopover {
-        let source = SelectedLookup.Source.transcript(
+        let anchor = LookupAnchor.transcript(
             sentenceIndex: sentenceIndex, tokenIndex: tokenIndex
         )
         return RubyTextView.LookupPopover(
-            isPresented: model.lookupPopoverBinding(for: source),
-            content: model.selectedLookup?.popoverItem(for: source).map { item in
+            isPresented: model.lookupPopoverBinding(for: anchor),
+            content: model.lookupPresentation?.popoverItem(for: anchor).map { presentation in
                 DictionaryPopoverView(
                     model: model,
-                    selected: item,
+                    presentation: presentation,
                     onFavoriteRemovalRequest: onFavoriteRemovalRequest
                 )
             }

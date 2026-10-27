@@ -2,17 +2,15 @@ import Foundation
 @testable import Mimidasu
 import Testing
 
-/// Seam tests for the Lookup Display module: tap-to-verdict cases (found,
+/// Seam tests for the Lookup Display resolver: tap-to-verdict cases (found,
 /// join-lead, lemma-lead, split-only demotion, favorites on not-found, bare
-/// miss, no hit), drift fail-closed, pill re-promotion purity, pager
-/// clamping, and the fault map. Every test asserts observable outcomes
-/// through the module interface — pinned Display, Also/Related ordering,
-/// warning surface, fault — over the fixture database, without constructing
-/// app state. Three suites share this harness — this file holds the core
-/// tap-to-verdict one (the out-of-bounds and duplicate-surface tap
-/// resolutions live in the pills/pager file); the fault map and the
-/// pills/pager live in their own files — so no suite body or file trips
-/// the length gates.
+/// miss, no hit), drift fail-closed, and the fault map. Every test asserts
+/// observable outcomes through the module interface — Display, Also/Related
+/// ordering, warning surface, fault — over the fixture database, without
+/// constructing app state. Three suites share this harness — this file holds
+/// the core tap-to-verdict one, the re-anchor resolutions live in
+/// `LookupDisplayReanchorTests`, and the fault map lives in its own file — so
+/// no suite body or file trips the length gates.
 struct ResolutionMismatch: Error {}
 
 final class LookupDisplayHarness {
@@ -79,8 +77,8 @@ final class LookupDisplayHarness {
     }
 
     /// A kana-shared entry: a kanji writing paired with its reading, for
-    /// the pill suite's hand-built homograph results that exercise the
-    /// written-or-read promotion rule.
+    /// hand-built homograph results that exercise the written-or-read
+    /// promotion rule.
     func entry(keb: String, reb: String, seq: Int) -> JMDictEntry {
         JMDictEntry(
             entSeq: seq,

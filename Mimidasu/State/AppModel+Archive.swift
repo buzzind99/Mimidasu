@@ -146,9 +146,7 @@ extension AppModel {
         sessionCharacterCount = loaded.characterCount
         // The transcript swapped under the pane: the dictionary anchors and
         // any in-flight lookup belong to the previous rows.
-        selectedLookup = nil
-        pinnedLookup = nil
-        lookupGeneration &+= 1
+        tapLookup.clear()
         hudPinnedIndex = nil
         hudVisible = false
         translationOverlayVisible = false
@@ -176,9 +174,9 @@ extension AppModel {
         entries.removeAll()
         entryPositionBySentence.removeAll()
         sessionCharacterCount = 0
-        selectedLookup = nil
-        pinnedLookup = nil
-        lookupGeneration &+= 1
+        // The pane emptied: anchors and in-flight lookups belong to the
+        // closed archive's rows.
+        tapLookup.clear()
         retranslate.archiveWillClose()
     }
 

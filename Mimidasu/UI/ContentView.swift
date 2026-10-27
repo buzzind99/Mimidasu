@@ -170,8 +170,8 @@ struct ContentView: View {
     }
 
     /// Whether the live strip owns the app's single dictionary
-    /// popover: true only while the selection is anchored to the strip.
-    /// Dismissal clears the selection only when the strip still owns it.
+    /// popover: true only while the presentation is anchored to the strip.
+    /// Dismissal clears the anchor only when the strip still owns it.
     /// (Binding shape shared via `AppModel.lookupPopoverBinding`.)
     private var liveStripLookupPresented: Binding<Bool> {
         model.lookupPopoverBinding(for: .liveStrip)
@@ -285,18 +285,20 @@ struct ContentView: View {
                 LiveStripView(
                     live: live,
                     onCopy: { text in model.copySnippet(text) },
-                    onLookup: { token in model.handleLookupTap(token, source: .liveStrip) },
+                    onLookup: { request in
+                        model.handleLookupTap(request, anchor: .liveStrip)
+                    },
                     isFavorite: model.favoriteSegmentMatcher
                 )
                 // Strip-anchored popover: single non-virtualized view, so
-                // the strip owns it while the selection's anchor is the
-                // live strip. Source-keyed so a strip retap swaps content
+                // the strip owns it while the presentation's anchor is the
+                // live strip. Anchor-keyed so a strip retap swaps content
                 // in place instead of a dismiss+replace.
                 .popover(isPresented: liveStripLookupPresented) {
-                    if let selected = model.selectedLookup?.popoverItem(for: .liveStrip) {
+                    if let presentation = model.lookupPresentation?.popoverItem(for: .liveStrip) {
                         DictionaryPopoverView(
                             model: model,
-                            selected: selected,
+                            presentation: presentation,
                             onFavoriteRemovalRequest: requestFavoriteRemoval
                         )
                     }

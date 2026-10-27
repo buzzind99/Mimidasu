@@ -32,8 +32,7 @@ struct RubyTextView: View, Equatable {
     /// cache. Hosts rendering a live partial — a growing 6–10 Hz revision of
     /// the in-flight sentence — opt out: every revision is a distinct string
     /// that will never be queried again, so caching it only churns the
-    /// store. The tap-time re-resolution (`AppModel.handleLookupTap`) stays
-    /// cached regardless. Excluded from `==` (no effect on rendered output).
+    /// store. Excluded from `==` (no effect on rendered output).
     var cachesSegments = true
     /// Click behavior for surfaces (sidebar "cursor mode"): `.copy` invokes
     /// `onCopy` with the clicked run; `.dictionary` opens a definition
@@ -44,11 +43,12 @@ struct RubyTextView: View, Equatable {
     /// Invoked with the clicked surface text when `cursorMode == .copy`; the
     /// host owns the pasteboard write and the confirmation toast.
     var onCopy: ((String) -> Void)?
-    /// Invoked with the tapped word when `cursorMode == .dictionary` and a
-    /// token-derived surface is clicked; the host owns the lookup, its
-    /// result presentation, and error surfacing. When nil, `.dictionary`
-    /// renders the legacy path and taps stay inert (the HUD).
-    var onLookup: ((LookupToken) -> Void)?
+    /// Invoked with the lookup request built from the segments this body
+    /// rendered when `cursorMode == .dictionary` and a token-derived surface
+    /// is clicked; the host owns the anchor, the lookup, its result
+    /// presentation, and error surfacing. When nil, `.dictionary` renders the
+    /// legacy path and taps stay inert (the HUD).
+    var onLookup: ((TapLookupRequest) -> Void)?
     /// Per-word popover presentation for the transcript host: invoked with
     /// a word unit's segment index at render time; a non-nil result
     /// attaches `.popover` to that word, and only the anchor word's
@@ -65,8 +65,8 @@ struct RubyTextView: View, Equatable {
 
     /// One word unit's popover presentation, resolved by the host per
     /// segment index: the binding presents only while that word is the
-    /// selection's anchor; the content is the shared entry view (nil until
-    /// a selection lands — the binding is false then, so nothing presents).
+    /// presentation's anchor; the content is the shared entry view (nil until
+    /// a lookup lands — the binding is false then, so nothing presents).
     struct LookupPopover {
         let isPresented: Binding<Bool>
         let content: DictionaryPopoverView?
@@ -131,21 +131,27 @@ struct RubyTextView: View, Equatable {
         return .flow(segmentedUnits(for: segments, annotation: annotation))
     }
 
-    /// The tap payload for segment `index`: surface, segment index, and the
-    /// full sentence text. Pure over the given segments; the tap path
-    /// passes the segments the body rendered, so the payload describes the
-    /// unit the user actually tapped even when the host's tap-time
-    /// re-resolution drifted. Annotation is not carried — the host
-    /// re-resolves it from the sentence at tap time.
-    static func lookupToken(
+    /// The tap request for segment `index`: the tapped surface and index, the
+    /// full sentence text, and every segment this body rendered — mapped with
+    /// its lemma and kana reading — so expansion resolves against the units
+    /// on screen. nil when there are no segments or the index is out of
+    /// range. Pure for tests.
+    static func lookupRequest(
         at index: Int, text: String, segments: [ReadingSegment]?
-    ) -> LookupToken? {
+    ) -> TapLookupRequest? {
         guard let segments, segments.indices.contains(index) else { return nil }
         let segment = segments[index]
-        return LookupToken(
-            surface: segment.surface,
-            tokenIndex: index,
-            sentenceText: text
+        return TapLookupRequest(
+            segments: segments.map { rendered in
+                LookupSegment(
+                    surface: rendered.surface,
+                    lemma: rendered.lemma,
+                    reading: rendered.kanaReading
+                )
+            },
+            tappedAt: index,
+            sentenceText: text,
+            surface: segment.surface
         )
     }
 
@@ -207,19 +213,18 @@ struct RubyTextView: View, Equatable {
     }
 
     /// The surface action for a dictionary-mode word unit: builds the
-    /// payload from the segments this body render resolved — the units on
-    /// screen — so the tapped surface survives a tap-time resolution that
-    /// drifted; the module's re-anchor (LookupDisplay.reAnchoredTapIndex)
-    /// then maps the stored index into the fresh resolution or fails the
-    /// tap closed.
+    /// request from the segments this body render resolved — the units on
+    /// screen — so the tapped surface and its neighbours survive as rendered.
+    /// `LookupDisplay.reAnchoredTapIndex` remains the defensive re-anchor for
+    /// a request whose stored index disagrees with its segments.
     private func lookupAction(at index: Int, segments: [ReadingSegment]) -> (() -> Void)? {
         guard let onLookup else { return nil }
         let text = text
         return {
-            guard let token = Self.lookupToken(
+            guard let request = Self.lookupRequest(
                 at: index, text: text, segments: segments
             ) else { return }
-            onLookup(token)
+            onLookup(request)
         }
     }
 
@@ -280,8 +285,8 @@ struct RubyTextView: View, Equatable {
     /// Dictionary path: one tappable unit per annotator segment — no
     /// plain-run folding, so the flow child's index is the tapped segment
     /// index. With no segments the plain fallback renders instead. The
-    /// resolved segments ride along to the tap actions: the payload must
-    /// describe what was rendered, not what a later resolution returns.
+    /// resolved segments ride along to the tap actions: the request carries
+    /// the units this body rendered.
     @ViewBuilder
     private var segmentedBody: some View {
         let segments = ReadingAnnotator.segments(for: text, caching: cachesSegments) ?? []

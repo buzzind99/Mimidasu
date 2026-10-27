@@ -247,22 +247,22 @@ struct DictionaryContentTests {
         #expect(notFound.fallbackResults.map(\.matched) == ["雨"])
     }
 
-    @Test("the selection identity follows the matched headword and the not-found surface")
+    @Test("the presentation identity follows the matched headword and the not-found surface")
     func identityToken() {
-        let found = SelectedLookup(
+        let found = LookupPresentation(
             content: .found(result: result("お"), also: [], origin: .tappedSurface),
-            source: .liveStrip,
-            entryIndex: 0
+            entryIndex: 0,
+            anchor: .liveStrip
         )
-        let promoted = SelectedLookup(
+        let promoted = LookupPresentation(
             content: .found(result: result("お土産"), also: [], origin: .tappedSurface),
-            source: .liveStrip,
-            entryIndex: 0
+            entryIndex: 0,
+            anchor: .liveStrip
         )
-        let notFound = SelectedLookup(
+        let notFound = LookupPresentation(
             content: .notFound(surface: "雨尾", related: []),
-            source: .liveStrip,
-            entryIndex: 0
+            entryIndex: 0,
+            anchor: .liveStrip
         )
 
         #expect(found.id.hasSuffix("-お"))

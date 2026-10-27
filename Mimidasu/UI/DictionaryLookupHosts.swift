@@ -3,18 +3,18 @@ import SwiftUI
 // MARK: - Shared popover binding
 
 extension AppModel {
-    /// The "get: source match / set: dismiss" binding behind every
+    /// The "get: anchor match / set: dismiss" binding behind every
     /// dictionary-popover presentation (the live strip and each transcript
-    /// word anchor): true only while the selection's anchor is `source`;
-    /// dismissal (and Escape) clears the selection only when this surface
+    /// word anchor): true only while the presentation's anchor is `anchor`;
+    /// dismissal (and Escape) clears the anchor only when this surface
     /// owns it, so a stale binding from a virtualized-off-screen row can
-    /// never clobber a newer selection.
-    func lookupPopoverBinding(for source: SelectedLookup.Source) -> Binding<Bool> {
+    /// never clobber a newer presentation.
+    func lookupPopoverBinding(for anchor: LookupAnchor) -> Binding<Bool> {
         Binding(
-            get: { self.selectedLookup?.source == source },
+            get: { self.lookupPresentation?.anchor == anchor },
             set: { isPresented in
                 if !isPresented {
-                    self.dismissLookupPopover(source: source)
+                    self.dismissLookupPopover(from: anchor)
                 }
             }
         )
@@ -344,12 +344,12 @@ func forwardRemovalRequest(_ outcome: FavoriteToggle, to onRequest: (String) -> 
     }
 }
 
-/// The popover presented by the surface that owns the selection: the shared
+/// The popover presented by the surface that owns the presentation: the shared
 /// entry content with the icon copy control, or the not-found state with
 /// its related suggestions.
 struct DictionaryPopoverView: View {
     var model: AppModel
-    let selected: SelectedLookup
+    let presentation: LookupPresentation
     /// Raises the window-level un-star question. The popover cannot own it: an
     /// alert inside a `.popover` presents as a sheet on the popover's own
     /// window, and closing the popover underneath it strands that sheet's
@@ -359,13 +359,13 @@ struct DictionaryPopoverView: View {
 
     var body: some View {
         Group {
-            switch selected.content {
+            switch presentation.content {
             case let .found(result, also, origin):
-                if let entry = result.entries[safe: selected.entryIndex] {
+                if let entry = result.entries[safe: presentation.entryIndex] {
                     DictionaryEntryContentView(
                         entry: entry,
                         entryCount: result.entries.count,
-                        entryIndex: selected.entryIndex,
+                        entryIndex: presentation.entryIndex,
                         also: also,
                         displayOrigin: origin,
                         senseLimit: nil,
@@ -440,16 +440,17 @@ struct DictionaryCardView: View {
     }
 
     private func card(freeHeight: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let presentation = model.lookupPresentation
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 dictionaryOpener
                 Spacer(minLength: 8)
-                if let pinned = model.pinnedLookup,
-                   case let .found(result, _, _) = pinned.content,
+                if let presentation,
+                   case let .found(result, _, _) = presentation.content,
                    result.entries.count > 1
                 {
                     DictionaryEntryPager(
-                        entryIndex: pinned.entryIndex,
+                        entryIndex: presentation.entryIndex,
                         entryCount: result.entries.count,
                         onStep: { index in model.stepLookupEntry(to: index) }
                     )
@@ -459,8 +460,8 @@ struct DictionaryCardView: View {
             // header row never changes height between lookups.
             .frame(height: DictionaryEntryPager.height)
             .onHeightChange { height in labelHeight = height }
-            if let pinned = model.pinnedLookup {
-                pinnedContent(pinned, freeHeight: freeHeight)
+            if let presentation {
+                pinnedContent(presentation, freeHeight: freeHeight)
             } else {
                 emptyHint
             }
@@ -512,14 +513,16 @@ struct DictionaryCardView: View {
     /// The not-found block feeds the top-section probe so the (sense-less)
     /// viewport math stays settled while it is up.
     @ViewBuilder
-    private func pinnedContent(_ pinned: PinnedLookup, freeHeight: CGFloat) -> some View {
-        switch pinned.content {
+    private func pinnedContent(
+        _ presentation: LookupPresentation, freeHeight: CGFloat
+    ) -> some View {
+        switch presentation.content {
         case let .found(result, also, origin):
-            if let entry = result.entries[safe: pinned.entryIndex] {
+            if let entry = result.entries[safe: presentation.entryIndex] {
                 DictionaryEntryContentView(
                     entry: entry,
                     entryCount: result.entries.count,
-                    entryIndex: pinned.entryIndex,
+                    entryIndex: presentation.entryIndex,
                     also: also,
                     displayOrigin: origin,
                     senseLimit: nil,

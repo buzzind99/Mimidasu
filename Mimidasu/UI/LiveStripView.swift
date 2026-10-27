@@ -9,9 +9,10 @@ struct LiveStripView: View {
     /// Invoked with the clicked surface text when cursor mode is `.copy`;
     /// the owner (ContentView) supplies the pasteboard + notice-pill path.
     var onCopy: ((String) -> Void)?
-    /// Invoked with the tapped word when cursor mode is `.dictionary`;
-    /// nil keeps `.dictionary` on the legacy rendering path.
-    var onLookup: ((LookupToken) -> Void)?
+    /// Invoked with the lookup request built from the rendered segments when
+    /// cursor mode is `.dictionary`; nil keeps `.dictionary` on the legacy
+    /// rendering path.
+    var onLookup: ((TapLookupRequest) -> Void)?
     /// Favorite matcher, straight from the owner. The owner reads the store's
     /// revision while its own body evaluates and discards it: the matcher
     /// accessor builds a closure and observes nothing, so it alone cannot

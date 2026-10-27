@@ -19,10 +19,10 @@ struct TapLookupRequest: Equatable, Sendable {
     /// too), empty for an annotator that ran without its dictionary
     /// (annotator fault).
     let segments: [LookupSegment]?
-    /// The stored render-time index into `segments` — the unit the user
-    /// actually tapped. The module re-anchors it at resolve time when the
-    /// re-resolved segments drifted, failing closed rather than defining
-    /// the wrong word.
+    /// The render-time index into the carried `segments` — the unit the user
+    /// actually tapped. Re-anchoring is the defensive path for a hand-built
+    /// request whose stored index disagrees with its segments; the production
+    /// request is built from the same segments, so the two agree.
     let tappedAt: Int
     /// The full sentence text at tap time, against which expansion validates
     /// join adjacency.
