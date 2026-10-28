@@ -232,8 +232,8 @@ struct AppModelRetranslateLaneTests {
         model.translationSettings.selectRetranslate(.appleFast)
         // An external live session, so the fast selection is a genuine
         // alternate and the lane arms its dedicated session on the click.
-        model.activeTranslationEngine = .external
-        model.activeExternalProvider = .google
+        model.translationSession.activeTranslationEngine = .external
+        model.translationSession.activeExternalProvider = .google
         model.phase = .running
         let sentence = makeSentence(index: 5)
         model.sessionController.onSentence?(sentence)

@@ -173,8 +173,8 @@ struct AppModelRetranslateAppleLaneTests {
         }
         let model = await harness.makeModel()
         if testCase.usesExternalLiveSession {
-            model.activeTranslationEngine = .external
-            model.activeExternalProvider = .google
+            model.translationSession.activeTranslationEngine = .external
+            model.translationSession.activeExternalProvider = .google
         }
         model.appleHighFidelityProbe = (true, "en")
         model.translationSettings.selectRetranslate(testCase.selection)
@@ -226,8 +226,8 @@ struct AppModelRetranslateAppleLaneTests {
         // already runs the Intelligence model. (A probe that landed
         // not-installed would degrade the selection to `.appleFast` instead
         // — see `unavailableHighFidelityDegradesToFast`.)
-        model.activeTranslationEngine = .external
-        model.activeExternalProvider = .google
+        model.translationSession.activeTranslationEngine = .external
+        model.translationSession.activeExternalProvider = .google
         model.translationSettings.selectRetranslate(.appleHighFidelity)
         model.phase = .running
         let worker = await harness.attachWorker(model)
@@ -399,8 +399,8 @@ struct AppModelRetranslateAppleLaneTests {
         // An external live session, so the degraded fast selection is a
         // genuine alternate (a live fast Apple session would be served by the
         // session engine instead).
-        model.activeTranslationEngine = .external
-        model.activeExternalProvider = .google
+        model.translationSession.activeTranslationEngine = .external
+        model.translationSession.activeExternalProvider = .google
         model.phase = .running
         let worker = await harness.attachWorker(model)
         defer { worker.cancel() }

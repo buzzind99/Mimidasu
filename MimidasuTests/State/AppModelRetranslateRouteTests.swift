@@ -162,12 +162,12 @@ struct AppModelRetranslateRouteTests {
         }
         try? model.translationSettings.saveKey("sk-google", for: .google)
         model.translationSettings.selectRetranslate(.google)
-        model.activeExternalProvider = .google
+        model.translationSession.activeExternalProvider = .google
 
         #expect(!model.alternateRetranslateEngineActive)
-        model.activeExternalProvider = nil
+        model.translationSession.activeExternalProvider = nil
         #expect(model.alternateRetranslateEngineActive)
-        model.activeExternalProvider = .google
+        model.translationSession.activeExternalProvider = .google
 
         model.phase = .running
         let (worker, queueEngine) = await attachWorker(model)

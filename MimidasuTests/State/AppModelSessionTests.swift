@@ -217,7 +217,7 @@ struct AppModelSessionTests {
         #expect(sut.model.phase == .stopping)
         #expect(await pollUntil { sut.model.phase == .idle }, "stop winds down to idle")
         #expect(sut.model.live.partial == "")
-        #expect(sut.model.translationStatus == .idle)
+        #expect(sut.model.translationRuntime.status == .idle)
         #expect(
             sut.log.contains(
                 inOrder: [

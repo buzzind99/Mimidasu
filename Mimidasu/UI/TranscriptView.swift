@@ -197,10 +197,11 @@ struct TranscriptView: View {
     /// here, in the body, so the invalidation that changes any of them
     /// re-renders the rows.
     ///
-    /// The worker and status clauses ride state the queue reports through
-    /// (`model.translationWorkerActive`, `model.translationStatus`) because
-    /// `TranslationQueue` is not `@Observable` and could not drive this view
-    /// directly. Both are skipped while an alternate retry engine resolves:
+    /// The worker and status clauses read the coordinator's live runtime
+    /// snapshot (`model.translationRuntime.workerAttached` /
+    /// `model.translationRuntime.status`) — the one published truth for the
+    /// queue's attached worker and translation status. Both are skipped
+    /// while an alternate retry engine resolves:
     /// a dead session engine is exactly when routing the retry elsewhere is
     /// useful, and the lane's availability (`alternateRetranslateEngineActive`)
     /// already answers "will this click be served". The row's own sentence
@@ -220,8 +221,8 @@ struct TranscriptView: View {
         }
         guard SessionPhaseMachine.isLive(model.phase) else { return false }
         if !model.alternateRetranslateEngineActive {
-            guard model.translationWorkerActive else { return false }
-            if case .unavailable = model.translationStatus {
+            guard model.translationRuntime.workerAttached else { return false }
+            if case .unavailable = model.translationRuntime.status {
                 return false
             }
         }

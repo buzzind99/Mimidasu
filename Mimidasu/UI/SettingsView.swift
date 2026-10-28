@@ -360,10 +360,8 @@ struct SettingsView: View {
                 // so it can't describe an engine the queue isn't using.
                 Text(
                     settings.activeEngineDescription(
-                        fallbackActive:
-                        model.translationFallbackActive &&
-                            model.activeTranslationEngine == .apple,
-                        attachedProvider: model.activeExternalProvider,
+                        fallbackActive: model.translationRuntime.isAppleFallbackLatched,
+                        attachedProvider: model.translationRuntime.externalProvider,
                         appleHighFidelity: model.appleHighFidelity
                     )
                 )

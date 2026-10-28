@@ -209,7 +209,7 @@ struct SettingsRetranslateCard: View {
                 .filter { provider in
                     provider.isExternal
                         && settings.isConfigured(for: provider)
-                        && provider != model.activeExternalProvider
+                        && provider != model.translationRuntime.externalProvider
                 }
                 .compactMap(externalOption)
         )

@@ -55,13 +55,13 @@ struct AppModelTests {
     func stopWindsDownToIdle(phase: SessionPhase) async {
         let model = await makeSUT()
         model.phase = phase
-        model.translationStatus = .translating
+        model.translationSession.translationStatus = .translating
 
         model.stop()
 
         #expect(model.phase == .stopping)
         #expect(await pollUntil { model.phase == .idle }, "stop winds down to idle")
-        #expect(model.translationStatus == .idle, "the teardown parks the status")
+        #expect(model.translationRuntime.status == .idle, "the teardown parks the status")
     }
 
     // MARK: - retryTranslation()

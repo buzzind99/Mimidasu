@@ -39,7 +39,7 @@ struct AppModelToastWiringTests {
     @Test("a degraded status posts the persistent fallback card with Reconnect")
     func degradedStatusPostsFallbackCard() async {
         let model = await makeSUT()
-        model.translationFallbackActive = true
+        model.translationSession.translationFallbackActive = true
 
         model.handleTranslationStatus(
             .degraded("External translation failed — using Apple on-device", .permanent)
@@ -54,7 +54,7 @@ struct AppModelToastWiringTests {
     @Test("an unavailable status posts the red card with Reconnect")
     func unavailableStatusPostsRedCard() async {
         let model = await makeSUT()
-        model.translationFallbackActive = true
+        model.translationSession.translationFallbackActive = true
 
         model.handleTranslationStatus(
             .unavailable("Invalid API key. Check the key in Settings, then reconnect.", .permanent)
@@ -90,7 +90,7 @@ struct AppModelToastWiringTests {
     @Test("a ready status keeps the fallback card while latched")
     func readyStatusKeepsFallbackCardWhileLatched() async {
         let model = await makeSUT()
-        model.translationFallbackActive = true
+        model.translationSession.translationFallbackActive = true
         model.handleTranslationStatus(
             .degraded("External translation failed — using Apple on-device", .permanent)
         )
@@ -109,7 +109,7 @@ struct AppModelToastWiringTests {
     @Test("a translating status clears the unavailable card but keeps the fallback")
     func translatingStatusClearsUnavailableOnly() async {
         let model = await makeSUT()
-        model.translationFallbackActive = true
+        model.translationSession.translationFallbackActive = true
         model.handleTranslationStatus(
             .degraded("External translation failed — using Apple on-device", .permanent)
         )

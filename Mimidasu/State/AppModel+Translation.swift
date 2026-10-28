@@ -100,29 +100,15 @@ extension AppModel {
         set { translationSession.translationConfig = newValue }
     }
 
-    var translationStatus: TranslationStatus {
-        get { translationSession.translationStatus }
-        set { translationSession.translationStatus = newValue }
-    }
-
-    var activeTranslationEngine: ActiveTranslationEngine {
-        get { translationSession.activeTranslationEngine }
-        set { translationSession.activeTranslationEngine = newValue }
-    }
-
-    var activeExternalProvider: TranslationProvider? {
-        get { translationSession.activeExternalProvider }
-        set { translationSession.activeExternalProvider = newValue }
+    /// The one live-translation runtime truth, read-only by intent: every
+    /// mutation happens inside `TranslationSessionCoordinator`.
+    var translationRuntime: TranslationRuntime {
+        translationSession.runtime
     }
 
     var appleHighFidelityProbe: (installed: Bool, targetCode: String?) {
         get { translationSession.appleHighFidelityProbe }
         set { translationSession.appleHighFidelityProbe = newValue }
-    }
-
-    var translationFallbackActive: Bool {
-        get { translationSession.translationFallbackActive }
-        set { translationSession.translationFallbackActive = newValue }
     }
 
     var providerAwaitingDisclosure: PendingCloudDisclosure? {
@@ -147,9 +133,8 @@ extension AppModel {
     /// the worker lifecycle (attach in `activate`, park in `sessionDidEnd`)
     /// stays inside the coordinator; outsiders only read or cancel the
     /// current task. Non-observed seam (`@ObservationIgnored` storage) —
-    /// views read `translationWorkerActive` / `translationStatus` instead.
-    /// The probe's supersede token lives inside `AppleTierAvailability`;
-    /// no facade reaches it.
+    /// views read `translationRuntime` instead. The probe's supersede token
+    /// lives inside `AppleTierAvailability`; no facade reaches it.
     var translationWorker: Task<Void, Never>? {
         translationSession.translationWorker
     }
@@ -205,9 +190,11 @@ extension AppModel {
         translationSession.declineDisclosure()
     }
 
-    /// Routes queue status updates to the published state, reconciles the
-    /// translation toasts, and drives the latched Apple fallback. Internal
-    /// so tests can drive the queue's status callback directly.
+    /// Lands a queue status on the coordinator: it reconciles the
+    /// translation toasts and drives the latched Apple fallback. Test seam —
+    /// production now calls `handleStatus` directly from the queue's status
+    /// callback; this method remains so tests can drive status landing from
+    /// outside.
     func handleTranslationStatus(_ status: TranslationStatus) {
         translationSession.handleStatus(status)
     }

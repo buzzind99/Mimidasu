@@ -141,8 +141,8 @@ struct AppModelRetranslateProbeTests {
         }
         let model = await harness.makeModel()
         // External live session: both Apple models are genuine alternates.
-        model.activeTranslationEngine = .external
-        model.activeExternalProvider = .google
+        model.translationSession.activeTranslationEngine = .external
+        model.translationSession.activeExternalProvider = .google
         model.translationSettings.selectRetranslate(.appleHighFidelity)
         model.phase = .running
         let worker = await harness.attachWorker(model)
@@ -199,8 +199,8 @@ struct AppModelRetranslateProbeTests {
             try Test.cancel("the provisional-identity defer requires macOS 26.4")
         }
         let model = await harness.makeModel()
-        model.activeTranslationEngine = .external
-        model.activeExternalProvider = .google
+        model.translationSession.activeTranslationEngine = .external
+        model.translationSession.activeExternalProvider = .google
         model.translationSettings.selectRetranslate(.appleHighFidelity)
         model.phase = .running
         let sentence = makeSentence(index: 7)
@@ -277,8 +277,8 @@ struct AppModelRetranslateProbeTests {
             try Test.cancel("the provisional-identity defer requires macOS 26.4")
         }
         let model = await harness.makeModel()
-        model.activeTranslationEngine = .external
-        model.activeExternalProvider = .google
+        model.translationSession.activeTranslationEngine = .external
+        model.translationSession.activeExternalProvider = .google
         model.translationSettings.selectRetranslate(.appleHighFidelity)
         model.phase = .running
         let sentence = makeSentence(index: 7)

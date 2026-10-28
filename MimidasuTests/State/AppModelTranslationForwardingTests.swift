@@ -4,12 +4,14 @@ import Testing
 
 /// Tests the app-model façade over the translation coordinators: writes
 /// route into the coordinator, and coordinator-side changes propagate
-/// through the forwarded properties as observation events — the mechanism
-/// SwiftUI's view invalidation depends on for the `.translationTask`
-/// configs, the status pill, and the row markers. Engine identity
-/// (`activeTranslationEngine` / `activeExternalProvider`) is write-through
-/// only — no coordinator→facade observation test for it (the value-level
-/// reads live in `AppModelTranslationEngineTests`).
+/// through the read-only forwarders — chiefly the `translationRuntime`
+/// snapshot — as observation events, the mechanism SwiftUI's view
+/// invalidation depends on for the `.translationTask` configs, the status
+/// pill, and the row markers. Engine identity
+/// (`activeTranslationEngine` / `activeExternalProvider`) is stamped
+/// through the session accessors into the runtime snapshot — no
+/// coordinator→facade observation test for it (the value-level reads live
+/// in `AppModelTranslationEngineTests`).
 @MainActor
 @Suite("AppModel translation forwarding")
 struct AppModelTranslationForwardingTests {
@@ -42,7 +44,7 @@ struct AppModelTranslationForwardingTests {
     @Test("a coordinator-side status change propagates through the AppModel forwarder")
     func statusForwarderPropagates() async {
         let model = await makeModel()
-        let observed = ObservedValuesRecorder(read: { model.translationStatus })
+        let observed = ObservedValuesRecorder(read: { model.translationRuntime.status })
 
         model.translationSession.translationStatus = .translating
 
@@ -55,7 +57,7 @@ struct AppModelTranslationForwardingTests {
     @Test("a status landing through handleTranslationStatus propagates")
     func statusHandlerPropagates() async {
         let model = await makeModel()
-        let observed = ObservedValuesRecorder(read: { model.translationStatus })
+        let observed = ObservedValuesRecorder(read: { model.translationRuntime.status })
 
         model.handleTranslationStatus(.retrying("External translation failed, 1 retries left"))
 
@@ -67,15 +69,15 @@ struct AppModelTranslationForwardingTests {
         )
     }
 
-    @Test("engine identity written through the AppModel forwarders reaches the coordinator")
-    func engineForwarderWritesThrough() async {
+    @Test("engine identity stamped through the session accessors lands in the runtime")
+    func engineAccessorsStampRuntime() async {
         let model = await makeModel()
 
-        model.activeTranslationEngine = .external
-        model.activeExternalProvider = .google
+        model.translationSession.activeTranslationEngine = .external
+        model.translationSession.activeExternalProvider = .google
 
-        #expect(model.translationSession.activeTranslationEngine == .external)
-        #expect(model.translationSession.activeExternalProvider == .google)
+        #expect(model.translationSession.runtime.engine == .external)
+        #expect(model.translationSession.runtime.externalProvider == .google)
     }
 
     @Test("a coordinator-side marker mutation propagates through the AppModel forwarder")
@@ -124,8 +126,8 @@ struct AppModelTranslationForwardingTests {
 
         #expect(!model.liveSessionRunsKind(.appleFast), "no probe landed — no provable identity")
 
-        model.activeTranslationEngine = .external
-        model.activeExternalProvider = .google
+        model.translationSession.activeTranslationEngine = .external
+        model.translationSession.activeExternalProvider = .google
 
         #expect(
             !model.liveSessionRunsKind(.appleFast),
@@ -135,8 +137,8 @@ struct AppModelTranslationForwardingTests {
         // A landed not-installed probe for the current target resolves the
         // live Apple session to the fast model — the one provable `true`
         // (below 26.4 Apple is always fast).
-        model.activeTranslationEngine = .apple
-        model.activeExternalProvider = nil
+        model.translationSession.activeTranslationEngine = .apple
+        model.translationSession.activeExternalProvider = nil
         let targetCode = model.translationSettings.targetLanguage.code
         model.appleHighFidelityProbe = (false, targetCode)
 

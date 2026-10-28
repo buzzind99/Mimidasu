@@ -65,7 +65,7 @@ struct AppModelTranslationHighFidelityTests {
 
         model.retryTranslation()
         #expect(
-            model.activeTranslationEngine == .apple,
+            model.translationRuntime.engine == .apple,
             "the Apple engine attaches through the default probe"
         )
 
@@ -141,7 +141,7 @@ struct AppModelTranslationHighFidelityTests {
         try? settings.saveKey("test-key-1234", for: .google)
         settings.select(.google)
         model.translationProviderDidChange()
-        #expect(model.activeTranslationEngine == .external)
+        #expect(model.translationRuntime.engine == .external)
         // The attach reset the tuple synchronously (probe re-fires), so a
         // landed marker after the second probe call is the re-probe's
         // landing, not the Apple probe's.

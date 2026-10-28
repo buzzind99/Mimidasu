@@ -63,7 +63,7 @@ struct AppModelTranslationEngineKindTests {
         await model.initialModelCheck?.value
         model.phase = .running
         model.translationProviderDidChange()
-        #expect(model.activeTranslationEngine == .external)
+        #expect(model.translationRuntime.engine == .external)
 
         #expect(model.activeEngineKind == .openrouter)
 

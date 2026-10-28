@@ -101,7 +101,7 @@ struct AppModelTranslationEngineTests {
 
         model.retryTranslation()
 
-        #expect(model.activeTranslationEngine == .apple)
+        #expect(model.translationRuntime.engine == .apple)
         #expect(model.translationConfig != nil)
     }
 
@@ -115,11 +115,11 @@ struct AppModelTranslationEngineTests {
 
             model.retryTranslation()
             #expect(
-                await pollUntil { model.translationStatus == .ready },
+                await pollUntil { model.translationRuntime.status == .ready },
                 "retryTranslation publishes .ready (\(provider))"
             )
 
-            #expect(model.activeTranslationEngine == .external, "\(provider)")
+            #expect(model.translationRuntime.engine == .external, "\(provider)")
             #expect(model.translationConfig == nil, "\(provider)")
 
             await stopTranslation(model)
@@ -136,16 +136,16 @@ struct AppModelTranslationEngineTests {
         )
 
         model.retryTranslation()
-        #expect(model.activeTranslationEngine == .external)
+        #expect(model.translationRuntime.engine == .external)
         model.translationQueue.enqueue(makeSentence(index: 0, text: "テスト"))
 
-        #expect(await pollUntil { model.translationFallbackActive }, "the exhausted engine latches the Apple fallback")
+        #expect(await pollUntil { model.translationRuntime.fallbackLatched }, "the exhausted engine latches the Apple fallback")
 
-        #expect(model.translationFallbackActive)
-        #expect(model.activeTranslationEngine == .apple)
+        #expect(model.translationRuntime.fallbackLatched)
+        #expect(model.translationRuntime.engine == .apple)
         #expect(model.translationConfig != nil, "the Apple host must be re-activated")
         #expect(
-            model.translationStatus
+            model.translationRuntime.status
                 == .degraded(
                     "External translation failed — using Apple on-device. "
                         + "Invalid API key. Check the key in Settings, then reconnect.",
@@ -169,21 +169,21 @@ struct AppModelTranslationEngineTests {
         // First failure: latches onto Apple.
         model.retryTranslation()
         model.translationQueue.enqueue(makeSentence(index: 0, text: "テスト"))
-        #expect(await pollUntil { model.translationFallbackActive }, "the first failure latches the Apple fallback")
+        #expect(await pollUntil { model.translationRuntime.fallbackLatched }, "the first failure latches the Apple fallback")
 
         // Manual retry resets the latch and re-attempts the external engine
         // (the key may have been fixed).
         model.retryTranslation()
-        #expect(!model.translationFallbackActive, "the retry re-arms the fallback")
-        #expect(model.activeTranslationEngine == .external)
+        #expect(!model.translationRuntime.fallbackLatched, "the retry re-arms the fallback")
+        #expect(model.translationRuntime.engine == .external)
 
         // A second failure re-latches instead of parking on .unavailable.
         model.translationQueue.enqueue(makeSentence(index: 1, text: "こんにちは"))
         #expect(
-            await pollUntil { model.translationFallbackActive },
+            await pollUntil { model.translationRuntime.fallbackLatched },
             "the retried failure re-latches the Apple fallback"
         )
-        #expect(model.activeTranslationEngine == .apple, "no parking on .unavailable")
+        #expect(model.translationRuntime.engine == .apple, "no parking on .unavailable")
         #expect(model.translationConfig != nil, "the Apple host is re-activated again")
 
         await stopTranslation(model)
@@ -219,14 +219,18 @@ struct AppModelTranslationEngineTests {
         )
         let recorder = TextRecorder()
         var statuses: [TranslationStatus] = []
-        // Replace AppModel's wiring with an observation tap: results land in
-        // a local recorder (no transcript entries exist in this test) and
-        // statuses keep flowing through the model.
+        // Replace the coordinator's installed queue wiring with an
+        // observation tap: results land in a local recorder (no transcript
+        // entries exist in this test), statuses keep flowing through the
+        // model, and worker attachment keeps publishing to the runtime.
         model.translationQueue.setHandlers(
             result: { _, translation in recorder.record(translation.text) },
             status: { [weak model] status in
                 statuses.append(status)
                 model?.handleTranslationStatus(status)
+            },
+            workerChanged: { [weak model] attached in
+                model?.translationSession.workerAttached = attached
             }
         )
 
@@ -266,22 +270,22 @@ extension AppModelTranslationEngineTests {
 
         // Attach the external engine (as session start would).
         model.retryTranslation()
-        #expect(await pollUntil { model.translationStatus == .ready })
-        #expect(model.activeTranslationEngine == .external)
-        #expect(model.activeExternalProvider == .openrouter)
+        #expect(await pollUntil { model.translationRuntime.status == .ready })
+        #expect(model.translationRuntime.engine == .external)
+        #expect(model.translationRuntime.externalProvider == .openrouter)
 
         // Idle: a selection change defers — nothing activates.
         settings.select(.apple)
         model.phase = .idle
         model.translationProviderDidChange()
-        #expect(model.activeTranslationEngine == .external, "no activation while idle")
-        #expect(model.activeExternalProvider == .openrouter)
+        #expect(model.translationRuntime.engine == .external, "no activation while idle")
+        #expect(model.translationRuntime.externalProvider == .openrouter)
 
         // Running: the change re-attaches Apple right away.
         model.phase = .running
         model.translationProviderDidChange()
-        #expect(model.activeTranslationEngine == .apple)
-        #expect(model.activeExternalProvider == nil)
+        #expect(model.translationRuntime.engine == .apple)
+        #expect(model.translationRuntime.externalProvider == nil)
         #expect(model.translationConfig != nil, "the Apple host must be re-activated")
 
         // Back to an external provider (configured + selected, as the key
@@ -290,8 +294,8 @@ extension AppModelTranslationEngineTests {
         try? settings.saveKey("test-key-1234", for: .google)
         settings.select(.google)
         model.translationProviderDidChange()
-        #expect(model.activeTranslationEngine == .external)
-        #expect(model.activeExternalProvider == .google)
+        #expect(model.translationRuntime.engine == .external)
+        #expect(model.translationRuntime.externalProvider == .google)
 
         await stopTranslation(model)
     }
@@ -309,7 +313,7 @@ extension AppModelTranslationEngineTests {
 
         model.retryTranslation()
         model.translationQueue.enqueue(makeSentence(index: 0, text: "テスト"))
-        #expect(await pollUntil { model.translationFallbackActive }, "the failure latches the Apple fallback")
+        #expect(await pollUntil { model.translationRuntime.fallbackLatched }, "the failure latches the Apple fallback")
 
         // A verified Google key selects it (the key card's success path);
         // the explicit change then rebuilds the queue onto the Google engine.
@@ -318,9 +322,9 @@ extension AppModelTranslationEngineTests {
         model.phase = .running
         model.translationProviderDidChange()
 
-        #expect(!model.translationFallbackActive, "an explicit change re-arms the fallback")
-        #expect(model.activeTranslationEngine == .external)
-        #expect(model.activeExternalProvider == .google)
+        #expect(!model.translationRuntime.fallbackLatched, "an explicit change re-arms the fallback")
+        #expect(model.translationRuntime.engine == .external)
+        #expect(model.translationRuntime.externalProvider == .google)
         #expect(
             !model.toasts.toasts.contains { toast in toast.key == ToastKey.translationFallback },
             "the fallback card is dismissed"
@@ -342,24 +346,24 @@ extension AppModelTranslationEngineTests {
         )
 
         model.retryTranslation()
-        #expect(await pollUntil { model.translationStatus == .ready })
-        #expect(model.activeExternalProvider == .openrouter)
+        #expect(await pollUntil { model.translationRuntime.status == .ready })
+        #expect(model.translationRuntime.externalProvider == .openrouter)
 
         // Selecting DeepL with no key: the OpenRouter engine stays attached.
         model.phase = .running
         settings.select(.deepl)
         model.translationProviderDidChange()
 
-        #expect(model.activeTranslationEngine == .external)
-        #expect(model.activeExternalProvider == .openrouter, "the unconfigured selection doesn't evict the active engine")
+        #expect(model.translationRuntime.engine == .external)
+        #expect(model.translationRuntime.externalProvider == .openrouter, "the unconfigured selection doesn't evict the active engine")
 
         // A verified DeepL key selects it (the key card's success path) and
         // then activates it.
         try? settings.saveKey("test-key-1234", for: .deepl)
         settings.select(.deepl)
         model.translationProviderDidChange()
-        #expect(model.activeTranslationEngine == .external)
-        #expect(model.activeExternalProvider == .deepl)
+        #expect(model.translationRuntime.engine == .external)
+        #expect(model.translationRuntime.externalProvider == .deepl)
 
         await stopTranslation(model)
     }
@@ -380,18 +384,18 @@ extension AppModelTranslationEngineTests {
         )
         await model.initialModelCheck?.value
         model.retryTranslation()
-        #expect(await pollUntil { model.translationStatus == .ready })
+        #expect(await pollUntil { model.translationRuntime.status == .ready })
         model.phase = .running
 
         _ = await model.verifyAndSelectTranslationProvider(.openrouter)
         model.confirmCloudDisclosure(.providerSwitch(.openrouter))
         #expect(settings.selectedProvider == .openrouter, "confirming moves the selection")
-        #expect(model.activeExternalProvider == .google, "activation waits for the settings-change observer")
+        #expect(model.translationRuntime.externalProvider == .google, "activation waits for the settings-change observer")
 
         // SettingsView's onChange applies the selection change.
         model.translationProviderDidChange()
-        #expect(model.activeTranslationEngine == .external)
-        #expect(model.activeExternalProvider == .openrouter)
+        #expect(model.translationRuntime.engine == .external)
+        #expect(model.translationRuntime.externalProvider == .openrouter)
 
         await stopTranslation(model)
     }
@@ -436,7 +440,7 @@ extension AppModelTranslationEngineTests {
             transport: constantStatusTransport(403)
         )
         model.retryTranslation()
-        #expect(await pollUntil { model.translationStatus == .ready })
+        #expect(await pollUntil { model.translationRuntime.status == .ready })
         model.phase = .running
 
         let verified = await model.verifyAndSelectTranslationProvider(.google)
@@ -444,7 +448,7 @@ extension AppModelTranslationEngineTests {
         #expect(verified == .failed)
         #expect(settings.selectedProvider == .openrouter, "the selection stays put")
         #expect(settings.testResult(for: .google) == .failure("Invalid API key"))
-        #expect(model.activeExternalProvider == .openrouter, "the active engine is untouched")
+        #expect(model.translationRuntime.externalProvider == .openrouter, "the active engine is untouched")
 
         await stopTranslation(model)
     }
@@ -473,12 +477,12 @@ extension AppModelTranslationEngineTests {
         )
         await model.initialModelCheck?.value
         model.retryTranslation()
-        #expect(await pollUntil { model.translationStatus == .ready })
+        #expect(await pollUntil { model.translationRuntime.status == .ready })
 
         // A failed translation latches the Apple fallback…
         model.translationQueue.enqueue(makeSentence(index: 0, text: "テスト"))
-        #expect(await pollUntil { model.translationFallbackActive })
-        #expect(model.activeTranslationEngine == .apple)
+        #expect(await pollUntil { model.translationRuntime.fallbackLatched })
+        #expect(model.translationRuntime.engine == .apple)
 
         // …then a successful probe of the selected provider re-engages it.
         model.phase = .running
@@ -486,9 +490,9 @@ extension AppModelTranslationEngineTests {
 
         #expect(verified.didVerify)
         #expect(settings.testResult(for: .openrouter) == .success)
-        #expect(!model.translationFallbackActive, "re-engagement re-arms the latch")
-        #expect(model.activeTranslationEngine == .external)
-        #expect(model.activeExternalProvider == .openrouter)
+        #expect(!model.translationRuntime.fallbackLatched, "re-engagement re-arms the latch")
+        #expect(model.translationRuntime.engine == .external)
+        #expect(model.translationRuntime.externalProvider == .openrouter)
 
         await stopTranslation(model)
     }
@@ -508,7 +512,7 @@ extension AppModelTranslationEngineTests {
         )
         await model.initialModelCheck?.value
         model.retryTranslation()
-        #expect(await pollUntil { model.translationStatus == .ready })
+        #expect(await pollUntil { model.translationRuntime.status == .ready })
         model.phase = .running
 
         let verified = await model.verifyModel("gpt-6-luna", for: .openai)
@@ -517,8 +521,8 @@ extension AppModelTranslationEngineTests {
         #expect(settings.testResult(for: .openai) == .success)
         #expect(settings.model(for: .openai).isEmpty, "the draft is not persisted")
         #expect(settings.selectedProvider == .google, "the selection is unchanged")
-        #expect(model.activeTranslationEngine == .external, "the active engine is untouched")
-        #expect(model.activeExternalProvider == .google)
+        #expect(model.translationRuntime.engine == .external, "the active engine is untouched")
+        #expect(model.translationRuntime.externalProvider == .google)
 
         await stopTranslation(model)
     }
@@ -538,7 +542,7 @@ extension AppModelTranslationEngineTests {
         let model = makeModel(settings: settings, transport: transport)
         await model.initialModelCheck?.value
         model.retryTranslation()
-        #expect(await pollUntil { model.translationStatus == .ready })
+        #expect(await pollUntil { model.translationRuntime.status == .ready })
         model.phase = .running
 
         let verified = await model.verifyModel("gpt-6-luna", for: .openai)
@@ -550,8 +554,8 @@ extension AppModelTranslationEngineTests {
         )
         #expect(settings.model(for: .openai).isEmpty, "the stored model is unchanged")
         #expect(settings.selectedProvider == .google, "the selection is unchanged")
-        #expect(model.activeTranslationEngine == .external, "the active engine is untouched")
-        #expect(model.activeExternalProvider == .google)
+        #expect(model.translationRuntime.engine == .external, "the active engine is untouched")
+        #expect(model.translationRuntime.externalProvider == .google)
         #expect(attempts.withLock { count in count } == 2, "the probe tries the compatible fallback once")
 
         await stopTranslation(model)
@@ -582,7 +586,7 @@ extension AppModelTranslationEngineTests {
         let model = makeModel(settings: settings, transport: transport)
         await model.initialModelCheck?.value
         model.retryTranslation()
-        #expect(await pollUntil { model.translationStatus == .ready })
+        #expect(await pollUntil { model.translationRuntime.status == .ready })
         model.phase = .running
 
         let verified = await model.verifyModel("gpt-6-sol", for: .openai)
@@ -594,7 +598,7 @@ extension AppModelTranslationEngineTests {
             "the downgrade is cached under the resolved draft, not the provider default"
         )
         #expect(settings.selectedProvider == .google, "the selection waits for the caller")
-        #expect(model.activeExternalProvider == .google, "the probe does not re-attach")
+        #expect(model.translationRuntime.externalProvider == .google, "the probe does not re-attach")
         #expect(attempts.withLock { count in count } == 2)
 
         // The key card commits the verified draft, then the settings observer
@@ -605,8 +609,8 @@ extension AppModelTranslationEngineTests {
         model.translationProviderDidChange()
 
         #expect(settings.model(for: .openai) == "gpt-6-sol")
-        #expect(model.activeTranslationEngine == .external)
-        #expect(model.activeExternalProvider == .openai)
+        #expect(model.translationRuntime.engine == .external)
+        #expect(model.translationRuntime.externalProvider == .openai)
 
         model.translationQueue.enqueue(makeSentence(index: 0, text: "テスト"))
         #expect(await pollUntil { bodies.withLock { log in log.count == 3 } })

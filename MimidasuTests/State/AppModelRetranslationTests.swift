@@ -207,30 +207,30 @@ struct AppModelRetranslationTests {
         #expect(drained, "the gated retry must not enter the queue without a worker")
     }
 
-    /// The transcript's retry gate reads `translationWorkerActive` — the
-    /// observable mirror of the queue's `hasWorker`, reported through the
-    /// queue's `workerChanged` handler — because the queue is not observable
-    /// and could not drive the view directly. The mirror must track attach
-    /// and release exactly, or the shown button diverges from what a click
-    /// would serve.
-    @Test("the worker-active mirror tracks the queue worker's attach and release")
-    func workerActiveMirrorTracksQueueWorker() async {
+    /// The transcript's retry gate reads `translationRuntime.workerAttached`
+    /// — the runtime snapshot's worker truth, published from the queue's
+    /// `workerChanged` handler (set when a run attaches its engine, cleared
+    /// when it releases) — because the queue is not observable and could not
+    /// drive the view directly. The snapshot must track attach and release
+    /// exactly, or the shown button diverges from what a click would serve.
+    @Test("the runtime's workerAttached tracks the queue worker's attach and release")
+    func workerAttachedTracksQueueWorker() async {
         let model = await harness.makeModel()
-        #expect(!model.translationWorkerActive, "no run has attached an engine yet")
+        #expect(!model.translationRuntime.workerAttached, "no run has attached an engine yet")
 
         let worker = await harness.attachWorker(model, engine: EchoRetranslateEngine())
         #expect(
-            model.translationWorkerActive,
-            "the mirror flips on when the run attaches its engine"
+            model.translationRuntime.workerAttached,
+            "the snapshot flips on when the run attaches its engine"
         )
 
-        // Awaited, not just cancelled: the mirror flips off in the run's
+        // Awaited, not just cancelled: the snapshot flips off in the run's
         // `defer`, so the value's return makes the assertion deterministic.
         worker.cancel()
         await worker.value
         #expect(
-            !model.translationWorkerActive,
-            "the mirror flips off when the run releases its engine"
+            !model.translationRuntime.workerAttached,
+            "the snapshot flips off when the run releases its engine"
         )
     }
 
@@ -251,7 +251,7 @@ struct AppModelRetranslationTests {
             worker.cancel()
         }
         model.phase = .running
-        model.activeTranslationEngine = .external
+        model.translationSession.activeTranslationEngine = .external
 
         model.retranslateSentence(makeSentence(index: 7))
         #expect(model.pendingRetranslations == [7], "the retry is marked pending")
@@ -259,7 +259,7 @@ struct AppModelRetranslationTests {
         model.handleTranslationStatus(.unavailable("engine failed", .permanent))
 
         #expect(model.pendingRetranslations == [7], "the fallback will replay the sentence")
-        #expect(model.translationFallbackActive, "the fallback latched onto Apple")
+        #expect(model.translationRuntime.fallbackLatched, "the fallback latched onto Apple")
     }
 
     /// Every *other* `.unavailable` is terminal for the backlog: Apple itself
@@ -278,7 +278,7 @@ struct AppModelRetranslationTests {
             worker.cancel()
         }
         model.phase = .running
-        model.activeTranslationEngine = .apple
+        model.translationSession.activeTranslationEngine = .apple
 
         model.retranslateSentence(makeSentence(index: 7))
         #expect(model.pendingRetranslations == [7], "the retry is marked pending")
@@ -298,8 +298,8 @@ struct AppModelRetranslationTests {
         let model = await harness.makeModel()
         model.phase = .running
         model.pendingRetranslations = [7]
-        model.translationFallbackActive = true
-        model.activeTranslationEngine = .apple
+        model.translationSession.translationFallbackActive = true
+        model.translationSession.activeTranslationEngine = .apple
 
         model.handleTranslationStatus(.unavailable("Apple replay failed", .permanent))
 
@@ -325,11 +325,11 @@ struct AppModelRetranslationTests {
     @Test("a new session resets the Apple fallback latch")
     func sessionBeginResetsFallbackLatch() async {
         let model = await harness.makeModel()
-        model.translationFallbackActive = true
+        model.translationSession.translationFallbackActive = true
 
         model.sessionController.onSessionBegin?()
 
-        #expect(!model.translationFallbackActive)
+        #expect(!model.translationRuntime.fallbackLatched)
     }
 
     /// A result whose row is gone — the transcript cleared underneath it —

@@ -56,8 +56,6 @@ final class AppModel {
     /// clear / archive swap instead of re-summing the transcript per render.
     /// Internal setter: the archive swap lives in the archive surface.
     var sessionCharacterCount = 0
-    /// Old mirror name, kept until views switch to the runtime snapshot.
-    var translationWorkerActive: Bool { translationSession.runtime.workerAttached }
     var engineIsMock = false
     var modelURL: URL?
     /// Floating subtitle overlay, shown/hidden from the sidebar's overlay

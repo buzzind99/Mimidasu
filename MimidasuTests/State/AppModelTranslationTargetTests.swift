@@ -49,14 +49,14 @@ struct AppModelTranslationTargetTests {
         )
 
         model.retryTranslation()
-        #expect(await pollUntil { model.translationStatus == .ready })
+        #expect(await pollUntil { model.translationRuntime.status == .ready })
         #expect(model.translationQueue.targetLangCode == "zh-Hans", "attach stamps the queue")
 
         // Re-engage the Apple host: its config must carry the same target.
         model.phase = .running
         settings.select(.apple)
         model.translationProviderDidChange()
-        #expect(model.activeTranslationEngine == .apple)
+        #expect(model.translationRuntime.engine == .apple)
         #expect(
             model.translationConfig?.target == Locale.Language(identifier: "zh-Hans"),
             "the Apple config targets the selected language"

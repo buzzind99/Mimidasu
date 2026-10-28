@@ -129,7 +129,7 @@ struct AppModelRetranslateLaneOwnershipTests {
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
         model.phase = .running
-        model.activeTranslationEngine = .apple
+        model.translationSession.activeTranslationEngine = .apple
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
 

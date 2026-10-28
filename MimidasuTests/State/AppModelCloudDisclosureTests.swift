@@ -85,7 +85,7 @@ struct AppModelCloudDisclosureTests {
         #expect(settings.testResult(for: .openrouter) == .success)
         #expect(settings.selectedProvider == .apple, "the selection is held")
         #expect(model.providerAwaitingDisclosure == .providerSwitch(.openrouter))
-        #expect(model.activeExternalProvider == nil, "activation waits for the selection")
+        #expect(model.translationRuntime.externalProvider == nil, "activation waits for the selection")
 
         model.confirmCloudDisclosure(.providerSwitch(.openrouter))
 

@@ -314,11 +314,17 @@ extension SidebarView {
         model.engineIsMock ? Theme.dotYellow : Theme.secondaryText
     }
 
+    /// The coordinator's live translation runtime snapshot — the one source
+    /// for engine, provider, status and the fallback latch.
+    private var runtime: TranslationRuntime {
+        model.translationRuntime
+    }
+
     /// The latched Apple fallback stays visible after the fresh Apple run
     /// publishes `.ready` — otherwise "On-device (fallback)" would flash for
     /// under a second and the card would read as healthy green.
     private var translationFallbackLatched: Bool {
-        model.translationFallbackActive && model.activeTranslationEngine == .apple
+        runtime.isAppleFallbackLatched
     }
 
     /// Names the engine actually attached to the queue: an external run
@@ -327,8 +333,8 @@ extension SidebarView {
     /// engine the queue isn't using.
     private var translationEngineName: String {
         SidebarStatus.translationEngineName(
-            activeEngine: model.activeTranslationEngine,
-            externalProvider: model.activeExternalProvider,
+            activeEngine: runtime.engine,
+            externalProvider: runtime.externalProvider,
             selectedProvider: model.translationSettings.selectedProvider,
             appleHighFidelity: model.appleHighFidelity
         )
@@ -336,16 +342,16 @@ extension SidebarView {
 
     private var translationDetail: String {
         SidebarStatus.translationDetail(
-            status: model.translationStatus,
-            activeEngine: model.activeTranslationEngine,
+            status: runtime.status,
+            activeEngine: runtime.engine,
             fallbackActive: translationFallbackLatched
         )
     }
 
     private var translationDotColor: Color {
         dotColor(TranslationPill.map(
-            status: model.translationStatus,
-            activeEngine: model.activeTranslationEngine,
+            status: runtime.status,
+            activeEngine: runtime.engine,
             fallbackActive: translationFallbackLatched
         ).tone)
     }
