@@ -56,11 +56,8 @@ final class AppModel {
     /// clear / archive swap instead of re-summing the transcript per render.
     /// Internal setter: the archive swap lives in the archive surface.
     var sessionCharacterCount = 0
-    /// Observable mirror of `translationQueue.hasWorker` for the retry gate
-    /// (the queue is not `@Observable`). An Apple run stays parked across a
-    /// stop (true); an external run flips it false as its cancelled worker
-    /// unwinds.
-    private(set) var translationWorkerActive = false
+    /// Old mirror name, kept until views switch to the runtime snapshot.
+    var translationWorkerActive: Bool { translationSession.runtime.workerAttached }
     var engineIsMock = false
     var modelURL: URL?
     /// Floating subtitle overlay, shown/hidden from the sidebar's overlay
@@ -359,18 +356,6 @@ final class AppModel {
             )
         }
         wireSessionController()
-        translationQueue.setHandlers(
-            result: { [weak self] index, translation in
-                self?.applyTranslation(index: index, translation: translation)
-            },
-            // Through the facade so tests exercise the production path.
-            status: { [weak self] status in
-                self?.handleTranslationStatus(status)
-            },
-            workerChanged: { [weak self] active in
-                self?.translationWorkerActive = active
-            }
-        )
         // The coordinators captured only values (queue, settings) above, so
         // no `self` escaped before full init. The host wiring below runs
         // after every stored property is initialized: the coordinators reach

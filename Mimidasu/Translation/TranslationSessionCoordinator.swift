@@ -93,24 +93,49 @@ enum PendingCloudDisclosure: Equatable, Identifiable {
 @Observable
 @MainActor
 final class TranslationSessionCoordinator {
+    /// The one live-translation truth. Written only through the accessors below
+    /// (activation, status landing, fallback latch, worker attach, session
+    /// boundary); read through `AppModel.translationRuntime`.
+    private(set) var runtime = TranslationRuntime()
+
     /// The engine currently attached to the queue — Apple's via the hidden
     /// `.translationTask` host, an external one via `translationWorker`.
-    var activeTranslationEngine: ActiveTranslationEngine = .apple
+    var activeTranslationEngine: ActiveTranslationEngine {
+        get { runtime.engine }
+        set { runtime.engine = newValue }
+    }
 
     /// Which external provider is attached while `activeTranslationEngine`
     /// is `.external` (nil on the Apple paths). Labels read this, never the
     /// picker, so the ENGINES card and "Currently using" row can't describe
     /// a provider that isn't actually attached.
-    var activeExternalProvider: TranslationProvider?
+    var activeExternalProvider: TranslationProvider? {
+        get { runtime.externalProvider }
+        set { runtime.externalProvider = newValue }
+    }
+
+    /// Drives the queue-status surface: the sidebar pill, the footer, and
+    /// the failure cards all read this through the app model.
+    var translationStatus: TranslationStatus {
+        get { runtime.status }
+        set { runtime.status = newValue }
+    }
 
     /// True once this session has latched onto Apple on-device after an
     /// external engine failed (the Settings "Currently using" row surfaces
     /// it). Reset by every manual retry and every session begin.
-    var translationFallbackActive = false
+    var translationFallbackActive: Bool {
+        get { runtime.fallbackLatched }
+        set { runtime.fallbackLatched = newValue }
+    }
 
-    /// Drives the queue-status surface: the sidebar pill, the footer, and
-    /// the failure cards all read this through the app model.
-    var translationStatus: TranslationStatus = .idle
+    /// The queue's worker attachment — published from the queue's
+    /// `workerChanged` callback (set when a run attaches its engine, cleared
+    /// when it releases).
+    var workerAttached: Bool {
+        get { runtime.workerAttached }
+        set { runtime.workerAttached = newValue }
+    }
 
     /// Drives SwiftUI's `.translationTask` (session acquisition + pack
     /// prompt).
@@ -178,6 +203,7 @@ final class TranslationSessionCoordinator {
         self.settings = settings
         self.transport = transport
         self.tierAvailability = tierAvailability
+        installQueueHandlers()
     }
 
     /// The live session phase from the host; `.idle` when the host is gone
