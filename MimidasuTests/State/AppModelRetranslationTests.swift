@@ -207,12 +207,13 @@ struct AppModelRetranslationTests {
         #expect(drained, "the gated retry must not enter the queue without a worker")
     }
 
-    /// The transcript's retry gate reads `translationRuntime.workerAttached`
-    /// — the runtime snapshot's worker truth, published from the queue's
-    /// `workerChanged` handler (set when a run attaches its engine, cleared
-    /// when it releases) — because the queue is not observable and could not
-    /// drive the view directly. The snapshot must track attach and release
-    /// exactly, or the shown button diverges from what a click would serve.
+    /// The sidebar and status surfaces read
+    /// `translationRuntime.workerAttached` — the runtime snapshot's worker
+    /// truth, published from the queue's `workerChanged` handler (set when a
+    /// run attaches its engine, cleared when it releases) — because the queue
+    /// is not observable and could not drive those views directly. The
+    /// transcript's retry gate reads the queue itself; the snapshot must
+    /// still track attach and release exactly for the surfaces that render it.
     @Test("the runtime's workerAttached tracks the queue worker's attach and release")
     func workerAttachedTracksQueueWorker() async {
         let model = await harness.makeModel()

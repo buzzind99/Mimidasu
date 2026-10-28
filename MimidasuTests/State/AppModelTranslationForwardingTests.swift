@@ -120,19 +120,24 @@ struct AppModelTranslationForwardingTests {
         #expect(model.retranslate.probeSettleTimeout == .milliseconds(25))
     }
 
-    @Test("liveSessionRunsKind forwards the live engine identity")
-    func liveSessionRunsKindForwards() async {
+    @Test("the live plan's run facts carry the live engine identity")
+    func livePlanCarriesLiveEngineIdentity() async {
         let model = await makeModel()
+        let target = model.translationSettings.targetLanguage
 
-        #expect(!model.liveSessionRunsKind(.appleFast), "no probe landed — no provable identity")
+        let unlanded = model.retranslatePlan(surface: .live, target: target).context.live
+        #expect(
+            unlanded.runsFast == !AppleTierAvailability.supportsStrategySelection,
+            "above the strategy API an unlanded probe leaves the live identity unprovable"
+        )
+        #expect(!unlanded.runsHighFidelity, "no probe landed — no provable high fidelity")
 
         model.translationSession.activeTranslationEngine = .external
         model.translationSession.activeExternalProvider = .google
 
-        #expect(
-            !model.liveSessionRunsKind(.appleFast),
-            "an external live session runs no Apple kind"
-        )
+        let external = model.retranslatePlan(surface: .live, target: target).context.live
+        #expect(!external.runsFast, "an external live session runs no Apple kind")
+        #expect(!external.runsHighFidelity, "an external live session runs no Apple kind")
 
         // A landed not-installed probe for the current target resolves the
         // live Apple session to the fast model — the one provable `true`
@@ -142,6 +147,8 @@ struct AppModelTranslationForwardingTests {
         let targetCode = model.translationSettings.targetLanguage.code
         model.appleHighFidelityProbe = (false, targetCode)
 
-        #expect(model.liveSessionRunsKind(.appleFast), "a landed fast identity is provable")
+        let appleFast = model.retranslatePlan(surface: .live, target: target).context.live
+        #expect(appleFast.runsFast, "a landed fast identity is provable")
+        #expect(!appleFast.runsHighFidelity, "the fast identity is not the high-fidelity engine")
     }
 }

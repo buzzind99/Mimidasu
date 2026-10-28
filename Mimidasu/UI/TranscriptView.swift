@@ -77,6 +77,11 @@ struct TranscriptView: View {
                         .listRowBackground(Color.clear)
                 }
                 ForEach(model.entries) { entry in
+                    let rowPlan = model.retranslateRowPlan(
+                        for: entry,
+                        surface: retranslateSurface,
+                        target: retranslateTarget
+                    )
                     TranscriptRow(
                         entry: entry,
                         displayLanguage: model.openArchive != nil
@@ -99,9 +104,7 @@ struct TranscriptView: View {
                         },
                         isFavorite: model.favoriteSegmentMatcher,
                         onRetry: { sentence in model.retranslateSentence(sentence) },
-                        retryEnabled: retryEnabled(for: entry),
-                        isRetranslating: model.pendingRetranslations.contains(entry.sentence.index),
-                        retranslateMarker: retranslateMarker(for: entry),
+                        rowPlan: rowPlan,
                         fadesIn: TranscriptScrollPin.rowFadesIn(
                             in: scrollMode, isNewest: entry.id == model.entries.last?.id
                         )
@@ -190,95 +193,19 @@ struct TranscriptView: View {
         model.openArchive == nil ? .live : .archive
     }
 
-    /// Whether this row's retry affordance may be shown. Every clause is a
-    /// precondition `AppModel.retranslateSentence` enforces, so a shown button
-    /// is one whose click would be served rather than silently refused:
-    /// a live session, and this row not already retranslating. Read per row
-    /// here, in the body, so the invalidation that changes any of them
-    /// re-renders the rows.
-    ///
-    /// The worker and status clauses read the coordinator's live runtime
-    /// snapshot (`model.translationRuntime.workerAttached` /
-    /// `model.translationRuntime.status`) — the one published truth for the
-    /// queue's attached worker and translation status. Both are skipped
-    /// while an alternate retry engine resolves:
-    /// a dead session engine is exactly when routing the retry elsewhere is
-    /// useful, and the lane's availability (`alternateRetranslateEngineActive`)
-    /// already answers "will this click be served". The row's own sentence
-    /// being queued or airborne is deliberately *not* consulted: that state
-    /// cannot reach this view either, and a queued line's button is the
-    /// common case anyway — it simply comes back with the batch.
-    private func retryEnabled(for entry: SessionEntry) -> Bool {
-        // Archive mode: the opened session is the deliverer (the lane routes
-        // through its dedicated engines), so the button is held back by an
-        // in-flight retry, a claimed bulk job (one translation at a time),
-        // and a retry selection that resolves to no engine (a key-less
-        // external pick would only report unavailable).
-        if model.openArchive != nil {
-            return !model.pendingRetranslations.contains(entry.sentence.index)
-                && !model.archiveTranslationRunning
-                && model.alternateRetranslateEngineActive
-        }
-        guard SessionPhaseMachine.isLive(model.phase) else { return false }
-        if !model.alternateRetranslateEngineActive {
-            guard model.translationRuntime.workerAttached else { return false }
-            if case .unavailable = model.translationRuntime.status {
-                return false
-            }
-        }
-        return !model.pendingRetranslations.contains(entry.sentence.index)
+    /// Which surface the transcript is rendering for the re-translate plan:
+    /// the opened record's pane, or the live feed.
+    private var retranslateSurface: RetranslateSurface {
+        model.openArchive == nil ? .live : .archive
     }
 
-    /// Marker text for a retried row: only when the lane produced it, the
-    /// lane's engine differs from the current active engine, and the toggle
-    /// is on. The Apple branch's identity is provisional until the
-    /// activation's probe lands — every activation, Apple or external,
-    /// resets the tuple to `(false, nil)` and it lands async — so comparing
-    /// against a not-yet-landed identity would flash a marker on a
-    /// just-retried row that the landing probe immediately removes. External
-    /// identity needs no probe.
-    private func retranslateMarker(for entry: SessionEntry) -> String? {
-        guard model.translationSettings.showsRetranslateMarker else { return nil }
-        // The row's target language: the open archive's viewed language in
-        // archive mode (retries stamp it), the settings target live.
-        let targetCode = model.openArchive != nil
-            ? (model.archiveViewingCode ?? model.translationSettings.targetLanguage.code)
-            : model.translationSettings.targetLanguage.code
-        // Matched by language, not `.last`: the row renders every
-        // translation, so the marker must describe the one shown for the
-        // current target rather than whichever came last.
-        guard let translation = entry.translations.first(where: { existing in
-            existing.lang == targetCode
-        }),
-            let engine = translation.engine
-        else { return nil }
-        // Once the probe has landed not-installed for the row's target, a
-        // row stamped `.appleHighFidelity` actually holds the fast model's
-        // text — the framework silently falls back — so its marker must not
-        // claim Apple Intelligence. The probe is evidence only for the pair
-        // it ran for, so the comparison is scoped to the row's target.
-        if engine == .appleHighFidelity, model.highFidelityKnownUnavailable(for: targetCode) {
-            return nil
-        }
-        // Archive mode: there is no live engine to differ from — every
-        // archive retry runs through a dedicated alternate, so the stamp
-        // itself is the provenance. The probe-pending hold below describes
-        // the live session's identity and does not apply.
-        if model.openArchive != nil {
-            return "· via \(engine.markerName)"
-        }
-        // Only the Apple kinds depend on the probe. While it is pending the
-        // identity is unknown under ANY live engine (external sessions probe
-        // too, and a probe killed by a stop leaves the tuple at
-        // `(false, nil)` while the transcript stays on screen), so an Apple
-        // marker waits for it.
-        if engine == .appleFast || engine == .appleHighFidelity,
-           model.appleHighFidelityProbe.targetCode == nil
-        {
-            return nil
-        }
-        guard engine != model.activeEngineKind else { return nil }
-        return "· via \(engine.markerName)"
+    /// The language the pane retries toward: the opened record's viewed
+    /// language, or the configured live target.
+    private var retranslateTarget: TargetLanguage {
+        guard model.openArchive != nil else { return model.translationSettings.targetLanguage }
+        return TargetLanguage(
+            code: model.archiveViewingCode ?? model.translationSettings.targetLanguage.code
+        )
     }
 
     /// Per-word popover presentation for the row's word units: the

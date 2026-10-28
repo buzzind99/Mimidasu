@@ -29,6 +29,11 @@ struct SettingsRetranslateCard: View {
         _settings = Bindable(wrappedValue: settings)
     }
 
+    /// The card's decision snapshot for the persisted target.
+    private var plan: RetranslatePlan {
+        model.retranslatePlan(surface: .live, target: settings.targetLanguage)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             KickerLabel("RE-TRANSLATE", color: Palette.label)
@@ -64,7 +69,7 @@ struct SettingsRetranslateCard: View {
         } label: {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(displayedOption.title)
+                    Text(displayed.title)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Palette.primaryText)
                     Spacer()
@@ -74,7 +79,7 @@ struct SettingsRetranslateCard: View {
                         .rotationEffect(.degrees(showsOptions ? 180 : 0))
                         .animation(.easeOut(duration: 0.15), value: showsOptions)
                 }
-                Text(displayedOption.subtitle)
+                Text(displayed.subtitle)
                     .font(.system(size: 10.5))
                     .foregroundStyle(Palette.mutedText)
                     .lineLimit(2)
@@ -95,25 +100,18 @@ struct SettingsRetranslateCard: View {
             RoundedRectangle(cornerRadius: 11, style: .continuous),
             tint: Palette.accent, opacity: 0.06
         )
-        .accessibilityLabel("Re-translate engine: \(displayedOption.title)")
+        .accessibilityLabel("Re-translate engine: \(displayed.title)")
         .popover(isPresented: $showsOptions, arrowEdge: .bottom) {
             optionsMenu
         }
     }
 
-    /// The option the selection card renders: the persisted selection while
-    /// it's listed, otherwise the option matching the effective (degraded)
-    /// resolution — a filtered-out selection can still resolve to a listed
-    /// alternate (a known-unavailable Apple Intelligence degrades to the
-    /// fast model, a duplicate external to the session path), and the card
-    /// must describe what a click actually does. Only when neither matches
-    /// does it fall back to the session engine.
-    private var displayedOption: Option {
-        engineOptions.first(where: { option in option.engine == settings.retranslateEngine })
-            ?? engineOptions.first(where: { option in
-                option.engine == model.effectiveRetranslateSelection
-            })
-            ?? sessionOption
+    /// The option the selection card renders: the plan's displayed engine,
+    /// matched to its listed option. The session option is the defensive
+    /// fallback — the plan always lists it.
+    private var displayed: Option {
+        let engine = plan.displayedEngine
+        return options.first(where: { listed in listed.engine == engine }) ?? sessionOption
     }
 
     // MARK: - Options popover
@@ -123,7 +121,7 @@ struct SettingsRetranslateCard: View {
         // would run off smaller screens at full provider counts.
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 8) {
-                ForEach(engineOptions) { option in
+                ForEach(options) { option in
                     optionCard(option)
                 }
             }
@@ -134,7 +132,7 @@ struct SettingsRetranslateCard: View {
     }
 
     /// One option card: title over description, checkmarked while it is the
-    /// displayed selection. The checkmark keys off `displayedOption` (not
+    /// displayed option. The checkmark keys off the displayed engine (not
     /// the persisted value) so the row matching the collapsed card is always
     /// the highlighted one — they diverge when a filtered-out selection
     /// degrades to a different listed option. The inert-click guard stays on
@@ -143,7 +141,7 @@ struct SettingsRetranslateCard: View {
     /// the already-persisted row stays a no-op that cannot re-raise the
     /// disclosure.
     private func optionCard(_ option: Option) -> some View {
-        let isDisplayed = option.engine == displayedOption.engine
+        let isDisplayed = option.engine == displayed.engine
         let isPersisted = option.engine == settings.retranslateEngine
         return Button {
             // The persisted row is inert: re-running the action would
@@ -190,30 +188,29 @@ struct SettingsRetranslateCard: View {
 
     // MARK: - Options
 
-    private var engineOptions: [Option] {
-        var options: [Option] = [sessionOption]
-        if !model.liveSessionRunsKind(.appleFast) {
-            options.append(appleFastOption)
+    private var options: [Option] {
+        plan.options.compactMap { planOption in
+            option(for: planOption)
         }
-        // Hidden once the OS is known not to serve the strategy for this pair:
-        // the framework would silently fall back to fast, so offering it would
-        // resolve the retry to the fast model while labelling the row "Apple
-        // Intelligence". A probe that has not landed is not evidence either
-        // way, so the option stays listed until the probe says no, and the OS
-        // never offers it without the strategy API at all.
-        if model.offersAppleHighFidelity, !model.liveSessionRunsKind(.appleHighFidelity) {
-            options.append(appleIntelligenceOption)
+    }
+
+    /// Maps one plan option to its dropdown card. The title and description
+    /// helpers remain the single source of the card copy.
+    private func option(for planOption: RetranslateOption) -> Option? {
+        let engine = planOption.engine
+        if let provider = engine.provider {
+            return externalOption(for: provider)
         }
-        options.append(
-            contentsOf: TranslationProvider.allCases
-                .filter { provider in
-                    provider.isExternal
-                        && settings.isConfigured(for: provider)
-                        && provider != model.translationRuntime.externalProvider
-                }
-                .compactMap(externalOption)
-        )
-        return options
+        switch engine {
+        case .session:
+            return sessionOption
+        case .appleFast:
+            return appleFastOption
+        case .appleHighFidelity:
+            return appleIntelligenceOption
+        default:
+            return nil
+        }
     }
 
     private var sessionOption: Option {

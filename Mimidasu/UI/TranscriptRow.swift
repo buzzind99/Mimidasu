@@ -38,25 +38,14 @@ struct TranscriptRow: View {
     var isFavorite: ((ReadingSegment) -> Bool)?
     /// Invoked with the row's sentence when the hover retry button fires.
     var onRetry: ((Sentence) -> Void)?
-    /// Whether the retry affordance may be shown at all — a live session,
-    /// and this row not already retranslating. When the configured retry
-    /// engine resolves to the session path, the attached-worker and
-    /// failure-card clauses apply too; when an alternate engine resolves,
-    /// they are deliberately skipped (see `TranscriptView.retryEnabled` for
-    /// the reads). The live-session, marker, and — on the session path —
-    /// worker clauses are preconditions `retranslateSentence` enforces
-    /// directly; the failure-card clause is belt-and-braces on the worker
-    /// clause (a terminal failure releases the worker in the same tick the
-    /// queue exits), so a shown button is always a button that would do
-    /// something.
-    let retryEnabled: Bool
-    /// True while a manual re-translation of this row's sentence is in
-    /// flight: the translation dims until the fresh one replaces it.
-    let isRetranslating: Bool
-    /// Provenance suffix for a lane-retried translation ("· via Apple
-    /// fast"), precomputed by `TranscriptView` (render-time comparison
-    /// against the active engine); nil = no suffix.
-    let retranslateMarker: String?
+    /// The row's re-translate decision: whether the retry affordance may be
+    /// shown, whether the sentence is already retranslating, and the
+    /// provenance suffix for the translation the row shows. The plan is
+    /// built by the transcript from the current surface, target, and live
+    /// evidence; the enabled flag already folds in every precondition a
+    /// click would enforce, so a shown button is always one that would be
+    /// served rather than silently refused.
+    let rowPlan: RetranslateRowPlan
     /// True only while this row is the live feed's newest entry: a freshly
     /// appended row fades in, while older rows render opaque so recycled
     /// rows scrolling back into view don't re-fade. A record's rows never
@@ -105,12 +94,12 @@ struct TranscriptRow: View {
                     // here rather than inside `translationRow` so it covers
                     // both branches, and above the overlay so the button
                     // itself never dims.
-                    .opacity(isRetranslating ? 0.45 : 1)
+                    .opacity(rowPlan.isRetranslating ? 0.45 : 1)
                     // The retry button floats left of the bar: overlay-only
                     // (no layout impact), vertically centered on the
                     // translation block whatever its line count.
                     .overlay(alignment: .leading) {
-                        if hovering, retryEnabled {
+                        if hovering, rowPlan.isEnabled {
                             retryButton
                                 // Pointer-only: the row's named action above
                                 // is the VoiceOver/keyboard path, and the
@@ -131,7 +120,7 @@ struct TranscriptRow: View {
         // the same affordance is exposed as a named custom action on the row
         // itself — the non-pointer path to the feature.
         .accessibilityAction(named: Text(Self.retryActionTitle)) {
-            guard retryEnabled else { return }
+            guard rowPlan.isEnabled else { return }
             onRetry?(entry.sentence)
         }
         .onHover { isHovering in hovering = isHovering }
@@ -161,13 +150,14 @@ struct TranscriptRow: View {
     /// lands clear of the timestamp on any row whose timestamp is short of
     /// its 40pt frame.
     ///
-    /// Rendered only while the row is hovered and retry is live: gating the
-    /// overlay's *content* rather than its opacity keeps the button out of
-    /// hit-testing when hidden, so it can neither eat a click meant for the
-    /// transcript nor leave a phantom control per row. The button stays out
-    /// of the accessibility tree even when rendered: VoiceOver and full
-    /// keyboard access reach the same affordance through the row's named
-    /// action, and a hover-only control in the tree would just duplicate it.
+    /// Rendered only while the row is hovered and the row plan enables the
+    /// retry: gating the overlay's *content* rather than its opacity keeps
+    /// the button out of hit-testing when hidden, so it can neither eat a
+    /// click meant for the transcript nor leave a phantom control per row.
+    /// The button stays out of the accessibility tree even when rendered:
+    /// VoiceOver and full keyboard access reach the same affordance through
+    /// the row's named action, and a hover-only control in the tree would
+    /// just duplicate it.
     private var retryButton: some View {
         Button {
             onRetry?(entry.sentence)
@@ -234,8 +224,8 @@ struct TranscriptRow: View {
     /// text: the suffix copies with the sentence.
     private func translationText(_ text: String) -> some View {
         let translation = Text(text).foregroundStyle(Theme.translationTeal)
-        guard let retranslateMarker else { return translation }
-        let glued = retranslateMarker.replacingOccurrences(of: " ", with: "\u{00A0}")
+        guard let marker = rowPlan.marker else { return translation }
+        let glued = marker.replacingOccurrences(of: " ", with: "\u{00A0}")
         let suffix = Text("\u{00A0}\u{00A0}\(glued)")
             .foregroundStyle(Theme.secondaryText)
         return translation + suffix

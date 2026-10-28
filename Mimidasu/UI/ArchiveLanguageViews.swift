@@ -367,33 +367,13 @@ struct ArchiveTranslationEnginePicker: View {
         TargetLanguage(code: lang)
     }
 
-    /// Whether the OS can serve the high-fidelity tier for this language.
-    private var hifiOffered: Bool {
-        model.archiveHighFidelityOffered(for: lang)
-    }
-
-    private var defaultEngine: RetranslateEngine {
-        hifiOffered ? .appleHighFidelity : .appleFast
+    /// The picker's decision snapshot for this session language.
+    private var plan: RetranslatePlan {
+        model.retranslatePlan(surface: .archive, target: language)
     }
 
     private var selectedEngine: RetranslateEngine {
-        selection ?? defaultEngine
-    }
-
-    /// High fidelity first (the preferred tier), then NMT, then the
-    /// externals in picker order.
-    private var engineOptions: [RetranslateEngine] {
-        var engines: [RetranslateEngine] = []
-        if hifiOffered {
-            engines.append(.appleHighFidelity)
-        }
-        engines.append(.appleFast)
-        engines.append(
-            contentsOf: TranslationProvider.allCases
-                .filter { provider in provider.isExternal }
-                .compactMap { provider in RetranslateEngine(provider: provider) }
-        )
-        return engines
+        selection ?? plan.defaultEngine
     }
 
     /// The sentences a run would send: missing count, or the full sentence
@@ -433,8 +413,8 @@ struct ArchiveTranslationEnginePicker: View {
             // picker never runs off the screen.
             ScrollView(.vertical) {
                 VStack(spacing: 2) {
-                    ForEach(engineOptions, id: \.rawValue) { engine in
-                        engineRow(engine)
+                    ForEach(plan.options) { option in
+                        engineRow(option)
                     }
                 }
             }
@@ -481,11 +461,11 @@ struct ArchiveTranslationEnginePicker: View {
 
     // MARK: - Engine rows
 
-    private func engineRow(_ engine: RetranslateEngine) -> some View {
-        let configured = isConfigured(engine)
+    private func engineRow(_ option: RetranslateOption) -> some View {
+        let engine = option.engine
         let isSelected = selectedEngine == engine
         return Button {
-            guard configured else { return }
+            guard option.isSelectable else { return }
             selection = engine
         } label: {
             HStack(spacing: 9) {
@@ -494,7 +474,7 @@ struct ArchiveTranslationEnginePicker: View {
                     .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(Theme.primaryText)
                 Spacer(minLength: 8)
-                Text(tailText(engine, configured: configured))
+                Text(tailText(for: option))
                     .font(.system(size: 10.5))
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -503,8 +483,8 @@ struct ArchiveTranslationEnginePicker: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!configured)
-        .opacity(configured ? 1 : 0.45)
+        .disabled(!option.isSelectable)
+        .opacity(option.isSelectable ? 1 : 0.45)
         .background(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(isSelected ? Theme.accentPink.opacity(0.08) : .clear)
@@ -515,22 +495,17 @@ struct ArchiveTranslationEnginePicker: View {
         )
         .hoverHighlight(
             RoundedRectangle(cornerRadius: 9, style: .continuous),
-            isEnabled: configured && !isSelected,
+            isEnabled: option.isSelectable && !isSelected,
             tint: Theme.accentPink, opacity: 0.08
         )
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
-    /// On-device tiers need no key; an external row is usable only while its
-    /// provider has a key that passed the connection probe.
-    private func isConfigured(_ engine: RetranslateEngine) -> Bool {
-        guard let provider = engine.provider else { return true }
-        return model.translationSettings.isConfigured(for: provider)
-    }
-
-    private func tailText(_ engine: RetranslateEngine, configured: Bool) -> String {
-        guard engine.provider != nil else { return "On-device" }
-        return configured ? "Configured" : "Not configured"
+    /// The row's right-hand tail: on-device tiers need no key; an external
+    /// row reports whether its provider is configured.
+    private func tailText(for option: RetranslateOption) -> String {
+        guard option.engine.provider != nil else { return "On-device" }
+        return option.isConfigured ? "Configured" : "Not configured"
     }
 
     private func radio(selected: Bool) -> some View {

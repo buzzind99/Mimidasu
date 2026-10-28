@@ -4,12 +4,11 @@ import Synchronization
 import Testing
 import Translation
 
-/// Tests the re-translate lane's route resolution and settings surface:
-/// `alternateRetranslateEngineActive`, the Apple selections' de facto
-/// degradation, the duplicate-external degradation, the armed dedicated
-/// Apple sessions' teardown at stop, the high-fidelity probe an external
-/// activation fires, and the cloud disclosure that holds an external
-/// selection.
+/// Tests the re-translate lane's route resolution and settings surface: the
+/// plan's alternate route, the Apple selections' de facto degradation, the
+/// duplicate-external degradation, the armed dedicated Apple sessions'
+/// teardown at stop, the high-fidelity probe an external activation fires,
+/// and the cloud disclosure that holds an external selection.
 @MainActor
 @Suite("AppModel re-translate routes")
 struct AppModelRetranslateRouteTests {
@@ -31,6 +30,12 @@ struct AppModelRetranslateRouteTests {
 
     private func makeSUT(transport: HTTPTranslationTransport? = nil) async -> AppModel {
         await harness.makeModel(translationTransport: transport)
+    }
+
+    /// The live plan for the current settings target — what the transcript's
+    /// retry button and the click path both read.
+    private func livePlan(_ model: AppModel) -> RetranslatePlan {
+        model.retranslatePlan(surface: .live, target: model.translationSettings.targetLanguage)
     }
 
     /// Attaches a queue worker and returns the engine too: the degrade tests
@@ -117,8 +122,8 @@ struct AppModelRetranslateRouteTests {
 
     // MARK: - Route resolution
 
-    @Test("alternate-engine active tracks the selection and key state")
-    func alternateEngineActiveTracksSelection() async throws {
+    @Test("the plan's alternate route tracks the selection and key state")
+    func planAlternateRouteTracksSelection() async throws {
         // The second half of the truth table pivots on the probe-installed
         // Apple identity, which `activeEngineKind` only reports on 26.4+.
         guard #available(macOS 26.4, *) else {
@@ -126,30 +131,30 @@ struct AppModelRetranslateRouteTests {
         }
         let model = await makeSUT()
 
-        #expect(!model.alternateRetranslateEngineActive, "the session selection is never alternate")
+        #expect(!livePlan(model).isAlternate, "the session selection is never alternate")
 
         model.translationSettings.selectRetranslate(.google)
-        #expect(!model.alternateRetranslateEngineActive, "an unconfigured external is not usable")
+        #expect(!livePlan(model).isAlternate, "an unconfigured external is not usable")
 
         try? model.translationSettings.saveKey("sk-google", for: .google)
-        #expect(model.alternateRetranslateEngineActive, "a keyed external resolves")
+        #expect(livePlan(model).isAlternate, "a keyed external resolves")
 
         // The probe never landed in this fixture: the live Apple identity is
         // UNKNOWN, so both Apple selections are alternates — the lane defers
         // to the landing instead of trusting the provisional `.appleFast`
         // read (which would misroute against a live hifi session).
         model.translationSettings.selectRetranslate(.appleFast)
-        #expect(model.alternateRetranslateEngineActive)
+        #expect(livePlan(model).isAlternate)
         model.translationSettings.selectRetranslate(.appleHighFidelity)
-        #expect(model.alternateRetranslateEngineActive)
+        #expect(livePlan(model).isAlternate)
 
         // Once the probe lands installed, the truth table resolves: the
         // live session IS Apple Intelligence, so the hifi selection is the
         // same engine and the fast selection is the alternate.
         model.appleHighFidelityProbe = (true, "en")
-        #expect(model.alternateRetranslateEngineActive == false, "the live session IS Apple Intelligence now")
+        #expect(livePlan(model).isAlternate == false, "the live session IS Apple Intelligence now")
         model.translationSettings.selectRetranslate(.appleFast)
-        #expect(model.alternateRetranslateEngineActive)
+        #expect(livePlan(model).isAlternate)
     }
 
     @Test("a duplicate external selection is not an alternate and routes through the session engine")
@@ -164,9 +169,9 @@ struct AppModelRetranslateRouteTests {
         model.translationSettings.selectRetranslate(.google)
         model.translationSession.activeExternalProvider = .google
 
-        #expect(!model.alternateRetranslateEngineActive)
+        #expect(!livePlan(model).isAlternate)
         model.translationSession.activeExternalProvider = nil
-        #expect(model.alternateRetranslateEngineActive)
+        #expect(livePlan(model).isAlternate)
         model.translationSession.activeExternalProvider = .google
 
         model.phase = .running
@@ -270,15 +275,15 @@ struct AppModelRetranslateRouteTests {
             "the external activation lands the high-fidelity probe for the current pair"
         )
         #expect(
-            model.highFidelityKnownUnavailable,
+            livePlan(model).context.tier.highFidelityKnownUnavailable,
             "a landed not-installed probe is known unavailability, under any live engine"
         )
         #expect(
-            model.effectiveRetranslateSelection == .appleFast,
+            livePlan(model).context.effectiveSelection == .appleFast,
             "the persisted hifi selection degrades once the probe lands unavailable"
         )
         #expect(
-            model.alternateRetranslateEngineActive,
+            livePlan(model).isAlternate,
             "the degraded fast selection is a genuine alternate against the external live session"
         )
     }
