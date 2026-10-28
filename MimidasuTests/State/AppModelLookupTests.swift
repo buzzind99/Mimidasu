@@ -325,7 +325,7 @@ final class AppModelLookupTests {
     @Test("the pill star probe reads the promoted lead entry")
     func pillStarProbeReadsLead() {
         let model = makeModel()
-        model.favorites.toggle(
+        model.favorites.add(
             FavoriteWord(headword: "雨", reading: "あめ", romaji: "ame", addedAt: 1)
         )
 

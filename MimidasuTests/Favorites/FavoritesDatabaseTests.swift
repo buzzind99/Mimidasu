@@ -3,10 +3,10 @@ import Foundation
 import Testing
 
 /// The SQL boundary itself: the two guarantees the store's API cannot reach.
-/// Through `FavoritesStore` a headword that is already present removes on the
-/// next toggle, so the idempotent insert — the primary key doing the work — is
-/// only observable here. Each test owns a private temp directory and removes it
-/// with `defer`; the database creates its parent directories on open.
+/// Through `FavoritesStore` an already-present headword never reaches the
+/// insert, so the idempotent insert — the primary key doing the work — is only
+/// observable here. Each test owns a private temp directory and removes it with
+/// `defer`; the database creates its parent directories on open.
 @Suite("FavoritesDatabase")
 struct FavoritesDatabaseTests {
 

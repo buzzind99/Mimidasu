@@ -65,35 +65,39 @@ struct FavoritesStoreTests {
 
     // MARK: - Membership
 
-    @Test("adding a word records it, publishes its headword, and bumps the revision")
+    @Test("adding a word records it and publishes a new snapshot")
     func addRecordsWord() {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
-        let before = store.revision
+        let before = store.snapshot
 
-        store.toggle(Self.miru)
+        store.add(Self.miru)
 
-        #expect(store.count == 1)
-        #expect(store.words.map(\.headword) == ["見る"])
-        #expect(store.revision > before)
+        #expect(store.snapshot.count == 1)
+        #expect(store.snapshot.rows.map(\.headword) == ["見る"])
+        #expect(store.snapshot != before)
     }
 
-    @Test("toggling a starred word removes it")
-    func toggleRemovesStarredWord() {
+    @Test("removing a starred word removes it and publishes the empty list")
+    func removeStarredWordRemovesIt() {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
-        store.toggle(Self.miru)
+        store.add(Self.miru)
+        let before = store.snapshot
 
-        let outcome = store.toggle(Self.miru)
+        let outcome = store.remove(headword: Self.miru.headword)
 
         #expect(outcome == .removed)
+        #expect(store.snapshot != before)
+        #expect(store.snapshot.rows.isEmpty)
+        #expect(!store.snapshot.identity.isFavorite(headword: Self.miru.headword))
     }
 
     @Test("a removed word stops matching, so the transcript drops its color")
     func removeClearsMatchKey() {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
-        store.toggle(Self.miru)
+        store.add(Self.miru)
 
         store.remove(headword: "見る")
 
@@ -105,17 +109,19 @@ struct FavoritesStoreTests {
         let (location, cleanup) = makeLocation()
         defer { cleanup() }
         let store = FavoritesStore(location: location)
-        store.toggle(
+        store.add(
             FavoriteWord(headword: "ｺｰﾋｰ", reading: nil, romaji: nil, addedAt: 1)
         )
 
-        store.remove(headword: "コーヒー")
+        let outcome = store.remove(headword: "コーヒー")
 
         // The reopen is the assertion that matters: membership is probed by
         // normalized key, but the row was stored halfwidth, so a delete by the
         // requested spelling would match nothing in the file and the favorite
         // would come back on the next launch.
-        #expect(FavoritesStore(location: location).words.isEmpty)
+        #expect(outcome == .removed)
+        #expect(store.snapshot.rows.isEmpty)
+        #expect(FavoritesStore(location: location).snapshot.rows.isEmpty)
     }
 
     @Test("a removal the file refuses reports unavailable and changes nothing")
@@ -123,7 +129,7 @@ struct FavoritesStoreTests {
         let (location, cleanup) = makeLocation()
         defer { cleanup() }
         let store = FavoritesStore(location: location)
-        store.toggle(Self.miru)
+        store.add(Self.miru)
         // A second connection holding an exclusive transaction faults the
         // store's delete immediately — the one way a healthy file refuses a
         // write, and the shape a busy disk or a competing writer produces.
@@ -137,13 +143,13 @@ struct FavoritesStoreTests {
         // Nothing changed where the user can see: the word stays starred, and
         // the memory the transcript colors still mirrors what the user was
         // shown — the divergence window is the file's, not the list's.
-        #expect(store.isFavorite(headword: "見る"))
-        #expect(store.words.map(\.headword) == ["見る"])
+        #expect(store.snapshot.identity.isFavorite(headword: "見る"))
+        #expect(store.snapshot.rows.map(\.headword) == ["見る"])
 
         try blocker.execute("ROLLBACK")
         // Not terminal: the next press commits, costing this one press only.
         #expect(store.remove(headword: "見る") == .removed)
-        #expect(store.words.isEmpty)
+        #expect(store.snapshot.rows.isEmpty)
     }
 
     // MARK: - Reading arm
@@ -152,7 +158,7 @@ struct FavoritesStoreTests {
     func matchesReadingOfDifferentSpelling() {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
-        store.toggle(Self.arigatou)
+        store.add(Self.arigatou)
 
         #expect(store.matches(segment: segment("ありがとう")))
     }
@@ -161,7 +167,7 @@ struct FavoritesStoreTests {
     func removeClearsReadingKey() {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
-        store.toggle(Self.arigatou)
+        store.add(Self.arigatou)
 
         store.remove(headword: "有難う")
 
@@ -172,8 +178,8 @@ struct FavoritesStoreTests {
     func removeKeepsSharedReading() {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
-        store.toggle(Self.arigatou)
-        store.toggle(Self.arigatouKana)
+        store.add(Self.arigatou)
+        store.add(Self.arigatouKana)
 
         store.remove(headword: "有難う")
 
@@ -184,7 +190,7 @@ struct FavoritesStoreTests {
     func kanaSpellingMatches() {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
-        store.toggle(Self.oi)
+        store.add(Self.oi)
 
         #expect(!store.matches(segment: segment("置く", lemma: "置く", furigana: "おく")))
         #expect(store.matches(segment: segment("おい")))
@@ -194,7 +200,7 @@ struct FavoritesStoreTests {
     func membershipIgnoresReadingMatch() {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
-        store.toggle(Self.arigatou)
+        store.add(Self.arigatou)
 
         #expect(!store.isFavorite(headword: "ありがとう"))
     }
@@ -203,7 +209,7 @@ struct FavoritesStoreTests {
     func persistsReadingKeys() {
         let (location, cleanup) = makeLocation()
         defer { cleanup() }
-        FavoritesStore(location: location).toggle(Self.arigatou)
+        FavoritesStore(location: location).add(Self.arigatou)
         let reopened = FavoritesStore(location: location)
 
         #expect(reopened.matches(segment: segment("ありがとう")))
@@ -215,10 +221,10 @@ struct FavoritesStoreTests {
     func persistsAcrossInstances() {
         let (location, cleanup) = makeLocation()
         defer { cleanup() }
-        FavoritesStore(location: location).toggle(Self.miru)
+        FavoritesStore(location: location).add(Self.miru)
         let reopened = FavoritesStore(location: location)
 
-        #expect(reopened.words.map(\.headword) == ["見る"])
+        #expect(reopened.snapshot.rows.map(\.headword) == ["見る"])
         #expect(reopened.matches(segment: segment("見た", lemma: "見る")))
     }
 
@@ -229,10 +235,10 @@ struct FavoritesStoreTests {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
 
-        store.toggle(Self.miru)
-        store.toggle(Self.taberu)
+        store.add(Self.miru)
+        store.add(Self.taberu)
 
-        #expect(store.words.map(\.headword) == ["食べる", "見る"])
+        #expect(store.snapshot.rows.map(\.headword) == ["食べる", "見る"])
     }
 
     @Test("a reopened store orders by the file's timestamp, not by insertion")
@@ -243,27 +249,27 @@ struct FavoritesStoreTests {
         // Starred in the opposite order to their timestamps: the newer word
         // goes in first, so an insert-at-zero list reads the other way round
         // and only the file's ordering can produce this answer.
-        store.toggle(Self.taberu)
-        store.toggle(Self.miru)
+        store.add(Self.taberu)
+        store.add(Self.miru)
 
         let reopened = FavoritesStore(location: location)
 
-        #expect(reopened.words.map(\.headword) == ["食べる", "見る"])
+        #expect(reopened.snapshot.rows.map(\.headword) == ["食べる", "見る"])
     }
 
     @Test("a backdated star lands where the file would put it, not at the top")
-    func toggleKeepsTheFileOrdering() {
+    func backdatedStarKeepsFileOrdering() {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
 
-        store.toggle(Self.miru)
-        store.toggle(Self.ko)
-        store.toggle(Self.taberu)
+        store.add(Self.miru)
+        store.add(Self.ko)
+        store.add(Self.taberu)
 
         // Timestamps 1000, 1002, 1001: the newest leads and the backdated
         // word slots between it and the oldest — what a reopen reads back,
         // so the list never reshuffles under the user on relaunch.
-        #expect(store.words.map(\.headword) == ["50%", "食べる", "見る"])
+        #expect(store.snapshot.rows.map(\.headword) == ["50%", "食べる", "見る"])
     }
 
     @Test("two stars in the same millisecond order by headword and read back in that order")
@@ -272,11 +278,11 @@ struct FavoritesStoreTests {
         defer { cleanup() }
         let store = FavoritesStore(location: location)
 
-        store.toggle(FavoriteWord(headword: "そら", reading: nil, romaji: nil, addedAt: 500))
-        store.toggle(FavoriteWord(headword: "あめ", reading: nil, romaji: nil, addedAt: 500))
+        store.add(FavoriteWord(headword: "そら", reading: nil, romaji: nil, addedAt: 500))
+        store.add(FavoriteWord(headword: "あめ", reading: nil, romaji: nil, addedAt: 500))
 
-        #expect(store.words.map(\.headword) == ["あめ", "そら"])
-        #expect(FavoritesStore(location: location).words.map(\.headword) == ["あめ", "そら"])
+        #expect(store.snapshot.rows.map(\.headword) == ["あめ", "そら"])
+        #expect(FavoritesStore(location: location).snapshot.rows.map(\.headword) == ["あめ", "そら"])
     }
 
     // MARK: - Degraded store
@@ -289,9 +295,9 @@ struct FavoritesStoreTests {
         let (store, cleanup) = makeDegradedStore()
         defer { cleanup() }
 
-        #expect(store.isDegraded)
-        #expect(store.words.isEmpty)
-        #expect(store.toggle(Self.miru) == .failed)
+        #expect(store.snapshot.availability == .unavailable)
+        #expect(store.snapshot.rows.isEmpty)
+        #expect(store.add(Self.miru) == .failed)
         #expect(store.search("見る").isEmpty)
         #expect(!store.matches(segment: segment("見た", lemma: "見る")))
     }
@@ -310,11 +316,11 @@ struct FavoritesStoreTests {
 
         let store = FavoritesStore(location: location)
 
-        #expect(store.words == [Self.miru])
+        #expect(store.snapshot.rows == [Self.miru])
         // The reopen is the assertion that matters: a raw handle reads the
         // file without the store's in-memory filter, so a ghost still on disk
         // would show up here — the deletion persisted, not a load-time hiding.
-        #expect(FavoritesStore(location: location).words == [Self.miru])
+        #expect(FavoritesStore(location: location).snapshot.rows == [Self.miru])
         #expect(try FavoritesDatabase(location: location).all() == [Self.miru])
     }
 
@@ -323,7 +329,7 @@ struct FavoritesStoreTests {
         let (location, cleanup) = makeLocation()
         defer { cleanup() }
         let store = FavoritesStore(location: location)
-        store.toggle(Self.miru)
+        store.add(Self.miru)
         // A second handle on the same file plays the older or parallel
         // writer: the load-time sweep already ran, so only the search filter
         // stands between this row and the list.
@@ -342,8 +348,8 @@ struct FavoritesStoreTests {
     func searchByHeadword(query: String, expectedHeadword: String) {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
-        store.toggle(Self.miru)
-        store.toggle(Self.taberu)
+        store.add(Self.miru)
+        store.add(Self.taberu)
 
         #expect(store.search(query).map(\.headword) == [expectedHeadword])
     }
@@ -352,8 +358,8 @@ struct FavoritesStoreTests {
     func emptySearchReturnsAll() {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
-        store.toggle(Self.miru)
-        store.toggle(Self.taberu)
+        store.add(Self.miru)
+        store.add(Self.taberu)
 
         #expect(store.search("   ").count == 2)
     }
@@ -362,7 +368,7 @@ struct FavoritesStoreTests {
     func searchMissReturnsEmpty() {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
-        store.toggle(Self.miru)
+        store.add(Self.miru)
 
         #expect(store.search("鋼").isEmpty)
     }
@@ -371,8 +377,8 @@ struct FavoritesStoreTests {
     func searchEscapesWildcards() {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
-        store.toggle(Self.miru)
-        store.toggle(Self.ko)
+        store.add(Self.miru)
+        store.add(Self.ko)
 
         #expect(store.search("%").map(\.headword) == ["50%"])
     }
@@ -381,8 +387,8 @@ struct FavoritesStoreTests {
     func searchEscapesUnderscore() {
         let (store, cleanup) = makeStore()
         defer { cleanup() }
-        store.toggle(Self.miru)
-        store.toggle(Self.underscored)
+        store.add(Self.miru)
+        store.add(Self.underscored)
 
         #expect(store.search("_").map(\.headword) == ["A_B"])
     }
@@ -391,7 +397,7 @@ struct FavoritesStoreTests {
 
     /// A store seeded to the cap through `seededFavorites` — one transaction
     /// for the fixture rows; the deciding press still runs through the
-    /// production `toggle`/`remove` cap paths.
+    /// production `add`/`remove` cap paths.
     private func makeFullStore() -> (FavoritesStore, () -> Void) {
         seededFavorites(count: FavoritesStore.limit)
     }
@@ -400,16 +406,16 @@ struct FavoritesStoreTests {
     func refusesPastTheCap() {
         let (store, cleanup) = makeFullStore()
         defer { cleanup() }
-        let before = store.revision
+        let before = store.snapshot
 
-        let outcome = store.toggle(
+        let outcome = store.add(
             FavoriteWord(headword: "overflow", reading: nil, romaji: nil, addedAt: 99999)
         )
 
         #expect(outcome == .limitReached)
-        #expect(!store.identity.isFavorite(headword: "overflow"))
-        #expect(store.count == FavoritesStore.limit)
-        #expect(store.revision == before)
+        #expect(!store.snapshot.identity.isFavorite(headword: "overflow"))
+        #expect(store.snapshot.count == FavoritesStore.limit)
+        #expect(store.snapshot == before)
     }
 }
 
@@ -426,21 +432,21 @@ extension FavoritesStoreTests {
         return (store, { try? FileManager.default.removeItem(at: blocked) })
     }
 
-    @Test("toggling an empty headword changes nothing")
-    func toggleEmptyHeadwordIsNoOp() {
+    @Test("adding an empty headword changes nothing")
+    func addEmptyHeadwordIsNoOp() {
         let (location, cleanup) = makeLocation()
         defer { cleanup() }
         let store = FavoritesStore(location: location)
 
-        let outcome = store.toggle(
+        let outcome = store.add(
             FavoriteWord(headword: "", reading: nil, romaji: nil, addedAt: 0)
         )
 
         #expect(outcome == .failed)
-        #expect(store.count == 0)
-        #expect(store.words.isEmpty)
-        #expect(!store.identity.isFavorite(headword: ""))
-        #expect(FavoritesStore(location: location).words.isEmpty)
+        #expect(store.snapshot.count == 0)
+        #expect(store.snapshot.rows.isEmpty)
+        #expect(!store.snapshot.identity.isFavorite(headword: ""))
+        #expect(FavoritesStore(location: location).snapshot.rows.isEmpty)
     }
 
     @Test("same-timestamp words order by UTF-8 bytes, as the file does, where canonical order disagrees")
@@ -457,12 +463,12 @@ extension FavoritesStoreTests {
         let (location, cleanup) = makeLocation()
         defer { cleanup() }
         let store = FavoritesStore(location: location)
-        store.toggle(FavoriteWord(headword: decomposedRing, reading: nil, romaji: nil, addedAt: 500))
-        store.toggle(FavoriteWord(headword: umlaut, reading: nil, romaji: nil, addedAt: 500))
+        store.add(FavoriteWord(headword: decomposedRing, reading: nil, romaji: nil, addedAt: 500))
+        store.add(FavoriteWord(headword: umlaut, reading: nil, romaji: nil, addedAt: 500))
 
         #expect(umlaut < decomposedRing)
-        #expect(store.words.map(\.headword) == [decomposedRing, umlaut])
-        #expect(FavoritesStore(location: location).words.map(\.headword) == [decomposedRing, umlaut])
+        #expect(store.snapshot.rows.map(\.headword) == [decomposedRing, umlaut])
+        #expect(FavoritesStore(location: location).snapshot.rows.map(\.headword) == [decomposedRing, umlaut])
     }
 
     @Test("a removal at the cap still removes")
@@ -473,7 +479,153 @@ extension FavoritesStoreTests {
         let outcome = store.remove(headword: "語0")
 
         #expect(outcome == .removed)
-        #expect(store.count == FavoritesStore.limit - 1)
-        #expect(!store.identity.isFavorite(headword: "語0"))
+        #expect(store.snapshot.count == FavoritesStore.limit - 1)
+        #expect(!store.snapshot.identity.isFavorite(headword: "語0"))
+    }
+}
+
+/// Snapshot publication: one new snapshot per successful mutation, while the
+/// unchanged, absent, refused, and limit paths leave the previous one intact.
+extension FavoritesStoreTests {
+
+    @Test("add publishes one new snapshot and reports added")
+    func addPublishesOneSnapshot() {
+        let (store, cleanup) = makeStore()
+        defer { cleanup() }
+        let before = store.snapshot
+
+        let outcome = store.add(Self.miru)
+
+        #expect(outcome == .added)
+        #expect(store.snapshot != before)
+        #expect(store.snapshot.rows == [Self.miru])
+        #expect(store.snapshot.count == 1)
+        #expect(store.snapshot.availability == .available)
+        #expect(store.snapshot.identity.isFavorite(headword: "見る"))
+    }
+
+    @Test("add inserts at the file-order index")
+    func addKeepsFileOrder() {
+        let (store, cleanup) = makeStore()
+        defer { cleanup() }
+
+        store.add(Self.miru)
+        store.add(Self.ko)
+        store.add(Self.taberu)
+
+        #expect(store.snapshot.rows.map(\.headword) == ["50%", "食べる", "見る"])
+        #expect(store.snapshot.count == 3)
+    }
+
+    @Test("adding a starred word is unchanged and leaves the snapshot identical")
+    func addExistingWordIsUnchanged() {
+        let (store, cleanup) = makeStore()
+        defer { cleanup() }
+        store.add(Self.miru)
+        let before = store.snapshot
+
+        let outcome = store.add(Self.miru)
+
+        #expect(outcome == .unchanged)
+        #expect(store.snapshot == before)
+    }
+
+    @Test("removing a starred word publishes the remaining rows")
+    func removePublishesRemainingRows() {
+        let (store, cleanup) = makeStore()
+        defer { cleanup() }
+        store.add(Self.miru)
+        store.add(Self.taberu)
+
+        let outcome = store.remove(headword: "見る")
+
+        #expect(outcome == .removed)
+        #expect(store.snapshot.rows == [Self.taberu])
+        #expect(store.snapshot.count == 1)
+        #expect(!store.snapshot.identity.isFavorite(headword: "見る"))
+    }
+
+    @Test("removing an absent word keeps the snapshot identical")
+    func removeAbsentWordKeepsSnapshot() {
+        let (store, cleanup) = makeStore()
+        defer { cleanup() }
+        store.add(Self.miru)
+        let before = store.snapshot
+
+        let outcome = store.remove(headword: "食べる")
+
+        #expect(outcome == .removed)
+        #expect(store.snapshot == before)
+    }
+
+    @Test("a refused delete leaves the snapshot identical")
+    func refusedRemovalKeepsSnapshot() throws {
+        let (location, cleanup) = makeLocation()
+        defer { cleanup() }
+        let store = FavoritesStore(location: location)
+        store.add(Self.miru)
+        let before = store.snapshot
+        let blocker = try SQLiteDatabase.writable(path: location.path)
+        try blocker.execute("BEGIN EXCLUSIVE")
+
+        let outcome = store.remove(headword: "見る")
+
+        #expect(outcome == .failed)
+        #expect(store.snapshot == before)
+        try blocker.execute("ROLLBACK")
+    }
+
+    @Test("a refused insert leaves the snapshot identical")
+    func refusedAddKeepsSnapshot() throws {
+        let (location, cleanup) = makeLocation()
+        defer { cleanup() }
+        let store = FavoritesStore(location: location)
+        store.add(Self.miru)
+        let before = store.snapshot
+        let blocker = try SQLiteDatabase.writable(path: location.path)
+        try blocker.execute("BEGIN EXCLUSIVE")
+
+        let outcome = store.add(Self.taberu)
+
+        #expect(outcome == .failed)
+        #expect(store.snapshot == before)
+        try blocker.execute("ROLLBACK")
+    }
+
+    @Test("add at the cap leaves the snapshot identical")
+    func limitReachedKeepsSnapshot() {
+        let (store, cleanup) = makeFullStore()
+        defer { cleanup() }
+        let before = store.snapshot
+
+        let outcome = store.add(
+            FavoriteWord(headword: "overflow", reading: nil, romaji: nil, addedAt: 99999)
+        )
+
+        #expect(outcome == .limitReached)
+        #expect(store.snapshot == before)
+    }
+
+    @Test("a degraded store publishes an unavailable snapshot at init")
+    func degradedStorePublishesUnavailableSnapshot() {
+        let (store, cleanup) = makeDegradedStore()
+        defer { cleanup() }
+
+        #expect(store.snapshot.availability == .unavailable)
+        #expect(!store.snapshot.isAvailable)
+        #expect(store.snapshot.rows.isEmpty)
+    }
+
+    @Test("adding on a degraded store fails and keeps the unavailable snapshot")
+    func degradedStoreAddFails() {
+        let (store, cleanup) = makeDegradedStore()
+        defer { cleanup() }
+        let before = store.snapshot
+
+        let outcome = store.add(Self.miru)
+
+        #expect(outcome == .failed)
+        #expect(store.snapshot == before)
+        #expect(store.snapshot.availability == .unavailable)
     }
 }

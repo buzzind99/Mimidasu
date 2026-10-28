@@ -18,7 +18,7 @@ func isolatedFavorites() -> FavoritesStore {
 /// A `FavoritesStore` over a private temp file seeded with `count` rows
 /// (headword 語<index>, oldest first). The rows go in through one SQLite
 /// transaction — a fixture, not the behavior under test: the store's own
-/// `toggle` costs one fsync'd insert per row, which makes populating the cap
+/// `add` costs one fsync'd insert per row, which makes populating the cap
 /// take seconds. Returned with the cleanup that removes the temp directory.
 @MainActor
 func seededFavorites(count: Int) -> (store: FavoritesStore, cleanup: () -> Void) {

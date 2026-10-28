@@ -101,7 +101,7 @@ struct AppModelFavoritesTests {
 
         model.confirmFavoriteRemoval(headword: "食べる")
 
-        #expect(model.favorites.count == 1)
+        #expect(model.favorites.snapshot.count == 1)
     }
 
     @Test("nothing is stashed on the model while a question is open")
@@ -113,7 +113,7 @@ struct AppModelFavoritesTests {
 
         // The host owns the pending headword; a model-level flag would be
         // observed by every mounted host and raise an alert in each.
-        #expect(model.favorites.words.map(\.headword) == ["見る"])
+        #expect(model.favorites.snapshot.rows.map(\.headword) == ["見る"])
     }
 
     @Test("a store that cannot be opened posts the persistent favorites toast")
@@ -171,7 +171,7 @@ struct AppModelFavoritesTests {
 
         let outcome = model.toggleFavorite(entry(keb: nil, reb: "コーヒー"))
 
-        #expect(outcome == .added && model.favorites.words.map(\.headword) == ["コーヒー"])
+        #expect(outcome == .added && model.favorites.snapshot.rows.map(\.headword) == ["コーヒー"])
     }
 
     @Test("the render matcher lights up an inflected form of a starred word")

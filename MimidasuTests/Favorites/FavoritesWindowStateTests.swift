@@ -91,14 +91,32 @@ struct FavoritesWindowStateTests {
         return (FavoritesWindowState(model: model, lookup: lookup), model)
     }
 
+    /// A window state over a store that cannot open its file: a regular file
+    /// sits where the store's directory belongs, so the first read fails and
+    /// the store degrades terminally.
+    private func makeDegradedState() -> (FavoritesWindowState, () -> Void) {
+        let blocked = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimidasu-favorites-degraded-\(UUID().uuidString)")
+        #expect(FileManager.default.createFile(atPath: blocked.path, contents: nil))
+        let favorites = FavoritesStore(location: blocked.appendingPathComponent("favorites.sqlite"))
+        let lookup = makeMissingLookup()
+        let model = AppModel(
+            favorites: favorites, archive: isolatedArchive(), jmDictLookup: lookup
+        )
+        return (
+            FavoritesWindowState(model: model, lookup: lookup),
+            { try? FileManager.default.removeItem(at: blocked) }
+        )
+    }
+
     @Test("starts on the store's words, with an empty query and a count")
     func startsOnTheStore() {
         let model = makeModel()
-        model.favorites.toggle(Self.miru)
-        model.favorites.toggle(Self.taberu)
+        model.favorites.add(Self.miru)
+        model.favorites.add(Self.taberu)
         // The state snapshots the store at init, so a word starred afterwards
         // does not silently rewrite the rows: only `favoritesChanged()` may.
-        model.favorites.toggle(Self.oi)
+        model.favorites.add(Self.oi)
 
         let state = FavoritesWindowState(model: model)
 
@@ -114,8 +132,8 @@ struct FavoritesWindowStateTests {
     @Test("debounces the query, and trails the rows by the debounce")
     func debouncesQuery() async {
         let (state, model) = makeState()
-        model.favorites.toggle(Self.miru)
-        model.favorites.toggle(Self.taberu)
+        model.favorites.add(Self.miru)
+        model.favorites.add(Self.taberu)
 
         state.favoritesChanged()
         state.query = "見る"
@@ -131,8 +149,8 @@ struct FavoritesWindowStateTests {
     @Test("a keystroke inside the window replaces the pending query")
     func pendingQueryReplaced() async {
         let (state, model) = makeState()
-        model.favorites.toggle(Self.miru)
-        model.favorites.toggle(Self.taberu)
+        model.favorites.add(Self.miru)
+        model.favorites.add(Self.taberu)
 
         state.favoritesChanged()
         state.query = "見る"
@@ -150,8 +168,8 @@ struct FavoritesWindowStateTests {
     @Test("treats a whitespace-only query as no query")
     func whitespaceQueryIsNoQuery() async {
         let (state, model) = makeState()
-        model.favorites.toggle(Self.miru)
-        model.favorites.toggle(Self.taberu)
+        model.favorites.add(Self.miru)
+        model.favorites.add(Self.taberu)
 
         state.favoritesChanged()
         state.query = "   "
@@ -164,15 +182,15 @@ struct FavoritesWindowStateTests {
     @Test("recounts the rows after a mutation while a query is live")
     func mutationRecountsRows() async {
         let (state, model) = makeState()
-        model.favorites.toggle(Self.miru)
-        model.favorites.toggle(Self.taberu)
-        model.favorites.toggle(Self.oi)
+        model.favorites.add(Self.miru)
+        model.favorites.add(Self.taberu)
+        model.favorites.add(Self.oi)
 
         state.favoritesChanged()
         state.query = "おい"
         #expect(await pollUntil(timeout: 5) { state.debouncedQuery == "おい" }, "the live query lands before the mutation")
 
-        model.favorites.toggle(FavoriteWord(
+        model.favorites.add(FavoriteWord(
             headword: "追い", reading: "おい", romaji: "oi", addedAt: 1003
         ))
         state.favoritesChanged()
@@ -183,8 +201,8 @@ struct FavoritesWindowStateTests {
     @Test("prunes the expansion of a word that left the store, and re-runs the query")
     func mutationPrunesExpandedRows() {
         let (state, model) = makeState()
-        model.favorites.toggle(Self.miru)
-        model.favorites.toggle(Self.taberu)
+        model.favorites.add(Self.miru)
+        model.favorites.add(Self.taberu)
 
         state.favoritesChanged()
         state.lookupState.toggle(Self.miru)
@@ -206,7 +224,7 @@ struct FavoritesWindowStateTests {
     func removalWhilePending(testCase: PendingRemovalCase) async {
         let (state, model) = makeState()
         for word in testCase.favorites {
-            model.favorites.toggle(word)
+            model.favorites.add(word)
         }
 
         state.favoritesChanged()
@@ -234,8 +252,8 @@ struct FavoritesWindowStateTests {
     @Test("wipes the query, the rows, and the expansions on close")
     func resetForCloseWipes() {
         let (state, model) = makeState()
-        model.favorites.toggle(Self.miru)
-        model.favorites.toggle(Self.taberu)
+        model.favorites.add(Self.miru)
+        model.favorites.add(Self.taberu)
 
         state.favoritesChanged()
         state.query = "見る"
@@ -254,8 +272,8 @@ struct FavoritesWindowStateTests {
     @Test("the close reset does not respawn the debounce it just cancelled")
     func resetDoesNotRespawnTheDebounce() async throws {
         let (state, model) = makeState()
-        model.favorites.toggle(Self.miru)
-        model.favorites.toggle(Self.taberu)
+        model.favorites.add(Self.miru)
+        model.favorites.add(Self.taberu)
 
         state.favoritesChanged()
         state.query = "食べ"
@@ -272,5 +290,20 @@ struct FavoritesWindowStateTests {
         #expect(state.debouncedQuery.isEmpty)
         #expect(state.results.count == 2)
         #expect(state.lookupState.expanded.isEmpty)
+    }
+
+    @Test("a degraded store's header reads Unavailable with and without a query")
+    func degradedCountText() async {
+        let (state, cleanup) = makeDegradedState()
+        defer { cleanup() }
+
+        #expect(state.countText() == "Unavailable")
+
+        state.query = "見る"
+        #expect(
+            await pollUntil(timeout: 5) { state.debouncedQuery == "見る" },
+            "the query lands over the degraded store"
+        )
+        #expect(state.countText() == "Unavailable")
     }
 }
