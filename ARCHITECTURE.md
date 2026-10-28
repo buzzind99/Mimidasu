@@ -305,20 +305,32 @@ packaged apps in `Contents/Frameworks/`.
   `zai` / `deepseek` / `xai`, persisted as
   `translation.retranslateEngine`). Routes resolve at click time against
   the *lane target*: Settings' target for a live session, the open
-  archive's viewing language for an archived Sentence. A live `.session`
-  selection, an external selection equal to the attached provider, and an
-  Apple selection the landed probe proves equal to the Session engine all route
-  through the queue unstamped; everything else runs through a serialized
-  lane of chained tasks with dedicated, lazily-armed Apple sessions
-  (explicit `preferredStrategy`, so a lane can't silently duplicate the
-  Session engine), Apple lanes deferring behind the availability probe's landing in
-  live mode. Archive mode never uses the queue: `.session` maps to
-  Apple (NMT), every re-translate is a dedicated alternate, and the probe
-  gate is skipped. Dispatching drops any queued copy; landings stamp the
-  SessionEntry's `engine` provenance, and seed the repeat cache only when
-  the SessionEntry accepted the result (live only).
-  Apple Intelligence picks degrade to Apple (NMT) below macOS 26.4 or where
-  the pair-scoped strategy is known unavailable; delivery is
+  archive's viewing language for an archived Sentence.
+  `RetranslateCoordinator` derives one immutable `RetranslateContext` from
+  current observable state — surface, target, selection, the tier-degraded
+  `effectiveSelection`, tier evidence, the live session's identity and
+  queue attachment, the key facts, and the row facts — and one computed
+  `RetranslatePlan` answers every question from it: the `route`
+  (`.session` / `.lane(engine)` / `.unavailable`), `isAlternate`, the
+  offered `options`, `displayedEngine` / `defaultEngine`, and the per-row
+  `RetranslateRowPlan`. The row lane and the bulk archive job switch on
+  `plan.route`; Settings, the archive picker, and the transcript only
+  render the plan. Route eligibility tests a stored key (`hasKey`), while
+  offerability in the picker and Settings requires a verified key
+  (`isConfigured`). A live `.session` selection, an external selection
+  equal to the attached provider, and an Apple selection the landed probe
+  proves equal to the Session engine all route through the queue unstamped;
+  everything else runs through a serialized lane of chained tasks with
+  dedicated, lazily-armed Apple sessions (explicit `preferredStrategy`, so
+  a lane can't silently duplicate the Session engine), and live Apple lanes
+  defer behind the availability probe's landing (the landing re-plans from
+  the click-time surface, target, and selection). Archive mode never uses
+  the queue: `.session` maps to Apple (NMT), every re-translate is a
+  dedicated alternate, and the probe gate is skipped. Dispatching drops any
+  queued copy; landings stamp the SessionEntry's `engine` provenance, and
+  seed the repeat cache only when the SessionEntry accepted the result
+  (live only). Apple Intelligence picks degrade to Apple (NMT) below macOS
+  26.4 or where the pair-scoped strategy is known unavailable; delivery is
   session-epoch-guarded (archive open/close bumps the epoch) and phase- or
   archive-open-guarded so a stale lane can't write into a new session;
   failures post yellow toasts.
@@ -725,8 +737,12 @@ packaged apps in `Contents/Frameworks/`.
   single read-only `translationRuntime` (every mutation happens inside
   `TranslationSessionCoordinator`, which also owns the queue's handler
   wiring — `AppModel` stores no live-runtime state), the re-translate lane
-  keeps its own façade forwards, and `handleTranslationStatus` remains as a
-  test seam over the coordinator's status landing. Split into extensions
+  exposes a read-only plan façade — `retranslatePlan(surface:target:)`,
+  `retranslatePlan(surface:target:selection:)`, and
+  `retranslateRowPlan(for:surface:target:)` — instead of derived
+  availability forwards (`activeEngineKind` remains the identity test
+  seam); `handleTranslationStatus` remains as a test seam over the
+  coordinator's status landing. Split into extensions
   (`AppModelArchive` / `ArchiveTranslation` / `ArchiveWriteBack` /
   `CaptureWarnings` / `Dictionary` / `Export` / `Favorites` / `Lookup` /
   `ModelSelection` / `Overlay` / `Pause` / `Retranslate` / `SessionControl`
@@ -844,10 +860,10 @@ packaged apps in `Contents/Frameworks/`.
   floating openers — book (reference window, Dictionary mode) and star
   (Favorites mode) — laid out below the toasts.
 - **SessionEntries:** hover reveals a circular re-translate button beside
-  the translation (the SessionEntry dims while it runs; a landed lane
-  result shows a "· via \<provider\>" provenance suffix when the marker
-  toggle is on); the list uses a manual bottom-pin scroll model so
-  follow-mode survives virtualization.
+  the translation; the button, the dim state, and the "· via \<provider\>"
+  provenance suffix all render from one `RetranslateRowPlan`, so a row
+  whose route is unavailable shows no button. The list uses a manual
+  bottom-pin scroll model so follow-mode survives virtualization.
 - **State split:** high-frequency partials (`LivePartialState`), the audio
   level ring (`AudioLevelState`), and latency (`LatencyState`) are small
   standalone observables, so partial-rate updates never re-render the
