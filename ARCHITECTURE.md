@@ -180,16 +180,34 @@ packaged apps in `Contents/Frameworks/`.
   deserve a retry?), typed error taxonomy. `TranslationQueue.run(with:)`
   accepts any provider; `Translation/Providers/` holds the cloud adapters.
 - **Coordination:** `TranslationSessionCoordinator` owns the live
-  attach/retry/fallback/provider machinery; `AppleTierAvailability` owns the
+  attach/retry/fallback/provider machinery and is the one live-translation
+  authority: it stores a single `TranslationRuntime` value (`engine` ·
+  `externalProvider` · `workerAttached` · `status` · `fallbackLatched`, plus
+  the derived `isAppleFallbackLatched`) that only the coordinator's
+  long-named accessors write (activation, status landing, fallback latch,
+  worker attach, session boundary). It also installs the queue's callbacks
+  itself — `installQueueHandlers()`, once at the end of `init`, wires
+  `result` (host row landing), `status` (`handleStatus`), and
+  `workerChanged` (the runtime snapshot) — so worker truth is published at
+  the source and nothing mirrors it through `AppModel`.
+  `AppleTierAvailability` owns the
   pair-scoped Apple Intelligence evidence/token/strategy resolution shared
   with the lane; `RetranslateCoordinator` owns the lane. `AppModel` keeps phase,
   entries, archive state, and toasts and forwards through façade extensions
   over `TranslationSessionPort` (`phase` · `toasts` · `applyTranslation` ·
-  archive session/viewing language/running flag · `beginArchiveTranslation`).
+  archive session/viewing language/running flag · `beginArchiveTranslation`),
+  and publishes the live runtime to views as the one read-only
+  `translationRuntime` snapshot.
 - **Providers:** Apple on-device (`AppleSessionEngine` fed by SwiftUI's
   `.translationTask`, hosted in a process-lifetime 1×1 panel
   (`TranslationSessionPanelController`) so closing the main window can't
-  cancel the task and strand the queue's pending sentences; the default;
+  cancel the task and strand the queue's pending sentences; the panel hands
+  the session to `TranslationSessionCoordinator.sessionHandOver(_:)`, the one
+  live hand-over entry point — it refuses unless the runtime's engine is
+  Apple, so a stale Apple session can never steal the queue from an attached
+  external engine, and it awaits `queue.run` inline, keeping the
+  `TranslationSession` alive for the run's life and Apple runs parked across
+  a stop; no view runs the queue itself; the default;
   OS prompts a one-time language pack), and nine external providers: Google
   Translate, DeepL, and seven LLM providers — OpenRouter, OpenAI, Anthropic,
   Moonshot, Z.ai (GLM), DeepSeek, and xAI. On macOS 26.4+ the live
@@ -312,6 +330,11 @@ packaged apps in `Contents/Frameworks/`.
   Apple Intelligence pair is installed, else "Apple", or the provider) over a
   detail line mirroring state ("On-device (fallback)", "Unavailable",
   "External"); Settings repeats it in its "Currently using" row.
+  Both mappers are fed from `model.translationRuntime` — one snapshot of
+  engine, attached provider, status, worker attachment, and latch — so no
+  surface assembles the picture from separate app-model fields, and the
+  Apple-fallback latch reads as `runtime.isAppleFallbackLatched` instead of
+  being re-derived per view.
   Retry/fallback/unavailable states surface as toasts.
 
 ### Reading annotation & dictionary lookup (`Text/`, `Dictionary/`)
@@ -684,8 +707,10 @@ packaged apps in `Contents/Frameworks/`.
 
 ### AppModel + SessionController (`State/`, `Session/`)
 - `AppModel` (@MainActor `@Observable`): session phase (including
-  `.paused` and `.sourceLost`), transcript entries, translation status
-  (forwarded from the live-session coordinator), archive state (`archive` /
+  `.paused` and `.sourceLost`), transcript entries, the live translation
+  runtime (one read-only `translationRuntime` value forwarded from the
+  live-session coordinator — engine, attached provider, worker attachment,
+  status, fallback latch), archive state (`archive` /
   `archiveRead`, `recordingSessionID`, `archiveWriteFailed`, `openArchive`,
   `archiveViewingLanguage`, `archiveTranslationJob`), HUD pin, toast/notice
   stacks, audio level + latency, ASR model state, lookup state (popover +
@@ -696,7 +721,12 @@ packaged apps in `Contents/Frameworks/`.
   fallback latch / lane machinery and the **three**
   `TranslationSession.Configuration`s (the live session's plus the
   re-translate lane's dedicated Apple (NMT) / Apple Intelligence pair), exposed
-  through computed façade pass-throughs. Split into extensions
+  through computed façade pass-throughs: the live runtime surface is the
+  single read-only `translationRuntime` (every mutation happens inside
+  `TranslationSessionCoordinator`, which also owns the queue's handler
+  wiring — `AppModel` stores no live-runtime state), the re-translate lane
+  keeps its own façade forwards, and `handleTranslationStatus` remains as a
+  test seam over the coordinator's status landing. Split into extensions
   (`AppModelArchive` / `ArchiveTranslation` / `ArchiveWriteBack` /
   `CaptureWarnings` / `Dictionary` / `Export` / `Favorites` / `Lookup` /
   `ModelSelection` / `Overlay` / `Pause` / `Retranslate` / `SessionControl`
