@@ -32,7 +32,7 @@ extension AppModel {
     func handleLookupTap(
         _ request: TapLookupRequest, anchor: LookupAnchor
     ) -> Task<Void, Never> {
-        tapLookup.tap(request, anchor: anchor, favorites: favorites.identity)
+        tapLookup.tap(request, anchor: anchor, favorites: favorites.snapshot.identity)
     }
 
     // MARK: - Popover lifecycle
@@ -53,7 +53,7 @@ extension AppModel {
     /// retained results, re-promotes favorites, resets the pager, and keeps
     /// the current anchor. No new query runs.
     func selectAlsoPill(_ result: LookupResult) {
-        tapLookup.selectFallback(result, favorites: favorites.identity)
+        tapLookup.selectFallback(result, favorites: favorites.snapshot.identity)
     }
 
     // MARK: - Entry pager
@@ -203,10 +203,10 @@ extension AppModel {
         // rather than blaming a store that is fine, and names nothing the
         // user could act on.
         guard let headword, !headword.isEmpty else { return .failed }
-        if favorites.isFavorite(headword: headword) {
+        if favorites.snapshot.identity.isFavorite(headword: headword) {
             return .pendingRemoval(headword: headword)
         }
-        let outcome = favorites.toggle(FavoriteWord.starred(
+        let outcome = favorites.add(FavoriteWord.starred(
             headword: headword, reading: reading
         ))
         switch outcome {
@@ -220,11 +220,12 @@ extension AppModel {
             )
         case .failed:
             postUnavailable()
+        case .unchanged:
+            break
         default:
             // `.removed` and `.pendingRemoval` cannot arrive: the guard above
-            // returns for an already-starred word, and `FavoritesStore.toggle`
-            // reports `.removed` exactly when `isFavorite` is true. Both
-            // would be silent anyway.
+            // returns for an already-starred word, and nothing here deletes.
+            // Both would be silent anyway.
             break
         }
         return outcome
@@ -235,7 +236,7 @@ extension AppModel {
     /// promotion repins both hosts, and a cached value would show the
     /// pre-promotion entry's membership for as long as it survived.
     func isFavorite(_ entry: JMDictEntry) -> Bool {
-        favorites.identity.isFavorite(entry)
+        favorites.snapshot.identity.isFavorite(entry)
     }
 
     /// Whether a fallback pill leads with a favorited entry — the pill
@@ -243,12 +244,13 @@ extension AppModel {
     /// front, so a favorited lead is the pill's starred word; a favorite
     /// matched through another spelling stays behind the lead.
     func isFavoriteLead(_ result: LookupResult) -> Bool {
-        favorites.identity.leads(result)
+        favorites.snapshot.identity.leads(result)
     }
 
     /// The per-segment probe the transcript, live strip, and HUD pass down.
-    /// A fresh closure per access: identity is meaningless here, which is why
-    /// membership changes travel as `favorites.revision` instead.
+    /// A fresh closure per access: the closure itself carries no observable
+    /// state, which is why membership changes travel as `favorites.snapshot`
+    /// instead.
     var favoriteSegmentMatcher: (ReadingSegment) -> Bool {
         let store = favorites
         return { segment in store.matches(segment: segment) }

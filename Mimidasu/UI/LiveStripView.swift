@@ -14,7 +14,7 @@ struct LiveStripView: View {
     /// rendering path.
     var onLookup: ((TapLookupRequest) -> Void)?
     /// Favorite matcher, straight from the owner. The owner reads the store's
-    /// revision while its own body evaluates and discards it: the matcher
+    /// snapshot while its own body evaluates and discards it: the matcher
     /// accessor builds a closure and observes nothing, so it alone cannot
     /// re-render an already-painted partial.
     var isFavorite: ((ReadingSegment) -> Bool)?

@@ -41,11 +41,12 @@ struct FavoriteWord: Identifiable, Equatable, Sendable {
 }
 
 /// What a star press did. `limitReached` (the user's list is full),
-/// `pendingRemoval` (an un-star the user must now confirm), and `failed`
-/// (the store is degraded, or the word carries no headword and the store
-/// refuses it defensively) are distinct because one is a refusal the user
-/// caused, one is a question, and the other is a fault deserving a persistent
-/// surface — only `added` and `removed` changed anything on screen.
+/// `pendingRemoval` (an un-star the user must now confirm), `unchanged` (the
+/// word was already present and nothing changed), and `failed` (the store is
+/// degraded, or the word carries no headword and the store refuses it
+/// defensively) are distinct because one is a refusal the user caused, one is
+/// a question, one is a repeat press, and the other is a fault deserving a
+/// persistent surface — only `added` and `removed` changed anything on screen.
 ///
 /// `pendingRemoval` carries its headword so the host can raise the
 /// confirmation without re-deriving it, and so nothing has to be stashed on
@@ -54,6 +55,7 @@ enum FavoriteToggle: Equatable, Sendable {
     case added
     case removed
     case pendingRemoval(headword: String)
+    case unchanged
     case limitReached
     case failed
 }

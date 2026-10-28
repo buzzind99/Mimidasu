@@ -14,7 +14,7 @@ struct HUDView: View {
     /// Set on offscreen measurement copies: fixes the layout width so the
     /// measured ideal height reflects text wrapped at the real HUD width.
     var fixedWidth: CGFloat?
-    /// Favorite matcher for both JP surfaces. The store-revision read here is
+    /// Favorite matcher for both JP surfaces. The snapshot read here is
     /// belt-and-braces: `RubyTextView`'s own body resolves membership and so
     /// observes the store directly, but this keeps the HUD's dependence on
     /// favorite state visible at the surface handing the matcher down. The
@@ -23,7 +23,7 @@ struct HUDView: View {
     /// segmented path, and in None annotation both surfaces stay on the plain
     /// fallback.
     private func observeFavorites() {
-        _ = model.favorites.revision
+        _ = model.favorites.snapshot
     }
 
     var body: some View {

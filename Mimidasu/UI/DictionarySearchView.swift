@@ -347,7 +347,7 @@ private extension DictionarySearchView {
         // Favorite-first: a starred entry leads the pager — reorders only,
         // the count unchanged. An unstepped row lands on its own entry.
         let promoted = FavoritesPromotion.promotingFavorites(
-            in: result, identity: model.favorites.identity
+            in: result, identity: model.favorites.snapshot.identity
         )
         let key = DictionarySearchState.lookupKey(for: hit)
         let fallback = DictionarySearchState.rowEntryIndex(for: hit, in: promoted)

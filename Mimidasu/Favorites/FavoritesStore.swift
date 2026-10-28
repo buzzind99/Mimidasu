@@ -4,12 +4,16 @@ import Observation
 /// The user's starred words, and the render-path answer to "is this segment a
 /// favorite?".
 ///
-/// Two read paths on purpose. `words` and `search` are durable — the file is
-/// the record and the SQL owns ordering and filtering. `identity` is the
-/// in-memory Favorite identity probed by the transcript twice per segment per
-/// re-diff; it must never touch SQLite. Load and removal rebuild it from
-/// `words` while each add folds one row in, which is otherwise invisible: a
-/// stale identity means a word simply never lights up.
+/// One publication: every mutation builds the next rows and identity and hands
+/// them to `publish`, which assigns one immutable `snapshot`. Store readers
+/// observe that snapshot; there is no parallel state to keep in step.
+///
+/// `snapshot.rows` and `search` are durable — the file is the record and the
+/// SQL owns ordering and filtering. `snapshot.identity` is the in-memory
+/// Favorite identity probed by the transcript twice per segment per re-diff; it
+/// must never touch SQLite. Load and removal rebuild it from the rows while
+/// each add folds one row in, which is otherwise invisible: a stale identity
+/// means a word simply never lights up.
 @Observable
 @MainActor
 final class FavoritesStore {
@@ -18,31 +22,11 @@ final class FavoritesStore {
     /// worse than a refused one.
     static let limit = 8192
 
-    /// Every favorite, newest first. Held in memory (≤`limit` rows of three
-    /// short strings) so the window renders without touching the disk.
-    private(set) var words: [FavoriteWord] = []
-    /// `words.count`, kept as its own property because the header renders it
-    /// on every tick of a search.
-    private(set) var count = 0
-    /// Bumped on every mutation that changed what is on screen. Host bodies
-    /// read it — `TranscriptView`, `ContentView`, `HUDView` — and discard the
-    /// number: it registers an `@Observable` dependency at the surface that
-    /// hands the matcher down. `RubyTextView` would repaint without it (its
-    /// body invokes the matcher, so it observes `identity` itself), which
-    /// makes these reads redundant rather than wrong — they keep the
-    /// dependence on favorite state visible where the matcher is supplied.
-    private(set) var revision = 0
-    /// Whether the database failed on its first read and was degraded
-    /// terminally: every file-backed answer is now a stub (empty list, empty
-    /// search). The window reads this to say "unavailable" instead of
-    /// rendering that stub as "No favorites yet" over data the file may still
-    /// hold.
-    private(set) var isDegraded = false
-
-    /// One Favorite identity, kept current with `words` on every mutation
-    /// that changed what is on screen. Star, Highlight, and Promotion read
-    /// this value instead of re-deriving the headword rule each.
-    private(set) var identity = FavoriteIdentity.empty
+    /// The one publication: rows, their derived identity, and whether the file
+    /// could be read. Every mutation assigns this exactly once through
+    /// `publish`; `@Observable` tracks this property as the store's sole
+    /// observation surface.
+    private(set) var snapshot = FavoritesSnapshot.empty
 
     /// Favorites are authored user data that must survive a clean, so they
     /// live in Application Support in **both** configurations — unlike the
@@ -57,8 +41,8 @@ final class FavoritesStore {
     private let database: FavoritesDatabase
 
     /// Opens the database, deletes the legacy empty-headword rows out of the
-    /// file, and loads the word rows synchronously, building the identity
-    /// snapshot from them: ~`limit` short rows parse well under a millisecond.
+    /// file, and loads the word rows synchronously, building the identity from
+    /// them: ~`limit` short rows parse well under a millisecond.
     /// The load still drops empty headwords from memory — belt-and-braces for
     /// a row an older or parallel process writes underneath the store after
     /// the sweep.
@@ -86,38 +70,52 @@ final class FavoritesStore {
         }
         do {
             let loaded = try database.all().filter { word in !word.headword.isEmpty }
-            words = loaded
-            count = loaded.count
-            identity = FavoriteIdentity(words: loaded)
+            snapshot = FavoritesSnapshot(
+                rows: loaded,
+                identity: FavoriteIdentity(words: loaded),
+                availability: .available
+            )
         } catch {
             print("favorites: load failed, degrading: \(error)")
-            isDegraded = true
             database.degrade()
+            snapshot = .unavailable
         }
     }
 
+    /// The one mutation point: builds the next snapshot from the rows, their
+    /// identity, and the availability that holds for both, so a caller cannot
+    /// publish one without the other.
+    private func publish(
+        rows: [FavoriteWord],
+        identity: FavoriteIdentity,
+        availability: FavoritesAvailability
+    ) {
+        snapshot = FavoritesSnapshot(rows: rows, identity: identity, availability: availability)
+    }
+
     var isFull: Bool {
-        count >= Self.limit
+        snapshot.count >= Self.limit
     }
 
     func isFavorite(headword: String?) -> Bool {
-        identity.isFavorite(headword: headword)
+        snapshot.identity.isFavorite(headword: headword)
     }
 
     /// The render-path probe over the current identity.
     func matches(segment: ReadingSegment) -> Bool {
-        identity.matches(segment)
+        snapshot.identity.matches(segment)
     }
 
-    /// Stars the word, or unstars it when already present. The cap is checked
-    /// against the in-memory count on the main actor, so it is race-free
-    /// without a transaction.
+    /// Stars the word. The one add path: a word that is already a favorite
+    /// reports `.unchanged` without touching the file, and a store that cannot
+    /// read its file fails before writing. The cap is checked against the
+    /// published count on the main actor, so it is race-free without a
+    /// transaction.
     @discardableResult
-    func toggle(_ word: FavoriteWord) -> FavoriteToggle {
+    func add(_ word: FavoriteWord) -> FavoriteToggle {
         guard !word.headword.isEmpty else { return .failed }
-        if identity.isFavorite(headword: word.headword) {
-            return remove(headword: word.headword)
-        }
+        guard snapshot.isAvailable else { return .failed }
+        guard !snapshot.identity.isFavorite(headword: word.headword) else { return .unchanged }
         guard !isFull else { return .limitReached }
         do {
             try database.insert(word)
@@ -125,19 +123,21 @@ final class FavoritesStore {
             return .failed
         }
         // The position the file would give the row — `added_at DESC,
-        // headword ASC` under BINARY collation. The window renders `words`
-        // directly, so an off-order insert would reshuffle under the user on
-        // the next launch's reload. The tiebreak compares UTF-8 bytes, which
-        // is what BINARY means; Swift's canonical ordering can disagree.
-        let index = words.firstIndex { element in
+        // headword ASC` under BINARY collation. The window renders
+        // `snapshot.rows` directly, so an off-order insert would reshuffle
+        // under the user on the next launch's reload. The tiebreak compares
+        // UTF-8 bytes, which is what BINARY means; Swift's canonical ordering
+        // can disagree.
+        let index = snapshot.rows.firstIndex { element in
             element.addedAt < word.addedAt
                 || (element.addedAt == word.addedAt
                     && word.headword.utf8.lexicographicallyPrecedes(element.headword.utf8))
-        } ?? words.count
-        words.insert(word, at: index)
-        count = words.count
-        identity.insert(word)
-        revision += 1
+        } ?? snapshot.rows.count
+        var rows = snapshot.rows
+        rows.insert(word, at: index)
+        var updated = snapshot.identity
+        updated.insert(word)
+        publish(rows: rows, identity: updated, availability: .available)
         return .added
     }
 
@@ -151,10 +151,10 @@ final class FavoritesStore {
     @discardableResult
     func remove(headword: String) -> FavoriteToggle {
         let key = FavoriteIdentity.normalize(headword)
-        guard identity.keys.contains(key) else { return .removed }
-        // Non-empty: `identity` holds a key only because a loaded row
+        guard snapshot.identity.keys.contains(key) else { return .removed }
+        // Non-empty: the identity holds a key only because a loaded row
         // normalizes to it.
-        let doomed = words.filter { word in FavoriteIdentity.normalize(word.headword) == key }
+        let doomed = snapshot.rows.filter { word in FavoriteIdentity.normalize(word.headword) == key }
         do {
             // One delete per row rather than one statement: the spellings are
             // only known from memory. If a later delete fails the file has lost
@@ -169,13 +169,15 @@ final class FavoritesStore {
         } catch {
             return .failed
         }
-        words.removeAll { word in FavoriteIdentity.normalize(word.headword) == key }
-        count = words.count
         // Rebuilt rather than key-by-key: two favorites can share a reading
         // (有難う and ありがとう both read the same), and dropping the removed
         // row's key alone would strand the survivor's highlight.
-        identity = FavoriteIdentity(words: words)
-        revision += 1
+        let remaining = snapshot.rows.filter { word in FavoriteIdentity.normalize(word.headword) != key }
+        publish(
+            rows: remaining,
+            identity: FavoriteIdentity(words: remaining),
+            availability: snapshot.availability
+        )
         return .removed
     }
 

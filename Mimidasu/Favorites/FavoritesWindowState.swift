@@ -47,7 +47,7 @@ final class FavoritesWindowState {
         // a long prefix scan cannot stall a tap. Same resolve seam, separate
         // Mutex — a passed-in handle is test-only; production takes a fresh one.
         lookupState = FavoritesLookupState(lookup: lookup ?? JMDictLookup())
-        results = model.favorites.words
+        results = favorites.snapshot.rows
     }
 
     /// Cancels any in-flight debounce and, unless the field already matches
@@ -73,7 +73,7 @@ final class FavoritesWindowState {
     /// the surviving words, and an unfiltered list picks up the store's new
     /// ordering.
     func favoritesChanged() {
-        let remaining = Set(favorites.words.map(\.headword))
+        let remaining = Set(favorites.snapshot.rows.map(\.headword))
         for key in lookupState.expanded where !remaining.contains(key) {
             lookupState.remove(key: key)
         }
@@ -104,7 +104,7 @@ final class FavoritesWindowState {
             searchTask?.cancel()
             searchTask = nil
             query = ""
-            results = favorites.words
+            results = favorites.snapshot.rows
             lookupState.reset()
         }
     }
@@ -115,16 +115,20 @@ final class FavoritesWindowState {
     /// evaluation; each call is a synchronous query.
     private func rows(for query: String) -> [FavoriteWord] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return favorites.words }
+        guard !trimmed.isEmpty else { return favorites.snapshot.rows }
         return favorites.search(trimmed)
     }
 
     /// The header's trailing count: capacity against the store's size with no
-    /// query, the row count with one.
+    /// query, the row count with one. A store whose file could not be read
+    /// says so instead, since its empty rows are not an empty list.
     func countText() -> String {
+        if favorites.snapshot.availability == .unavailable {
+            return "Unavailable"
+        }
         let trimmed = debouncedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            return "\(favorites.count) / \(FavoritesStore.limit)"
+            return "\(favorites.snapshot.count) / \(FavoritesStore.limit)"
         }
         return results.count == 1 ? "1 entry" : "\(results.count) entries"
     }

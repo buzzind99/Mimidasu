@@ -39,7 +39,7 @@ struct FavoritesView: View {
             .onAppear {
                 state.favoritesChanged()
             }
-            .onChange(of: model.favorites.words) { _, _ in
+            .onChange(of: model.favorites.snapshot) { _, _ in
                 state.favoritesChanged()
             }
     }
@@ -50,7 +50,7 @@ struct FavoritesView: View {
     private func windowContent(_ rows: [FavoriteWord]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             noticeCard
-            if model.favorites.isDegraded {
+            if !model.favorites.snapshot.isAvailable {
                 degradedState
             } else {
                 searchField
@@ -200,7 +200,7 @@ struct FavoritesView: View {
         // this reordered list. Entry order only; the pager and the "also:"
         // pills stay off, as below.
         let promoted = FavoritesPromotion.promotingFavorites(
-            in: result, identity: model.favorites.identity
+            in: result, identity: model.favorites.snapshot.identity
         )
         if let index = plan.displayEntryIndex(in: promoted.entries) {
             // `also: []` is the same kind of empty as the suppressed header:
@@ -226,7 +226,7 @@ struct FavoritesView: View {
     /// alert commits the removal.
     private func unstar(_ word: FavoriteWord) {
         // A filled star asserts membership; re-check so a row that vanished cannot be re-added by the removal press.
-        guard model.favorites.isFavorite(headword: word.headword) else { return }
+        guard model.favorites.snapshot.identity.isFavorite(headword: word.headword) else { return }
         forwardRemovalRequest(
             model.toggleFavorite(headword: word.headword, reading: word.reading),
             to: onFavoriteRemoval

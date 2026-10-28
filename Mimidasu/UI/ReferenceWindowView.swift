@@ -263,7 +263,8 @@ struct ReferenceWindowView: View {
     }
 
     /// The trailing count, following the active mode. Favorites keeps its
-    /// capacity/filtered phrasing; Dictionary reads `displayed / matched`, the
+    /// capacity/filtered phrasing, and says `Unavailable` when the store could
+    /// not be read; Dictionary reads `displayed / matched`, the
     /// one number that says both "this is what you got" and "this is all there
     /// is". Its total carries a `+` when the search stopped short, so
     /// the two halves do not read as equal claims. Empty while the query is

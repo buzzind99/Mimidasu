@@ -54,12 +54,13 @@ struct TranscriptView: View {
 
     var body: some View {
         // Read here, in the body, and not inside the row closure: the matcher
-        // accessor only *builds* a closure and observes nothing. This read is
-        // belt-and-braces — `RubyTextView`'s own body resolves membership and
-        // so observes the store directly — but it keeps the transcript's
-        // dependence on favorite state visible at the surface that hands the
-        // matcher down, and it re-runs this body when membership changes.
-        _ = model.favorites.revision
+        // accessor only *builds* a closure and observes nothing. This snapshot
+        // read is belt-and-braces — `RubyTextView`'s own body resolves
+        // membership and so observes the store directly — but it keeps the
+        // transcript's dependence on favorite state visible at the surface
+        // that hands the matcher down, and it re-runs this body when
+        // membership changes.
+        _ = model.favorites.snapshot
         return ScrollViewReader { proxy in
             List {
                 Color.clear

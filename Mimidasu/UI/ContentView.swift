@@ -240,11 +240,11 @@ struct ContentView: View {
 
     private var mainContent: some View {
         // Read in this body, not inside a nested closure: the matcher accessor
-        // builds a closure and observes nothing. The read is discarded — the
-        // strip's surfaces resolve membership and observe the store
-        // themselves — but it keeps the dependence on favorite state visible
-        // at the surface that hands the matcher down.
-        _ = model.favorites.revision
+        // builds a closure and observes nothing. The snapshot read is
+        // discarded — the strip's surfaces resolve membership and observe the
+        // store themselves — but it keeps the dependence on favorite state
+        // visible at the surface that hands the matcher down.
+        _ = model.favorites.snapshot
         return HStack(spacing: 0) {
             SidebarView(
                 model: model,
