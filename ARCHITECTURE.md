@@ -768,7 +768,26 @@ packaged apps in `Contents/Frameworks/`.
   `resume()` restarts the IOProc, re-arms a fresh watchdog grace, and
   resets the presence latch. Pause/resume/restart/stop are serialized on a
   main-actor transition tail; `stop` latches `stopRequested` synchronously
-  and `hasStopped` makes teardown one-shot.
+  and `hasStopped` makes teardown one-shot. `begin` is transactional:
+  capture start, engine `prepare` (off-main), and `openStream` run inside one
+  do/catch with a stop-latch check after every await. A throw or a stop
+  latched mid-begin rolls the acquisition back — the capture is stopped, the
+  engine / capture / buffer / metadata references drop, and timers and live
+  surfaces clear — without closing, finishing, or retiring the process-warm
+  engine and without resetting an engine channel a queued stop may own; a
+  cancelled begin throws `CancellationError`, which the phase machine refuses
+  from the stop phases, so a handled stop never surfaces a failure card.
+- The phase machine returns phase + category (`legal` / `refused` /
+  `compensating`) plus, only for a capture loss while paused, the parked
+  capture-error message. It carries no effect list; the ordered stop seam
+  below is the only executor.
+- Ordered end seam: `SessionLifecycle.end` (`Session/SessionLifecycle.swift`)
+  owns the whole stop sequence — pause-span fold → controller drain → live
+  coordinator end → re-translate lane end → end stamp + chrome clear +
+  `.stopCompleted` → archive finalize → archived-Recent toast. `AppModel`
+  is the host (`State/AppModel+SessionLifecycle.swift`); `performStop` is one
+  delegation, and the two coordinator conformances live with the host rather
+  than in the coordinator files.
 - Teardown order: capture stop → watchdog disarm → `SessionEngineChannel`
   finish (consuming any airborne pause flush) off-main with drained events
   replayed → timers → buffer flush → bounded translation drain. The 60 ms
