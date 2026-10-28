@@ -223,7 +223,7 @@ struct SessionControllerTests {
         #expect(sut.controller.sessionMetadata == nil)
     }
 
-    @Test("begin rethrows a capture start failure and skips engine setup")
+    @Test("begin rethrows a capture start failure and rolls back the capture")
     func beginCaptureFailureThrows() async throws {
         let sut = makeSUT(captureStartError: CaptureError.setupFailed(captureFailureDetail))
 
@@ -234,8 +234,8 @@ struct SessionControllerTests {
         #expect(
             thrown?.errorDescription == CaptureError.setupFailed(captureFailureDetail).errorDescription
         )
-        #expect(sut.log.names == ["factory allowMock=true", "capture.start"])
-        #expect(sut.controller.sessionMetadata == nil)
+        #expect(sut.log.names == ["factory allowMock=true", "capture.start", "capture.stop"])
+        #expect(sut.controller.sessionMetadata == nil, "a failed start must not keep metadata")
     }
 
     // MARK: - Capture chunk path

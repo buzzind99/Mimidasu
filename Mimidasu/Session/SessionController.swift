@@ -192,13 +192,21 @@ final class SessionController {
         }
         sentenceBuffer = buffer
 
-        try await startCapture(for: engine)
-
-        // `prepare` may wait out a multi-second GGUF load + Metal compile
-        // (when the background warm-up hasn't finished) — keep it off the
-        // main actor. `prepareLock` still serializes it against the warm-up.
-        try await Task.detached(priority: .userInitiated) { try engine.prepare() }.value
-        try engine.openStream()
+        do {
+            try throwIfStopRequested()
+            try await startCapture(for: engine)
+            try throwIfStopRequested()
+            // `prepare` may wait out a multi-second GGUF load + Metal compile
+            // (when the background warm-up hasn't finished) — keep it off the
+            // main actor. `prepareLock` still serializes it against the warm-up.
+            try await Task.detached(priority: .userInitiated) { try engine.prepare() }.value
+            try throwIfStopRequested()
+            try engine.openStream()
+            try throwIfStopRequested()
+        } catch {
+            rollbackFailedBegin()
+            throw error
+        }
         engineChannel.started()
 
         sessionMetadata = SessionMetadata(
@@ -210,6 +218,35 @@ final class SessionController {
         )
 
         return true
+    }
+
+    /// Latch check between the acquisition steps of `begin()`: a stop
+    /// requested while an acquisition is airborne cancels the remaining
+    /// setup so the queued stop owns the teardown.
+    private func throwIfStopRequested() throws {
+        if stopRequested {
+            throw CancellationError()
+        }
+    }
+
+    /// Undoes the visible pieces of a half-built session after a failed
+    /// acquisition: the capture is stopped and every owned surface cleared so
+    /// a failed start cannot leak a live rig or export stale metadata. The
+    /// engine is dropped without `finish`/`flush` — its stream never opened,
+    /// and a queued stop may already own the channel. `stopRequested` /
+    /// `hasStopped` are left for that queued stop to consume.
+    private func rollbackFailedBegin() {
+        capture?.stop()
+        capture = nil
+        engine = nil
+        sentenceBuffer = nil
+        sessionMetadata = nil
+        stopTimers()
+        disarmNoAudioWatchdog()
+        live.partial = ""
+        latency.reset()
+        audioLevel.reset()
+        clearAudioStaging()
     }
 
     /// Builds, wires, and starts a new capture stream for `engine`. Shared
