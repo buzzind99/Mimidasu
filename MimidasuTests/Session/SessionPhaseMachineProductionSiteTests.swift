@@ -27,55 +27,27 @@ enum ProductionSiteTable {
         let from: SessionPhase
         let action: SessionAction
         let to: SessionPhase
-        let effects: [SessionEffect]
+        let category: SessionTransition.Category
     }
-
-    /// The effect bundle a finished stop runs.
-    static let stopCompletionBundle: [SessionEffect] = [
-        .drainTranslation,
-        .clearToastsAndNotices,
-        .finalizeLiveSession,
-        .postArchivedRecentToast
-    ]
-
-    /// The effect bundle a quit-time teardown runs from a live phase.
-    static let terminationTeardownBundle: [SessionEffect] = [
-        .stopCapture,
-        .drainTranslation,
-        .clearToastsAndNotices,
-        .finalizeLiveSession,
-        .postArchivedRecentToast,
-        .retireWarmEngine,
-        .postTerminationTeardownComplete
-    ]
-
-    /// The effect bundle a quit-time teardown runs when a stop is already
-    /// staged: the staged stop owns the teardown, so the machine waits for it
-    /// before the warm engine is retired.
-    static let stagedTerminationBundle: [SessionEffect] = [
-        .awaitStagedStop,
-        .retireWarmEngine,
-        .postTerminationTeardownComplete
-    ]
 
     static let sites: [Site] = [
         // 1
         Site(
-            number: 1, file: "Mimidasu/State/AppModel+Session.swift", line: 387, value: ".needsModel",
+            number: 1, file: "Mimidasu/State/AppModel+Session.swift", line: 344, value: ".needsModel",
             guardDescription: "the machine's `.idle` + unresolved pair (was: `if url == nil, phase == .idle`)",
             from: .idle,
             action: .modelResolved(resolved: false),
             to: .needsModel,
-            effects: [.warmUpEngine]
+            category: .legal
         ),
         // 2
         Site(
-            number: 2, file: "Mimidasu/State/AppModel+Session.swift", line: 387, value: ".idle",
+            number: 2, file: "Mimidasu/State/AppModel+Session.swift", line: 344, value: ".idle",
             guardDescription: "the machine's `.needsModel` + resolved pair (was: `else if url != nil, phase == .needsModel`)",
             from: .needsModel,
             action: .modelResolved(resolved: true),
             to: .idle,
-            effects: [.warmUpEngine]
+            category: .legal
         ),
         // 3
         Site(
@@ -84,7 +56,7 @@ enum ProductionSiteTable {
             from: .running,
             action: .captureLost("stream died"),
             to: .sourceLost,
-            effects: [.postCaptureLost("stream died")]
+            category: .legal
         ),
         // 3 — the second legal from-phase of the same write
         Site(
@@ -93,7 +65,7 @@ enum ProductionSiteTable {
             from: .starting,
             action: .captureLost("stream died"),
             to: .sourceLost,
-            effects: [.postCaptureLost("stream died")]
+            category: .legal
         ),
         // 4
         Site(
@@ -102,7 +74,7 @@ enum ProductionSiteTable {
             from: .sourceLost,
             action: .captureRestartRequested,
             to: .starting,
-            effects: [.restartCapture]
+            category: .legal
         ),
         // 4 — the resume-deferred caller of the same write
         Site(
@@ -111,7 +83,7 @@ enum ProductionSiteTable {
             from: .paused,
             action: .captureRestartRequested,
             to: .starting,
-            effects: [.restartCapture]
+            category: .legal
         ),
         // 5
         Site(
@@ -120,7 +92,7 @@ enum ProductionSiteTable {
             from: .starting,
             action: .captureRestartSucceeded,
             to: .running,
-            effects: [.armNoAudioWatchdog]
+            category: .legal
         ),
         // 6
         Site(
@@ -129,7 +101,7 @@ enum ProductionSiteTable {
             from: .starting,
             action: .captureRestartFailed("boom"),
             to: .sourceLost,
-            effects: [.postCaptureLost("boom")]
+            category: .legal
         ),
         // 7
         Site(
@@ -138,7 +110,7 @@ enum ProductionSiteTable {
             from: .running,
             action: .pauseRequested,
             to: .paused,
-            effects: [.stopCapture]
+            category: .legal
         ),
         // 8
         Site(
@@ -147,7 +119,7 @@ enum ProductionSiteTable {
             from: .paused,
             action: .resumeSucceeded,
             to: .running,
-            effects: [.flushEngine]
+            category: .legal
         ),
         // 9
         Site(
@@ -156,7 +128,7 @@ enum ProductionSiteTable {
             from: .paused,
             action: .resumeFailed("boom"),
             to: .sourceLost,
-            effects: [.postCaptureLost("boom")]
+            category: .legal
         ),
         // 10
         Site(
@@ -166,7 +138,7 @@ enum ProductionSiteTable {
             from: .idle,
             action: .startRequested,
             to: .starting,
-            effects: [.awaitDictionary, .beginSession]
+            category: .legal
         ),
         // 10 — the `.failed` arm of the same switch
         Site(
@@ -176,7 +148,7 @@ enum ProductionSiteTable {
             from: .failed("boom"),
             action: .startRequested,
             to: .starting,
-            effects: [.awaitDictionary, .beginSession]
+            category: .legal
         ),
         // 11
         Site(
@@ -185,7 +157,7 @@ enum ProductionSiteTable {
             from: .starting,
             action: .beginFailed("boom"),
             to: .failed("boom"),
-            effects: [.postSessionFailed("boom")]
+            category: .legal
         ),
         // 12 — the teardown the interrupted bring-up owes
         Site(
@@ -195,7 +167,7 @@ enum ProductionSiteTable {
             from: .stopping,
             action: .beginInterruptedByTeardown,
             to: .stopping,
-            effects: [.tearDownSession]
+            category: .compensating
         ),
         // 12 — the wind-back, after the teardown has landed
         Site(
@@ -205,7 +177,7 @@ enum ProductionSiteTable {
             from: .stopping,
             action: .teardownCompleted,
             to: .idle,
-            effects: []
+            category: .legal
         ),
         // 13
         Site(
@@ -214,7 +186,7 @@ enum ProductionSiteTable {
             from: .starting,
             action: .beginReturnedNoModel,
             to: .needsModel,
-            effects: []
+            category: .legal
         ),
         // 14
         Site(
@@ -223,7 +195,7 @@ enum ProductionSiteTable {
             from: .starting,
             action: .beginSucceeded,
             to: .running,
-            effects: [.activateTranslation, .startTimers, .armNoAudioWatchdog]
+            category: .legal
         ),
         // 15 — the `.running` arm
         Site(
@@ -232,7 +204,7 @@ enum ProductionSiteTable {
             from: .running,
             action: .stopRequested,
             to: .stopping,
-            effects: [.stopCapture, .drainTranslation]
+            category: .legal
         ),
         // 15 — the `.paused` arm
         Site(
@@ -241,7 +213,7 @@ enum ProductionSiteTable {
             from: .paused,
             action: .stopRequested,
             to: .stopping,
-            effects: [.stopCapture, .drainTranslation]
+            category: .legal
         ),
         // 15 — the `.sourceLost` arm
         Site(
@@ -250,7 +222,7 @@ enum ProductionSiteTable {
             from: .sourceLost,
             action: .stopRequested,
             to: .stopping,
-            effects: [.stopCapture, .drainTranslation]
+            category: .legal
         ),
         // 15 — the `.starting` arm: a session the user cancels mid-start is
         // stoppable, and a stop during the bring-up must never let the
@@ -261,75 +233,75 @@ enum ProductionSiteTable {
             from: .starting,
             action: .stopRequested,
             to: .stopping,
-            effects: [.stopCapture, .drainTranslation]
+            category: .legal
         ),
         // 16
         Site(
-            number: 16, file: "Mimidasu/State/AppModel+Session.swift", line: 305, value: ".idle",
+            number: 16, file: "Mimidasu/State/AppModel+SessionLifecycle.swift", line: 21, value: ".idle",
             guardDescription: "the machine's `.stopping`/`.idle` legal-from set (was unconditional, post-teardown)",
             from: .stopping,
             action: .stopCompleted,
             to: .idle,
-            effects: stopCompletionBundle
+            category: .legal
         ),
         // 16 — the site-12 race: the phase was already wound back to idle
         Site(
-            number: 16, file: "Mimidasu/State/AppModel+Session.swift", line: 305, value: ".idle",
+            number: 16, file: "Mimidasu/State/AppModel+SessionLifecycle.swift", line: 21, value: ".idle",
             guardDescription: "the machine's `.stopping`/`.idle` legal-from set; reachable from .idle when site 12 won",
             from: .idle,
             action: .stopCompleted,
             to: .idle,
-            effects: stopCompletionBundle
+            category: .legal
         ),
         // 17 — the `.running` arm
         Site(
-            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 333, value: ".stopping",
+            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 290, value: ".stopping",
             guardDescription: "the machine's live-phase branch (was: `else if phase == .starting || .running"
                 + " || .paused || .stopping || .sourceLost`)",
             from: .running,
             action: .terminationStarted,
             to: .stopping,
-            effects: terminationTeardownBundle
+            category: .legal
         ),
         // 17 — the `.sourceLost` arm
         Site(
-            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 333, value: ".stopping",
+            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 290, value: ".stopping",
             guardDescription: "the machine's live-phase branch (was: `else if phase == .starting || .running"
                 + " || .paused || .stopping || .sourceLost`)",
             from: .sourceLost,
             action: .terminationStarted,
             to: .stopping,
-            effects: terminationTeardownBundle
+            category: .legal
         ),
         // 17 — the `.starting` arm: quitting during the TCC-prompted bring-up
         Site(
-            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 333, value: ".stopping",
+            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 290, value: ".stopping",
             guardDescription: "the machine's live-phase branch (was: `else if phase == .starting || .running"
                 + " || .paused || .stopping || .sourceLost`)",
             from: .starting,
             action: .terminationStarted,
             to: .stopping,
-            effects: terminationTeardownBundle
+            category: .legal
         ),
         // 17 — the `.paused` arm: quitting while the session is paused
         Site(
-            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 333, value: ".stopping",
+            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 290, value: ".stopping",
             guardDescription: "the machine's live-phase branch (was: `else if phase == .starting || .running"
                 + " || .paused || .stopping || .sourceLost`)",
             from: .paused,
             action: .terminationStarted,
             to: .stopping,
-            effects: terminationTeardownBundle
+            category: .legal
         ),
         // 17 — the `.stopping` arm: a stop is already staged and owns the
         // teardown, so the machine waits for it before retiring the engine.
         Site(
-            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 333, value: "(none — the staged stop owns the teardown)",
+            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 290, value: "(none — the staged stop owns the teardown)",
             guardDescription: "the machine's staged-stop branch (was: `await stopTask.value`)",
             from: .stopping,
             action: .terminationStarted,
             to: .stopping,
-            effects: stagedTerminationBundle
+            category: .legal
         ),
         // 18 — the resume request: the machine arms the resume latch, and
         // the phase stays `.paused` until the IOProc is actually back.
@@ -339,7 +311,7 @@ enum ProductionSiteTable {
             from: .paused,
             action: .resumeRequested,
             to: .paused,
-            effects: [.resumeCapture]
+            category: .legal
         ),
         // 19 — the latch release when a stop won the resume race
         Site(
@@ -348,7 +320,7 @@ enum ProductionSiteTable {
             from: .stopping,
             action: .resumeAbandoned,
             to: .stopping,
-            effects: []
+            category: .legal
         ),
         // 19 — the latch release after the deferred capture rebuild took over
         Site(
@@ -357,7 +329,7 @@ enum ProductionSiteTable {
             from: .starting,
             action: .resumeAbandoned,
             to: .starting,
-            effects: []
+            category: .legal
         )
     ]
 }
@@ -406,12 +378,13 @@ struct ProductionWriteSiteSpecTests {
     /// The production files that write the phase.
     private static let productionFiles = [
         "Mimidasu/State/AppModel.swift",
-        "Mimidasu/State/AppModel+Session.swift"
+        "Mimidasu/State/AppModel+Session.swift",
+        "Mimidasu/State/AppModel+SessionLifecycle.swift"
     ]
 
     /// Every one of the production sites appears in the spec table.
     @Test("the spec table covers every production write site")
-    func specCoversAllSeventeenSites() {
+    func specCoversAllProductionSites() {
         let covered = Set(ProductionSiteTable.sites.map { site in site.number })
         #expect(covered == Set(1 ... 19), "sites covered: \(covered.sorted())")
     }
@@ -455,20 +428,41 @@ struct ProductionWriteSiteSpecTests {
         }
     }
 
+    /// The machine reproduces today's phase outcome and category for every
+    /// production site.
+    @Test("the machine reproduces today's outcome for every production site")
+    func machineReproducesProductionOutcome() {
+        for site in ProductionSiteTable.sites {
+            var machine = SessionPhaseMachine(phase: site.from)
+            let transition = machine.reduce(site.action)
+
+            #expect(
+                machine.phase == site.to,
+                "site \(site.number) (\(site.file)#\(site.action.callLabel)) must land on \(site.to), landed on \(machine.phase)"
+            )
+            #expect(
+                transition.phase == site.to,
+                "site \(site.number) (\(site.file)#\(site.action.callLabel)) must report \(site.to), reported \(transition.phase)"
+            )
+            #expect(
+                transition.category == site.category,
+                "site \(site.number) (\(site.file)#\(site.action.callLabel)) must be \(site.category), was \(transition.category)"
+            )
+        }
+    }
+
     // MARK: - Termination
 
     @Test("terminationStarted has no refused from-phase: every phase either stops or retires")
     func terminationHasNoRefusal() {
         for from in SessionPhaseFixtures.all {
             var machine = SessionPhaseMachine(phase: from)
-            let effects = machine.reduce(.terminationStarted).effects
+            let transition = machine.reduce(.terminationStarted)
 
             #expect(machine.isTerminating, "\(from)")
-            #expect(effects.contains(.retireWarmEngine), "\(from)")
-            #expect(effects.contains(.postTerminationTeardownComplete), "\(from)")
+            #expect(transition.isLegal, "\(from)")
             if from == .starting || from == .running || from == .paused || from == .sourceLost {
                 #expect(machine.phase == .stopping, "\(from)")
-                #expect(effects.contains(.finalizeLiveSession), "\(from)")
             } else {
                 #expect(machine.phase == from, "\(from) must not move")
             }

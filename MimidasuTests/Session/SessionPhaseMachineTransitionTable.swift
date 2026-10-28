@@ -4,9 +4,8 @@ import Testing
 /// The transition table — the specification the machine is checked against.
 ///
 /// Every action × every phase is listed with the expected category (legal /
-/// refused / compensating), the expected resulting phase and the expected
-/// effects. The table IS the specification: nothing else in the machine
-/// decides anything.
+/// refused / compensating) and the expected resulting phase. The table IS
+/// the specification: nothing else in the machine decides anything.
 enum SessionPhaseMachineTransitionTable {
 
     /// The canonical phase order every expectation row is written in:
@@ -23,33 +22,6 @@ enum SessionPhaseMachineTransitionTable {
         .failed("boom")
     ]
 
-    /// The effect bundle a finished stop runs.
-    static let stopCompletionBundle: [SessionEffect] = [
-        .drainTranslation,
-        .clearToastsAndNotices,
-        .finalizeLiveSession,
-        .postArchivedRecentToast
-    ]
-
-    /// The effect bundle a quit-time teardown runs from a live phase.
-    static let terminationTeardownBundle: [SessionEffect] = [
-        .stopCapture,
-        .drainTranslation,
-        .clearToastsAndNotices,
-        .finalizeLiveSession,
-        .postArchivedRecentToast,
-        .retireWarmEngine,
-        .postTerminationTeardownComplete
-    ]
-
-    /// The effect bundle a quit-time teardown runs when a stop is already
-    /// staged: the staged stop is awaited before the engine is retired.
-    static let stagedTerminationBundle: [SessionEffect] = [
-        .awaitStagedStop,
-        .retireWarmEngine,
-        .postTerminationTeardownComplete
-    ]
-
     /// The three transition categories, as the table states them.
     enum Category: String, Sendable {
         case legal
@@ -59,20 +31,19 @@ enum SessionPhaseMachineTransitionTable {
 
     /// One action's outcome in one phase.
     enum Expectation: Sendable {
-        /// The action was legal: the phase lands on `to` and the effects run.
-        case legal(to: SessionPhase, effects: [SessionEffect])
-        /// The action was refused: the phase stays and nothing runs.
+        /// The action was legal: the phase lands on `to`.
+        case legal(to: SessionPhase)
+        /// The action was refused: the phase stays.
         case refused
-        /// The action was illegal but owes a compensation: the phase lands on
-        /// `to` (it may have moved) and the effects run.
-        case compensating(to: SessionPhase, effects: [SessionEffect])
+        /// The action was illegal but owes a compensation: the phase lands
+        /// on `to` (it may have moved).
+        case compensating(to: SessionPhase)
     }
 
     struct Row: Sendable {
         let action: SessionAction
         let from: SessionPhase
         let to: SessionPhase
-        let effects: [SessionEffect]
         let category: Category
     }
 
@@ -88,19 +59,19 @@ enum SessionPhaseMachineTransitionTable {
         )
         return zip(canonicalPhases, expectations).map { from, expectation in
             switch expectation {
-            case let .legal(to, effects):
-                Row(action: action, from: from, to: to, effects: effects, category: .legal)
+            case let .legal(to):
+                Row(action: action, from: from, to: to, category: .legal)
             case .refused:
-                Row(action: action, from: from, to: from, effects: [], category: .refused)
-            case let .compensating(to, effects):
-                Row(action: action, from: from, to: to, effects: effects, category: .compensating)
+                Row(action: action, from: from, to: from, category: .refused)
+            case let .compensating(to):
+                Row(action: action, from: from, to: to, category: .compensating)
             }
         }
     }
 
     /// The category a transition belongs to.
     static func category(of transition: SessionTransition) -> Category {
-        switch transition {
+        switch transition.category {
         case .legal: .legal
         case .refused: .refused
         case .compensating: .compensating
@@ -110,44 +81,41 @@ enum SessionPhaseMachineTransitionTable {
     // MARK: - The table
 
     static let table: [Row] = rows(for: .startRequested, [
-        .legal(to: .starting, effects: [.awaitDictionary, .beginSession]), // .idle
+        .legal(to: .starting), // .idle
         .refused, // .needsModel
         .refused, // .starting
         .refused, // .running
         .refused, // .paused
         .refused, // .sourceLost
         .refused, // .stopping
-        .legal(to: .starting, effects: [.awaitDictionary, .beginSession]) // .failed
+        .legal(to: .starting) // .failed
     ]) + rows(for: .beginSucceeded, [
-        .compensating(to: .idle, effects: [.tearDownSession]), // .idle
-        .compensating(to: .needsModel, effects: [.tearDownSession]), // .needsModel
-        .legal(
-            to: .running,
-            effects: [.activateTranslation, .startTimers, .armNoAudioWatchdog]
-        ), // .starting
-        .compensating(to: .running, effects: [.tearDownSession]), // .running
-        .compensating(to: .paused, effects: [.tearDownSession]), // .paused
-        .compensating(to: .sourceLost, effects: [.tearDownSession]), // .sourceLost
-        .compensating(to: .stopping, effects: [.tearDownSession]), // .stopping — COMPENSATING
-        .compensating(to: .failed("boom"), effects: [.tearDownSession]) // .failed
+        .compensating(to: .idle), // .idle
+        .compensating(to: .needsModel), // .needsModel
+        .legal(to: .running), // .starting
+        .compensating(to: .running), // .running
+        .compensating(to: .paused), // .paused
+        .compensating(to: .sourceLost), // .sourceLost
+        .compensating(to: .stopping), // .stopping — COMPENSATING
+        .compensating(to: .failed("boom")) // .failed
     ]) + rows(for: .beginReturnedNoModel, [
-        .compensating(to: .idle, effects: [.tearDownSession]), // .idle
-        .compensating(to: .needsModel, effects: [.tearDownSession]), // .needsModel
-        .legal(to: .needsModel, effects: []), // .starting
-        .compensating(to: .running, effects: [.tearDownSession]), // .running
-        .compensating(to: .paused, effects: [.tearDownSession]), // .paused
-        .compensating(to: .sourceLost, effects: [.tearDownSession]), // .sourceLost
-        .compensating(to: .stopping, effects: [.tearDownSession]), // .stopping
-        .compensating(to: .failed("boom"), effects: [.tearDownSession]) // .failed
+        .compensating(to: .idle), // .idle
+        .compensating(to: .needsModel), // .needsModel
+        .legal(to: .needsModel), // .starting
+        .compensating(to: .running), // .running
+        .compensating(to: .paused), // .paused
+        .compensating(to: .sourceLost), // .sourceLost
+        .compensating(to: .stopping), // .stopping
+        .compensating(to: .failed("boom")) // .failed
     ]) + rows(for: .beginInterruptedByTeardown, [
-        .compensating(to: .idle, effects: [.tearDownSession]), // .idle
-        .compensating(to: .needsModel, effects: [.tearDownSession]), // .needsModel
+        .compensating(to: .idle), // .idle
+        .compensating(to: .needsModel), // .needsModel
         .refused, // .starting — not interrupted: the session may come up
-        .compensating(to: .running, effects: [.tearDownSession]), // .running
-        .compensating(to: .paused, effects: [.tearDownSession]), // .paused
-        .compensating(to: .sourceLost, effects: [.tearDownSession]), // .sourceLost
-        .compensating(to: .stopping, effects: [.tearDownSession]), // .stopping
-        .compensating(to: .failed("boom"), effects: [.tearDownSession]) // .failed
+        .compensating(to: .running), // .running
+        .compensating(to: .paused), // .paused
+        .compensating(to: .sourceLost), // .sourceLost
+        .compensating(to: .stopping), // .stopping
+        .compensating(to: .failed("boom")) // .failed
     ]) + rows(for: .teardownCompleted, [
         .refused, // .idle
         .refused, // .needsModel
@@ -155,12 +123,12 @@ enum SessionPhaseMachineTransitionTable {
         .refused, // .running
         .refused, // .paused
         .refused, // .sourceLost
-        .legal(to: .idle, effects: []), // .stopping — the wind-back
+        .legal(to: .idle), // .stopping — the wind-back
         .refused // .failed
     ]) + rows(for: .beginFailed("boom"), [
         .refused, // .idle
         .refused, // .needsModel
-        .legal(to: .failed("boom"), effects: [.postSessionFailed("boom")]), // .starting
+        .legal(to: .failed("boom")), // .starting
         .refused, // .running
         .refused, // .paused
         .refused, // .sourceLost
@@ -170,7 +138,7 @@ enum SessionPhaseMachineTransitionTable {
         .refused, // .idle
         .refused, // .needsModel
         .refused, // .starting
-        .legal(to: .paused, effects: [.stopCapture]), // .running
+        .legal(to: .paused), // .running
         .refused, // .paused
         .refused, // .sourceLost
         .refused, // .stopping
@@ -180,7 +148,7 @@ enum SessionPhaseMachineTransitionTable {
         .refused, // .needsModel
         .refused, // .starting
         .refused, // .running
-        .legal(to: .paused, effects: [.resumeCapture]), // .paused
+        .legal(to: .paused), // .paused
         .refused, // .sourceLost
         .refused, // .stopping
         .refused // .failed
@@ -189,7 +157,7 @@ enum SessionPhaseMachineTransitionTable {
         .refused, // .needsModel
         .refused, // .starting
         .refused, // .running
-        .legal(to: .running, effects: [.flushEngine]), // .paused
+        .legal(to: .running), // .paused
         .refused, // .sourceLost
         .refused, // .stopping
         .refused // .failed
@@ -198,26 +166,26 @@ enum SessionPhaseMachineTransitionTable {
         .refused, // .needsModel
         .refused, // .starting
         .refused, // .running
-        .legal(to: .sourceLost, effects: [.postCaptureLost("boom")]), // .paused
+        .legal(to: .sourceLost), // .paused
         .refused, // .sourceLost
         .refused, // .stopping
         .refused // .failed
     ]) + rows(for: .resumeAbandoned, [
-        .legal(to: .idle, effects: []), // .idle
-        .legal(to: .needsModel, effects: []), // .needsModel
-        .legal(to: .starting, effects: []), // .starting
-        .legal(to: .running, effects: []), // .running
-        .legal(to: .paused, effects: []), // .paused
-        .legal(to: .sourceLost, effects: []), // .sourceLost
-        .legal(to: .stopping, effects: []), // .stopping
-        .legal(to: .failed("boom"), effects: []) // .failed
+        .legal(to: .idle), // .idle
+        .legal(to: .needsModel), // .needsModel
+        .legal(to: .starting), // .starting
+        .legal(to: .running), // .running
+        .legal(to: .paused), // .paused
+        .legal(to: .sourceLost), // .sourceLost
+        .legal(to: .stopping), // .stopping
+        .legal(to: .failed("boom")) // .failed
     ]) + rows(for: .captureLost("stream died"), [
         .refused, // .idle
         .refused, // .needsModel
-        .legal(to: .sourceLost, effects: [.postCaptureLost("stream died")]), // .starting
-        .legal(to: .sourceLost, effects: [.postCaptureLost("stream died")]), // .running
-        // .paused — deferred, no phase change
-        .legal(to: .paused, effects: [.deferCaptureError("stream died")]),
+        .legal(to: .sourceLost), // .starting
+        .legal(to: .sourceLost), // .running
+        // .paused — the error is deferred for the resume path, no phase change
+        .legal(to: .paused),
         .refused, // .sourceLost
         .refused, // .stopping
         .refused // .failed
@@ -226,14 +194,14 @@ enum SessionPhaseMachineTransitionTable {
         .refused, // .needsModel
         .refused, // .starting
         .refused, // .running
-        .legal(to: .starting, effects: [.restartCapture]), // .paused
-        .legal(to: .starting, effects: [.restartCapture]), // .sourceLost
+        .legal(to: .starting), // .paused
+        .legal(to: .starting), // .sourceLost
         .refused, // .stopping
         .refused // .failed
     ]) + rows(for: .captureRestartSucceeded, [
         .refused, // .idle
         .refused, // .needsModel
-        .legal(to: .running, effects: [.armNoAudioWatchdog]), // .starting
+        .legal(to: .running), // .starting
         .refused, // .running
         .refused, // .paused
         .refused, // .sourceLost
@@ -242,67 +210,58 @@ enum SessionPhaseMachineTransitionTable {
     ]) + rows(for: .captureRestartFailed("boom"), [
         .refused, // .idle
         .refused, // .needsModel
-        .legal(to: .sourceLost, effects: [.postCaptureLost("boom")]), // .starting
+        .legal(to: .sourceLost), // .starting
         .refused, // .running
         .refused, // .paused
         .refused, // .sourceLost
         .refused, // .stopping
         .refused // .failed
     ]) + rows(for: .modelResolved(resolved: true), [
-        .legal(to: .idle, effects: [.warmUpEngine]), // .idle
-        .legal(to: .idle, effects: [.warmUpEngine]), // .needsModel
-        .legal(to: .starting, effects: [.warmUpEngine]), // .starting
-        .legal(to: .running, effects: [.warmUpEngine]), // .running
-        .legal(to: .paused, effects: [.warmUpEngine]), // .paused
-        .legal(to: .sourceLost, effects: [.warmUpEngine]), // .sourceLost
-        .legal(to: .stopping, effects: [.warmUpEngine]), // .stopping
-        .legal(to: .failed("boom"), effects: [.warmUpEngine]) // .failed
+        .legal(to: .idle), // .idle
+        .legal(to: .idle), // .needsModel
+        .legal(to: .starting), // .starting
+        .legal(to: .running), // .running
+        .legal(to: .paused), // .paused
+        .legal(to: .sourceLost), // .sourceLost
+        .legal(to: .stopping), // .stopping
+        .legal(to: .failed("boom")) // .failed
     ]) + rows(for: .modelResolved(resolved: false), [
-        .legal(to: .needsModel, effects: [.warmUpEngine]), // .idle
-        .legal(to: .needsModel, effects: [.warmUpEngine]), // .needsModel
-        .legal(to: .starting, effects: [.warmUpEngine]), // .starting
-        .legal(to: .running, effects: [.warmUpEngine]), // .running
-        .legal(to: .paused, effects: [.warmUpEngine]), // .paused
-        .legal(to: .sourceLost, effects: [.warmUpEngine]), // .sourceLost
-        .legal(to: .stopping, effects: [.warmUpEngine]), // .stopping
-        .legal(to: .failed("boom"), effects: [.warmUpEngine]) // .failed
+        .legal(to: .needsModel), // .idle
+        .legal(to: .needsModel), // .needsModel
+        .legal(to: .starting), // .starting
+        .legal(to: .running), // .running
+        .legal(to: .paused), // .paused
+        .legal(to: .sourceLost), // .sourceLost
+        .legal(to: .stopping), // .stopping
+        .legal(to: .failed("boom")) // .failed
     ]) + rows(for: .stopRequested, [
         .refused, // .idle
         .refused, // .needsModel
-        .legal(to: .stopping, effects: [.stopCapture, .drainTranslation]), // .starting
-        .legal(to: .stopping, effects: [.stopCapture, .drainTranslation]), // .running
-        .legal(to: .stopping, effects: [.stopCapture, .drainTranslation]), // .paused
-        .legal(to: .stopping, effects: [.stopCapture, .drainTranslation]), // .sourceLost
+        .legal(to: .stopping), // .starting
+        .legal(to: .stopping), // .running
+        .legal(to: .stopping), // .paused
+        .legal(to: .stopping), // .sourceLost
         .refused, // .stopping — double stop refused
         .refused // .failed
     ]) + rows(for: .stopCompleted, [
         // The production write is unconditional: the teardown always winds
         // the session back to `.idle`.
-        .legal(to: .idle, effects: stopCompletionBundle), // .idle
-        .legal(to: .idle, effects: stopCompletionBundle), // .needsModel
-        .legal(to: .idle, effects: stopCompletionBundle), // .starting
-        .legal(to: .idle, effects: stopCompletionBundle), // .running
-        .legal(to: .idle, effects: stopCompletionBundle), // .paused
-        .legal(to: .idle, effects: stopCompletionBundle), // .sourceLost
-        .legal(to: .idle, effects: stopCompletionBundle), // .stopping
-        .legal(to: .idle, effects: stopCompletionBundle) // .failed
+        .legal(to: .idle), // .idle
+        .legal(to: .idle), // .needsModel
+        .legal(to: .idle), // .starting
+        .legal(to: .idle), // .running
+        .legal(to: .idle), // .paused
+        .legal(to: .idle), // .sourceLost
+        .legal(to: .idle), // .stopping
+        .legal(to: .idle) // .failed
     ]) + rows(for: .terminationStarted, [
-        .legal(
-            to: .idle,
-            effects: [.retireWarmEngine, .postTerminationTeardownComplete]
-        ), // .idle
-        .legal(
-            to: .needsModel,
-            effects: [.retireWarmEngine, .postTerminationTeardownComplete]
-        ), // .needsModel
-        .legal(to: .stopping, effects: terminationTeardownBundle), // .starting
-        .legal(to: .stopping, effects: terminationTeardownBundle), // .running
-        .legal(to: .stopping, effects: terminationTeardownBundle), // .paused
-        .legal(to: .stopping, effects: terminationTeardownBundle), // .sourceLost
-        .legal(to: .stopping, effects: stagedTerminationBundle), // .stopping — a stop is staged
-        .legal(
-            to: .failed("boom"),
-            effects: [.retireWarmEngine, .postTerminationTeardownComplete]
-        ) // .failed
+        .legal(to: .idle), // .idle
+        .legal(to: .needsModel), // .needsModel
+        .legal(to: .stopping), // .starting
+        .legal(to: .stopping), // .running
+        .legal(to: .stopping), // .paused
+        .legal(to: .stopping), // .sourceLost
+        .legal(to: .stopping), // .stopping — a stop is staged
+        .legal(to: .failed("boom")) // .failed
     ])
 }

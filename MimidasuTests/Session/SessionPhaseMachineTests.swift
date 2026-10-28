@@ -3,9 +3,9 @@ import Testing
 
 /// The exhaustive transition table.
 ///
-/// Every action × every phase is listed, with the expected category, the
-/// expected resulting phase and the expected effects. The table IS the
-/// specification: nothing else in the machine decides anything.
+/// Every action × every phase is listed, with the expected category and the
+/// expected resulting phase. The table IS the specification: nothing else in
+/// the machine decides anything.
 struct SessionPhaseMachineTests {
 
     // MARK: - Tests
@@ -23,10 +23,6 @@ struct SessionPhaseMachineTests {
             #expect(
                 transition.phase == row.to,
                 "\(row.action) from \(row.from) must report \(row.to), reported \(transition.phase)"
-            )
-            #expect(
-                transition.effects == row.effects,
-                "\(row.action) from \(row.from) must emit \(row.effects), emitted \(transition.effects)"
             )
             #expect(
                 SessionPhaseMachineTransitionTable.category(of: transition) == row.category,
@@ -53,13 +49,38 @@ struct SessionPhaseMachineTests {
 
     /// A legal transition never owes a teardown: the teardown is what makes
     /// a transition *compensating*, and the category decides.
-    @Test("no legal transition carries the compensating teardown effect")
+    @Test("no legal transition requires a teardown")
     func legalTransitionsNeverTearDown() {
         for row in SessionPhaseMachineTransitionTable.table where row.category == .legal {
+            var machine = SessionPhaseMachine(phase: row.from)
+            let transition = machine.reduce(row.action)
+
             #expect(
-                !row.effects.contains(.tearDownSession),
+                !transition.requiresTeardown,
                 "\(row.action) from \(row.from) is legal and must not tear down"
             )
+        }
+    }
+
+    /// The `.paused` capture-lost deferral: the phase does not move, the
+    /// transition stays legal, and the error is parked on the transition
+    /// for the resume path. Every other phase parks nothing.
+    @Test("captureLost while paused parks the error on the transition")
+    func captureLostWhilePausedParksTheError() {
+        var paused = SessionPhaseMachine(phase: .paused)
+        let deferred = paused.reduce(.captureLost("stream died"))
+
+        #expect(paused.phase == .paused, "the deferral must not move the phase")
+        #expect(deferred.isLegal)
+        #expect(deferred.deferredCaptureError == "stream died")
+
+        for phase in [SessionPhase.starting, .running] {
+            var machine = SessionPhaseMachine(phase: phase)
+            let transition = machine.reduce(.captureLost("stream died"))
+
+            #expect(machine.phase == .sourceLost, "\(phase) reads as source-lost")
+            #expect(transition.isLegal)
+            #expect(transition.deferredCaptureError == nil, "\(phase) must not park the error")
         }
     }
 

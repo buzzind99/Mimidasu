@@ -1,8 +1,7 @@
 @testable import Mimidasu
 import Testing
 
-/// The machine's internal latches, its test seam, and the effect ordering
-/// the quit-time teardown depends on.
+/// The machine's internal latches and its test seam.
 ///
 /// The latches are the resume double-click guard and the quit-time teardown
 /// latch moved into the machine. They are machine state, never new session
@@ -18,7 +17,8 @@ struct SessionPhaseMachineLatchTests {
 
         #expect(machine.phase == .paused, "the phase stays `.paused` until the IOProc is back")
         #expect(machine.isResuming)
-        #expect(transition.effects == [.resumeCapture])
+        #expect(transition.isLegal)
+        #expect(transition.phase == .paused)
     }
 
     @Test("a second resumeRequested is refused while the latch is set")
@@ -28,16 +28,16 @@ struct SessionPhaseMachineLatchTests {
         let transition = machine.reduce(.resumeRequested)
 
         #expect(machine.phase == .paused)
-        #expect(transition.effects.isEmpty, "the double-click guard must hold")
+        #expect(!transition.isLegal, "the double-click guard must hold")
     }
 
     @Test("the resuming latch clears when the resume settles", arguments: [
-        (SessionAction.resumeSucceeded, SessionPhase.running, [SessionEffect.flushEngine]),
-        (.resumeFailed("boom"), .sourceLost, [.postCaptureLost("boom")]),
-        (.resumeAbandoned, .paused, [])
+        (SessionAction.resumeSucceeded, SessionPhase.running),
+        (.resumeFailed("boom"), .sourceLost),
+        (.resumeAbandoned, .paused)
     ])
     func resumeSettleClearsLatch(
-        action: SessionAction, expectedPhase: SessionPhase, expectedEffects: [SessionEffect]
+        action: SessionAction, expectedPhase: SessionPhase
     ) {
         var machine = SessionPhaseMachine(phase: .paused)
         _ = machine.reduce(.resumeRequested)
@@ -46,7 +46,8 @@ struct SessionPhaseMachineLatchTests {
 
         #expect(machine.phase == expectedPhase)
         #expect(!machine.isResuming)
-        #expect(transition.effects == expectedEffects)
+        #expect(transition.isLegal)
+        #expect(transition.phase == expectedPhase)
     }
 
     @Test("leaving `.paused` clears the resuming latch")
@@ -109,7 +110,7 @@ struct SessionPhaseMachineLatchTests {
         _ = machine.reduce(.terminationStarted)
         let transition = machine.reduce(.terminationStarted)
 
-        #expect(transition.effects.isEmpty, "quit-time teardown is single-shot")
+        #expect(!transition.isLegal, "quit-time teardown is single-shot")
     }
 
     @Test("startRequested is refused once the terminating latch is set")
@@ -119,7 +120,7 @@ struct SessionPhaseMachineLatchTests {
         let transition = machine.reduce(.startRequested)
 
         #expect(machine.phase == .idle, "a terminating model never begins a new session")
-        #expect(transition.effects.isEmpty)
+        #expect(!transition.isLegal)
     }
 
     @Test("the terminating latch survives a phase change")
@@ -130,32 +131,6 @@ struct SessionPhaseMachineLatchTests {
 
         #expect(machine.phase == .idle)
         #expect(machine.isTerminating, "the latch is not a phase")
-    }
-
-    // MARK: - Effect ordering
-
-    @Test("the quit-time teardown orders the staged stop and the session finalization before the retire")
-    func teardownEffectsAreOrdered() throws {
-        var staged = SessionPhaseMachine(phase: .stopping)
-        let stagedEffects = staged.reduce(.terminationStarted).effects
-        let awaited = try #require(stagedEffects.firstIndex(of: .awaitStagedStop))
-        let stagedRetired = try #require(stagedEffects.firstIndex(of: .retireWarmEngine))
-        #expect(
-            awaited < stagedRetired,
-            "the staged stop must land before the engine is retired: \(stagedEffects)"
-        )
-
-        for phase in [SessionPhase.starting, .running, .paused, .sourceLost] {
-            var machine = SessionPhaseMachine(phase: phase)
-            let effects = machine.reduce(.terminationStarted).effects
-
-            let finalized = try #require(effects.firstIndex(of: .finalizeLiveSession))
-            let retired = try #require(effects.firstIndex(of: .retireWarmEngine))
-            #expect(
-                finalized < retired,
-                "the session must be finalized before the engine is retired: \(effects)"
-            )
-        }
     }
 
     // MARK: - The test seam
@@ -192,7 +167,8 @@ struct SessionPhaseMachineLatchTests {
 
         let transition = machine.reduce(.resumeRequested)
         #expect(machine.isResuming, "the seam must not leave the resume guard closed")
-        #expect(transition.effects == [.resumeCapture])
+        #expect(transition.isLegal)
+        #expect(transition.phase == .paused)
     }
 
     @Test("a phase forced through the seam is still startable")
@@ -202,6 +178,7 @@ struct SessionPhaseMachineLatchTests {
 
         let transition = machine.reduce(.startRequested)
         #expect(machine.phase == .starting)
-        #expect(transition.effects == [.awaitDictionary, .beginSession])
+        #expect(transition.isLegal)
+        #expect(transition.phase == .starting)
     }
 }

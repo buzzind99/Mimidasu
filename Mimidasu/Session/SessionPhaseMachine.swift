@@ -6,26 +6,20 @@
 ///
 /// Three transition categories, and the difference between them matters:
 ///
-/// - a **legal** action moves the phase and emits its effects;
-/// - a **refused** action changes nothing and emits nothing;
+/// - a **legal** action moves the phase (or leaves it where it already had
+///   to be);
+/// - a **refused** action changes nothing;
 /// - a **compensating** action changes the phase only as the production code
-///   does and still emits the effect that keeps a torn-down session from
+///   does and still owes the teardown that keeps a torn-down session from
 ///   coming back up.
-///
-/// The returned effects **name** the gated side effects, in the order they
-/// happen. The host performs them — the list is the transition's
-/// *description*, not an execution plan: the host's lifecycle spans several
-/// actions and also owns bookkeeping the machine does not model.
 ///
 /// The production-site table names the call sites production makes and what
 /// each one does; its source check keeps that table and the production
-/// sources in step, so a call site cannot appear or move unnoticed. The
-/// effect lists themselves are a hand-written description of what each site
-/// gates.
+/// sources in step, so a call site cannot appear or move unnoticed.
 ///
 /// The quit-time teardown's order matters — the staged stop has to land
-/// before the warm engine is retired — and it is stated here *and* asserted
-/// against production by the session tests.
+/// before the warm engine is retired — and it is asserted against
+/// production by the session tests.
 struct SessionPhaseMachine: Sendable {
 
     // MARK: - State
@@ -195,7 +189,7 @@ struct SessionPhaseMachine: Sendable {
         switch phase {
         case .idle, .failed:
             move(to: .starting)
-            return .legal(phase: phase, effects: [.awaitDictionary, .beginSession])
+            return .legal(phase: phase)
         default:
             return .refused(phase: phase)
         }
@@ -216,12 +210,9 @@ struct SessionPhaseMachine: Sendable {
         switch phase {
         case .starting:
             move(to: .running)
-            return .legal(
-                phase: phase,
-                effects: [.activateTranslation, .startTimers, .armNoAudioWatchdog]
-            )
+            return .legal(phase: phase)
         default:
-            return .compensating(phase: phase, effects: [.tearDownSession])
+            return .compensating(phase: phase)
         }
     }
 
@@ -235,9 +226,9 @@ struct SessionPhaseMachine: Sendable {
         switch phase {
         case .starting:
             move(to: .needsModel)
-            return .legal(phase: phase, effects: [])
+            return .legal(phase: phase)
         default:
-            return .compensating(phase: phase, effects: [.tearDownSession])
+            return .compensating(phase: phase)
         }
     }
 
@@ -260,7 +251,7 @@ struct SessionPhaseMachine: Sendable {
         case .starting:
             .refused(phase: phase)
         default:
-            .compensating(phase: phase, effects: [.tearDownSession])
+            .compensating(phase: phase)
         }
     }
 
@@ -276,7 +267,7 @@ struct SessionPhaseMachine: Sendable {
     private mutating func reduceTeardownCompleted() -> SessionTransition {
         guard phase == .stopping else { return .refused(phase: phase) }
         move(to: .idle)
-        return .legal(phase: phase, effects: [])
+        return .legal(phase: phase)
     }
 
     /// The bring-up failed.
@@ -289,7 +280,7 @@ struct SessionPhaseMachine: Sendable {
     private mutating func reduceBeginFailed(_ message: String) -> SessionTransition {
         guard phase == .starting else { return .refused(phase: phase) }
         move(to: .failed(message))
-        return .legal(phase: phase, effects: [.postSessionFailed(message)])
+        return .legal(phase: phase)
     }
 
     /// The pause request. The phase flips to `.paused` synchronously,
@@ -298,7 +289,7 @@ struct SessionPhaseMachine: Sendable {
     private mutating func reducePauseRequested() -> SessionTransition {
         guard phase == .running else { return .refused(phase: phase) }
         move(to: .paused)
-        return .legal(phase: phase, effects: [.stopCapture])
+        return .legal(phase: phase)
     }
 
     /// The resume request. The phase stays `.paused` until the IOProc is
@@ -306,14 +297,14 @@ struct SessionPhaseMachine: Sendable {
     private mutating func reduceResumeRequested() -> SessionTransition {
         guard phase == .paused, !isResuming else { return .refused(phase: phase) }
         isResuming = true
-        return .legal(phase: phase, effects: [.resumeCapture])
+        return .legal(phase: phase)
     }
 
     /// The resume succeeded.
     private mutating func reduceResumeSucceeded() -> SessionTransition {
         guard phase == .paused else { return .refused(phase: phase) }
         move(to: .running)
-        return .legal(phase: phase, effects: [.flushEngine])
+        return .legal(phase: phase)
     }
 
     /// The resume failed: the capture is gone, so the session reads as
@@ -321,7 +312,7 @@ struct SessionPhaseMachine: Sendable {
     private mutating func reduceResumeFailed(_ message: String) -> SessionTransition {
         guard phase == .paused else { return .refused(phase: phase) }
         move(to: .sourceLost)
-        return .legal(phase: phase, effects: [.postCaptureLost(message)])
+        return .legal(phase: phase)
     }
 
     /// The resume was abandoned: the latch is cleared and nothing else
@@ -332,7 +323,7 @@ struct SessionPhaseMachine: Sendable {
     /// this resume" — it does not depend on that rule holding.
     private mutating func reduceResumeAbandoned() -> SessionTransition {
         isResuming = false
-        return .legal(phase: phase, effects: [])
+        return .legal(phase: phase)
     }
 
     /// The capture source died.
@@ -345,9 +336,9 @@ struct SessionPhaseMachine: Sendable {
         switch phase {
         case .running, .starting:
             move(to: .sourceLost)
-            return .legal(phase: phase, effects: [.postCaptureLost(message)])
+            return .legal(phase: phase)
         case .paused:
-            return .legal(phase: phase, effects: [.deferCaptureError(message)])
+            return .legal(phase: phase, deferredCaptureError: message)
         default:
             return .refused(phase: phase)
         }
@@ -364,7 +355,7 @@ struct SessionPhaseMachine: Sendable {
         switch phase {
         case .sourceLost, .paused:
             move(to: .starting)
-            return .legal(phase: phase, effects: [.restartCapture])
+            return .legal(phase: phase)
         default:
             return .refused(phase: phase)
         }
@@ -374,14 +365,14 @@ struct SessionPhaseMachine: Sendable {
     private mutating func reduceCaptureRestartSucceeded() -> SessionTransition {
         guard phase == .starting else { return .refused(phase: phase) }
         move(to: .running)
-        return .legal(phase: phase, effects: [.armNoAudioWatchdog])
+        return .legal(phase: phase)
     }
 
     /// The capture restart failed: the session is still source-lost.
     private mutating func reduceCaptureRestartFailed(_ message: String) -> SessionTransition {
         guard phase == .starting else { return .refused(phase: phase) }
         move(to: .sourceLost)
-        return .legal(phase: phase, effects: [.postCaptureLost(message)])
+        return .legal(phase: phase)
     }
 
     /// The model's availability was resolved.
@@ -398,7 +389,7 @@ struct SessionPhaseMachine: Sendable {
         default:
             break
         }
-        return .legal(phase: phase, effects: [.warmUpEngine])
+        return .legal(phase: phase)
     }
 
     /// The stop request. `.stopping` is not in the legal-from set: a second
@@ -406,7 +397,7 @@ struct SessionPhaseMachine: Sendable {
     private mutating func reduceStopRequested() -> SessionTransition {
         guard isLiveOrStarting else { return .refused(phase: phase) }
         move(to: .stopping)
-        return .legal(phase: phase, effects: [.stopCapture, .drainTranslation])
+        return .legal(phase: phase)
     }
 
     /// The teardown finished.
@@ -419,15 +410,7 @@ struct SessionPhaseMachine: Sendable {
     /// unconditional write is what the machine reproduces.
     private mutating func reduceStopCompleted() -> SessionTransition {
         move(to: .idle)
-        return .legal(
-            phase: phase,
-            effects: [
-                .drainTranslation,
-                .clearToastsAndNotices,
-                .finalizeLiveSession,
-                .postArchivedRecentToast
-            ]
-        )
+        return .legal(phase: phase)
     }
 
     /// The quit-time teardown began.
@@ -438,35 +421,15 @@ struct SessionPhaseMachine: Sendable {
     /// From a live phase the machine winds the session down itself; from
     /// `.stopping` a stop is already staged and owns the teardown, so the
     /// machine waits for it — **the staged stop must land before the warm
-    /// engine is retired**, and the effect order states that explicitly.
+    /// engine is retired** (asserted against production by the session
+    /// tests).
     private mutating func reduceTerminationStarted() -> SessionTransition {
         guard !isTerminating else { return .refused(phase: phase) }
         isTerminating = true
         if isLiveOrStarting {
             move(to: .stopping)
-            return .legal(
-                phase: phase,
-                effects: [
-                    .stopCapture,
-                    .drainTranslation,
-                    .clearToastsAndNotices,
-                    .finalizeLiveSession,
-                    .postArchivedRecentToast,
-                    .retireWarmEngine,
-                    .postTerminationTeardownComplete
-                ]
-            )
         }
-        if phase == .stopping {
-            return .legal(
-                phase: phase,
-                effects: [.awaitStagedStop, .retireWarmEngine, .postTerminationTeardownComplete]
-            )
-        }
-        return .legal(
-            phase: phase,
-            effects: [.retireWarmEngine, .postTerminationTeardownComplete]
-        )
+        return .legal(phase: phase)
     }
 
     // MARK: - Phase writes

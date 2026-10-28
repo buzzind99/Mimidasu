@@ -451,7 +451,7 @@ final class AppModel {
             // capture, and only a failed resume reports capture lost.
             guard let self else { return }
             let transition = reducePhase(.captureLost(message))
-            if transition.defersCaptureError {
+            if let message = transition.deferredCaptureError {
                 deferredCaptureError = message
                 return
             }

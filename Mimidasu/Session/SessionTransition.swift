@@ -64,110 +64,52 @@ enum SessionActionFamily: Sendable, Equatable, Hashable {
     case lifecycle
 }
 
-/// The side effects a transition asks the host to perform.
-///
-/// Only *gated* effects live here — the ones that must NOT happen when a
-/// transition is refused. Bookkeeping that is unconditional once a transition
-/// is accepted (toast dismissals, the pause-span close, the capture-lost
-/// anchor, the translation-queue reset) stays at the call site.
-///
-/// The list **names** the gated effects and the order they happen in; the
-/// host performs them. It is a description of the transition, not an
-/// execution plan — the host's lifecycle spans several actions, and it also
-/// owns bookkeeping the machine does not model. The production-site table
-/// names the call sites production makes; the effect lists are a
-/// hand-written description of what each site gates.
-enum SessionEffect: Sendable, Equatable, Hashable {
-    // Start path
-    case awaitDictionary
-    case beginSession
-    // Capture / pause / resume
-    case stopCapture
-    case resumeCapture
-    case flushEngine
-    case restartCapture
-    case deferCaptureError(String)
-    // Cards
-    /// The capture-lost card. One case for every path that raises it — the
-    /// capture died, a restart failed, a resume failed: the card is the same
-    /// one, only its body differs.
-    case postCaptureLost(String)
-    case postSessionFailed(String)
-    // Session bring-up
-    case activateTranslation
-    case startTimers
-    case armNoAudioWatchdog
-    // Model availability
-    case warmUpEngine
-    // Stop / teardown
-    case tearDownSession
-    case drainTranslation
-    case clearToastsAndNotices
-    case finalizeLiveSession
-    case postArchivedRecentToast
-    // Termination
-    /// Wait for the stop that is already staged before retiring the engine.
-    case awaitStagedStop
-    case retireWarmEngine
-    case postTerminationTeardownComplete
-}
-
 /// The outcome of a transition: what happened to the phase, and what the
 /// host must do about it.
 ///
 /// Three categories, and the difference between them matters:
 ///
 /// - **legal** — the action was legal in the phase the machine was in: the
-///   phase moved (or was already where it had to be) and the effects must
-///   run;
-/// - **refused** — the action was illegal: nothing changed, nothing runs;
+///   phase moved (or was already where it had to be);
+/// - **refused** — the action was illegal: nothing changed;
 /// - **compensating** — the action was illegal, but the session still owes a
-///   teardown: the phase moves the way production moves it and the
-///   compensating effect must run.
-enum SessionTransition: Sendable, Equatable {
-    /// A legal transition: the phase landed on `phase` and the effects must
-    /// run, in the order they are listed.
-    case legal(phase: SessionPhase, effects: [SessionEffect])
-    /// A refused transition: the phase did not move and no effect runs.
-    case refused(phase: SessionPhase)
-    /// A compensating transition: the action was illegal, but the session
-    /// still owes a teardown. The phase landed on `phase` — it may have
-    /// moved, exactly the way production moves it — and the effects must run.
-    case compensating(phase: SessionPhase, effects: [SessionEffect])
-
-    /// The transition's category, spelled out so a host can branch on it
-    /// without pattern-matching the case.
+///   teardown: the phase moves the way production moves it and the host
+///   performs the compensating teardown.
+struct SessionTransition: Sendable, Equatable {
     enum Category: Sendable, Equatable {
         case legal
         case refused
         case compensating
     }
 
-    /// The phase after the transition.
-    var phase: SessionPhase {
-        switch self {
-        case let .legal(phase, _), let .refused(phase), let .compensating(phase, _):
-            phase
-        }
+    let phase: SessionPhase
+    let category: Category
+
+    /// Set only when `.captureLost` arrived while `.paused`: the host parks
+    /// the message for the resume path instead of raising the capture-lost
+    /// card. Nil for every other action.
+    let deferredCaptureError: String?
+
+    /// A legal transition: the phase landed on `phase`.
+    static func legal(phase: SessionPhase) -> SessionTransition {
+        SessionTransition(phase: phase, category: .legal, deferredCaptureError: nil)
     }
 
-    /// The effects the host must run, in order. Empty for a refusal.
-    var effects: [SessionEffect] {
-        switch self {
-        case let .legal(_, effects), let .compensating(_, effects):
-            effects
-        case .refused:
-            []
-        }
+    /// A legal transition that parks a capture error for the resume path.
+    static func legal(phase: SessionPhase, deferredCaptureError: String) -> SessionTransition {
+        SessionTransition(phase: phase, category: .legal, deferredCaptureError: deferredCaptureError)
     }
 
-    /// The transition's category.
-    var category: Category {
-        switch self {
-        case .legal: .legal
-        case .refused: .refused
-        case .compensating: .compensating
-        }
+    /// A refused transition: the phase did not move.
+    static func refused(phase: SessionPhase) -> SessionTransition {
+        SessionTransition(phase: phase, category: .refused, deferredCaptureError: nil)
+    }
+
+    /// A compensating transition: the action was illegal, but the session
+    /// still owes a teardown. The phase landed on `phase` — it may have
+    /// moved, exactly the way production moves it.
+    static func compensating(phase: SessionPhase) -> SessionTransition {
+        SessionTransition(phase: phase, category: .compensating, deferredCaptureError: nil)
     }
 
     /// Whether the action was legal in the phase the machine was in.
@@ -176,23 +118,11 @@ enum SessionTransition: Sendable, Equatable {
     }
 
     /// Whether the transition asks for a session teardown — the compensating
-    /// effect that keeps a torn-down session from coming back up.
+    /// teardown that keeps a torn-down session from coming back up.
     ///
-    /// The category decides, not the effect list: a compensating transition
-    /// owes a teardown by definition, and a legal one never does. (The
-    /// transition table pins that no legal transition carries
-    /// `.tearDownSession`.)
+    /// The category decides: a compensating transition owes a teardown by
+    /// definition, and a legal one never does.
     var requiresTeardown: Bool {
         category == .compensating
-    }
-
-    /// Whether the transition parks the capture error instead of raising the
-    /// capture-lost card: the capture died while the session was paused, and
-    /// the resume path rebuilds it.
-    var defersCaptureError: Bool {
-        effects.contains { effect in
-            guard case .deferCaptureError = effect else { return false }
-            return true
-        }
     }
 }
