@@ -267,50 +267,7 @@ extension AppModel {
     /// does not reliably re-fire on. Internal: driven by `stop()` and from
     /// the quit-time teardown below.
     func performStop() async {
-        // Close any open pause span first: the span folds into the session's
-        // paused total (and its stored paused time) while the recording row
-        // is still addressable, before the teardown nils it. Idempotent, so
-        // the quit path and a resume that already closed the span are safe.
-        finishPauseSpan()
-        await sessionController.stop()
-        // End order is live-then-lane (begin order in `wireSessionController`
-        // is lane-then-live). The halves are independent — worker/sequence/
-        // status reset vs marker-clear/teardown-rebuild — so the swap is
-        // harmless. `sessionDidEnd` is not config-idempotent: `teardown`
-        // rebuilds armed configs on every call, but a double `performStop`
-        // is unreachable (`stop` guards on the live phases, and
-        // `shutdownForTermination` awaits the in-flight `stopTask` — or, for
-        // its own branch, is latched by `isTerminating`).
-        // The external worker parks in the queue's wake loop after draining;
-        // once `sessionController.stop()` has drained (translations intact),
-        // the live session tears the worker down (Apple runs are owned by
-        // SwiftUI and stay parked), supersedes any airborne high-fidelity
-        // probe (a landing must not mark a session that no longer exists),
-        // and resets the published status.
-        translationSession.sessionDidEnd()
-        // The transcript stays on screen after a stop, so a row waiting on a
-        // re-translation would sit dimmed with its button disabled. Nothing
-        // will deliver that result any more; the lane drops every marker,
-        // cancels its task, invalidates stragglers through its epoch bump,
-        // and rebuilds the armed sessions in place — a nil → fresh-equal
-        // config reassignment is the `.translationTask` path that does not
-        // reliably re-fire, so the teardown must not nil them (see
-        // `RetranslateCoordinator.teardown`).
-        retranslate.sessionDidEnd()
-        let endedAt = ContinuousClock.now
-        sessionEndedAt = endedAt
-        // Stop/teardown clears all toasts and notices (phase → `.idle`).
-        toasts.clearAll()
-        notices.dismiss()
-        reducePhase(.stopCompleted)
-        // The archive finalize runs last so its toast — or its one-shot
-        // failure warning — survives the teardown's `clearAll` above. Every
-        // stop finalizes as a recent; promotion is a later one-click action.
-        if let durationMS = activeSessionDurationMS(to: endedAt),
-           finalizeLiveSession(durationMS: durationMS)
-        {
-            postArchivedRecentToast()
-        }
+        await sessionLifecycle.end(host: self)
     }
 
     /// Quit-time teardown, invoked via `.mimidasuAppWillTerminate` (posted by
