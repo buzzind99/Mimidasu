@@ -593,13 +593,17 @@ packaged apps in `Contents/Frameworks/`.
   probed normalized, rows are deleted as stored); rows order by
   epoch-millisecond `addedAt`, newest first (headword breaks ties). A hard
   cap of 8,192 rows refuses the next star with a visible notice — nothing
-  is ever silently evicted. One `FavoriteIdentity` value stays current
-  with the list — normalized headword keys + kana-folded reading keys —
-  and star, highlight matching, and promotion all read it. A store that
-  cannot open or load degrades terminally for that instance: every
+  is ever silently evicted. One immutable `FavoritesSnapshot` — rows,
+  identity, computed count, availability — is the store's one publication;
+  `add` and a confirmed `remove` are the only writes (re-adding an existing
+  word reports `.unchanged`), and every consumer reads the snapshot. Its
+  `FavoriteIdentity` carries normalized headword keys + kana-folded reading
+  keys, and star, highlight matching, and promotion all read it. A store
+  that cannot open or load degrades terminally for that instance: every
   mutation fails into one keyed persistent red toast, reads answer empty
-  stubs, and the window shows a degraded card (a relaunch builds a
-  fresh store; deleting `favorites.sqlite` starts over).
+  stubs, the snapshot's availability is `.unavailable` (distinct from a
+  healthy empty list), and the window shows a degraded card (a relaunch
+  builds a fresh store; deleting `favorites.sqlite` starts over).
 - **Matching (render path):** a rendered segment matches when its surface
   equals a stored headword (NFKC-folded); or, for a non-bound lemma, when
   the lemma equals a stored headword, is an all-kana form whose kana fold
@@ -612,8 +616,8 @@ packaged apps in `Contents/Frameworks/`.
   screen, so starring ない must not light ねえ / なきゃ / なし; a bound
   token still matches on its exact surface. The hot path probes the
   identity's in-memory sets (`FavoriteIdentity.keys` / `.readings`) per
-  rendered segment and never touches SQLite; `FavoritesStore.revision` is
-  the observation transcript rows read to repaint. Favorites render in
+  rendered segment and never touches SQLite; `FavoritesStore.snapshot` is
+  the observation value transcript rows read to repaint. Favorites render in
   `Theme.favoriteAccent` in the transcript, the live strip, and the HUD —
   wherever `RubyTextView` renders per-segment units: the dictionary path
   in every annotation mode (Favorite segments staying their own units even
