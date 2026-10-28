@@ -18,6 +18,12 @@ struct AppModelRetranslateLaneOwnershipTests {
     private let sentenceText = "テスト"
     private let resultTimeout: TimeInterval = 5
 
+    /// The plan routes externals by the stored key, so a lane-flight fixture
+    /// that injects an engine must also store the key the click checks.
+    private func saveTestKey(_ provider: TranslationProvider, on model: AppModel) {
+        try? model.translationSettings.saveKey("sk-test-\(provider.rawValue)", for: provider)
+    }
+
     /// `#expect(await pollUntil(...))` with the message first, so the
     /// suite's many bounded waits read one line apiece.
     private func expectPoll(
@@ -51,6 +57,7 @@ struct AppModelRetranslateLaneOwnershipTests {
             return call == 0 ? stragglerEngine : liveEngine
         }
         model.translationSettings.selectRetranslate(.google)
+        saveTestKey(.google, on: model)
         model.phase = .running
         let worker = await harness.attachWorker(model, engine: LaneEchoEngine())
         let first = makeSentence(index: 7)
@@ -120,6 +127,42 @@ struct AppModelRetranslateLaneOwnershipTests {
         #expect(liveEngine.recordedBatches == [[sentenceText]], "the new flight flew once")
     }
 
+    @Test("a stopped lane does not fly an engine handed over during the arm wait")
+    func stoppedLaneDropsLateHandover() async {
+        let model = await harness.makeModel()
+        let engine = LaneEchoEngine()
+        model.translationSettings.selectRetranslate(.appleFast)
+        model.appleHighFidelityProbe = (false, model.translationSettings.targetLanguage.code)
+        // An external live session makes Apple-fast a genuine lane; the
+        // dedicated fast session starts unarmed, so the flight parks in the
+        // engine wait.
+        model.translationSession.activeTranslationEngine = .external
+        model.translationSession.activeExternalProvider = .google
+        model.phase = .running
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+
+        model.retranslateSentence(sentence)
+        #expect(model.lanePendingRetranslations == [7], "the click parks in the arm wait")
+
+        // Let the flight enter the wait before the boundary lands.
+        try? await Task.sleep(for: .milliseconds(100))
+        model.phase = .idle
+        model.retranslateSessionEngine = engine
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
+            },
+            "the late hand-over is retired, not flown"
+        )
+        #expect(engine.recordedBatches.isEmpty, "a stopped lane never calls the engine")
+        #expect(
+            !model.toasts.toasts.contains { toast in toast.key == ToastKey.retranslate },
+            "the stop reports nothing"
+        )
+    }
+
     // MARK: - Backlog ownership
 
     @Test("a queue unavailable mid-lane keeps the lane marker")
@@ -128,6 +171,7 @@ struct AppModelRetranslateLaneOwnershipTests {
         let engine = LaneGatedEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
+        saveTestKey(.google, on: model)
         model.phase = .running
         model.translationSession.activeTranslationEngine = .apple
         let sentence = makeSentence(index: 7)
@@ -162,6 +206,7 @@ struct AppModelRetranslateLaneOwnershipTests {
         let engine = LaneEchoEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
+        saveTestKey(.google, on: model)
         model.phase = .running
         // No worker attached: both sentences pile up in the queue's
         // backlog — the state a failed-out engine leaves behind (pending
@@ -212,6 +257,7 @@ struct AppModelRetranslateLaneOwnershipTests {
         let engine = LaneGatedEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
+        saveTestKey(.google, on: model)
         model.phase = .running
         let worker = Task { await model.translationQueue.run(with: QueueEchoEngine()) }
         defer { worker.cancel() }

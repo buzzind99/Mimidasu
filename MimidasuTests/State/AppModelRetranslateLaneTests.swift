@@ -1,5 +1,6 @@
 import Foundation
 @testable import Mimidasu
+import Synchronization
 import Testing
 
 /// How a lane's external selection resolves to no engine: a test factory
@@ -45,6 +46,12 @@ struct AppModelRetranslateLaneTests {
     private let sentenceText = "テスト"
     private let resultTimeout: TimeInterval = 5
 
+    /// The plan routes externals by the stored key, so a lane-flight fixture
+    /// that injects an engine must also store the key the click checks.
+    private func saveTestKey(_ provider: TranslationProvider, on model: AppModel) {
+        try? model.translationSettings.saveKey("sk-test-\(provider.rawValue)", for: provider)
+    }
+
     // MARK: - Lane delivery
 
     @Test("a lane result stamps the engine and seeds the cache unstamped")
@@ -56,6 +63,7 @@ struct AppModelRetranslateLaneTests {
             return engine
         }
         model.translationSettings.selectRetranslate(.google)
+        saveTestKey(.google, on: model)
         model.phase = .running
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
@@ -87,9 +95,14 @@ struct AppModelRetranslateLaneTests {
     )
     func unavailableLaneEnginePostsToastAndSkips(testCase: UnavailableLaneEngine) async {
         let model = await harness.makeModel()
+        let factoryCalled = Mutex(false)
         if testCase.usesFactory {
+            // The plan admits the route on the stored key; the factory's
+            // nil is then the build failure this case reports.
+            saveTestKey(testCase.provider, on: model)
             model.retranslateEngineFactory = { provider, _ in
                 #expect(provider == testCase.provider)
+                factoryCalled.withLock { called in called = true }
                 return nil
             }
         }
@@ -110,6 +123,12 @@ struct AppModelRetranslateLaneTests {
         let toast = model.toasts.toasts.first(where: { candidate in candidate.key == ToastKey.retranslate })
         #expect(toast?.title == "Re-translate unavailable")
         #expect(toast?.body == "No API key stored for \(testCase.provider.displayName).")
+        if testCase.usesFactory {
+            #expect(
+                factoryCalled.withLock { called in called },
+                "the keyed route reached the build, rather than refusing at the plan"
+            )
+        }
     }
 
     // MARK: - Serialization
@@ -120,6 +139,7 @@ struct AppModelRetranslateLaneTests {
         let engine = LaneGatedEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
+        saveTestKey(.google, on: model)
         model.phase = .running
         let first = makeSentence(index: 1, text: "一")
         let second = makeSentence(index: 2, text: "二")
@@ -150,6 +170,7 @@ struct AppModelRetranslateLaneTests {
         let engine = LaneGatedEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
+        saveTestKey(.google, on: model)
         model.phase = .running
         let sentence = makeSentence(index: 7, text: "一")
         model.sessionController.onSentence?(sentence)
@@ -179,6 +200,7 @@ struct AppModelRetranslateLaneTests {
         let engine = LaneGatedEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
+        saveTestKey(.google, on: model)
         model.phase = .running
         let worker = await harness.attachWorker(model)
         defer { worker.cancel() }
@@ -280,6 +302,7 @@ struct AppModelRetranslateLaneTests {
         let engine = LaneGatedEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
+        saveTestKey(.google, on: model)
         model.phase = .running
         let worker = await harness.attachWorker(model)
         defer { worker.cancel() }
@@ -325,6 +348,7 @@ struct AppModelRetranslateLaneTests {
         let engine = LaneGatedEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
+        saveTestKey(.google, on: model)
         model.phase = .running
         let worker = await harness.attachWorker(model)
         let sentence = makeSentence(index: 7)
@@ -381,6 +405,7 @@ struct AppModelRetranslateLaneTests {
         let engine = LaneGatedEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
+        saveTestKey(.google, on: model)
         model.phase = .sourceLost
         let sentence = makeSentence(index: 4)
         model.sessionController.onSentence?(sentence)
@@ -419,6 +444,7 @@ struct AppModelRetranslateLaneTests {
         let engine = LaneGatedEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
+        saveTestKey(.google, on: model)
         model.phase = .running
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)

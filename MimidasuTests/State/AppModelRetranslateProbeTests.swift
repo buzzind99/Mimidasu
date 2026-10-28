@@ -13,6 +13,14 @@ struct AppModelRetranslateProbeTests {
     private let harness = RetranslateHarness(suite: "test.AppModelRetranslateProbe")
     private let resultTimeout: TimeInterval = 5
 
+    /// The live plan's route for the current settings target — the decision
+    /// the click executes and the probe landing re-plans.
+    private func liveRoute(_ model: AppModel) -> RetranslateRoute {
+        model.retranslatePlan(
+            surface: .live, target: model.translationSettings.targetLanguage
+        ).route
+    }
+
     // MARK: - Probe deferral
 
     @Test("a fast retry during a pending probe flies the dedicated fast session, not the live one")
@@ -26,6 +34,10 @@ struct AppModelRetranslateProbeTests {
         // read — the live session may actually run high fidelity, whose
         // text would land unstamped over a fast request.
         model.translationSettings.selectRetranslate(.appleFast)
+        #expect(
+            liveRoute(model) == .lane(.appleFast),
+            "the unlanded identity routes the fast retry to its dedicated lane"
+        )
         model.phase = .running
         let worker = await harness.attachWorker(model)
         defer { worker.cancel() }
@@ -42,6 +54,10 @@ struct AppModelRetranslateProbeTests {
         // Intelligence model. The dedicated fast lane flies anyway: a
         // genuine alternate, stamped so.
         model.appleHighFidelityProbe = (true, "en")
+        #expect(
+            liveRoute(model) == .lane(.appleFast),
+            "the landed hifi identity leaves the fast lane a genuine alternate"
+        )
         model.retranslateSessionArrived(LaneEchoEngine())
 
         #expect(
@@ -62,6 +78,10 @@ struct AppModelRetranslateProbeTests {
         }
         let model = await harness.makeModel()
         model.translationSettings.selectRetranslate(.appleFast)
+        #expect(
+            liveRoute(model) == .lane(.appleFast),
+            "the unlanded identity routes the fast retry to its dedicated lane"
+        )
         model.phase = .running
         let worker = await harness.attachWorker(model)
         defer { worker.cancel() }
@@ -78,6 +98,10 @@ struct AppModelRetranslateProbeTests {
         // model, i.e. the engine the retry asked for. The lane hands the
         // retry to the session path instead of flying a duplicate.
         model.appleHighFidelityProbe = (false, "en")
+        #expect(
+            liveRoute(model) == .session,
+            "the landed fast identity makes the session the same-engine route"
+        )
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
@@ -102,6 +126,10 @@ struct AppModelRetranslateProbeTests {
         }
         let model = await harness.makeModel()
         model.translationSettings.selectRetranslate(.appleHighFidelity)
+        #expect(
+            liveRoute(model) == .lane(.appleHighFidelity),
+            "the unlanded identity routes the hifi retry to its dedicated lane"
+        )
         model.phase = .running
         let worker = await harness.attachWorker(model)
         defer { worker.cancel() }
@@ -120,6 +148,10 @@ struct AppModelRetranslateProbeTests {
         // byte-identical text with the marker suppressed; the queue serves
         // instead.
         model.appleHighFidelityProbe = (true, "en")
+        #expect(
+            liveRoute(model) == .session,
+            "the landed hifi identity makes the session the same-engine route"
+        )
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
@@ -144,6 +176,10 @@ struct AppModelRetranslateProbeTests {
         model.translationSession.activeTranslationEngine = .external
         model.translationSession.activeExternalProvider = .google
         model.translationSettings.selectRetranslate(.appleHighFidelity)
+        #expect(
+            liveRoute(model) == .lane(.appleHighFidelity),
+            "the unlanded identity routes the hifi retry to its dedicated lane"
+        )
         model.phase = .running
         let worker = await harness.attachWorker(model)
         defer { worker.cancel() }
@@ -168,6 +204,10 @@ struct AppModelRetranslateProbeTests {
         // engine arrives only after the arming is observable, mirroring the
         // `.translationTask` host, which fires on the config's appearance.
         model.appleHighFidelityProbe = (false, "en")
+        #expect(
+            liveRoute(model) == .lane(.appleFast),
+            "the landed degrade re-plans the click to the fast lane"
+        )
         #expect(
             await pollUntil(timeout: resultTimeout) { model.retranslateConfig != nil },
             "the degrade armed the fast lane"
@@ -202,6 +242,10 @@ struct AppModelRetranslateProbeTests {
         model.translationSession.activeTranslationEngine = .external
         model.translationSession.activeExternalProvider = .google
         model.translationSettings.selectRetranslate(.appleHighFidelity)
+        #expect(
+            liveRoute(model) == .lane(.appleHighFidelity),
+            "the unlanded identity routes the hifi retry to its dedicated lane"
+        )
         model.phase = .running
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
@@ -241,6 +285,10 @@ struct AppModelRetranslateProbeTests {
         }
         let model = await harness.makeModel()
         model.translationSettings.selectRetranslate(.appleFast)
+        #expect(
+            liveRoute(model) == .lane(.appleFast),
+            "the unlanded identity routes the fast retry to its dedicated lane"
+        )
         model.phase = .running
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
@@ -255,6 +303,10 @@ struct AppModelRetranslateProbeTests {
             "the deferred lane owns the marker"
         )
         model.appleHighFidelityProbe = (false, "en")
+        #expect(
+            liveRoute(model) == .session,
+            "the landed fast identity hands the retry to the session path"
+        )
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
@@ -280,6 +332,10 @@ struct AppModelRetranslateProbeTests {
         model.translationSession.activeTranslationEngine = .external
         model.translationSession.activeExternalProvider = .google
         model.translationSettings.selectRetranslate(.appleHighFidelity)
+        #expect(
+            liveRoute(model) == .lane(.appleHighFidelity),
+            "the unlanded identity routes the hifi retry to its dedicated lane"
+        )
         model.phase = .running
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)

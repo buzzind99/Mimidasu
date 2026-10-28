@@ -91,11 +91,13 @@ func appendArchive(
 }
 
 /// Installs a factory returning `engine` for one provider and nil for
-/// the rest — the test stand-in for a stored key.
+/// the rest, and stores a key for that provider — the test stand-in for a
+/// stored key, which the archive plan routes external engines on.
 @MainActor
 func install(
     _ engine: ScriptedArchiveEngine, for provider: TranslationProvider, on model: AppModel
 ) {
+    try? model.translationSettings.saveKey("sk-test-\(provider.rawValue)", for: provider)
     model.retranslateEngineFactory = { requested, _ in requested == provider ? engine : nil }
 }
 

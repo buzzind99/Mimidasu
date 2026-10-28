@@ -96,6 +96,21 @@ struct AppModelRetranslateArchiveTests {
         return SUT(model: model, store: store, id: finalized)
     }
 
+    /// The archive plan for the open pane's viewing language — the
+    /// click-time lane target the retry button and the click path share.
+    private func archivePlan(_ model: AppModel) -> RetranslatePlan {
+        let target = TargetLanguage(
+            code: model.archiveViewingCode ?? model.translationSettings.targetLanguage.code
+        )
+        return model.retranslatePlan(surface: .archive, target: target)
+    }
+
+    /// The plan routes externals by the stored key, so a lane-flight fixture
+    /// that injects an engine must also store the key the click checks.
+    private func saveTestKey(_ provider: TranslationProvider, on model: AppModel) {
+        try? model.translationSettings.saveKey("sk-test-\(provider.rawValue)", for: provider)
+    }
+
     // MARK: - Gate
 
     @Test("a retry with no live session and no open archive is a no-op")
@@ -216,6 +231,7 @@ struct AppModelRetranslateArchiveTests {
             provider == .google ? engine : nil
         }
         sut.model.translationSettings.selectRetranslate(.google)
+        saveTestKey(.google, on: sut.model)
         let target = entrySentence(in: sut.model, at: 1)
 
         sut.model.retranslateSentence(target)
@@ -234,6 +250,9 @@ struct AppModelRetranslateArchiveTests {
     @Test("an external selection with no usable engine reports unavailable and keeps the row")
     func externalSelectionWithoutEngineReports() async {
         let sut = await makeSUT()
+        // The stored key admits the route; the factory's nil is the build
+        // failure that must leave the row and its backlog untouched.
+        try? sut.model.translationSettings.saveKey("sk-test-google", for: .google)
         sut.model.retranslateEngineFactory = { _, _ in nil }
         sut.model.translationSettings.selectRetranslate(.google)
         let target = entrySentence(in: sut.model, at: 0)
@@ -243,7 +262,7 @@ struct AppModelRetranslateArchiveTests {
         #expect(sut.model.pendingRetranslations.isEmpty)
         #expect(
             sut.model.toasts.toasts.contains { toast in toast.key == ToastKey.retranslate },
-            "the key-less provider reports unavailable"
+            "the unbuildable engine reports unavailable"
         )
         #expect(sut.store.load(id: sut.id)?.entries.first?.translations.isEmpty == true)
     }
@@ -253,21 +272,39 @@ struct AppModelRetranslateArchiveTests {
     @Test("in archive mode every Apple selection is an alternate")
     func archiveAlternateIdentity() async {
         let sut = await makeSUT()
+        let target = TargetLanguage(
+            code: sut.model.archiveViewingCode ?? sut.model.translationSettings.targetLanguage.code
+        )
 
         // Default selection is `.session`, and there is no live session to
         // serve it — the retry button must still enable.
         #expect(sut.model.translationSettings.retranslateEngine == .session)
-        #expect(sut.model.alternateRetranslateEngineActive)
+        #expect(archivePlan(sut.model).isAlternate)
+        #expect(
+            sut.model.retranslateRowPlan(
+                for: sut.model.entries[0], surface: .archive, target: target
+            ).isEnabled
+        )
 
         // A key-less external reports not-an-alternate (the lane would only
         // toast); the settings-target engine builder agrees there is no key.
         sut.model.translationSettings.selectRetranslate(.google)
-        #expect(!sut.model.alternateRetranslateEngineActive)
+        #expect(!archivePlan(sut.model).isAlternate)
+        #expect(
+            !sut.model.retranslateRowPlan(
+                for: sut.model.entries[0], surface: .archive, target: target
+            ).isEnabled,
+            "the unavailable route hides the retry button"
+        )
         #expect(sut.model.translationSession.makeExternalEngine(for: .deepl) == nil)
 
-        // The closed pane turns the identity back to live semantics.
+        // The closed pane turns the route back to live semantics.
         sut.model.closeArchive()
-        #expect(!sut.model.alternateRetranslateEngineActive)
+        #expect(
+            !sut.model.retranslatePlan(
+                surface: .live, target: sut.model.translationSettings.targetLanguage
+            ).isAlternate
+        )
     }
 
     @Test("the high-fidelity selection arms its own dedicated session in archive mode")

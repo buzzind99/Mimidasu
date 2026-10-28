@@ -210,27 +210,29 @@ extension RetranslateCoordinator {
 
     // MARK: - Bulk job engine resolution
 
-    /// Resolves the bulk archive-translation job's engine, mirroring the
-    /// archive route's mapping: `.session` / `.appleFast` arm the dedicated
-    /// fast session, a high-fidelity selection arms its session, and
-    /// externals come from their stored key. The selection arrives already
-    /// resolved against the run's target (the caller's archive-job mapping
-    /// applied `effectiveAppleTier(_:targetCode:)`), so it is passed through
-    /// verbatim — no settings-pair degrade is re-applied. The wait aborts on
-    /// the run's own cancellation probe, so an archive boundary never
-    /// discards a run.
+    /// Resolves the bulk archive-translation job's engine from the archive
+    /// plan: `.session` / `.appleFast` arm the dedicated fast session, the
+    /// plan's effective high-fidelity selection arms its session, and an
+    /// external comes from its stored key. The plan scopes the effective
+    /// selection to the run's target, so no settings-pair degrade applies
+    /// here. The wait aborts on the run's own cancellation probe, so an
+    /// archive boundary never discards a run.
     func resolveArchiveJobEngine(
         selection: RetranslateEngine, target: TargetLanguage,
         shouldAbort: @escaping @MainActor () -> Bool
     ) async -> ArchiveTranslationJob.EngineResolution {
-        if let provider = selection.provider {
+        let plan = plan(surface: .archive, target: target, selection: selection)
+        if case let .unavailable(reason) = plan.route {
+            return .unavailable(reason: reason)
+        }
+        // An archive plan always routes a lane; `.session` can only be a
+        // defensive fallback here and resolves the plain on-device model.
+        let engine = plan.route.laneEngine ?? .appleFast
+        if let provider = engine.provider {
             return archiveExternalResolution(for: provider, target: target)
         }
-        let kind: TranslationEngineKind = selection == .appleHighFidelity
-            ? .appleHighFidelity
-            : .appleFast
         return await resolveJobAppleEngine(
-            kind: kind, target: target, shouldAbort: shouldAbort
+            kind: engine.kind ?? .appleFast, target: target, shouldAbort: shouldAbort
         )
     }
 

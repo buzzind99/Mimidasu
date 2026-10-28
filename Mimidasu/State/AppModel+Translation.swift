@@ -122,12 +122,6 @@ extension AppModel {
         translationSession.appleHighFidelity
     }
 
-    /// Whether the settings pair can offer high fidelity: the strategy API
-    /// exists and no landing for this pair says it is unavailable.
-    var offersAppleHighFidelity: Bool {
-        translationSession.tierAvailability.offersHighFidelity(for: translationSettings.targetLanguage.code)
-    }
-
     /// The spawned external-engine worker (`queue.run(with:)`); Apple runs
     /// belong to SwiftUI's `.translationTask` instead. Get-only by intent:
     /// the worker lifecycle (attach in `activate`, park in `sessionDidEnd`)
@@ -213,36 +207,6 @@ extension AppModel {
     /// `RetranslateCoordinator.activeEngineKind`).
     var activeEngineKind: TranslationEngineKind {
         retranslate.activeEngineKind
-    }
-
-    /// True when the live Apple session provably runs the given Apple kind.
-    func liveSessionRunsKind(_ kind: TranslationEngineKind) -> Bool {
-        retranslate.liveSessionRunsKind(kind)
-    }
-
-    /// High fidelity is *known* unavailable for the current target (see
-    /// `RetranslateCoordinator.highFidelityKnownUnavailable`).
-    var highFidelityKnownUnavailable: Bool {
-        retranslate.highFidelityKnownUnavailable
-    }
-
-    /// High fidelity is *known* unavailable for `targetCode` — probe
-    /// evidence only counts for the pair it was probed for, so a row whose
-    /// target differs from the settings target is not described by the
-    /// settings probe.
-    func highFidelityKnownUnavailable(for targetCode: String) -> Bool {
-        retranslate.highFidelityKnownUnavailable(for: targetCode)
-    }
-
-    /// The Apple model the re-translate selection can actually deliver.
-    var effectiveRetranslateSelection: RetranslateEngine {
-        retranslate.effectiveRetranslateSelection
-    }
-
-    /// True when the configured retry engine resolves to an engine other
-    /// than the live session engine.
-    var alternateRetranslateEngineActive: Bool {
-        retranslate.alternateRetranslateEngineActive
     }
 }
 

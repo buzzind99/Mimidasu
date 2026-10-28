@@ -112,8 +112,9 @@ final class TranslationQueue {
     private var onResult: ((Int, SentenceTranslation) -> Void)?
     private var onStatus: ((TranslationStatus) -> Void)?
     /// Called when a run attaches or releases its engine (main-actor
-    /// context). `TranslationQueue` is not `@Observable`, so `AppModel`
-    /// mirrors this into observable state for the transcript's retry gate.
+    /// context). `TranslationQueue` is not `@Observable`, so the live-session
+    /// coordinator mirrors this into the runtime snapshot the sidebar and
+    /// status surfaces render.
     private var onWorkerChanged: ((Bool) -> Void)?
 
     /// Wire callbacks (invoked synchronously on the main actor).

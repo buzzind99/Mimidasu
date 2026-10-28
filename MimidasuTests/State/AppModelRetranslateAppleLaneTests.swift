@@ -411,7 +411,11 @@ struct AppModelRetranslateAppleLaneTests {
             "the initial session translation is delivered before the retry"
         )
 
-        #expect(model.effectiveRetranslateSelection == .appleFast)
+        let plan = model.retranslatePlan(
+            surface: .live, target: model.translationSettings.targetLanguage
+        )
+        #expect(plan.context.effectiveSelection == .appleFast)
+        #expect(plan.route == .lane(.appleFast), "the degrade routes through the fast lane")
 
         model.retranslateSentence(sentence)
         model.retranslateSessionArrived(LaneEchoEngine())

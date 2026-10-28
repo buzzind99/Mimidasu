@@ -15,13 +15,94 @@ struct AppModelRetranslateLaneFailureTests {
     private let harness = RetranslateHarness(suite: "test.AppModelRetranslateLaneFailure")
     private let resultTimeout: TimeInterval = 5
 
+    /// The plan routes externals by the stored key, so a lane-flight fixture
+    /// that injects an engine must also store the key the click checks.
+    private func saveTestKey(_ provider: TranslationProvider, on model: AppModel) {
+        try? model.translationSettings.saveKey("sk-test-\(provider.rawValue)", for: provider)
+    }
+
+    /// A transport that always answers 401 — keeps the lane's live engine
+    /// build path (no injected factory) one request away from the network.
+    private func unauthorizedTransport() -> HTTPTranslationTransport {
+        HTTPTranslationTransport(timeout: 5) { request in
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil
+            )!
+            return (Data(), response)
+        }
+    }
+
     // MARK: - Failure surfaces
+
+    @Test("a keyed external whose engine cannot build reports unavailable")
+    func keyedExternalBuildFailureReportsUnavailable() async {
+        let model = await harness.makeModel()
+        model.retranslateEngineFactory = { _, _ in nil }
+        model.translationSettings.selectRetranslate(.google)
+        saveTestKey(.google, on: model)
+        model.phase = .running
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+        model.applyTranslation(
+            index: 7, translation: SentenceTranslation(lang: "en", text: "Original")
+        )
+
+        model.retranslateSentence(sentence)
+
+        #expect(model.pendingRetranslations.isEmpty, "the failed build leaves no marker")
+        #expect(model.lanePendingRetranslations.isEmpty)
+        #expect(
+            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            "the row keeps its previous translation"
+        )
+        let toast = model.toasts.toasts.first(where: { candidate in
+            candidate.key == ToastKey.retranslate
+        })
+        #expect(toast?.title == "Re-translate unavailable")
+        #expect(toast?.body == "No API key stored for \(TranslationProvider.google.displayName).")
+
+        // The failed build ran before the lane evicted anything: attaching a
+        // worker still delivers the sentence that was queued at click time.
+        let worker = await harness.attachWorker(model)
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                model.entries[0].translations
+                    == [SentenceTranslation(lang: "en", text: "EN:テスト")]
+            },
+            "the failed build left the queued sentence in the backlog"
+        )
+        worker.cancel()
+    }
+
+    @Test("a keyed external with no factory builds the live session's engine")
+    func keyedExternalLaneBuildsLiveEngine() async {
+        let model = await harness.makeModel(translationTransport: unauthorizedTransport())
+        model.translationSettings.selectRetranslate(.google)
+        saveTestKey(.google, on: model)
+        model.phase = .running
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+
+        model.retranslateSentence(sentence)
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                model.toasts.toasts.contains { toast in
+                    toast.key == ToastKey.retranslate && toast.title == "Re-translate failed"
+                }
+            },
+            "the live-built engine's flight reports its failure"
+        )
+        #expect(model.pendingRetranslations.isEmpty)
+        #expect(model.lanePendingRetranslations.isEmpty)
+    }
 
     @Test("a failed lane run posts the failure toast and clears the marker")
     func failedLaneRunPostsFailureToastAndClearsMarker() async {
         let model = await harness.makeModel()
         model.retranslateEngineFactory = { _, _ in LaneEmptyEngine() }
         model.translationSettings.selectRetranslate(.google)
+        saveTestKey(.google, on: model)
         model.phase = .running
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
@@ -54,6 +135,7 @@ struct AppModelRetranslateLaneFailureTests {
         let engine = LaneGatedFailingEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
+        saveTestKey(.google, on: model)
         model.phase = .running
         // A served backlog keeps a stop's translation-tail drain instant.
         let worker = Task { await model.translationQueue.run(with: QueueEchoEngine()) }
@@ -107,6 +189,7 @@ struct AppModelRetranslateLaneFailureTests {
         let engine = LaneCancellableEngine()
         model.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
+        saveTestKey(.google, on: model)
         model.phase = .running
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)

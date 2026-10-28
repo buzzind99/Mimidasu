@@ -198,7 +198,7 @@ struct ArchiveTranslationResolutionTests {
         )
     }
 
-    @Test("the engine factory receives the run's target, not the settings target")
+    @Test("an external pick with a stored key flies its engine over the run's target")
     func engineFactoryReceivesRunTarget() async {
         let sut = await makeSUT()
         #expect(
@@ -206,6 +206,9 @@ struct ArchiveTranslationResolutionTests {
             "the settings target differs from the archive's stored target"
         )
         let engine = ScriptedArchiveEngine()
+        // The external route requires a stored key; the factory is the
+        // instrumented engine builder.
+        try? sut.model.translationSettings.saveKey("sk-test-google", for: .google)
         let recorded = Mutex<[(provider: TranslationProvider, target: String)]>([])
         sut.model.retranslateEngineFactory = { provider, target in
             recorded.withLock { current in current.append((provider, target.code)) }
@@ -222,6 +225,26 @@ struct ArchiveTranslationResolutionTests {
         #expect(calls.count == 1, "one engine build for the run")
         #expect(calls.first?.provider == .google)
         #expect(calls.first?.target == "fr", "the factory builds over the run's target")
+    }
+
+    @Test("a keyed external pick whose engine cannot build reports unavailable")
+    func keyedExternalWithoutBuildableEngineReportsUnavailable() async {
+        let sut = await makeSUT()
+        // The key makes the plan's route executable; the factory's nil is
+        // the build failure the resolution reports.
+        try? sut.model.translationSettings.saveKey("sk-test-google", for: .google)
+        sut.model.retranslateEngineFactory = { _, _ in nil }
+
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) { archiveToast(sut.model) != nil },
+            "the failed build reports under the run's card"
+        )
+        let toast = archiveToast(sut.model)
+        #expect(toast?.title == "Archive translation unavailable")
+        #expect(toast?.body == "No API key stored for \(TranslationProvider.google.displayName).")
+        #expect(!sut.model.archiveTranslationRunning, "a failed build starts nothing")
     }
 
     // MARK: - Target-scoped high-fidelity resolution
@@ -297,10 +320,13 @@ struct ArchiveTranslationResolutionTests {
         #expect(sut.model.retranslateHifiConfig == nil, "the high-fidelity session is never armed")
     }
 
-    @Test("an NMT pick flies fast even where high fidelity is installed")
+    @Test("an NMT pick flies fast even where high fidelity is installed, ignoring the settings pick")
     func nmtPickFliesFastWithHifiInstalled() async {
         let sut = await makeSUT()
         sut.model.appleHighFidelityProbe = (true, "fr")
+        // The settings card's selection is a live-surface preference; the
+        // run takes only the picker's explicit tier.
+        sut.model.translationSettings.selectRetranslate(.google)
         let engine = ScriptedArchiveEngine()
         sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "fr")
         sut.model.retranslateSessionArrived(engine)
@@ -320,46 +346,78 @@ struct ArchiveTranslationResolutionTests {
         #expect(sut.model.retranslateHifiConfig == nil, "an explicit NMT pick never upgrades")
     }
 
-    @Test("the high-fidelity known-unavailable facade is scoped to the row's target")
-    func highFidelityKnownUnavailableFacadeIsTargetScoped() async {
+    @Test("the high-fidelity known-unavailable plan fact is scoped to the target")
+    func highFidelityKnownUnavailableIsTargetScoped() async {
         let sut = await makeSUT()
         sut.model.appleHighFidelityProbe = (false, "en")
 
         #expect(
-            sut.model.highFidelityKnownUnavailable(for: "en"),
+            sut.model.retranslatePlan(
+                surface: .archive, target: TargetLanguage(code: "en")
+            ).context.tier.highFidelityKnownUnavailable,
             "the probed pair reports unavailable"
         )
         #expect(
-            !sut.model.highFidelityKnownUnavailable(for: "fr"),
+            !sut.model.retranslatePlan(
+                surface: .archive, target: TargetLanguage(code: "fr")
+            ).context.tier.highFidelityKnownUnavailable,
             "a foreign target has no probe evidence"
         )
-        #expect(!sut.model.highFidelityKnownUnavailable(for: "de"))
-        #expect(sut.model.highFidelityKnownUnavailable, "the settings-pair read still delegates")
+        #expect(
+            !sut.model.retranslatePlan(
+                surface: .archive, target: TargetLanguage(code: "de")
+            ).context.tier.highFidelityKnownUnavailable
+        )
+        #expect(
+            sut.model.retranslatePlan(
+                surface: .archive, target: sut.model.translationSettings.targetLanguage
+            ).context.tier.highFidelityKnownUnavailable,
+            "the settings-target plan reads the settings pair's evidence"
+        )
     }
 
     // MARK: - Picker offer
 
-    @Test("the picker offers high fidelity without evidence and withdraws only for its pair")
+    @Test("the archive plan offers high fidelity without evidence and withdraws only for its pair")
     func pickerOfferReflectsProbeEvidence() async throws {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("the high-fidelity offer requires macOS 26.4")
         }
         let sut = await makeSUT()
 
+        let offered = sut.model.retranslatePlan(
+            surface: .archive, target: TargetLanguage(code: "fr")
+        )
         #expect(
-            sut.model.archiveHighFidelityOffered(for: "fr"),
+            offered.options.contains { option in option.engine == .appleHighFidelity },
             "a pair with no unavailability evidence keeps the offer"
+        )
+        #expect(
+            offered.defaultEngine == .appleHighFidelity,
+            "the picker defaults to high fidelity while it is offered"
         )
 
         sut.model.appleHighFidelityProbe = (false, "fr")
 
-        #expect(
-            !sut.model.archiveHighFidelityOffered(for: "fr"),
-            "the probed pair withdraws its offer"
+        let withdrawn = sut.model.retranslatePlan(
+            surface: .archive, target: TargetLanguage(code: "fr")
         )
         #expect(
-            sut.model.archiveHighFidelityOffered(for: "en"),
+            !withdrawn.options.contains { option in option.engine == .appleHighFidelity },
+            "the probed pair withdraws its offer"
+        )
+        #expect(withdrawn.defaultEngine == .appleFast, "a withdrawn offer defaults to NMT")
+
+        let foreign = sut.model.retranslatePlan(
+            surface: .archive, target: TargetLanguage(code: "en")
+        )
+        #expect(
+            foreign.options.contains { option in option.engine == .appleHighFidelity },
             "evidence for one pair does not describe the other's offer"
+        )
+        #expect(
+            foreign.defaultEngine == .appleHighFidelity,
+            "the foreign pair keeps the high-fidelity default"
         )
     }
 }

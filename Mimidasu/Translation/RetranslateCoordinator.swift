@@ -12,10 +12,10 @@ import Translation
 /// phase, entries, and toasts come from the host through
 /// `TranslationSessionPort`.
 ///
-/// File split: identity + selection + routing live here;
-/// `RetranslateCoordinator+Lane.swift` holds the runner;
-/// `RetranslateCoordinator+Sessions.swift` holds the dedicated-session
-/// arming/teardown lifecycle.
+/// File split: identity + selection live here; the decision builder sits in
+/// `RetranslateCoordinator+Plan.swift`; `RetranslateCoordinator+Lane.swift`
+/// executes the row lane; `RetranslateCoordinator+Sessions.swift` holds the
+/// dedicated-session arming/teardown lifecycle.
 @Observable
 @MainActor
 final class RetranslateCoordinator {
@@ -225,96 +225,6 @@ extension RetranslateCoordinator {
             return false
         }
         return activeEngineKind == kind
-    }
-
-    /// High fidelity is *known* unavailable when the last probe landed for
-    /// `targetCode` and reported it not installed. Deliberately narrower
-    /// than "cannot serve": a probe that never landed or one run for a
-    /// different target is not evidence of unavailability. Delegates to
-    /// `tierAvailability.knownUnavailable(for:)`, which owns the pair-scoped
-    /// evidence — a foreign archive target compares against its own code,
-    /// never the settings pair.
-    func highFidelityKnownUnavailable(for targetCode: String) -> Bool {
-        tierAvailability.knownUnavailable(for: targetCode)
-    }
-
-    /// The settings-pair spelling of `highFidelityKnownUnavailable(for:)`.
-    var highFidelityKnownUnavailable: Bool {
-        highFidelityKnownUnavailable(for: settings.targetLanguage.code)
-    }
-
-    /// The Apple tier `engine` can actually deliver for `targetCode`, which
-    /// is not always the selected one. `.appleHighFidelity` names a strategy
-    /// the OS may not be able to serve: below the strategy API there is no
-    /// strategy selection at all, and where the ja→target pair is not
-    /// `.installed` the dedicated config still requests high fidelity and the
-    /// framework silently falls back to the fast model (the same caveat
-    /// `makeConfig` documents). Requesting it anyway would return text
-    /// byte-identical to a fast session while stamping the row
-    /// `.appleHighFidelity` — a "· via Apple Intelligence" marker over
-    /// fast-model output. So a *known*-unavailable high-fidelity route
-    /// degrades to the fast model, which is a genuine alternate. Delegates to
-    /// `tierAvailability.effectiveTier(_:targetCode:)`; non-Apple selections
-    /// pass through untouched.
-    ///
-    /// Accepted caveat: a foreign target (an archive whose viewing language
-    /// differs from the settings target) has no probe evidence, so it keeps
-    /// requesting high fidelity and the framework may silently serve the
-    /// fast model — the same caveat the config builders document. No
-    /// on-demand probe runs at archive-run start.
-    func effectiveAppleTier(_ engine: RetranslateEngine, targetCode: String) -> RetranslateEngine {
-        tierAvailability.effectiveTier(engine, targetCode: targetCode)
-    }
-
-    /// The settings re-translate selection resolved for `targetCode` — the
-    /// settings-selection spelling of `effectiveAppleTier(_:targetCode:)`,
-    /// which documents the degrade semantics. Every consumer switches on the
-    /// effective selection, so the persisted `.appleHighFidelity` is never
-    /// rewritten; only its resolution degrades.
-    func effectiveRetranslateSelection(targetCode: String) -> RetranslateEngine {
-        effectiveAppleTier(settings.retranslateEngine, targetCode: targetCode)
-    }
-
-    /// The settings-pair spelling of `effectiveRetranslateSelection(targetCode:)`.
-    var effectiveRetranslateSelection: RetranslateEngine {
-        effectiveRetranslateSelection(targetCode: settings.targetLanguage.code)
-    }
-
-    /// True when the configured retry engine resolves to an engine *other
-    /// than* the live session engine — the transcript's retry button drops
-    /// its worker/status requirements in that case (a dead session engine is
-    /// exactly when routing the retry elsewhere is useful). A selection that
-    /// names the live session's own engine is not an alternate: the lane
-    /// would run the identical engine (for Apple, a deterministic one) and
-    /// show no marker.
-    ///
-    /// Archive mode has no live session to differ from: every retry is a
-    /// dedicated alternate there (a `.session` selection maps to Apple-fast;
-    /// externals are alternates when their key is usable), so only the
-    /// key-less external case reports "not an alternate".
-    var alternateRetranslateEngineActive: Bool {
-        if archiveOpen {
-            switch effectiveRetranslateSelection {
-            case .session, .appleFast, .appleHighFidelity:
-                return true
-            case let selection:
-                guard let provider = selection.provider else { return false }
-                return settings.hasKey(for: provider)
-            }
-        }
-        switch effectiveRetranslateSelection {
-        case .session:
-            return false
-        case .appleFast:
-            return !liveSessionRunsKind(.appleFast)
-        case .appleHighFidelity:
-            return !liveSessionRunsKind(.appleHighFidelity)
-        case let selection:
-            guard let provider = selection.provider,
-                  provider != live?.activeExternalProvider
-            else { return false }
-            return settings.hasKey(for: provider)
-        }
     }
 
     // MARK: - Settings selection

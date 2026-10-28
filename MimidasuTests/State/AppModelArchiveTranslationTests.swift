@@ -402,6 +402,9 @@ extension AppModelArchiveTranslationTests {
     @Test("an external start with no engine reports unavailable and starts nothing")
     func unavailableEngineReportsAndStartsNothing() async {
         let sut = await makeSUT()
+        // The stored key admits the route; the factory's nil is the build
+        // failure the run reports.
+        try? sut.model.translationSettings.saveKey("sk-test-google", for: .google)
         sut.model.retranslateEngineFactory = { _, _ in nil }
 
         sut.model.beginArchiveTranslation(engine: .google, lang: "fr")

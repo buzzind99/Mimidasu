@@ -21,7 +21,7 @@ extension AppModel {
         archiveTranslationJob.resolveEngine = { [weak self] engine, target in
             guard let self else { return .cancelled }
             return await retranslate.resolveArchiveJobEngine(
-                selection: archiveJobSelection(for: engine, target: target), target: target,
+                selection: engine, target: target,
                 shouldAbort: { self.archiveTranslationJob.isCancelled }
             )
         }
@@ -201,27 +201,6 @@ extension AppModel {
         if case .archiveTranslation(_, _, _, .archiveWindow) = providerAwaitingDisclosure {
             declineCloudDisclosure()
         }
-    }
-
-    /// The run's engine: the picker's explicit selection, passed through —
-    /// Apple high fidelity degrades to the fast model only on pair-scoped
-    /// evidence that the strategy can't be served for the run's target
-    /// (the OS lacks the strategy API, or the probe landed not-installed for
-    /// exactly that pair). The settings re-translate selection plays no part:
-    /// the picker's own row decides the tier.
-    private func archiveJobSelection(
-        for engine: RetranslateEngine, target: TargetLanguage
-    ) -> RetranslateEngine {
-        retranslate.effectiveAppleTier(engine, targetCode: target.code)
-    }
-
-    /// Whether the archive engine picker offers — and defaults to — the
-    /// Apple Intelligence tier for `lang`: the strategy API exists and the
-    /// pair isn't known unavailable. Probe evidence is pair-scoped, so an
-    /// unprobed pair stays offered; the framework's silent fast fallback
-    /// covers the remainder.
-    func archiveHighFidelityOffered(for lang: String) -> Bool {
-        translationSession.tierAvailability.offersHighFidelity(for: lang)
     }
 
     private static func translatedIndexes(
