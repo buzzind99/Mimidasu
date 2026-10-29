@@ -90,6 +90,7 @@ struct AppModelArchiveTranslationRowStartTests {
         #expect(toast?.body == "This session is no longer in the archive.")
         #expect(sut.model.archiveTranslationJob.activity == .idle, "no claim is taken")
         #expect(sut.model.archiveTranslationJob.lastRun == nil)
+        #expect(!sut.model.archiveTranslationRunning, "the unclaimed start leaves the gate clear")
         #expect(engine.recordedBatches.isEmpty, "no engine ever runs")
     }
 
@@ -108,7 +109,7 @@ struct AppModelArchiveTranslationRowStartTests {
             },
             "the first run claims the slot and parks mid-walk"
         )
-        let claimed = sut.model.archiveTranslationJob.activity.request
+        let claimed = sut.model.archiveTranslationJob.activity.runStatus
 
         sut.model.requestArchiveTranslation(
             engine: .google, lang: "fr", sessionID: otherID, presenter: .archiveWindow
@@ -119,8 +120,12 @@ struct AppModelArchiveTranslationRowStartTests {
             "the refused request stages nothing for a disclosure"
         )
         #expect(
-            sut.model.archiveTranslationJob.activity.request == claimed,
+            sut.model.archiveTranslationJob.activity.runStatus == claimed,
             "the claimed run is untouched"
+        )
+        #expect(
+            !sut.model.archiveTranslationJob.isBusy(sessionID: otherID, lang: "fr"),
+            "the scoped gate never widens to the refused row"
         )
         #expect(engine.recordedBatches == [["こんにちは"]], "no second flight starts")
 
@@ -153,8 +158,12 @@ struct AppModelArchiveTranslationRowStartTests {
 
         #expect(sut.store.load(id: otherID) != nil, "the delete is refused while the run walks it")
         #expect(
-            sut.model.archiveTranslationJob.activity.request?.sessionID == otherID,
+            sut.model.archiveTranslationJob.activity.runStatus?.sessionID == otherID,
             "the run stays claimed"
+        )
+        #expect(
+            sut.model.archiveTranslationJob.isBusy(sessionID: otherID, lang: "fr"),
+            "the delete guard reads the run's scoped gate"
         )
         #expect(sut.model.openArchive?.id == sut.id, "the pane stays on its archive")
 

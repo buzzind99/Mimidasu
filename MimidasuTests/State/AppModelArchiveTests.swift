@@ -232,54 +232,6 @@ struct AppModelArchiveTests {
         )
     }
 
-    @Test("opening another archive keeps the run over the previous one")
-    func openAnotherArchiveKeepsRunningRun() async {
-        let sut = await makeSUT()
-        let secondID = appendArchive(to: sut.store)
-        let gate = PermitGate()
-        let engine = ScriptedArchiveEngine(gate: gate)
-        install(engine, for: .google, on: sut.model)
-
-        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
-        #expect(
-            await pollUntil {
-                sut.model.archiveTranslationRunning && engine.recordedBatches.count == 1
-            },
-            "the run starts and parks on its first sentence"
-        )
-        let cardID = archiveToast(sut.model)?.id
-        #expect(cardID != nil, "the started event posts the progress card")
-
-        sut.model.openArchiveSession(id: secondID)
-
-        #expect(sut.model.openArchive?.id == secondID)
-        #expect(sut.model.archiveTranslationRunning, "the swap keeps the run claimed")
-        #expect(archiveToast(sut.model)?.id == cardID, "the swap keeps the run's card")
-        gate.release()
-        gate.release()
-        gate.release()
-        #expect(
-            await pollUntil {
-                archiveToast(sut.model)?.title == "Archive translation finished"
-                    && !sut.model.archiveTranslationRunning
-            },
-            "the released run walks every sentence"
-        )
-        #expect(
-            engine.recordedBatches == [["こんにちは"], ["さようなら"], ["おはよう"]],
-            "no sentence is dropped by the swap"
-        )
-        #expect(
-            sut.store.load(id: sut.id)?.entries.compactMap { entry in entry.translation(for: "fr")?.text }
-                == ["T:こんにちは", "T:さようなら", "T:おはよう"],
-            "every landing persists under the first archive"
-        )
-        #expect(
-            sut.store.load(id: secondID)?.entries.allSatisfy { entry in entry.translations.isEmpty } == true,
-            "the swapped-in archive is never modified"
-        )
-    }
-
     @Test("archive boundaries clear only main-window intents")
     func boundariesClearOnlyMainWindowIntents() async {
         let (model, first) = await makeModel()
@@ -450,5 +402,67 @@ struct AppModelArchiveTests {
         #expect(model.archiveProjection.summaries == summariesBefore, "the cached list is unchanged")
         #expect(model.archiveProjection.openSummary == nil, "no session opens")
         #expect(!model.toasts.toasts.contains { toast in toast.key == ToastKey.archiveUnavailable })
+    }
+}
+
+/// The bulk run's cross-archive boundary: opening another session keeps the
+/// run over the previous one and its card, the scoped activity reads leave
+/// the swapped-in row idle, and every landing stays under the run's own id.
+extension AppModelArchiveTests {
+
+    @Test("opening another archive keeps the run over the previous one")
+    func openAnotherArchiveKeepsRunningRun() async {
+        let sut = await makeSUT()
+        let secondID = appendArchive(to: sut.store)
+        let gate = PermitGate()
+        let engine = ScriptedArchiveEngine(gate: gate)
+        install(engine, for: .google, on: sut.model)
+
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
+        #expect(
+            await pollUntil {
+                sut.model.archiveTranslationRunning && engine.recordedBatches.count == 1
+            },
+            "the run starts and parks on its first sentence"
+        )
+        let cardID = archiveToast(sut.model)?.id
+        #expect(cardID != nil, "the started event posts the progress card")
+
+        sut.model.openArchiveSession(id: secondID)
+
+        #expect(sut.model.openArchive?.id == secondID)
+        #expect(sut.model.archiveTranslationRunning, "the swap keeps the run claimed")
+        #expect(
+            sut.model.archiveTranslationJob.activity(for: sut.id).isRunning,
+            "the run's own row reads running"
+        )
+        #expect(
+            sut.model.archiveTranslationJob.activity(for: secondID) == .idle,
+            "the swapped-in row reads idle"
+        )
+        #expect(archiveToast(sut.model)?.id == cardID, "the swap keeps the run's card")
+        gate.release()
+        gate.release()
+        gate.release()
+        #expect(
+            await pollUntil {
+                archiveToast(sut.model)?.title == "Archive translation finished"
+                    && !sut.model.archiveTranslationRunning
+            },
+            "the released run walks every sentence"
+        )
+        #expect(
+            engine.recordedBatches == [["こんにちは"], ["さようなら"], ["おはよう"]],
+            "no sentence is dropped by the swap"
+        )
+        #expect(
+            sut.store.load(id: sut.id)?.entries.compactMap { entry in entry.translation(for: "fr")?.text }
+                == ["T:こんにちは", "T:さようなら", "T:おはよう"],
+            "every landing persists under the first archive"
+        )
+        #expect(
+            sut.store.load(id: secondID)?.entries.allSatisfy { entry in entry.translations.isEmpty } == true,
+            "the swapped-in archive is never modified"
+        )
     }
 }

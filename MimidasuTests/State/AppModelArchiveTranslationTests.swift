@@ -39,6 +39,11 @@ struct AppModelArchiveTranslationTests {
         #expect(started?.title == "Translating to Français…")
         #expect(started?.body == "Google Translate · 0/3 sentences")
         #expect(started?.action?.label == "Cancel")
+        #expect(
+            sut.model.archiveTranslationJob.runProgress
+                == ArchiveTranslationJobFixtures.makeRunProgress(kind: .google, processed: 0, total: 3),
+            "the running status's progress is a separate observable at zero"
+        )
         let cardID = started?.id
 
         gate.release()
@@ -66,6 +71,7 @@ struct AppModelArchiveTranslationTests {
         #expect(summary?.action == nil, "the all-success summary carries no action")
         #expect(summary?.autoDismisses == true, "the plain summary auto-dismisses")
         #expect(summary?.id == cardID, "the summary replaced the progress card in place")
+        #expect(sut.model.archiveTranslationJob.runProgress == nil, "the progress clears with the run")
     }
 
     // MARK: - Failures
@@ -360,12 +366,12 @@ extension AppModelArchiveTranslationTests {
             },
             "the run claims the slot and parks"
         )
-        let claimed = sut.model.archiveTranslationJob.activity.request
+        let claimed = sut.model.archiveTranslationJob.activity.runStatus
 
         sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
         sut.model.retranslateSentence(sut.model.entries[1].sentence)
 
-        #expect(sut.model.archiveTranslationJob.activity.request == claimed, "the second start is refused")
+        #expect(sut.model.archiveTranslationJob.activity.runStatus == claimed, "the second start is refused")
         #expect(engine.recordedBatches == [["こんにちは"]], "only the claimed run's flight is airborne")
         #expect(sut.model.pendingRetranslations.isEmpty, "the per-row lane never takes a marker")
         #expect(retranslateToast(sut.model) == nil, "the per-row lane never reports")
@@ -390,6 +396,15 @@ extension AppModelArchiveTranslationTests {
         sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
 
         #expect(sut.model.archiveTranslationRunning, "the claimed run is visible from the click")
+        #expect(
+            sut.model.archiveTranslationJob.activity.runStatus
+                == ArchiveTranslationJobFixtures.makeStatus(sessionID: sut.id, lang: "fr", engine: .google),
+            "the claimed status names the run from the click"
+        )
+        #expect(
+            sut.model.archiveTranslationJob.runProgress == nil,
+            "the claim publishes no progress before the walk"
+        )
 
         #expect(
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },

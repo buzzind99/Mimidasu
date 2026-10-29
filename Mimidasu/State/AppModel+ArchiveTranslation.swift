@@ -88,7 +88,7 @@ extension AppModel {
     /// captured request, so it works whether or not that session is still
     /// open.
     func retryFailedArchiveTranslation() {
-        guard archiveTranslationJob.activity == .idle,
+        guard !archiveTranslationJob.isBusy,
               let run = archiveTranslationJob.lastRun,
               !archiveTranslationJob.failureIndexes.isEmpty
         else { return }
@@ -121,7 +121,7 @@ extension AppModel {
         engine: RetranslateEngine, lang: String, sessionID: Int64,
         presenter: ArchiveDisclosurePresenter
     ) {
-        guard archiveTranslationJob.activity == .idle, providerAwaitingDisclosure == nil else {
+        guard !archiveTranslationJob.isBusy, providerAwaitingDisclosure == nil else {
             return
         }
         if let provider = engine.provider {
@@ -147,7 +147,7 @@ extension AppModel {
     /// unconditional, because the failure summary card outlives the finished
     /// run.
     func cancelArchiveTranslation() {
-        if archiveTranslationJob.activity != .idle {
+        if archiveTranslationJob.isBusy {
             archiveTranslationJob.cancel()
         }
         toasts.dismiss(key: ToastKey.archiveTranslation)
@@ -195,7 +195,7 @@ extension AppModel {
     /// previous text, so the display never claims a translation the store
     /// lacks.
     private func landArchiveTranslation(index: Int, translation: SentenceTranslation) -> Bool {
-        guard let sessionID = archiveTranslationJob.activity.request?.sessionID else { return false }
+        guard let sessionID = archiveTranslationJob.activity.runStatus?.sessionID else { return false }
         guard writeBackTranslation(translation, index: index, session: sessionID) else {
             // The run's row vanishing mid-flight is expected when the run was
             // cancelled; only a genuine fault reports.
@@ -249,8 +249,10 @@ extension AppModel {
     /// The keyed progress card: per-key dedup replaces it in place, so the
     /// bar animates instead of flashing. Cancel keeps partial results.
     private func postArchiveTranslationProgress(processed: Int, total: Int) {
-        guard case let .running(request, progress) = archiveTranslationJob.activity else { return }
-        let language = TargetLanguage(code: request.lang)
+        guard case let .running(status) = archiveTranslationJob.activity,
+              let progress = archiveTranslationJob.runProgress
+        else { return }
+        let language = TargetLanguage(code: status.lang)
         toasts.post(
             key: ToastKey.archiveTranslation, style: .info,
             title: "Translating to \(language.nativeName)…",

@@ -255,7 +255,7 @@ extension AppModel {
     /// Refused while that session is the run's target: the walk would lose
     /// its rows mid-flight.
     func deleteArchive(id: Int64) {
-        guard archiveTranslationJob.activity.request?.sessionID != id else { return }
+        guard !archiveTranslationJob.isBusy(sessionID: id, lang: nil) else { return }
         if openArchive?.id == id {
             closeArchive()
         }
