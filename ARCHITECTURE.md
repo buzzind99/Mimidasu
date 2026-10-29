@@ -848,6 +848,22 @@ packaged apps in `Contents/Frameworks/`.
   every landed row's `engine`, and writes back through the same seam as
   live and per-row translation. Progress/summary is an `.info` toast card
   with Cancel / Retry failed; a failed write counts as a failed sentence.
+  The job's transition state is a small `Activity` — `.idle`, `.claimed`,
+  `.running` — carrying a `RunStatus` (`sessionID`, `lang`, `engine`) and
+  nothing else; per-tick counts live in a separate `runProgress` observable,
+  non-nil exactly while running, and every return to idle goes through one
+  `endActivity()` that clears the transition, the progress, and the retained
+  claim. `Request` (the sentence payload and translated snapshot) stays
+  internal as the claim input and is retained by `lastRun` for Retry failed;
+  it is not part of the observable activity. One scoped
+  `isBusy(sessionID:lang:)` (a nil language matches any language; a foreign
+  session never matches) plus a global `isBusy` answer the busy gates; eight
+  UI gates plus seven model readers read the small status/progress surface
+  instead of re-deriving the run. The archive row takes one `Activity` value,
+  and a private progress bar child (`ArchiveRunProgressBar`) is the only view
+  that reads `runProgress`, so a `runProgress` tick invalidates only that bar
+  (and the progress toast, by design) while the banner toolbar, language picker,
+  stop confirmation, and row body change on transitions. No user-visible change.
 - **Window and pane:** a fixed 640×720 `Window("Session archive")` scene
   splits rows into RECENT and SAVED, newest first. Each row carries a date
   rail, a large title (the user's name, the quoted first sentence, or
