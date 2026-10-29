@@ -9,12 +9,9 @@ struct RetranslatePlanFixture: Sendable {
     var target: TargetLanguage = .english
     var selection: RetranslateEngine = .session
     var effectiveSelection: RetranslateEngine = .session
-    var supportsStrategySelection = true
-    var probeLandedForTarget = true
     var highFidelityOffered = true
     var highFidelityKnownUnavailable = false
     var activeEngineKind: TranslationEngineKind = .appleFast
-    var isApple = true
     var runsFast = true
     var runsHighFidelity = false
     var attachedProvider: TranslationProvider?
@@ -35,14 +32,11 @@ struct RetranslatePlanFixture: Sendable {
             selection: selection,
             effectiveSelection: effectiveSelection,
             tier: RetranslateTierFacts(
-                supportsStrategySelection: supportsStrategySelection,
-                probeLandedForTarget: probeLandedForTarget,
                 highFidelityOffered: highFidelityOffered,
                 highFidelityKnownUnavailable: highFidelityKnownUnavailable
             ),
             live: RetranslateLiveFacts(
                 activeEngineKind: activeEngineKind,
-                isApple: isApple,
                 runsFast: runsFast,
                 runsHighFidelity: runsHighFidelity,
                 attachedProvider: attachedProvider,

@@ -4,9 +4,10 @@ extension RetranslateCoordinator {
     /// Builds the re-translate decision for one surface, target, and
     /// selection. Every fact is read from current observable state, so a view
     /// body that reads a derived member also observes the settings, probe
-    /// evidence, live runtime, queue attachment, phase, and pending markers
-    /// that can change the decision. The selection defaults to the persisted
-    /// Settings choice; callers with an explicit picker selection pass it in.
+    /// evidence, live runtime (status and worker attachment), phase, and
+    /// pending markers that can change the decision. The selection defaults
+    /// to the persisted Settings choice; callers with an explicit picker
+    /// selection pass it in.
     func plan(
         surface: RetranslateSurface,
         target: TargetLanguage,
@@ -23,8 +24,6 @@ extension RetranslateCoordinator {
                     selection, targetCode: target.code
                 ),
                 tier: RetranslateTierFacts(
-                    supportsStrategySelection: AppleTierAvailability.supportsStrategySelection,
-                    probeLandedForTarget: tierAvailability.probeLanded(for: target.code),
                     highFidelityOffered: tierAvailability.offersHighFidelity(for: target.code),
                     highFidelityKnownUnavailable: tierAvailability.knownUnavailable(for: target.code)
                 ),
@@ -60,17 +59,17 @@ extension RetranslateCoordinator {
         plan(surface: surface, target: target).row(for: entry)
     }
 
-    /// The live session's identity, queue attachment, and phase. The
-    /// attachment is read from the queue itself because that is the source the
-    /// click path checks before enqueueing a retry.
+    /// The live session's identity, worker attachment, and phase. The
+    /// attachment reads the observable mirror the queue's workerChanged
+    /// callback keeps in sync with the queue, and falls back to the queue
+    /// itself when there is no live session.
     private var liveFacts: RetranslateLiveFacts {
         RetranslateLiveFacts(
             activeEngineKind: activeEngineKind,
-            isApple: live?.activeTranslationEngine == .apple,
             runsFast: liveSessionRunsKind(.appleFast),
             runsHighFidelity: liveSessionRunsKind(.appleHighFidelity),
             attachedProvider: live?.activeExternalProvider,
-            workerAttached: queue.hasWorker,
+            workerAttached: live?.runtime.workerAttached ?? queue.hasWorker,
             status: live?.runtime.status ?? .idle,
             phaseIsLive: SessionPhaseMachine.isLive(sessionPhase)
         )

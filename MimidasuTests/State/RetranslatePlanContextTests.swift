@@ -56,11 +56,6 @@ struct RetranslatePlanContextTests {
 
         let plan = model.retranslatePlan(surface: .live, target: .english)
 
-        #expect(
-            plan.context.tier.supportsStrategySelection
-                == AppleTierAvailability.supportsStrategySelection
-        )
-        #expect(plan.context.tier.probeLandedForTarget)
         #expect(plan.context.tier.highFidelityKnownUnavailable)
         #expect(!plan.context.tier.highFidelityOffered)
     }
@@ -72,7 +67,6 @@ struct RetranslatePlanContextTests {
         let plan = model.retranslatePlan(surface: .live, target: .english)
 
         #expect(plan.context.live.activeEngineKind == .appleFast)
-        #expect(plan.context.live.isApple)
         #expect(plan.context.live.attachedProvider == nil)
         #expect(plan.context.live.runsFast == !AppleTierAvailability.supportsStrategySelection)
         #expect(!plan.context.live.runsHighFidelity)
@@ -87,7 +81,6 @@ struct RetranslatePlanContextTests {
         let plan = model.retranslatePlan(surface: .live, target: .english)
 
         #expect(plan.context.live.activeEngineKind == .deepl)
-        #expect(!plan.context.live.isApple)
         #expect(plan.context.live.attachedProvider == .deepl)
         #expect(!plan.context.live.runsFast)
         #expect(!plan.context.live.runsHighFidelity)
@@ -103,14 +96,17 @@ struct RetranslatePlanContextTests {
         #expect(plan.context.live.status == .unavailable("boom", .permanent))
     }
 
-    @Test("reads the queue source rather than the published worker mirror")
-    func copiesQueueWorker() async {
+    @Test("reads the observable worker mirror the queue's callback keeps in sync")
+    func copiesWorkerMirror() async {
         let model = await makeModel()
-        model.translationSession.workerAttached = true
+        let idle = model.retranslatePlan(surface: .live, target: .english)
 
+        #expect(!idle.context.live.workerAttached)
+
+        model.translationSession.workerAttached = true
         let mirrorOnly = model.retranslatePlan(surface: .live, target: .english)
 
-        #expect(!mirrorOnly.context.live.workerAttached)
+        #expect(mirrorOnly.context.live.workerAttached)
 
         let worker = await harness.attachWorker(model)
         defer { worker.cancel() }

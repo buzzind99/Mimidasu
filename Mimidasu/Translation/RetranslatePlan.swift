@@ -10,21 +10,19 @@ enum RetranslateSurface: Equatable, Sendable {
     case archive
 }
 
-/// The high-fidelity evidence for one target pair. `supportsStrategySelection`
-/// is an OS fact; the remaining members are the pair-scoped probe evidence.
+/// The high-fidelity evidence for one target pair: whether the pair offers
+/// high fidelity, and whether a landed probe marks it known-unavailable.
 struct RetranslateTierFacts: Equatable, Sendable {
-    let supportsStrategySelection: Bool
-    let probeLandedForTarget: Bool
     let highFidelityOffered: Bool
     let highFidelityKnownUnavailable: Bool
 }
 
 /// The live session's identity and queue attachment at the time the plan is
-/// built. `workerAttached` deliberately comes from the queue itself, the same
-/// source the click path checks before enqueueing.
+/// built. `workerAttached` reads the observable runtime mirror kept in sync
+/// by the queue's workerChanged callback, falling back to the queue itself
+/// when there is no live session.
 struct RetranslateLiveFacts: Equatable, Sendable {
     let activeEngineKind: TranslationEngineKind
-    let isApple: Bool
     let runsFast: Bool
     let runsHighFidelity: Bool
     let attachedProvider: TranslationProvider?
