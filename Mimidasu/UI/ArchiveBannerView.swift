@@ -140,7 +140,8 @@ struct ArchiveBannerView: View {
         let viewingCount = viewedCode.flatMap { code in
             languageSet.count(for: code)
         } ?? languageSet.counts.first
-        let busy = jobIsActive(on: archive, lang: viewedCode ?? viewingCount?.lang)
+        let busyLang = viewedCode ?? viewingCount?.lang
+        let busy = busyLang.map { lang in jobIsActive(on: archive, lang: lang) } ?? false
         return HStack(spacing: 0) {
             languageSegment(archive, count: viewingCount, busy: busy)
             toolbarDivider

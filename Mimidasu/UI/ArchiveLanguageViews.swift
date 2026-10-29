@@ -267,9 +267,8 @@ struct ArchiveSwitchLanguagePopover: View {
 
     /// Targets the session doesn't hold yet. Membership is the filter —
     /// an already-added language never appears here, translated or not.
-    /// The OS catalog lands asynchronously: nil from the set means the
-    /// probe is pending, so it gets its own row instead of reading as
-    /// "none available".
+    /// The chooser is only enterable through an affordance that already
+    /// waited for the OS catalog, so `addableTargets()` is loaded here.
     @ViewBuilder
     private var chooserRows: some View {
         if let available = languageSet.addableTargets() {
@@ -284,10 +283,6 @@ struct ArchiveSwitchLanguagePopover: View {
                     chooserRow(target)
                 }
             }
-        } else {
-            LanguagesLoadingRow(tint: Theme.secondaryText)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 8)
         }
     }
 
