@@ -22,7 +22,7 @@ extension DictionarySearchEngine {
         let probe: DictionarySearchProbe
         let matchKind: DictionarySearchHit.MatchKind
         /// Zero means "no highlight" — the lemma retry matched something the
-        /// user never typed, and the badge is the whole explanation (D10).
+        /// user never typed, and the badge is the whole explanation.
         let highlightScalars: Int
     }
 

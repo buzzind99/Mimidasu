@@ -38,7 +38,7 @@ struct TranslationSessionHandOverTests {
         )
     }
 
-    /// D5: a stale Apple hand-over must not bump the queue's generation and
+    /// A stale Apple hand-over must not bump the queue's generation and
     /// steal it from the attached external engine — the guard returns before
     /// `queue.run`, so the queue, the snapshot's worker flag, and the status
     /// all stay exactly as they were.
