@@ -392,7 +392,7 @@ struct ArchiveTranslationEnginePicker: View {
     }
 
     private var jobIsActive: Bool {
-        model.archiveTranslationJob.activity != .idle
+        model.archiveTranslationJob.isBusy
     }
 
     /// The start action is held back while a run is claimed (one job at a

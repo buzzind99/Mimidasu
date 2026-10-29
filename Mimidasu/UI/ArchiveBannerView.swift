@@ -259,7 +259,7 @@ struct ArchiveBannerView: View {
     /// viewed language. Held back while a bulk run is claimed (one job at a
     /// time) and without a viewed language to translate.
     private func translateSegment(_ archive: ArchivedSession) -> some View {
-        let disabled = model.archiveTranslationJob.activity != .idle
+        let disabled = model.archiveTranslationJob.isBusy
             || model.archiveViewingCode == nil
         let isComplete = viewedLanguageIsComplete(archive)
         let title = isComplete ? "Retranslate" : "Translate"
@@ -349,13 +349,10 @@ struct ArchiveBannerView: View {
     }
 
     /// Whether the bulk job claims or runs for this session and language —
-    /// from the synchronous claim through the run's end. The scoped activity
-    /// carries the request throughout, so a foreign session or an idle slot
-    /// reads false.
+    /// from the synchronous claim through the run's end. A foreign session,
+    /// a different language, or an idle slot reads false.
     private func jobIsActive(on archive: ArchivedSession, lang: String?) -> Bool {
-        let activity = model.archiveTranslationJob.activity(for: archive.id)
-        guard let request = activity.request else { return false }
-        return request.lang == lang
+        model.archiveTranslationJob.isBusy(sessionID: archive.id, lang: lang)
     }
 }
 

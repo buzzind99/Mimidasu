@@ -347,17 +347,13 @@ struct ArchiveWindowView: View {
     }
 
     private func row(_ summary: ArchivedSessionSummary) -> some View {
-        let job = model.archiveTranslationJob
         // The scoped activity: this session's claim is visible from the
-        // click onward, and progress numbers belong to a started walk.
-        let activity = job.activity(for: summary.id)
-        let request = activity.request
+        // click onward; per-tick progress stays with the row's progress bar.
+        let activity = model.archiveTranslationJob.activity(for: summary.id)
         return ArchiveSessionRow(
             model: model,
             summary: summary,
-            isJobRunning: request != nil,
-            jobLang: request?.lang,
-            jobProgress: activity.progress.map { progress in (progress.processed, progress.total) },
+            activity: activity,
             chooserPresented: chooserPresented(summary),
             translationPickerPresented: { lang in
                 translationPickerPresented(summary: summary, lang: lang)

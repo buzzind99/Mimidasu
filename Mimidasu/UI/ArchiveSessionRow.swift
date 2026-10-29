@@ -8,13 +8,10 @@ import SwiftUI
 struct ArchiveSessionRow: View {
     var model: AppModel
     let summary: ArchivedSessionSummary
-    /// The bulk job claims this session (the chip line's busy state, from
-    /// the claim onward); the progress bar renders once the run starts.
-    /// `jobLang` names the language it walks.
-    let isJobRunning: Bool
-    let jobLang: String?
-    /// The run's `(processed, total)`, for the progress bar.
-    let jobProgress: (Int, Int)?
+    /// The bulk job's transition state for this session: the chip line and
+    /// the delete action read it, and the progress bar appears once the
+    /// walk starts.
+    let activity: ArchiveTranslationJob.Activity
     /// The add-language chooser's presentation, anchored on the `+` pill.
     @Binding var chooserPresented: Bool
     /// The translate picker's presentation for one row language, anchored on
@@ -42,15 +39,8 @@ struct ArchiveSessionRow: View {
                     .foregroundStyle(Theme.secondaryText)
                     .padding(.top, 1)
                 chipLine
-                if let jobProgress {
-                    ProgressView(
-                        value: Double(jobProgress.0),
-                        total: Double(max(jobProgress.1, 1))
-                    )
-                    .progressViewStyle(.linear)
-                    .tint(Theme.accentPink)
-                    .frame(width: 150)
-                    .padding(.top, 3)
+                if case .running = activity {
+                    ArchiveRunProgressBar(job: model.archiveTranslationJob)
                 }
             }
             actionColumn
@@ -141,6 +131,11 @@ struct ArchiveSessionRow: View {
         model.canOpenArchivedSession
     }
 
+    /// Whether the bulk job holds this session's slot, claimed or running.
+    private var isBusy: Bool {
+        activity.isBusy
+    }
+
     private var actionColumn: some View {
         VStack(alignment: .trailing, spacing: 8) {
             actionButtons
@@ -170,11 +165,11 @@ struct ArchiveSessionRow: View {
         HStack(spacing: 6) {
             actionButton(
                 "trash",
-                help: isJobRunning
+                help: isBusy
                     ? "Can't delete while this session is translating"
                     : "Delete",
-                isEnabled: !isJobRunning,
-                showsLink: !isJobRunning,
+                isEnabled: !isBusy,
+                showsLink: !isBusy,
                 action: onDelete
             )
             actionButton("square.and.pencil", help: "Rename", action: onRename)
@@ -254,7 +249,7 @@ struct ArchiveSessionRow: View {
     private var chipFingerprint: String {
         var parts = ["total:\(summary.sentenceCount)"]
         for count in languageSet.counts {
-            let busy = isJobRunning && count.lang == jobLang
+            let busy = activity.runStatus?.lang == count.lang
             let selected = model.openArchive?.id == summary.id
                 && count.lang == model.archiveViewingCode
             parts.append("\(count.lang):\(count.translated):\(busy ? 1 : 0):\(selected ? 1 : 0)")
@@ -273,7 +268,7 @@ struct ArchiveSessionRow: View {
             ArchiveLanguageChip(
                 count: count,
                 total: summary.sentenceCount,
-                busy: isJobRunning && count.lang == jobLang,
+                busy: activity.runStatus?.lang == count.lang,
                 selected: model.openArchive?.id == summary.id
                     && count.lang == model.archiveViewingCode
             )
@@ -295,6 +290,26 @@ struct ArchiveSessionRow: View {
                 },
                 isPresented: isPresented
             )
+        }
+    }
+}
+
+/// The row's live progress bar: the one view that reads the job's per-tick
+/// progress, so a `runProgress` tick invalidates only this child, never the
+/// row body.
+private struct ArchiveRunProgressBar: View {
+    let job: ArchiveTranslationJob
+
+    var body: some View {
+        if let progress = job.runProgress {
+            ProgressView(
+                value: Double(progress.processed),
+                total: Double(max(progress.total, 1))
+            )
+            .progressViewStyle(.linear)
+            .tint(Theme.accentPink)
+            .frame(width: 150)
+            .padding(.top, 3)
         }
     }
 }
