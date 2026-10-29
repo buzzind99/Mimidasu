@@ -11,6 +11,11 @@ excluded:
   - Mock
   - ffi
 
+# Analyzer rules — only run by `swiftlint analyze`. Inert for plain `swiftlint lint`.
+analyzer_rules:
+  - unused_declaration
+  - unused_import
+
 # Keep the default rule set, then opt out of rules that fight the
 # existing code style. Re-enable individually if desired.
 disabled_rules:
