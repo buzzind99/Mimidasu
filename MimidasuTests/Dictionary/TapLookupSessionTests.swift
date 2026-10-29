@@ -40,6 +40,7 @@ private actor GatedTapLookupResolver: TapLookupResolving {
     func cancelAll() {
         let parked = pending
         pending.removeAll()
+        isCancelled = true
         for entry in parked {
             entry.continuation.resume(returning: nil)
         }
