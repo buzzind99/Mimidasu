@@ -312,8 +312,8 @@ extension ArchiveProjectionTests {
         #expect(model.summaries.first { row in row.id == id }?.status == .interrupted)
     }
 
-    @Test("a row refresh drops a row the store no longer holds")
-    func refreshRowRemovesRowMissingFromTheStore() {
+    @Test("a touch drops a row the store no longer holds")
+    func touchDropsRowMissingFromTheStore() {
         let store = isolatedArchive()
         guard let id = ArchiveProjectionFixtures.finalizeSession(store, startedAt: 1000) else {
             Issue.record("seed should succeed")
@@ -323,7 +323,7 @@ extension ArchiveProjectionTests {
         let model = ArchiveProjectionFixtures.makeProjection(store: store, recorder: recorder)
 
         #expect(store.delete(id: id))
-        model.refreshRow(id: id)
+        model.refreshTouched(id: id)
 
         #expect(model.summaries.isEmpty)
         #expect(model.availability == .available)
@@ -405,31 +405,6 @@ extension ArchiveProjectionTests {
         #expect(model.summaries == before)
         #expect(model.availability == .readFailed)
         #expect(!model.isAvailable)
-    }
-
-    @Test("a row inserted by refresh keeps the newest-first order")
-    func incrementalInsertKeepsNewestFirstOrder() throws {
-        let store = isolatedArchive()
-        guard let first = ArchiveProjectionFixtures.finalizeSession(store, startedAt: 1000) else {
-            Issue.record("seed should succeed")
-            return
-        }
-        let recorder = LoadRecorder()
-        let model = ArchiveProjectionFixtures.makeProjection(store: store, recorder: recorder)
-
-        guard let second = recordingSession(store, startedAt: 2000) else {
-            Issue.record("second seed should succeed")
-            return
-        }
-        #expect(store.finalize(session: second, durationMS: 4000, saved: false))
-
-        model.refreshRow(id: second)
-
-        #expect(recorder.summaryCalls == 1)
-        #expect(recorder.summariesCalls == 1)
-        let storedIDs = try store.loadSummaries().get().map(\.id)
-        #expect(storedIDs == [second, first])
-        #expect(model.summaries.map(\.id) == storedIDs)
     }
 }
 

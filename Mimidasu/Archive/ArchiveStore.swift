@@ -143,7 +143,8 @@ final class ArchiveStore: Sendable {
         }
     }
 
-    /// One session's list-row summary without loading its sentences.
+    /// One session's list-row summary without loading its sentences. No
+    /// production caller — the suites read it as a direct store check.
     func summary(id: Int64) -> ArchivedSessionSummary? {
         (try? summaryResult(id: id).get()) ?? nil
     }

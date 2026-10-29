@@ -25,14 +25,14 @@ struct ArchiveProjectionAvailabilityTests {
         #expect(model.summaries.isEmpty)
     }
 
-    @Test("a row refresh on a degraded store reports openFailed without reading")
-    func refreshRowOnDegradedStoreReportsOpenFailed() {
+    @Test("a touch on a degraded store reports openFailed without reading")
+    func refreshTouchedOnDegradedStoreReportsOpenFailed() {
         let (store, cleanup) = ArchiveProjectionFixtures.degradedStore()
         defer { cleanup() }
         let recorder = LoadRecorder()
         let model = ArchiveProjectionFixtures.makeProjection(store: store, recorder: recorder)
 
-        model.refreshRow(id: 1)
+        model.refreshTouched(id: 1)
 
         #expect(model.availability == .openFailed)
         #expect(!model.isAvailable)
@@ -40,8 +40,8 @@ struct ArchiveProjectionAvailabilityTests {
         #expect(model.summaries.isEmpty)
     }
 
-    @Test("a row refresh that succeeds clears a read failure")
-    func refreshRowClearsReadFailure() {
+    @Test("a touch that succeeds clears a read failure")
+    func refreshTouchedClearsReadFailureAndSwapsTheRow() {
         let store = isolatedArchive()
         guard let id = ArchiveProjectionFixtures.finalizeSession(store, startedAt: 1000) else {
             Issue.record("seed should succeed")
@@ -74,17 +74,17 @@ struct ArchiveProjectionAvailabilityTests {
             }
         )
 
-        model.refreshRow(id: id)
+        model.refreshTouched(id: id)
         #expect(model.availability == .readFailed)
-        model.refreshRow(id: id)
+        model.refreshTouched(id: id)
 
         #expect(model.availability == .available)
         #expect(model.isAvailable)
         #expect(model.summaries.first { row in row.id == id }?.name == "Refreshed")
     }
 
-    @Test("a row refresh that cannot open the archive reports openFailed and keeps the rows")
-    func refreshRowOpenFailedKeepsTheCachedRows() {
+    @Test("a touch that cannot open the archive reports openFailed and keeps the rows")
+    func refreshTouchedOpenFailedKeepsTheCachedRows() {
         let store = isolatedArchive()
         guard let id = ArchiveProjectionFixtures.finalizeSession(store, startedAt: 1000) else {
             Issue.record("seed should succeed")
@@ -97,7 +97,7 @@ struct ArchiveProjectionAvailabilityTests {
         )
         let before = model.summaries
 
-        model.refreshRow(id: id)
+        model.refreshTouched(id: id)
 
         #expect(model.availability == .openFailed)
         #expect(!model.isAvailable)

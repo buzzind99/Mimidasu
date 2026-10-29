@@ -73,32 +73,6 @@ final class ArchiveProjection {
         reload()
     }
 
-    /// Re-reads one list row: replaces it in place, inserts a missing row at
-    /// its list position, or drops it when the store no longer holds it. The
-    /// availability tests pin the typed-read failure mapping through it;
-    /// production writes use `refreshTouched`.
-    func refreshRow(id: Int64) {
-        guard !store.isDegraded else {
-            availability = .openFailed
-            return
-        }
-        switch loadSummary(id) {
-        case let .success(summary):
-            if let summary {
-                place(summary)
-            } else {
-                summaries.removeAll { row in row.id == id }
-            }
-            if availability == .readFailed {
-                availability = .available
-            }
-        case .failure(.openFailed):
-            availability = .openFailed
-        case .failure(.readFailed):
-            availability = .readFailed
-        }
-    }
-
     // MARK: - Open session
 
     /// Opens one stored session: loads its rows, stores its summary as the
@@ -236,17 +210,10 @@ final class ArchiveProjection {
         }
     }
 
-    /// Replaces the row with `summary.id` in place, or inserts one at its
-    /// `startedAt` DESC / `id` DESC position when the cache doesn't hold it.
+    /// Replaces the row with `summary.id` in place: every caller refreshes a
+    /// row the cache already holds, so the store's order is never re-derived.
     private func place(_ summary: ArchivedSessionSummary) {
-        if let index = summaries.firstIndex(where: { row in row.id == summary.id }) {
-            summaries[index] = summary
-            return
-        }
-        let insertion = summaries.firstIndex { row in
-            row.startedAt < summary.startedAt
-                || (row.startedAt == summary.startedAt && row.id < summary.id)
-        } ?? summaries.endIndex
-        summaries.insert(summary, at: insertion)
+        guard let index = summaries.firstIndex(where: { row in row.id == summary.id }) else { return }
+        summaries[index] = summary
     }
 }
