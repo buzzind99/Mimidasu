@@ -1,6 +1,5 @@
 import Foundation
 @testable import Mimidasu
-import Synchronization
 import Testing
 @preconcurrency import Translation
 

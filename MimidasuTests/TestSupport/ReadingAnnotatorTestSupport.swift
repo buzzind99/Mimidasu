@@ -1,6 +1,4 @@
-import Foundation
 @testable import Mimidasu
-import Testing
 
 // MARK: - Fixtures (shared by the ReadingAnnotator suites)
 

@@ -14,10 +14,6 @@ final class DictionarySearchEngineTests {
         fixture = try DictionarySearchFixture()
     }
 
-    private var engine: DictionarySearchEngine {
-        fixture.engine
-    }
-
     private var databaseURL: URL {
         fixture.url
     }

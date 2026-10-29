@@ -10,18 +10,9 @@ import Foundation
 /// reason instead of each suite re-deriving the check.
 enum TestEnvironment {
 
-    /// True when `TranslationSession(installedSource:target:)` exists on this
-    /// OS (macOS 26+; the deployment target is macOS 15.5).
-    static var supportsInstalledTranslationSession: Bool {
-        if #available(macOS 26.0, *) {
-            return true
-        }
-        return false
-    }
-
-    /// True when the OS ja→en translation pack is installed (implies
-    /// `supportsInstalledTranslationSession`). Async — the availability query
-    /// can consult the on-demand resources service.
+    /// True when the OS ja→en translation pack is installed (implies macOS
+    /// 26+). Async — the availability query can consult the on-demand
+    /// resources service.
     static func jaToENPackInstalled() async -> Bool {
         guard #available(macOS 26.0, *) else { return false }
         let availability = LanguageAvailability()

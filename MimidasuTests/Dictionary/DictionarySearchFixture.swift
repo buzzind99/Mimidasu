@@ -1,6 +1,5 @@
 import Foundation
 @testable import Mimidasu
-import Testing
 
 /// A throwaway fixture database plus a search engine over it, with the
 /// teardown Swift Testing has no hook for: the suite's own lifetime ends the

@@ -244,10 +244,6 @@ private final class GatedStaleRunEngine: TranslationEngine, @unchecked Sendable 
         state.withLock { gateState in gateState.entered }
     }
 
-    var recordedBatches: [[String]] {
-        state.withLock { gateState in gateState.batches }
-    }
-
     /// Releases every suspended `translate`, and any that arrives later.
     /// Repeat calls are no-ops.
     func openGate() {

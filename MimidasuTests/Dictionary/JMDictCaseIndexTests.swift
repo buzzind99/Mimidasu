@@ -1,6 +1,5 @@
 import Foundation
 @testable import Mimidasu
-import SQLite3
 import Testing
 
 /// The derived index the engine's case-spelling load rides.

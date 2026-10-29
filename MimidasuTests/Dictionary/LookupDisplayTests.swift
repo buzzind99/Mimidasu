@@ -2,16 +2,15 @@ import Foundation
 @testable import Mimidasu
 import Testing
 
-/// Seam tests for the Lookup Display resolver: tap-to-verdict cases (found,
-/// join-lead, lemma-lead, split-only demotion, favorites on not-found, bare
-/// miss, no hit), drift fail-closed, and the fault map. Every test asserts
-/// observable outcomes through the module interface — Display, Also/Related
-/// ordering, warning surface, fault — over the fixture database, without
-/// constructing app state. Three suites share this harness — this file holds
-/// the core tap-to-verdict one, the re-anchor resolutions live in
-/// `LookupDisplayReanchorTests`, and the fault map lives in its own file — so
-/// no suite body or file trips the length gates.
-struct ResolutionMismatch: Error {}
+// Seam tests for the Lookup Display resolver: tap-to-verdict cases (found,
+// join-lead, lemma-lead, split-only demotion, favorites on not-found, bare
+// miss, no hit), drift fail-closed, and the fault map. Every test asserts
+// observable outcomes through the module interface — Display, Also/Related
+// ordering, warning surface, fault — over the fixture database, without
+// constructing app state. Three suites share this harness — this file holds
+// the core tap-to-verdict one, the re-anchor resolutions live in
+// `LookupDisplayReanchorTests`, and the fault map lives in its own file — so
+// no suite body or file trips the length gates.
 
 final class LookupDisplayHarness {
     let fixture: JMDictFixtureDatabase.Built
@@ -47,65 +46,6 @@ final class LookupDisplayHarness {
     /// A single kana segment resolving to the あめ homograph pair.
     func requestAme() -> TapLookupRequest {
         TapLookupRequest(segments: [LookupSegment(surface: "あめ")], tappedAt: 0, sentenceText: "あめ", surface: "あめ")
-    }
-
-    func shownContent(
-        for request: TapLookupRequest, favorites: FavoriteIdentity = .empty
-    ) async throws -> LookupAnswer {
-        let answer = await makeDisplay().resolve(request, favorites: favorites)
-        guard let content = requirePinnable(answer) else {
-            throw ResolutionMismatch()
-        }
-        return content
-    }
-
-    func entry(_ headword: String, seq: Int) -> JMDictEntry {
-        JMDictEntry(
-            entSeq: seq,
-            keb: headword,
-            reb: headword,
-            common: false,
-            jlpt: nil,
-            hatsuon: nil,
-            accPatts: nil,
-            zoPatts: nil,
-            senses: [JMDictSense(
-                pos: nil, glosses: ["gloss"], misc: nil,
-                restrictedKanji: nil, restrictedKana: nil
-            )]
-        )
-    }
-
-    /// A kana-shared entry: a kanji writing paired with its reading, for
-    /// hand-built homograph results that exercise the written-or-read
-    /// promotion rule.
-    func entry(keb: String, reb: String, seq: Int) -> JMDictEntry {
-        JMDictEntry(
-            entSeq: seq,
-            keb: keb,
-            reb: reb,
-            common: false,
-            jlpt: nil,
-            hatsuon: nil,
-            accPatts: nil,
-            zoPatts: nil,
-            senses: [JMDictSense(
-                pos: nil, glosses: ["gloss"], misc: nil,
-                restrictedKanji: nil, restrictedKana: nil
-            )]
-        )
-    }
-
-    /// A hand-built fallback hit: one entry per headword, dictionary-ranked
-    /// as given (the fixture's multi-entry hits never relabel a fallback
-    /// pill — they are display results or same-headword homographs).
-    func result(_ headwords: [String]) -> LookupResult {
-        LookupResult(
-            matched: headwords[0],
-            entries: headwords.enumerated().map { index, headword in
-                entry(headword, seq: index + 1)
-            }
-        )
     }
 }
 

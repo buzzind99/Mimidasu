@@ -26,10 +26,6 @@ struct AppModelRetranslateArchiveTests {
 
         private let state = Mutex((count: 0, batches: [[String]]()))
 
-        var callCount: Int {
-            state.withLock { pair in pair.count }
-        }
-
         var recordedBatches: [[String]] {
             state.withLock { pair in pair.batches }
         }

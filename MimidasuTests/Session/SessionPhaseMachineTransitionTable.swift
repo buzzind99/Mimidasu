@@ -1,5 +1,4 @@
 @testable import Mimidasu
-import Testing
 
 /// The transition table — the specification the machine is checked against.
 ///

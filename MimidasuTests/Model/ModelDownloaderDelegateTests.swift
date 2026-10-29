@@ -1,6 +1,5 @@
 import Foundation
 @testable import Mimidasu
-import Synchronization
 import Testing
 
 /// Tests `ModelDownloader`'s `nonisolated` `URLSessionDownloadDelegate`

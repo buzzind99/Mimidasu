@@ -1,4 +1,3 @@
-import Foundation
 import Observation
 
 /// Records values read through an `@Observable` object's tracked properties.

@@ -25,16 +25,6 @@ struct AppModelCloudDisclosureTests {
         return settings
     }
 
-    /// Transport that always answers with the given HTTP status.
-    private func constantStatusTransport(_ status: Int) -> HTTPTranslationTransport {
-        HTTPTranslationTransport(timeout: 5) { request in
-            let response = HTTPURLResponse(
-                url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil
-            )!
-            return (Data(), response)
-        }
-    }
-
     /// Transport that answers 200 with a body the probed provider can parse:
     /// a Google v2 translate envelope for Google, a chat-completions reply for
     /// the LLM providers.

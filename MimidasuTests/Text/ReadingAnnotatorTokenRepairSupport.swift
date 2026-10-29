@@ -1,4 +1,3 @@
-import Foundation
 @testable import Mimidasu
 
 // MARK: - Collapse repair fixtures

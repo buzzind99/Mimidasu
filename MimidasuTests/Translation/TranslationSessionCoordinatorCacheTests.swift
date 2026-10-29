@@ -2,7 +2,6 @@ import Foundation
 @testable import Mimidasu
 import Synchronization
 import Testing
-import Translation
 
 /// Covers the coordinator's compatible-mode persistence: a live downgrade is
 /// cached for future engines, and a fast-mode probe clears a stale entry.

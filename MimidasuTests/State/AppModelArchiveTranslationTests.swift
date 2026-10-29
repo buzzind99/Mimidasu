@@ -1,6 +1,5 @@
 import Foundation
 @testable import Mimidasu
-import Synchronization
 import Testing
 
 /// Tests `AppModel`'s bulk archive-translation surface over a seeded

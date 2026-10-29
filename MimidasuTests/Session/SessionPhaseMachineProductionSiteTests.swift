@@ -51,7 +51,7 @@ enum ProductionSiteTable {
         ),
         // 3
         Site(
-            number: 3, file: "Mimidasu/State/AppModel.swift", line: 448, value: ".sourceLost",
+            number: 3, file: "Mimidasu/State/AppModel.swift", line: 447, value: ".sourceLost",
             guardDescription: "the machine's `.running`/`.starting` legal-from set (after the .paused deferral)",
             from: .running,
             action: .captureLost("stream died"),
@@ -60,7 +60,7 @@ enum ProductionSiteTable {
         ),
         // 3 — the second legal from-phase of the same write
         Site(
-            number: 3, file: "Mimidasu/State/AppModel.swift", line: 448, value: ".sourceLost",
+            number: 3, file: "Mimidasu/State/AppModel.swift", line: 447, value: ".sourceLost",
             guardDescription: "the machine's `.running`/`.starting` legal-from set (after the .paused deferral)",
             from: .starting,
             action: .captureLost("stream died"),
@@ -69,7 +69,7 @@ enum ProductionSiteTable {
         ),
         // 4
         Site(
-            number: 4, file: "Mimidasu/State/AppModel.swift", line: 503, value: ".starting",
+            number: 4, file: "Mimidasu/State/AppModel.swift", line: 502, value: ".starting",
             guardDescription: "the machine's `.sourceLost`/`.paused` legal-from set (was an unconditional write)",
             from: .sourceLost,
             action: .captureRestartRequested,
@@ -78,7 +78,7 @@ enum ProductionSiteTable {
         ),
         // 4 — the resume-deferred caller of the same write
         Site(
-            number: 4, file: "Mimidasu/State/AppModel.swift", line: 503, value: ".starting",
+            number: 4, file: "Mimidasu/State/AppModel.swift", line: 502, value: ".starting",
             guardDescription: "the machine's `.sourceLost`/`.paused` legal-from set (was an unconditional write)",
             from: .paused,
             action: .captureRestartRequested,
@@ -87,7 +87,7 @@ enum ProductionSiteTable {
         ),
         // 5
         Site(
-            number: 5, file: "Mimidasu/State/AppModel.swift", line: 510, value: ".running",
+            number: 5, file: "Mimidasu/State/AppModel.swift", line: 509, value: ".running",
             guardDescription: "the machine's `.starting` legal-from set (was: `guard phase == .starting`)",
             from: .starting,
             action: .captureRestartSucceeded,
@@ -96,7 +96,7 @@ enum ProductionSiteTable {
         ),
         // 6
         Site(
-            number: 6, file: "Mimidasu/State/AppModel.swift", line: 519, value: ".sourceLost",
+            number: 6, file: "Mimidasu/State/AppModel.swift", line: 518, value: ".sourceLost",
             guardDescription: "the machine's `.starting` legal-from set (was: `guard phase == .starting`)",
             from: .starting,
             action: .captureRestartFailed("boom"),
@@ -237,7 +237,7 @@ enum ProductionSiteTable {
         ),
         // 16
         Site(
-            number: 16, file: "Mimidasu/State/AppModel+SessionLifecycle.swift", line: 21, value: ".idle",
+            number: 16, file: "Mimidasu/State/AppModel+SessionLifecycle.swift", line: 19, value: ".idle",
             guardDescription: "the machine's `.stopping`/`.idle` legal-from set (was unconditional, post-teardown)",
             from: .stopping,
             action: .stopCompleted,
@@ -246,7 +246,7 @@ enum ProductionSiteTable {
         ),
         // 16 — the site-12 race: the phase was already wound back to idle
         Site(
-            number: 16, file: "Mimidasu/State/AppModel+SessionLifecycle.swift", line: 21, value: ".idle",
+            number: 16, file: "Mimidasu/State/AppModel+SessionLifecycle.swift", line: 19, value: ".idle",
             guardDescription: "the machine's `.stopping`/`.idle` legal-from set; reachable from .idle when site 12 won",
             from: .idle,
             action: .stopCompleted,

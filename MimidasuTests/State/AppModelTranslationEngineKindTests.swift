@@ -1,7 +1,6 @@
 import Foundation
 @testable import Mimidasu
 import Testing
-@preconcurrency import Translation
 
 /// Tests `AppModel.activeEngineKind` — the row marker's comparison target.
 /// An attached external provider maps through its kind; the Apple branch

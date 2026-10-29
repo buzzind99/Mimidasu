@@ -2,7 +2,6 @@ import Darwin
 import Foundation
 @testable import Mimidasu
 import Synchronization
-import Testing
 
 /// An `ArchiveStore` over a private temp file. `ArchiveStore()` defaults to
 /// the production Application Support location, so every `AppModel` built in

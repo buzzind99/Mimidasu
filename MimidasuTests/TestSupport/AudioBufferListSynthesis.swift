@@ -1,5 +1,4 @@
 import CoreAudio
-import Foundation
 @testable import Mimidasu
 
 /// Owns a synthesized `AudioBufferList` and its `AudioStreamBasicDescription`
