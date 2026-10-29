@@ -1,5 +1,3 @@
-import Foundation
-
 /// The app-model state the translation coordinators act through — the port
 /// side of the coordination seam. `TranslationSessionCoordinator` owns every
 /// engine, fallback, and probe field and `RetranslateCoordinator` owns the

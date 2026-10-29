@@ -1,5 +1,3 @@
-import Foundation
-
 /// What one query turns into: candidate writings, the romaji conversions behind
 /// them, and the lemma retry's tokenizer probe. Kept apart from the ladder so
 /// both files stay inside the type-body budget.

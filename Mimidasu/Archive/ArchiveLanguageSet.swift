@@ -1,5 +1,3 @@
-import Foundation
-
 /// One archive session's language rules: the ordered counts, the sentence
 /// total, the stored target, and the runtime target catalog. Every surface
 /// that asks "how many are translated", "is this complete", "how many would

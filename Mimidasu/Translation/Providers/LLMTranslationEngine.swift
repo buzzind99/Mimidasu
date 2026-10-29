@@ -1,4 +1,3 @@
-import Foundation
 import Synchronization
 
 /// One sentence per request through a chat model: the reply *is* the

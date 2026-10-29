@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import Translation
 
 /// Session lifecycle phases.
 enum SessionPhase: Equatable {

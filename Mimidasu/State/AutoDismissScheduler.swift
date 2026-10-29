@@ -1,5 +1,3 @@
-import Foundation
-
 /// Schedules a transient surface's auto-dismissal; injectable so tests fire
 /// (and cancel) dismissals deterministically instead of sleeping. Returns a
 /// cancel closure — invoked when the same surface re-fires (timer reset) or

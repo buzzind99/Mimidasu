@@ -1,5 +1,3 @@
-import Foundation
-
 extension AppModel {
     var sessionLifecycle: SessionLifecycle {
         SessionLifecycle(

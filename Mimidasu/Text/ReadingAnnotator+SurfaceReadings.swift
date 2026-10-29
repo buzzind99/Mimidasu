@@ -1,5 +1,3 @@
-import Foundation
-
 // MARK: - Whole-surface reading overrides
 
 /// The reading overrides keyed by the *written form* of a surface, and

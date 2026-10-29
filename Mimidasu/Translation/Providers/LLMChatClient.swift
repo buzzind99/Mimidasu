@@ -1,5 +1,3 @@
-import Foundation
-
 /// One chat message on the provider-independent LLM seam.
 struct LLMChatMessage: Codable, Sendable, Equatable {
     let role: String

@@ -1,5 +1,3 @@
-import Foundation
-
 /// Kana → wapuro-romaji conversion for dictionary readings — the forward,
 /// unambiguous direction (kana readings carry no segmentation ambiguity,
 /// unlike the reverse). Emits the exact style the annotation suite pins:

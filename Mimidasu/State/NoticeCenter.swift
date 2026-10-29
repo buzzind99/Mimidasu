@@ -1,4 +1,3 @@
-import Foundation
 import Observation
 
 /// State behind the transient notice pill (e.g. the copy confirmation).

@@ -1,5 +1,3 @@
-import Foundation
-
 /// Where one lookup is anchored: the transcript word the user tapped, or the
 /// live strip. The app shows a single popover, owned by whatever anchor it was
 /// opened from, while the pinned card outlives the popover.

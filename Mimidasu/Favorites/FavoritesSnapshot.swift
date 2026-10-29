@@ -1,5 +1,3 @@
-import Foundation
-
 /// Whether the favorites database could be read. A healthy store with no
 /// favorites and a store whose file failed to load are different states, not
 /// two spellings of "empty".

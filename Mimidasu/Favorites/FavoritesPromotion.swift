@@ -1,5 +1,3 @@
-import Foundation
-
 /// Reorders a resolved lookup so a starred entry written or read as the
 /// looked-up word leads. Lives in `Favorites/` and stays pure so it is
 /// testable without a store, a database, or a model — and so the dictionary

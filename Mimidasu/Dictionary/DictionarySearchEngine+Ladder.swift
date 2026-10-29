@@ -1,5 +1,3 @@
-import Foundation
-
 /// Which of the two headword scans a candidate asks for: a single primary-key
 /// seek, or a B-tree range scan over the prefix. The lemma retry probes both —
 /// it is a lemma *tier*, not a third scan.

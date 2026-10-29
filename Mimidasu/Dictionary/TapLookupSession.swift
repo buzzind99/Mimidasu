@@ -1,4 +1,3 @@
-import Foundation
 import Observation
 
 /// The lookup engine behind a tap: resolves one request to an answer. The

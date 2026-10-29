@@ -1,5 +1,3 @@
-import Foundation
-
 /// Tap-to-verdict resolver: everything from a tap request to the answer the
 /// session presents — resolution, defensive re-anchoring,
 /// Display/Also/Related classification, and favorites promotion applied at

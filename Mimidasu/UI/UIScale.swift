@@ -42,16 +42,12 @@ enum UIScale: Int, CaseIterable, Identifiable {
 }
 
 /// Fixed point sizes standing in for the macOS semantic text styles content
-/// text uses — body 13, callout 12, title3 15 match the semantic sizes;
+/// text uses — callout 12, title3 15 match the semantic sizes;
 /// caption is 11 where the semantic caption is 10 — multiplied by the
 /// UI-scale factor.
 enum ScaledFont {
     static func caption(_ factor: CGFloat) -> Font {
         .system(size: 11 * factor)
-    }
-
-    static func body(_ factor: CGFloat) -> Font {
-        .system(size: 13 * factor)
     }
 
     static func callout(_ factor: CGFloat) -> Font {

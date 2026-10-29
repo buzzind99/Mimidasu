@@ -1,4 +1,3 @@
-import Foundation
 import Observation
 
 /// The archive window's cached read surface over `ArchiveStore`: it owns the

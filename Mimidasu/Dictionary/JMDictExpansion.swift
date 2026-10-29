@@ -1,5 +1,3 @@
-import Foundation
-
 /// One rendered-annotation segment snapshot for dictionary lookup: the
 /// fields forward expansion reads off the `ReadingAnnotator.segments`
 /// element a tap resolved against. A value snapshot keeps the expansion a

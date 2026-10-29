@@ -1,5 +1,3 @@
-import Foundation
-
 /// How deep a search's rows may be read: the list's slice of the ranked
 /// payload, never a bound on what the engine returns.
 ///

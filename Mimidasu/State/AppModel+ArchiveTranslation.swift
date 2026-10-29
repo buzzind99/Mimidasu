@@ -1,5 +1,3 @@
-import Foundation
-
 // The bulk archive-translation surface of `AppModel`: the job, its engine
 // resolver and landing sink, and the archiving toast card.
 //

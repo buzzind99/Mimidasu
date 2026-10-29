@@ -1,5 +1,3 @@
-import Foundation
-
 // The syllable, alternate-reading, and onset tables behind `KanaRomaji.convert(_:)`.
 // Kept out of the scanner file so both stay under the lint length ceiling; extends
 // the same `KanaRomaji` enum.

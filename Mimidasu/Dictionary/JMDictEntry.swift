@@ -1,5 +1,3 @@
-import Foundation
-
 /// One JMDict entry. `jlpt` and the pitch fields come from the headword row
 /// the candidate matched (per-writing values); `common` is entry-level.
 struct JMDictEntry: Equatable, Sendable {

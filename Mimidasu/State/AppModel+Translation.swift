@@ -1,4 +1,3 @@
-import Foundation
 import Translation
 
 // The translation surface of `AppModel`: the live translation session and the

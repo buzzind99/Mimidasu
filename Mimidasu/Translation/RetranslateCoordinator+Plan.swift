@@ -1,5 +1,3 @@
-import Foundation
-
 extension RetranslateCoordinator {
     /// Builds the re-translate decision for one surface, target, and
     /// selection. Every fact is read from current observable state, so a view

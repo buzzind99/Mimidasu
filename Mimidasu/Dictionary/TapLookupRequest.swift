@@ -1,5 +1,3 @@
-import Foundation
-
 /// One tap's lookup question: the value snapshots forward expansion
 /// consumes, taken at tap time.
 ///

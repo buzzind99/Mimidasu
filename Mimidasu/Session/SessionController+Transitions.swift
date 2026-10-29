@@ -1,5 +1,3 @@
-import Foundation
-
 /// The transition entry points of `SessionController`: `pause()`, `resume()`,
 /// `restartCapture()`, and `stop()` are enqueued on one serial main-actor
 /// queue so their capture and engine calls can never interleave. `stop()` is

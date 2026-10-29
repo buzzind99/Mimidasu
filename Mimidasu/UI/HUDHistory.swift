@@ -1,5 +1,3 @@
-import Foundation
-
 /// Pure HUD history-cycling semantics, extracted from `HUDView` for
 /// testability. The HUD shows the newest translated entry unless a pin is
 /// set; the history buttons step the pin older/newer.

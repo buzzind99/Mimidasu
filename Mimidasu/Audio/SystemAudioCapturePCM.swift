@@ -1,5 +1,4 @@
 import CoreAudio
-import Foundation
 
 // MARK: - PCM extraction
 

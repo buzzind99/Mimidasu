@@ -1,5 +1,3 @@
-import SwiftUI
-
 /// Reading annotation mode. Romaji and furigana are mutually exclusive —
 /// exactly one (or neither) is shown; a shared UserDefaults key backs it.
 enum ReadingAnnotation: String, CaseIterable, Identifiable {

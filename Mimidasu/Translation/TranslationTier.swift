@@ -1,5 +1,3 @@
-import Foundation
-
 /// The translation tiers the app names — and the single owner of their
 /// names.
 ///

@@ -1,5 +1,3 @@
-import Foundation
-
 /// Which surface a re-translate decision is rendered for. The live surface
 /// feeds the transcript and the Settings card; the archive surface feeds the
 /// opened archive's transcript and its engine picker. The two surfaces share

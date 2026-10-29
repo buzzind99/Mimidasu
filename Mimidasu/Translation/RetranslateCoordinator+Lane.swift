@@ -1,6 +1,3 @@
-import Foundation
-import Translation
-
 // The re-translate lane runner of `RetranslateCoordinator` — the retry
 // entry point, the serialized alternate-engine runner, the probe-deferral
 // gate, and the marker bookkeeping — split from the main file to keep it

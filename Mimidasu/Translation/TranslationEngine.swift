@@ -1,5 +1,3 @@
-import Foundation
-
 /// Progress report fired by an engine while it retries a failed request.
 /// Drives the footer copy ("External translation failed, N retries left").
 struct RetryProgress: Equatable, Sendable {

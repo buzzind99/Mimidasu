@@ -1,5 +1,3 @@
-import Foundation
-
 /// Read-only facade over the re-translate coordinator's plan. Views build the
 /// plan through these methods; the coordinator stays a state-layer detail.
 extension AppModel {

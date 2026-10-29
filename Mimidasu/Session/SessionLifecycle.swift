@@ -1,5 +1,3 @@
-import Foundation
-
 @MainActor
 protocol SessionLifecycleHost: AnyObject {
     func finishPauseSpan()

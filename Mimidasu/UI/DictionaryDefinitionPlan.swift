@@ -1,5 +1,3 @@
-import Foundation
-
 /// The four hosts a shared dictionary definition renders in. Each host's
 /// whole rendering stance — entry selection, chrome suppression, limits —
 /// is one `DictionaryDefinitionPlan` keyed by this mode.

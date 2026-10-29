@@ -1,5 +1,3 @@
-import Foundation
-
 // MARK: - Unknown-run collapse repair
 
 extension ReadingAnnotator {

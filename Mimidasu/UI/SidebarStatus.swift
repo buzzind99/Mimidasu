@@ -1,5 +1,3 @@
-import SwiftUI
-
 /// Pure phase → presentation mapping for the sidebar's status affordances —
 /// the session capsule (title, icon, gradient choice, disabled gate) and the
 /// ASR engine dot's tone. Mirrors the `TranslationPill.map` precedent: the

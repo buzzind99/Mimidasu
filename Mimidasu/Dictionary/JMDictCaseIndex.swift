@@ -1,5 +1,3 @@
-import Foundation
-
 /// The derived index over the headwords that carry case, built by the
 /// ingestion pipeline and shipped inside the bundled artifact.
 ///

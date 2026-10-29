@@ -1,5 +1,3 @@
-import Foundation
-
 /// Settings "Test" button actions, per provider. Every external provider runs
 /// a minimal one-sentence translation through the same factory path the live
 /// engine uses (cheap, exercises the real request shape). Probes run with

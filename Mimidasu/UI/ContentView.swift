@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 /// Shared hover flag for the floating reference-window openers. Hover delivery

@@ -1,5 +1,3 @@
-import Foundation
-
 /// Scalar-offset slicing for the search results' match highlight.
 ///
 /// Every span in the app is a range of **Unicode scalars**, never

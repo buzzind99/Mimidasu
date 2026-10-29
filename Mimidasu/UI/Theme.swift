@@ -114,8 +114,6 @@ enum Theme {
 
     // MARK: Text
 
-    /// JP transcript text (primary line).
-    static let jpText = Color(light: 0x2A241E, dark: 0xF5F3FA)
     /// Generic primary text.
     static let primaryText = SharedTokens.primaryText
     /// Labels and detail lines: warm gray `#8A8177` on light, white 45% on
@@ -219,10 +217,6 @@ enum Theme {
         static let start = LinearGradient(
             colors: [Color(light: 0x0D9488, dark: 0x2DD4BF), Color(light: 0x0284C7, dark: 0x38BDF8)],
             startPoint: .leading, endPoint: .trailing
-        )
-        /// Audio meter bars (`meterTeal → meterBlue`, top→bottom).
-        static let audioMeter = LinearGradient(
-            colors: [Theme.meterTeal, Theme.meterBlue], startPoint: .top, endPoint: .bottom
         )
     }
 

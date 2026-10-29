@@ -91,11 +91,6 @@ enum JMDictFTSIndex {
     /// the build refuses instead (`guardMaxOrd`).
     static let maxEncodableOrd = ordStride - 1
 
-    /// The highest `entry_id` the packed `rowid` can hold inside int64.
-    /// Measured `MAX(entry_id)` on the pinned build is 19,999,990, which packs
-    /// to ~2.56e9 — three orders of magnitude of headroom.
-    static let maxPackableEntryID = Int64.max / Int64(ordStride)
-
     /// The build failed for a reason the caller must not paper over.
     ///
     /// Deliberately distinct from `SQLiteDatabase.Error`: the store treats a

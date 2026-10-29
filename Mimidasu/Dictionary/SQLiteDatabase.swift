@@ -1,4 +1,3 @@
-import Foundation
 import SQLite3
 
 /// `SQLITE_TRANSIENT` — SQLite's destructor constant is not exposed to Swift
@@ -169,11 +168,6 @@ final class SQLiteDatabase: @unchecked Sendable {
     func execute(_ sql: String) throws(Error) {
         let prepared = try statement(sql)
         _ = try prepared.step()
-    }
-
-    /// The connection's current error code and message.
-    func lastError() -> Error {
-        Self.error(handle)
     }
 
     /// The rowid of the most recently successful INSERT on this connection.

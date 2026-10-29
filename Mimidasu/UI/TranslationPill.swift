@@ -1,5 +1,3 @@
-import SwiftUI
-
 /// Pure translation-status presentation mapping — a `Tone` plus the engine
 /// label — derived from status × active engine × fallback latch. The
 /// sidebar's ENGINES translation row consumes `map`'s tone for its status

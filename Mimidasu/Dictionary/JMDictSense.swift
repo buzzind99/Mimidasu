@@ -1,5 +1,3 @@
-import Foundation
-
 /// One sense of a JMDict entry.
 struct JMDictSense: Equatable, Sendable {
     /// Comma-joined part-of-speech tags as stored (`"n,vs,vi"`), or nil.

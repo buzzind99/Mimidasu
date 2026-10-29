@@ -1,5 +1,3 @@
-import Foundation
-
 /// One Favorite identity: the headword rule, the Highlight match, and the
 /// Promotion lead behind a single seam.
 ///

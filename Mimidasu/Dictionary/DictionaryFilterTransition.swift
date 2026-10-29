@@ -1,5 +1,3 @@
-import Foundation
-
 /// The single author of Filter changes: every exclusion, carry-over, and floor
 /// rule lives in `apply`, so "what clears what" has exactly one answer and the
 /// panel and the search state are thin dispatchers. The other half of the

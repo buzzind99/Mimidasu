@@ -1,5 +1,3 @@
-import Foundation
-
 /// One lookup candidate: the string the user tapped, queried against
 /// `headwords.text` in its NFKC-composed form (the database stores
 /// precomposed fullwidth spellings), plus the headword kind the sense

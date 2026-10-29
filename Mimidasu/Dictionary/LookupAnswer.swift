@@ -1,5 +1,3 @@
-import Foundation
-
 /// What a finished dictionary lookup answers with: a hit with its display
 /// result, the retained "also:" fallback hits, and the origin the display
 /// result came from (a join lead is labeled; a tap-promoted pill reads as

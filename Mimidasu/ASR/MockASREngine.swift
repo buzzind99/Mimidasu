@@ -1,5 +1,3 @@
-import Foundation
-
 /// Pure-Swift stand-in used when the native runtime is unavailable. Emits
 /// canned transcripts in rotation, gated by the audio energy (simple RMS
 /// threshold) so the

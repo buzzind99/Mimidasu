@@ -1,5 +1,3 @@
-import Foundation
-
 /// The pinned JMDict_Extended input. One release, never floating: the app
 /// ships dictionary data derived from exactly this asset, and
 /// `scripts/build_dictionary.sh` asserts its own copy of these constants matches

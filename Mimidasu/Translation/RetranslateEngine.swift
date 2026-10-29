@@ -1,5 +1,3 @@
-import Foundation
-
 /// Which engine the transcript row's re-translate button uses. The raw
 /// value is the persisted representation and must stay stable.
 enum RetranslateEngine: String, Codable, CaseIterable, Sendable, Equatable, Hashable {

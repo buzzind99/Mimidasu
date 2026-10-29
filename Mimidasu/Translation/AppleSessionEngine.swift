@@ -1,4 +1,3 @@
-import Foundation
 import Translation
 
 /// `TranslationEngine` adapter around the on-device `TranslationSession`

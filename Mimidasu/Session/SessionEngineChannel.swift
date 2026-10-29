@@ -1,5 +1,3 @@
-import Foundation
-
 /// Owns the engine's `flushUtterance` / `finish` ordering for one session.
 /// A pause flush is started at most once per live stretch, its events are
 /// delivered exactly once, and a stop consumes an airborne flush instead of

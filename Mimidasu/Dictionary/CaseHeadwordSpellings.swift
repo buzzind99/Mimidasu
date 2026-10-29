@@ -1,5 +1,3 @@
-import Foundation
-
 /// Every stored headword spelling that is not already lowercase, paired with
 /// the form a query has to be folded into before it can reach it.
 ///
