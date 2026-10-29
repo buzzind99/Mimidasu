@@ -431,7 +431,7 @@ extension AppModelArchiveTranslationTests {
         let toast = archiveToast(sut.model)
         #expect(toast?.style == .yellowAuto)
         #expect(toast?.title == "Archive translation unavailable", "the run's own copy, not the retry key's")
-        #expect(toast?.body == "No API key stored for Google Translate.")
+        #expect(toast?.body == "Couldn't build a Google Translate engine — try again in a moment.")
         #expect(toast?.progress == nil, "no progress card is ever posted")
         #expect(retranslateToast(sut.model) == nil, "the per-row lane's key is untouched")
         #expect(!sut.model.archiveTranslationRunning, "the claim releases with the report")
@@ -475,6 +475,44 @@ extension AppModelArchiveTranslationTests {
         #expect(
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
             "a complete language gets a fresh full pass"
+        )
+    }
+
+    @Test("a fully-translated pane re-sends the whole session despite a stale incomplete summary")
+    func fullyTranslatedPaneResendsWholeSessionDespiteStaleSummary() async {
+        let sut = await makeSUT()
+        let engine = ScriptedArchiveEngine()
+        install(engine, for: .google, on: sut.model)
+
+        // The pane rows land their translations while the projection's
+        // summary refresh faults — the same disagreement a `.readFailed`
+        // leaves behind: the open summary keeps its open-time counts while
+        // the entries carry every landing.
+        for (index, translations) in expectedFRLandings.enumerated() {
+            sut.model.entries[index].replaceTranslation(translations[0])
+        }
+        #expect(sut.model.openArchive?.summary.languageCount(for: "fr")?.translated == 0)
+        #expect(sut.model.entries.allSatisfy { entry in entry.translation(for: "fr") != nil })
+
+        sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                sut.model.archiveTranslationJob.lastRun?.request.scope == .all
+            },
+            "the scope derives from the entries snapshot, not the stale summary"
+        )
+        #expect(
+            sut.model.archiveTranslationJob.lastRun?.request.translated == Set([0, 1, 2]),
+            "every sentence is known to be translated"
+        )
+        #expect(
+            await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
+            "a fully-translated set re-sends the whole session"
+        )
+        #expect(
+            engine.recordedBatches == [["こんにちは"], ["さようなら"], ["おはよう"]],
+            "the walk re-sends every sentence"
         )
     }
 }

@@ -38,21 +38,17 @@ extension AppModel {
 
     /// Starts a bulk run for one language through `engine` — the archive
     /// engine picker's action and the cloud disclosure's confirm callback.
-    /// The scope derives from the language set's completeness: missing
-    /// sentences fill, a complete language re-translates every sentence as a
-    /// fresh full pass. The claim refuses while a run is active; a session no
-    /// longer in the archive reports that instead of claiming.
+    /// The scope derives from the same entries snapshot the walk uses:
+    /// missing sentences fill, a fully-translated set re-sends the whole
+    /// session as a fresh full pass. The claim refuses while a run is active;
+    /// a session no longer in the archive reports that instead of claiming.
     func beginArchiveTranslation(engine: RetranslateEngine, lang: String, sessionID: Int64) {
         let entries: [SessionEntry]
-        let summary: ArchivedSessionSummary
         if let opened = openArchive, opened.id == sessionID {
-            // The pane's rows carry every landing since the archive opened;
-            // the summary is the projection's one copy.
+            // The pane's rows carry every landing since the archive opened.
             entries = self.entries
-            summary = opened.summary
         } else if let stored = archive.load(id: sessionID) {
             entries = stored.entries
-            summary = stored.summary
         } else {
             toasts.post(
                 key: ToastKey.archiveTranslation, style: .yellowAuto,
@@ -63,7 +59,7 @@ extension AppModel {
         }
         let translated = Self.translatedIndexes(in: entries, lang: lang)
         let scope: ArchiveTranslationJob.Scope =
-            archiveLanguageSet(for: summary).isComplete(lang) ? .all : .missing
+            translated.count >= entries.count && !entries.isEmpty ? .all : .missing
         claimAndRunArchiveTranslation(
             ArchiveTranslationJob.Request(
                 sessionID: sessionID,

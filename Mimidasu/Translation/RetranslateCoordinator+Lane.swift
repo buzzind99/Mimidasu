@@ -91,7 +91,9 @@ extension RetranslateCoordinator {
         let built: (any TranslationEngine)?
         if let provider = engine.provider {
             guard let engine = laneExternalEngine(for: provider, target: target) else {
-                postRetranslateUnavailableToast("No API key stored for \(provider.displayName).")
+                postRetranslateUnavailableToast(
+                    "Couldn't build a \(provider.displayName) engine — try again in a moment."
+                )
                 return
             }
             built = engine

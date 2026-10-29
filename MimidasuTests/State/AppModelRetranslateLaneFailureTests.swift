@@ -59,7 +59,10 @@ struct AppModelRetranslateLaneFailureTests {
             candidate.key == ToastKey.retranslate
         })
         #expect(toast?.title == "Re-translate unavailable")
-        #expect(toast?.body == "No API key stored for \(TranslationProvider.google.displayName).")
+        #expect(
+            toast?.body
+                == "Couldn't build a \(TranslationProvider.google.displayName) engine — try again in a moment."
+        )
 
         // The failed build ran before the lane evicted anything: attaching a
         // worker still delivers the sentence that was queued at click time.

@@ -237,13 +237,17 @@ extension RetranslateCoordinator {
     }
 
     /// The external half of the job resolution: the provider's stored key
-    /// supplies its lane engine over the run's target, or the run reports
-    /// the missing key.
+    /// supplies its lane engine over the run's target. The plan's key check
+    /// already admitted the route, so a nil engine means the build failed —
+    /// the key is unreadable (deleted from the secure store, denied after a
+    /// re-sign) or a test factory reports no engine.
     private func archiveExternalResolution(
         for provider: TranslationProvider, target: TargetLanguage
     ) -> ArchiveTranslationJob.EngineResolution {
         guard let engine = laneExternalEngine(for: provider, target: target) else {
-            return .unavailable(reason: "No API key stored for \(provider.displayName).")
+            return .unavailable(
+                reason: "Couldn't build a \(provider.displayName) engine — try again in a moment."
+            )
         }
         return .ready(
             engine: engine,

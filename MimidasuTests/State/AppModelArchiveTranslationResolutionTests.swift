@@ -243,7 +243,10 @@ struct ArchiveTranslationResolutionTests {
         )
         let toast = archiveToast(sut.model)
         #expect(toast?.title == "Archive translation unavailable")
-        #expect(toast?.body == "No API key stored for \(TranslationProvider.google.displayName).")
+        #expect(
+            toast?.body
+                == "Couldn't build a \(TranslationProvider.google.displayName) engine — try again in a moment."
+        )
         #expect(!sut.model.archiveTranslationRunning, "a failed build starts nothing")
     }
 

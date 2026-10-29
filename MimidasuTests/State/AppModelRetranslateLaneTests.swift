@@ -29,6 +29,17 @@ enum UnavailableLaneEngine: String, CaseIterable, Sendable {
         case .missingKey: false
         }
     }
+
+    /// The keyed route reaches the build, so its report names the failed
+    /// build; the unkeyed route is refused at the plan with the missing key.
+    var expectedToastBody: String {
+        switch self {
+        case .factoryWithoutEngine:
+            "Couldn't build a \(provider.displayName) engine — try again in a moment."
+        case .missingKey:
+            "No API key stored for \(provider.displayName)."
+        }
+    }
 }
 
 /// Tests the alternate-engine re-translate lane's runner semantics against
@@ -122,7 +133,7 @@ struct AppModelRetranslateLaneTests {
         )
         let toast = model.toasts.toasts.first(where: { candidate in candidate.key == ToastKey.retranslate })
         #expect(toast?.title == "Re-translate unavailable")
-        #expect(toast?.body == "No API key stored for \(testCase.provider.displayName).")
+        #expect(toast?.body == testCase.expectedToastBody)
         if testCase.usesFactory {
             #expect(
                 factoryCalled.withLock { called in called },
