@@ -54,8 +54,17 @@ final class ArchiveTranslationJob {
         case unavailable(reason: String)
     }
 
-    /// The job's present tense: one value every surface renders.
+    /// The job's transition state: idle, claimed, or running. Assigned only
+    /// on those transitions.
     private(set) var activity: Activity = .idle
+
+    /// The running walk's per-sentence counts. Non-nil exactly while
+    /// `activity` is `.running`; cleared with it.
+    private(set) var runProgress: RunProgress?
+
+    /// The claimed run's inputs: retained from `claim` until the run ends,
+    /// then cleared with the activity. Never observable.
+    @ObservationIgnored private var claimedRequest: Request?
 
     /// The most recently begun run — inputs, resolved kind, and final
     /// counts — the summary toast's and retry-failed's read. Survives the
@@ -98,7 +107,8 @@ final class ArchiveTranslationJob {
     /// from a previous generation, so the claim is always fresh.
     func claim(_ request: Request) -> Bool {
         guard activity == .idle else { return false }
-        activity = .claimed(request)
+        claimedRequest = request
+        activity = .claimed(RunStatus(request))
         isCancelled = false
         return true
     }
@@ -108,16 +118,16 @@ final class ArchiveTranslationJob {
     /// cancel landing during engine resolution discards the run silently:
     /// the surface that would have reported it is already gone.
     func run() async {
-        guard case let .claimed(request) = activity else { return }
+        guard case .claimed = activity, let request = claimedRequest else { return }
         let indexes = Self.indexes(for: request)
         guard !indexes.isEmpty else {
-            activity = .idle
+            endActivity()
             onEvent?(.finished(translated: 0, failedIndexes: []))
             return
         }
         let resolution = await resolveEngine(request.engine, TargetLanguage(code: request.lang))
         guard !isCancelled else {
-            activity = .idle
+            endActivity()
             return
         }
         let engine: any TranslationEngine
@@ -127,11 +137,11 @@ final class ArchiveTranslationJob {
             engine = resolvedEngine
             resolvedKind = engineKind
         case let .unavailable(reason):
-            activity = .idle
+            endActivity()
             onEvent?(.unavailable(reason: reason))
             return
         case .cancelled:
-            activity = .idle
+            endActivity()
             return
         }
         beginRun(request, kind: resolvedKind, total: indexes.count)
@@ -151,9 +161,8 @@ final class ArchiveTranslationJob {
         lastRun = LastRun(request: request, kind: kind, total: total, processed: 0)
         translatedCount = 0
         failureIndexes = []
-        activity = .running(
-            request, progress: RunProgress(kind: kind, processed: 0, total: total)
-        )
+        activity = .running(RunStatus(request))
+        runProgress = RunProgress(kind: kind, processed: 0, total: total)
         onEvent?(.started(total: total))
     }
 
@@ -176,9 +185,7 @@ final class ArchiveTranslationJob {
                 break
             }
             let processed = translatedCount + failureIndexes.count
-            activity = .running(
-                request, progress: RunProgress(kind: kind, processed: processed, total: total)
-            )
+            runProgress = RunProgress(kind: kind, processed: processed, total: total)
             onEvent?(.progress(processed: processed, total: total))
         }
     }
@@ -228,15 +235,23 @@ final class ArchiveTranslationJob {
     }
 
     private func finishRun() {
-        if let progress = activity.progress {
+        if let progress = runProgress {
             lastRun?.processed = progress.processed
         }
-        activity = .idle
+        endActivity()
         if isCancelled || Task.isCancelled {
             onEvent?(.cancelled(translated: translatedCount))
         } else {
             onEvent?(.finished(translated: translatedCount, failedIndexes: failureIndexes))
         }
+    }
+
+    /// The one return to idle: clears the transition, its per-tick progress,
+    /// and the claim's retained inputs together.
+    private func endActivity() {
+        activity = .idle
+        runProgress = nil
+        claimedRequest = nil
     }
 
     /// A run's indexes in sentence order — the scope computation, pure and

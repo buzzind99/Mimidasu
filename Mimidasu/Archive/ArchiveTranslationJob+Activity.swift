@@ -1,22 +1,35 @@
-// The job's present tense and its history record, kept beside the scoped
-// read every per-session surface uses: `Activity` answers what the job is
-// doing right now — idle, claimed for a session, or running with progress —
-// while `LastRun` keeps the last begun run's inputs and final counts.
+// The job's transition state and its history record, kept beside the scoped
+// read every per-session surface uses: `Activity` answers whether the job is
+// idle, claimed, or running for a session — while the separate `runProgress`
+// carries the per-tick counts — and `LastRun` keeps the last begun run's
+// inputs and final counts.
 
 extension ArchiveTranslationJob {
-    /// What the job is doing right now.
+    /// The run's public identity while claimed or running. Deliberately
+    /// excludes the run inputs; views must never depend on the sentence
+    /// payload.
+    struct RunStatus: Equatable, Sendable {
+        let sessionID: Int64
+        let lang: String
+        let engine: RetranslateEngine
+    }
+
+    /// The job's transition state. Per-tick progress lives in `runProgress`;
+    /// assigning this property only happens on idle → claimed → running →
+    /// idle transitions.
     enum Activity: Equatable, Sendable {
         /// No run claimed: the slot is free.
         case idle
-        /// Claimed for `request`: from the synchronous claim through engine
+        /// Claimed for `status`: from the synchronous claim through engine
         /// resolution. The session and language are visible; nothing runs.
-        case claimed(Request)
-        /// The walk executes for `request`; `progress` carries the resolved
-        /// kind and the processed/total counts.
-        case running(Request, progress: RunProgress)
+        case claimed(RunStatus)
+        /// The walk executes for `status`; the per-sentence counts live in
+        /// the job's `runProgress`.
+        case running(RunStatus)
     }
 
-    /// One running step's facts.
+    /// One running step's facts. Published separately from `Activity`, so a
+    /// per-tick update never republishes the transition value.
     struct RunProgress: Equatable, Sendable {
         let kind: TranslationEngineKind
         let processed: Int
@@ -35,30 +48,49 @@ extension ArchiveTranslationJob {
     /// or running run targets that session.
     func activity(for sessionID: Int64) -> Activity {
         switch activity {
-        case let .claimed(request) where request.sessionID == sessionID:
-            .claimed(request)
-        case let .running(request, progress) where request.sessionID == sessionID:
-            .running(request, progress: progress)
+        case let .claimed(status) where status.sessionID == sessionID:
+            .claimed(status)
+        case let .running(status) where status.sessionID == sessionID:
+            .running(status)
         default:
             .idle
         }
     }
+
+    /// True while claimed or running, regardless of session.
+    var isBusy: Bool {
+        activity.isBusy
+    }
+
+    /// The caller-facing scoped gate.
+    func isBusy(sessionID: Int64, lang: String? = nil) -> Bool {
+        activity.isBusy(sessionID: sessionID, lang: lang)
+    }
+}
+
+extension ArchiveTranslationJob.RunStatus {
+    init(_ request: ArchiveTranslationJob.Request) {
+        self.init(
+            sessionID: request.sessionID,
+            lang: request.lang,
+            engine: request.engine
+        )
+    }
 }
 
 extension ArchiveTranslationJob.Activity {
-    /// The run's request while claimed or running; nil when idle.
-    var request: ArchiveTranslationJob.Request? {
+    /// The run's identity while claimed or running; nil when idle.
+    var runStatus: ArchiveTranslationJob.RunStatus? {
         switch self {
         case .idle: nil
-        case let .claimed(request): request
-        case let .running(request, _): request
+        case let .claimed(status): status
+        case let .running(status): status
         }
     }
 
-    /// Live progress while the walk executes; nil while claimed or idle.
-    var progress: ArchiveTranslationJob.RunProgress? {
-        guard case let .running(_, progress) = self else { return nil }
-        return progress
+    /// True while claimed or running.
+    var isBusy: Bool {
+        self != .idle
     }
 
     /// True only while the walk executes.
@@ -67,5 +99,13 @@ extension ArchiveTranslationJob.Activity {
             return true
         }
         return false
+    }
+
+    /// The one scoped busy rule. A non-nil `lang` additionally matches the
+    /// run's language; a nil `lang` matches any language.
+    func isBusy(sessionID: Int64, lang: String? = nil) -> Bool {
+        guard let status = runStatus, status.sessionID == sessionID else { return false }
+        guard let lang else { return true }
+        return status.lang == lang
     }
 }

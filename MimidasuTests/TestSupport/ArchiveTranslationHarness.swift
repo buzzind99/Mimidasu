@@ -234,6 +234,26 @@ enum ArchiveTranslationJobFixtures {
             scope: scope
         )
     }
+
+    static func makeStatus(
+        sessionID: Int64 = 42,
+        lang: String = "en",
+        engine: RetranslateEngine = .google
+    ) -> ArchiveTranslationJob.RunStatus {
+        ArchiveTranslationJob.RunStatus(
+            sessionID: sessionID,
+            lang: lang,
+            engine: engine
+        )
+    }
+
+    static func makeRunProgress(
+        kind: TranslationEngineKind = .google,
+        processed: Int = 0,
+        total: Int = 3
+    ) -> ArchiveTranslationJob.RunProgress {
+        ArchiveTranslationJob.RunProgress(kind: kind, processed: processed, total: total)
+    }
 }
 
 /// The job's event and landing sinks, kept together so a test can script a

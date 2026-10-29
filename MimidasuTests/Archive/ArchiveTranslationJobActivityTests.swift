@@ -5,9 +5,9 @@ import Testing
 
 /// Pins `ArchiveTranslationJob`'s activity projection: the synchronous
 /// claim from the click onward, the scoped `activity(for:)` read, the
-/// claimed → running(progress) → idle walk, and `lastRun`'s preservation
-/// across runs that never begin. Drives the job directly against the shared
-/// scripted engine and gate doubles.
+/// claimed → running → idle walk with its separate `runProgress` value, and
+/// `lastRun`'s preservation across runs that never begin. Drives the job
+/// directly against the shared scripted engine and gate doubles.
 @MainActor
 @Suite("ArchiveTranslationJob activity")
 struct ArchiveTranslationJobActivityTests {
@@ -43,9 +43,39 @@ struct ArchiveTranslationJobActivityTests {
         let claimed = job.claim(request)
 
         #expect(claimed, "the free slot accepts the claim")
-        #expect(job.activity == .claimed(request), "the claim is visible before any run")
+        #expect(
+            job.activity == .claimed(ArchiveTranslationJob.RunStatus(request)),
+            "the claim is visible before any run"
+        )
+        #expect(job.runProgress == nil, "the claim publishes no run progress")
         #expect(job.claim(ArchiveTranslationJobFixtures.makeRequest()) == false, "a second claim is refused")
-        #expect(job.activity == .claimed(request), "the refused claim leaves the activity unchanged")
+        #expect(
+            job.activity == .claimed(ArchiveTranslationJob.RunStatus(request)),
+            "the refused claim leaves the activity unchanged"
+        )
+    }
+
+    @Test("a refused claim keeps the accepted request for the run")
+    func refusedClaimKeepsTheAcceptedRequest() async {
+        let job = makeJob()
+        let engine = ScriptedEngine()
+        job.resolveEngine = { _, _ in .ready(engine: engine, kind: .google) }
+        job.land = { _, _ in true }
+        let original = ArchiveTranslationJobFixtures.makeRequest()
+
+        #expect(job.claim(original))
+        let refused = ArchiveTranslationJobFixtures.makeRequest(
+            sentenceCount: 1, engine: .deepl, lang: "fr", sessionID: 7
+        )
+        #expect(!job.claim(refused), "a second claim is refused")
+        #expect(
+            job.activity == .claimed(ArchiveTranslationJob.RunStatus(original)),
+            "the refused claim leaves the accepted status in place"
+        )
+
+        await job.run()
+
+        #expect(job.lastRun?.request == original, "the walk still uses the accepted request")
     }
 
     @Test("activity(for:) scopes the claim to the run's session")
@@ -56,7 +86,10 @@ struct ArchiveTranslationJobActivityTests {
         let request = ArchiveTranslationJobFixtures.makeRequest()
         #expect(job.claim(request))
 
-        #expect(job.activity(for: request.sessionID) == .claimed(request))
+        #expect(
+            job.activity(for: request.sessionID)
+                == .claimed(ArchiveTranslationJob.RunStatus(request))
+        )
         #expect(job.activity(for: request.sessionID + 1) == .idle, "a foreign session never sees the claim")
     }
 
@@ -82,9 +115,13 @@ struct ArchiveTranslationJobActivityTests {
             await pollUntil(timeout: resultTimeout) { resolutionGate.enteredCount == 1 },
             "the run parks in engine resolution"
         )
-        #expect(job.activity == .claimed(request), "engine resolution keeps the run claimed")
+        #expect(
+            job.activity == .claimed(ArchiveTranslationJob.RunStatus(request)),
+            "engine resolution keeps the run claimed"
+        )
         #expect(!job.activity.isRunning, "no engine work starts while resolving")
         #expect(job.lastRun == nil, "nothing has begun while the resolver runs")
+        #expect(job.runProgress == nil, "a claimed run publishes no run progress")
 
         resolutionGate.open()
         #expect(
@@ -92,10 +129,11 @@ struct ArchiveTranslationJobActivityTests {
             "the walk parks in its first engine call"
         )
         #expect(
-            job.activity == .running(
-                request,
-                progress: ArchiveTranslationJob.RunProgress(kind: .google, processed: 0, total: 3)
-            )
+            job.activity == .running(ArchiveTranslationJobFixtures.makeStatus())
+        )
+        #expect(
+            job.runProgress
+                == ArchiveTranslationJobFixtures.makeRunProgress(kind: .google, processed: 0, total: 3)
         )
         #expect(job.activity.isRunning, "the walk reports running once the engine starts")
         #expect(job.activity(for: request.sessionID) == job.activity, "the running state is scoped to its session")
@@ -131,29 +169,34 @@ struct ArchiveTranslationJobActivityTests {
             "the walk parks on the first sentence"
         )
         #expect(
-            job.activity == .running(
-                request,
-                progress: ArchiveTranslationJob.RunProgress(kind: .google, processed: 0, total: 3)
-            )
+            job.activity == .running(ArchiveTranslationJobFixtures.makeStatus())
         )
+        #expect(
+            job.runProgress
+                == ArchiveTranslationJobFixtures.makeRunProgress(kind: .google, processed: 0, total: 3)
+        )
+        let runningActivity = job.activity
 
         gate.release()
         #expect(
-            await pollUntil(timeout: resultTimeout) { job.activity.progress?.processed == 1 },
+            await pollUntil(timeout: resultTimeout) { job.runProgress?.processed == 1 },
             "the first landing advances the progress"
         )
+        #expect(job.activity == runningActivity, "the first tick leaves the running status unchanged")
 
         gate.release()
         #expect(
-            await pollUntil(timeout: resultTimeout) { job.activity.progress?.processed == 2 },
+            await pollUntil(timeout: resultTimeout) { job.runProgress?.processed == 2 },
             "the failed sentence still advances the progress"
         )
         #expect(job.failureIndexes == [1], "the failure is reported in index order")
         #expect(
-            job.activity == .running(
-                request,
-                progress: ArchiveTranslationJob.RunProgress(kind: .google, processed: 2, total: 3)
-            ),
+            job.activity == .running(ArchiveTranslationJobFixtures.makeStatus()),
+            "a progress tick leaves the running status unchanged"
+        )
+        #expect(
+            job.runProgress
+                == ArchiveTranslationJobFixtures.makeRunProgress(kind: .google, processed: 2, total: 3),
             "the progress count includes the failure"
         )
 
