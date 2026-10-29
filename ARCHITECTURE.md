@@ -70,7 +70,7 @@ Sidecars off the main flow:
 - **RetranslateCoordinator + the re-translate lane** — manual
   re-translate of a finalized Sentence through a selected provider
   (dedicated Apple sessions, serialized lane, provenance stamps).
-- **ArchiveStore / ArchiveReadModel / ArchiveTranslationJob** — every
+- **ArchiveStore / ArchiveProjection / ArchiveTranslationJob** — every
   finalized sentence and landed translation persists to `archives.sqlite`;
   Recent/Saved browsing, interrupted-session sweep, bulk multi-language
   re-translation, and archive-aware export.
@@ -723,8 +723,9 @@ packaged apps in `Contents/Frameworks/`.
   runtime (one read-only `translationRuntime` value forwarded from the
   live-session coordinator — engine, attached provider, worker attachment,
   status, fallback latch), archive state (`archive` /
-  `archiveRead`, `recordingSessionID`, `archiveWriteFailed`, `openArchive`,
-  `archiveViewingLanguage`, `archiveTranslationJob`), HUD pin, toast/notice
+  `archiveProjection`, `recordingSessionID`, `archiveWriteFailed`,
+  `openArchive` (computed from the projection's open summary plus the pane
+  entries), `archiveViewingLanguage`, `archiveTranslationJob`), HUD pin, toast/notice
   stacks, audio level + latency, ASR model state, lookup state (popover +
   pinned card), the Favorites store (star outcomes + the segment matcher),
   session clock / loss / pause anchors, and the two translation
@@ -822,13 +823,22 @@ packaged apps in `Contents/Frameworks/`.
   rows to `interrupted` (dating the end from the last sentence when no
   finalized duration exists). The 10-session Recent cap evicts oldest-first
   and exempts Saved and recording rows; Saved sessions have no cap.
-- **Read model:** `ArchiveReadModel` (@MainActor `@Observable`) owns the
-  cached summary list, typed availability (`available` / `openFailed` /
-  `readFailed`), and a revision bumped once per landed mutation. The
-  archive window reads only cached rows; a full reload replaces the list,
-  row mutations refresh one row, and failed writes change neither cache nor
-  revision. A terminal open failure degrades every operation; per-operation
-  read failures keep the prior rows and expose the typed state.
+- **Projection:** `ArchiveProjection` (@MainActor `@Observable`) owns the
+  cached summary list, the one opened session's summary, and typed
+  availability (`available` / `openFailed` / `readFailed`). The archive
+  window and the opened banner read only cached rows; opening loads one
+  session and reuses its summary for a listed row. Every landed write that
+  affects a listed or open session performs exactly one summary read and
+  updates both copies from that value; a write to neither reads nothing. A
+  terminal open failure degrades every operation; per-operation read
+  failures keep the prior rows and expose the typed state. `AppModel` joins
+  the projection's open summary with the pane's entries for `openArchive`;
+  entries, the position map, and the character count stay in `AppModel`.
+- **Language set:** `ArchiveLanguageSet` is the one pure value for a
+  summary's ordered counts, sentence total, stored target, and the runtime
+  OS target catalog. Count, completeness, send count, and addability all
+  come from it; the add affordance waits for the catalog and is hidden when
+  nothing is addable.
 - **Bulk re-translation:** `ArchiveTranslationJob` is a main-actor state
   machine with a synchronous one-run-at-a-time claim, scopes `missing` /
   `all` / `failedOnly`, injected provider resolver and landing closures,
