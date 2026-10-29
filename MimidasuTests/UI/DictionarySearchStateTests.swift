@@ -273,7 +273,6 @@ struct DictionarySearchStateTests {
         state.lookupState.toggle(
             key: taberuKey, candidate: LookupCandidate(text: "食べる", reading: "たべる")
         )
-        state.stepEntry(taberuKey, to: 3, in: result(entries: 2))
         state.resetForClose()
 
         #expect(state.query.isEmpty)
@@ -282,7 +281,6 @@ struct DictionarySearchStateTests {
         #expect(state.isSearching == false)
         #expect(state.unavailable == false)
         #expect(state.lookupState.expanded.isEmpty)
-        #expect(state.entryIndex(for: taberuKey) == 0)
         // The reset's own `query = ""` write must not leave a pending task that
         // fires 150ms later.
         try await Task.sleep(for: DictionarySearchState.searchDebounce * 3)

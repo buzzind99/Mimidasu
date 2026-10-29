@@ -1,138 +1,30 @@
 @testable import Mimidasu
 import Testing
 
-/// The pager half of `DictionarySearchStateTests`: the absolute-target step,
-/// the bounds it clamps to, the pruning a departed row triggers, and the
-/// promoted-lead restart. Split out of the parent suite to keep both type
-/// bodies small, over the fixture the parent builds.
+/// The pager-index half of `DictionarySearchStateTests`: the row's own
+/// entry position, clamped into the promoted list it is measured against.
+/// Split out of the parent suite to keep both type bodies small, over the
+/// fixture the parent builds.
 @MainActor
 extension DictionarySearchStateTests {
 
-    @Test("an absent row's pager starts at the first entry")
-    func absentRowStartsAtZero() throws {
-        let fixture = try makeState()
-
-        #expect(fixture.state.entryIndex(for: "食べる") == 0)
-    }
-
-    @Test("the pager step is clamped to the entry list",
+    @Test("the displayed index clamps the row's own entry into the list",
           arguments: [
-              // (2, 4, 2) pins in-range pass-through: target 2 sits inside a
-              // 4-entry list, so nothing is clamped away.
+              // (2, 4, 2) pins in-range pass-through: fallback 2 sits inside
+              // a 4-entry list, so nothing is clamped away.
               (2, 4, 2),
               (5, 3, 2),
               (-5, 3, 0),
               (1, 1, 0),
               (1, 0, 0)
           ])
-    func pagerStepClamps(target: Int, count: Int, expected: Int) throws {
+    func validatedIndexClampsFallback(fallback: Int, count: Int, expected: Int) throws {
         let fixture = try makeState()
 
-        let state = fixture.state
-        state.stepEntry("食べる", to: target, in: result(entries: count))
+        let index = fixture.state.validatedIndex(
+            for: "食べる", in: result(entries: count), fallback: fallback
+        )
 
-        #expect(state.entryIndex(for: "食べる") == expected)
-    }
-
-    @Test("the pager step stores the pager's absolute target")
-    func stepStoresAbsoluteTarget() throws {
-        let fixture = try makeState()
-        let state = fixture.state
-
-        state.stepEntry("食べる", to: 1, in: result(entries: 4))
-        #expect(state.entryIndex(for: "食べる") == 1)
-
-        // The pager hands over absolute indices (current ± 1): a second press
-        // from page 1 must land on 2, not on stored + target.
-        state.stepEntry("食べる", to: 2, in: result(entries: 4))
-        #expect(state.entryIndex(for: "食べる") == 2)
-    }
-
-    @Test("a stepped pager resets when its row leaves the rows")
-    func steppedPagerResetsWhenRowLeaves() async throws {
-        let fixture = try makeState()
-        let state = fixture.state
-
-        state.query = "あめ"
-        #expect(await pollUntil(timeout: 2) { state.outcome.hits.count == 4 }, "the あめ rows land")
-        let ame = try #require(state.outcome.hits.first { hit in hit.headword == "飴" })
-        let ameKey = DictionarySearchState.lookupKey(for: ame)
-        state.stepEntry(ameKey, to: 1, in: result(entries: 2))
-        #expect(state.entryIndex(for: ameKey) == 1)
-
-        // A lead change to the Names scope drops 飴 from the rows; the
-        // landing prunes the stored pager alongside the expansion, so a
-        // stale page cannot outlive the row that stored it.
-        state.apply(.setScope(.names))
-        #expect(await pollUntil(timeout: 2) { state.outcome.hits.map(\.entSeq) == [15_668_307] }, "the names landing lands")
-        #expect(state.entryIndex(for: ameKey) == 0)
-    }
-
-    @Test("the promoted pager resets when the lead entry changes")
-    func promotedPagerResetsOnLeadChange() throws {
-        let fixture = try makeState()
-        let state = fixture.state
-        // The entries share the matched reading, so starring 語2 can promote it.
-        let baseline = LookupResult(matched: "あめ", entries: [
-            JMDictEntry(
-                entSeq: 1, keb: "語1", reb: "あめ", common: false,
-                jlpt: nil, hatsuon: nil, accPatts: nil, zoPatts: nil,
-                senses: [JMDictSense(pos: nil, glosses: ["gloss"], misc: nil,
-                                     restrictedKanji: nil, restrictedKana: nil)]
-            ),
-            JMDictEntry(
-                entSeq: 2, keb: "語2", reb: "あめ", common: false,
-                jlpt: nil, hatsuon: nil, accPatts: nil, zoPatts: nil,
-                senses: [JMDictSense(pos: nil, glosses: ["gloss"], misc: nil,
-                                     restrictedKanji: nil, restrictedKana: nil)]
-            )
-        ])
-
-        #expect(state.validatedIndex(for: "飴", in: baseline) == 0)
-        state.stepEntry("飴", to: 1, in: baseline)
-        #expect(state.validatedIndex(for: "飴", in: baseline) == 1)
-        // The plan pins the same keep at the render seam: same stored lead,
-        // stored page wins.
-        let plan = DictionaryDefinitionPlan(mode: .searchRow)
-        #expect(plan.displayEntryIndex(
-            in: baseline.entries, rowEntryIndex: 0,
-            storedIndex: state.entryIndex(for: "飴"), storedLead: 1
-        ) == 1)
-
-        // A promotion reorder moves another entry to the front; the stored
-        // page belonged to the old order, so the display restarts at the
-        // fallback — the row's own entry in the search window, 0 here —
-        // instead of silently retargeting. Storage lags until the next press
-        // overwrites it — the view only ever reads `validatedIndex`.
-        let identity = FavoriteIdentity(keys: [FavoriteIdentity.normalize("語2")])
-        let reordered = FavoritesPromotion.promotingFavorites(in: baseline, identity: identity)
-        #expect(reordered.entries.map(\.entSeq) == [2, 1])
-        #expect(state.validatedIndex(for: "飴", in: reordered) == 0)
-        #expect(state.entryIndex(for: "飴") == 1)
-        // The plan pins the same restart: the changed lead falls back to the
-        // row's own entry rather than retargeting the stale page.
-        #expect(plan.displayEntryIndex(
-            in: reordered.entries, rowEntryIndex: 0,
-            storedIndex: state.entryIndex(for: "飴"), storedLead: 1
-        ) == 0)
-    }
-
-    @Test("the pager clamps when the lead is unchanged")
-    func pagerClampsWithoutLeadChange() throws {
-        let fixture = try makeState()
-        let state = fixture.state
-        let promoted = result(entries: 3)
-
-        #expect(state.validatedIndex(for: "飴", in: promoted) == 0)
-        state.stepEntry("飴", to: 5, in: promoted)
-        #expect(state.validatedIndex(for: "飴", in: promoted) == 2)
-        // The clamp persists, so the stored index and the shown page agree.
-        #expect(state.entryIndex(for: "飴") == 2)
-        // The plan pins the same clamp at the render seam.
-        let plan = DictionaryDefinitionPlan(mode: .searchRow)
-        #expect(plan.displayEntryIndex(
-            in: promoted.entries, rowEntryIndex: 0,
-            storedIndex: state.entryIndex(for: "飴"), storedLead: 1
-        ) == 2)
+        #expect(index == expected)
     }
 }

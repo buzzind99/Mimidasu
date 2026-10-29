@@ -155,6 +155,8 @@ struct DictionarySearchPageTests {
         )
         #expect(ceiling.footer == .ceiling)
 
+        // Synthetic: the ladder never saturates and truncates together; the
+        // projection still refuses a rescan for the combined state.
         let both = DictionarySearchPage(
             outcome: makeOutcome(hits: 60, saturated: true, truncated: true),
             window: .initial
@@ -192,6 +194,8 @@ struct DictionarySearchPageTests {
         #expect(scannedWindow.footer == .none)
         #expect(scannedWindow.isFloor)
 
+        // Synthetic: saturation always keeps at least `limit` hits; kept to
+        // pin the empty-window label for a saturated answer.
         let saturatedWindow = DictionarySearchPage(
             outcome: makeOutcome(hits: 0, saturated: true),
             window: .initial

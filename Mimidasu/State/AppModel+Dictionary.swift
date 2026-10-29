@@ -220,12 +220,11 @@ extension AppModel {
             )
         case .failed:
             postUnavailable()
-        case .unchanged:
-            break
         default:
-            // `.removed` and `.pendingRemoval` cannot arrive: the guard above
-            // returns for an already-starred word, and nothing here deletes.
-            // Both would be silent anyway.
+            // `.unchanged`, `.removed`, and `.pendingRemoval` cannot arrive:
+            // the guard above returns for an already-starred word, `add`
+            // answers that same membership check, and nothing here deletes.
+            // All would be silent anyway.
             break
         }
         return outcome

@@ -344,8 +344,8 @@ private extension DictionarySearchView {
         _ hit: DictionarySearchHit, result: LookupResult
     ) -> some View {
         let plan = DictionaryDefinitionPlan(mode: .searchRow)
-        // Favorite-first: a starred entry leads the pager — reorders only,
-        // the count unchanged. An unstepped row lands on its own entry.
+        // Favorite-first: a starred entry leads the promoted list — reorders
+        // only, the count unchanged. The row lands on its own entry.
         let promoted = FavoritesPromotion.promotingFavorites(
             in: result, identity: model.favorites.snapshot.identity
         )

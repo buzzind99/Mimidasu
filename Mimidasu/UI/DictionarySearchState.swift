@@ -121,13 +121,6 @@ final class DictionarySearchState {
     /// it. Rows expand independently, and one row's collapse must not drop a
     /// sibling's in-flight lookup.
     let lookupState: FavoritesLookupState
-    /// Which entry an expanded row's pager is showing, per row key.
-    private var entryIndices: [String: Int] = [:]
-    /// Lead entry identity per row key, so the pager does not retarget when
-    /// promotion reorders the entries: starring a word moves its entry to the
-    /// front, and without the lead check the stored index would point at a
-    /// different entry after the reorder.
-    private var entryLeads: [String: Int] = [:]
 
     private let engine: DictionarySearchEngine
     private let prepareDictionary: () -> Void
@@ -255,10 +248,10 @@ final class DictionarySearchState {
     }
 
     /// Where a row's own entry sits in a promoted lookup — the fallback page
-    /// the search view hands `validatedIndex`, so an untouched row opens on
-    /// the entry it names rather than on the lookup's ranked first. Two rows
-    /// sharing a headword run the same lookup, whose ranked first is one of
-    /// them; without this, expanding the other would show its sibling.
+    /// the search view hands `validatedIndex`, so a row opens on the entry it
+    /// names rather than on the lookup's ranked first. Two rows sharing a
+    /// headword run the same lookup, whose ranked first is one of them;
+    /// without this, expanding the other would show its sibling.
     nonisolated static func rowEntryIndex(
         for hit: DictionarySearchHit, in promoted: LookupResult
     ) -> Int {
@@ -278,56 +271,27 @@ final class DictionarySearchState {
         for key in lookupState.expanded where !rows.contains(key) {
             lookupState.remove(key: key)
         }
-        entryIndices = entryIndices.filter { key, _ in rows.contains(key) }
-        entryLeads = entryLeads.filter { key, _ in rows.contains(key) }
     }
 
-    /// The raw stored page, unvalidated: no lead check, so a promotion
-    /// reorder reads as a stale page here. Only tests read this — display
-    /// code must read `validatedIndex(for:in:)`, which restarts at the
-    /// fallback when the lead entry changed.
-    func entryIndex(for key: String) -> Int {
-        entryIndices[key] ?? 0
-    }
-
-    /// Pager index against the promoted entry list. A pure read: the display
-    /// restarts at the fallback when the lead entry changed — a promotion
-    /// reorder, or a fresh lookup that leads with a different entry — and
-    /// otherwise clamps the stored index to the list bounds. The search view
-    /// passes the row's own entry position as the fallback, so an untouched
-    /// row opens on the entry it names rather than on the lookup's ranked
-    /// first: the lookups of two rows sharing a headword rank the same, and
-    /// a row must not expand to a sibling's definition. A re-lookup that
-    /// leads with the same entry keeps the stored page. The same keep can
-    /// resurface a page: when a lead flips away and back — an unrelated
-    /// unstar elsewhere, then re-starring the same entry reproduces the
-    /// promoted ordering — the stored page returns on that star press
-    /// rather than a pager touch. That is the accepted trade of the
-    /// absolute-target pager, where storage deliberately lags a display
-    /// reset until the next press. The rule itself is
-    /// `DictionaryDefinitionPlan`'s row-validated policy; this method only
-    /// supplies the live per-row memory. Nothing is written here; `stepEntry`
-    /// persists the lead and index when the user presses, so body evaluation
-    /// never mutates the state it reads.
+    /// The entry index the search row displays out of the promoted list: the
+    /// row's own entry position (the fallback the search view hands in),
+    /// clamped into the list's bounds.
+    ///
+    /// The search view passes the row's own entry position as the fallback,
+    /// so a row opens on the entry it names rather than on the lookup's
+    /// ranked first: the lookups of two rows sharing a headword rank the
+    /// same, and a row must not expand to a sibling's definition. The row
+    /// key names the call site's row but is not looked up — the search-row
+    /// pager lives in the headword block the row suppresses, so it can never
+    /// render and there is no per-row page to keep between evaluations. The
+    /// clamp is `DictionaryDefinitionPlan`'s row-validated policy with no
+    /// stored page in play; nothing is written here.
     func validatedIndex(for key: String, in promoted: LookupResult, fallback: Int = 0) -> Int {
         let plan = DictionaryDefinitionPlan(mode: .searchRow)
         return plan.displayEntryIndex(
             in: promoted.entries,
-            rowEntryIndex: fallback,
-            storedIndex: entryIndices[key],
-            storedLead: entryLeads[key]
+            rowEntryIndex: fallback
         ) ?? 0
-    }
-
-    /// The expanded row's pager step: the absolute target index the pager
-    /// hands over, clamped to the entry list it belongs to. Persists the
-    /// promoted lead alongside the index, so a later promotion reorder reads
-    /// as a lead change and restarts the display at the fallback.
-    func stepEntry(_ key: String, to index: Int, in promoted: LookupResult) {
-        if let lead = promoted.entries.first?.entSeq {
-            entryLeads[key] = lead
-        }
-        entryIndices[key] = min(max(index, 0), max(promoted.entries.count - 1, 0))
     }
 
     /// Wipes the mode at the moment the window closes — see
@@ -356,8 +320,6 @@ final class DictionarySearchState {
             filters = DictionarySearchFilters()
             filtersExpanded = false
             window = .initial
-            entryIndices.removeAll()
-            entryLeads.removeAll()
             lookupState.reset()
         }
     }
