@@ -3,8 +3,8 @@ import Foundation
 import Testing
 
 /// The pure display-formatting surface of the archive models: duration and
-/// sentence-count text, chip labels and badge codes, completeness, and the
-/// auto-title snippet.
+/// sentence-count text, chip labels and badge codes, and the auto-title
+/// snippet.
 @Suite("Archive models")
 struct ArchiveModelsTests {
 
@@ -57,40 +57,6 @@ struct ArchiveModelsTests {
         #expect(chinese.badgeCode == "ZH", "the badge is the uppercase primary subtag")
         #expect(english.chipText(of: 183) == "EN 40/183")
         #expect(chinese.chipText(of: 3) == "ZH 0/3")
-    }
-
-    @Test("completeness needs a non-empty session")
-    func completeness() {
-        #expect(ArchiveLanguageCount(lang: "en", translated: 0).isComplete(of: 0) == false)
-        #expect(ArchiveLanguageCount(lang: "en", translated: 0).isComplete(of: 3) == false)
-        #expect(ArchiveLanguageCount(lang: "en", translated: 3).isComplete(of: 3))
-    }
-
-    // MARK: - Language coverage
-
-    @Test("a session holding every target language needs no add affordance")
-    func holdsEveryTargetLanguage() {
-        var sut = summary()
-        sut.langs = TargetLanguage.known.map { known in
-            ArchiveLanguageCount(lang: known.code, translated: 0)
-        }
-
-        #expect(sut.holdsEveryTargetLanguage)
-    }
-
-    @Test("a session missing one target language still offers the add affordance")
-    func missingTargetLanguage() {
-        var sut = summary()
-        sut.langs = TargetLanguage.known.dropLast().map { known in
-            ArchiveLanguageCount(lang: known.code, translated: 0)
-        }
-
-        #expect(!sut.holdsEveryTargetLanguage)
-    }
-
-    @Test("a session holding no language offers the add affordance")
-    func noLanguageHolds() {
-        #expect(!summary().holdsEveryTargetLanguage)
     }
 
     // MARK: - Auto title

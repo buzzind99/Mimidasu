@@ -169,18 +169,24 @@ struct ArchiveSwitchLanguagePopover: View {
 
     // MARK: - Language list
 
+    /// The session's language set: the ordered counts and the addability
+    /// gate the list reads.
+    private var languageSet: ArchiveLanguageSet {
+        model.archiveLanguageSet(for: summary)
+    }
+
     private var languageList: some View {
         VStack(alignment: .leading, spacing: 2) {
             header(
                 "Languages",
                 subtitle: "\(summary.displayTitle) · \(summary.sentenceCountText)"
             )
-            ForEach(summary.langs) { count in
+            ForEach(languageSet.counts) { count in
                 languageRow(count)
             }
             // The add path disappears once the session holds every language
             // the app can target.
-            if !summary.holdsEveryTargetLanguage {
+            if languageSet.canAddLanguage {
                 addLanguageRow
             }
         }
@@ -261,28 +267,27 @@ struct ArchiveSwitchLanguagePopover: View {
 
     /// Targets the session doesn't hold yet. Membership is the filter —
     /// an already-added language never appears here, translated or not.
-    /// The OS catalog lands asynchronously, so the probe's pending state
-    /// gets its own row instead of reading as "none available".
+    /// The OS catalog lands asynchronously: nil from the set means the
+    /// probe is pending, so it gets its own row instead of reading as
+    /// "none available".
     @ViewBuilder
     private var chooserRows: some View {
-        let held = Set(summary.langs.map(\.lang))
-        let available = model.appleTranslationAvailability.targets.filter { target in
-            !held.contains(target.code)
-        }
-        if !model.appleTranslationAvailability.isLoaded {
+        if let available = languageSet.addableTargets() {
+            if available.isEmpty {
+                Text("No other languages available")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.secondaryText)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 8)
+            } else {
+                ForEach(available) { target in
+                    chooserRow(target)
+                }
+            }
+        } else {
             LanguagesLoadingRow(tint: Theme.secondaryText)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 8)
-        } else if available.isEmpty {
-            Text("No other languages available")
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.secondaryText)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 8)
-        } else {
-            ForEach(available) { target in
-                chooserRow(target)
-            }
         }
     }
 
@@ -379,11 +384,11 @@ struct ArchiveTranslationEnginePicker: View {
     /// The sentences a run would send: missing count, or the full sentence
     /// count when the language is complete.
     private var sendCount: Int {
-        model.archiveTranslationSendCount(summary: summary, lang: lang)
+        model.archiveLanguageSet(for: summary).sendCount(lang)
     }
 
     private var isComplete: Bool {
-        model.archiveLanguageIsComplete(summary: summary, lang: lang)
+        model.archiveLanguageSet(for: summary).isComplete(lang)
     }
 
     private var jobIsActive: Bool {

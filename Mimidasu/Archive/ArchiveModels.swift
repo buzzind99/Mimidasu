@@ -56,12 +56,6 @@ struct ArchiveLanguageCount: Equatable, Sendable, Identifiable {
         let chip = chipText(of: total)
         return busy ? "\(chip), translating" : chip
     }
-
-    /// True when this language's chip reads as complete (`N/N` with a
-    /// non-empty session) — the engine picker's Retranslate mode.
-    func isComplete(of total: Int) -> Bool {
-        total > 0 && translated >= total
-    }
 }
 
 /// A stored session's list-row summary — everything the archive window and
@@ -69,8 +63,7 @@ struct ArchiveLanguageCount: Equatable, Sendable, Identifiable {
 struct ArchivedSessionSummary: Identifiable, Equatable, Sendable {
     let id: Int64
     let status: ArchiveStatus
-    /// Whether the user promoted the session to the permanent tier. Mutable:
-    /// a promote while the session is open updates the banner in place.
+    /// Whether the user promoted the session to the permanent tier.
     var saved: Bool
     let startedAt: Date
     /// Active duration in seconds, pause-excluded; nil while unknown
@@ -82,32 +75,18 @@ struct ArchivedSessionSummary: Identifiable, Equatable, Sendable {
     let targetLang: String?
     let model: String?
     let chunkMS: Int?
-    /// The user-editable name; nil = display the auto-title. Mutable: a
-    /// rename while the session is open updates the banner in place.
+    /// The user-editable name; nil = display the auto-title.
     var name: String?
     /// The first sentence's text, for the auto-title snippet.
     let firstSentence: String?
     /// Every language the archive holds with its translated count, in the
     /// language set's order: stored target first, then membership order,
-    /// then translation-only languages. Mutable: a landed bulk-job result
-    /// refreshes the counts in place on the opened banner.
+    /// then translation-only languages.
     var langs: [ArchiveLanguageCount] = []
 
     /// The count entry for `lang`, or nil when the language isn't held.
     func languageCount(for lang: String) -> ArchiveLanguageCount? {
         langs.first { count in count.lang == lang }
-    }
-
-    /// True when the session already holds every language the app can
-    /// target — the add-language affordance has nothing left to offer.
-    var holdsEveryTargetLanguage: Bool {
-        let held = Set(langs.map(\.lang))
-        return TargetLanguage.known.allSatisfy { known in held.contains(known.code) }
-    }
-
-    /// The language the pane shows when nothing overrides it.
-    var defaultViewingLang: String? {
-        targetLang
     }
 }
 

@@ -4,9 +4,8 @@ import Testing
 
 /// Pins the archive models' display-formatting surface that the list rows
 /// and the opened banner read: the badge fallback, the chip's identity, the
-/// default viewing language, the auto-title fallback, the row meta line, the
-/// sentence-count and duration text, the date/time stamps, and the banner's
-/// character tally.
+/// auto-title fallback, the row meta line, the sentence-count and duration
+/// text, the date/time stamps, and the banner's character tally.
 @Suite("Archive models formatting")
 struct ArchiveModelsFormattingTests {
 
@@ -75,18 +74,6 @@ struct ArchiveModelsFormattingTests {
         let count = ArchiveLanguageCount(lang: "zh-Hans", translated: 3)
 
         #expect(count.id == "zh-Hans")
-    }
-
-    // MARK: - Default viewing language
-
-    @Test("the default viewing language is the session's target language")
-    func defaultViewingLang() {
-        #expect(makeSummary(targetLang: "ja").defaultViewingLang == "ja")
-    }
-
-    @Test("a session without a target language has no default viewing language")
-    func defaultViewingLangIsAbsent() {
-        #expect(makeSummary(targetLang: nil).defaultViewingLang == nil)
     }
 
     // MARK: - Display title

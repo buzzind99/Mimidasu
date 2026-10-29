@@ -63,7 +63,7 @@ struct ArchiveSessionRow: View {
             if chooserPresented {
                 chooserPresented = false
             }
-            for count in summary.langs {
+            for count in languageSet.counts {
                 translationPickerPresented(count.lang).wrappedValue = false
             }
         }
@@ -207,6 +207,12 @@ struct ArchiveSessionRow: View {
 
     // MARK: - Language chips
 
+    /// The row's language set: the stored counts and the runtime target
+    /// catalog the chip line's add affordance reads.
+    private var languageSet: ArchiveLanguageSet {
+        model.archiveLanguageSet(for: summary)
+    }
+
     /// The row's language chips, each a button opening the translate picker
     /// for its language, with the `+` pill that opens the add-language
     /// chooser for this session. The chips flow: a long language list wraps
@@ -214,10 +220,10 @@ struct ArchiveSessionRow: View {
     /// out once the session holds every language the app can target.
     private var chipLine: some View {
         FlowLayout(spacing: 6, lineSpacing: 4, fingerprint: chipFingerprint) {
-            ForEach(summary.langs) { count in
+            ForEach(languageSet.counts) { count in
                 languageChipButton(count)
             }
-            if !summary.holdsEveryTargetLanguage {
+            if languageSet.canAddLanguage {
                 ArchiveAddLanguagePill {
                     chooserPresented = true
                 }
@@ -247,7 +253,7 @@ struct ArchiveSessionRow: View {
     /// chip's own width, so both ride the fingerprint.
     private var chipFingerprint: String {
         var parts = ["total:\(summary.sentenceCount)"]
-        for count in summary.langs {
+        for count in languageSet.counts {
             let busy = isJobRunning && count.lang == jobLang
             let selected = model.openArchive?.id == summary.id
                 && count.lang == model.archiveViewingCode
