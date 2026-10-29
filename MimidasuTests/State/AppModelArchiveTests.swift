@@ -331,32 +331,41 @@ struct AppModelArchiveTests {
 
     // MARK: - Promote / rename / delete
 
-    @Test("the banner save icon promotes once, updates the store and banner, then no-ops")
+    @Test("the banner save icon promotes once, updates the store and both surfaces, then no-ops")
     func saveOpenArchivePromotesOnce() async {
         let (model, id) = await makeModel()
         model.openArchiveSession(id: id)
         #expect(model.openArchive?.summary.saved == false)
-        let revisionBefore = model.archiveRevision
 
         model.saveOpenArchive()
         #expect(model.archive.list().first?.saved == true)
         #expect(model.openArchive?.summary.saved == true)
-        #expect(model.archiveRevision != revisionBefore)
+        #expect(
+            model.archiveProjection.summaries.first { summary in summary.id == id }?.saved == true,
+            "the cached row flips to saved"
+        )
+        #expect(model.openArchive?.summary == model.archiveProjection.openSummary)
 
-        let revisionAfterPromote = model.archiveRevision
+        let summariesAfterPromote = model.archiveProjection.summaries
+        let openSummaryAfterPromote = model.archiveProjection.openSummary
         model.saveOpenArchive()
-        #expect(model.archiveRevision == revisionAfterPromote)
+        #expect(model.archiveProjection.summaries == summariesAfterPromote, "a second save leaves the rows alone")
+        #expect(
+            model.archiveProjection.openSummary == openSummaryAfterPromote,
+            "a second save leaves the open summary alone"
+        )
     }
 
     @Test("the banner save icon is a no-op with nothing open")
     func saveOpenArchiveWithoutOpenIsNoop() async {
         let (model, _) = await makeModel()
-        let revisionBefore = model.archiveRevision
+        let summariesBefore = model.archiveProjection.summaries
 
         model.saveOpenArchive()
 
         #expect(model.archive.list().first?.saved == false)
-        #expect(model.archiveRevision == revisionBefore)
+        #expect(model.archiveProjection.summaries == summariesBefore)
+        #expect(model.archiveProjection.openSummary == nil)
     }
 
     @Test("renaming updates the store and the open banner; an empty name clears")
@@ -366,14 +375,21 @@ struct AppModelArchiveTests {
 
         model.renameArchive(id: id, name: "Lecture 3")
         #expect(model.archive.list().first?.name == "Lecture 3")
+        #expect(
+            model.archiveProjection.summaries.first?.name == "Lecture 3",
+            "the cached row carries the new name"
+        )
         #expect(model.openArchive?.summary.name == "Lecture 3")
+        #expect(model.openArchive?.summary == model.archiveProjection.openSummary)
 
         model.renameArchive(id: id, name: "  ")
         #expect(model.archive.list().first?.name == nil)
+        #expect(model.archiveProjection.summaries.first?.name == nil, "the cached row clears the name")
         #expect(model.openArchive?.summary.name == nil)
+        #expect(model.openArchive?.summary == model.archiveProjection.openSummary)
     }
 
-    @Test("each failed archive command warns dismissibly without bumping the revision")
+    @Test("each failed archive command warns dismissibly without changing either surface")
     func commandWriteFailuresWarn() async {
         let (store, root) = makeDegradedStore()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -385,7 +401,8 @@ struct AppModelArchiveTests {
 
         for testCase in cases {
             let (model, _) = await makeModel(sentences: [], store: store)
-            let revisionBefore = model.archiveRevision
+            let summariesBefore = model.archiveProjection.summaries
+            let openSummaryBefore = model.archiveProjection.openSummary
 
             testCase.run(model)
 
@@ -397,7 +414,11 @@ struct AppModelArchiveTests {
                 "the failed command names its own outcome"
             )
             #expect(warning?.isClosable == true, "the command warning is dismissible")
-            #expect(model.archiveRevision == revisionBefore, "a failed command bumps nothing")
+            #expect(model.archiveProjection.summaries == summariesBefore, "a failed command leaves the cached rows alone")
+            #expect(
+                model.archiveProjection.openSummary == openSummaryBefore,
+                "a failed command leaves the open summary alone"
+            )
         }
     }
 
@@ -409,6 +430,8 @@ struct AppModelArchiveTests {
         model.deleteArchive(id: id)
 
         #expect(model.openArchive == nil)
+        #expect(model.archiveProjection.openSummary == nil)
+        #expect(model.archiveProjection.summaries.isEmpty)
         #expect(model.entries.isEmpty)
         #expect(model.archive.list().isEmpty)
         #expect(model.archive.load(id: id) == nil)
@@ -419,12 +442,13 @@ struct AppModelArchiveTests {
     @Test("finalizing without a recording session persists nothing")
     func finalizeWithoutRecordingIsNoop() async {
         let (model, _) = await makeModel()
-        let revisionBefore = model.archiveRevision
+        let summariesBefore = model.archiveProjection.summaries
 
         let finalized = model.finalizeLiveSession(durationMS: 5000)
 
         #expect(!finalized)
-        #expect(model.archiveRevision == revisionBefore)
+        #expect(model.archiveProjection.summaries == summariesBefore, "the cached list is unchanged")
+        #expect(model.archiveProjection.openSummary == nil, "no session opens")
         #expect(!model.toasts.toasts.contains { toast in toast.key == ToastKey.archiveUnavailable })
     }
 }

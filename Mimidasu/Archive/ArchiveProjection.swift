@@ -2,12 +2,14 @@ import Foundation
 import Observation
 
 /// The archive window's cached read surface over `ArchiveStore`: it owns the
-/// current summary list, a typed availability for the window's unavailable
-/// state, and a revision bumped by every landed mutation, so SwiftUI bodies
-/// read cached rows instead of re-running SQL per evaluation.
+/// current summary list, the one opened session's summary, and a typed
+/// availability for the window's unavailable state. SwiftUI bodies read
+/// cached rows instead of re-running SQL per evaluation, and every landed
+/// write that affects a listed or opened session refreshes both copies from
+/// one summary read.
 @MainActor
 @Observable
-final class ArchiveReadModel {
+final class ArchiveProjection {
     /// Whether the cached list is trustworthy: readable, terminally
     /// unopenable, or faulted on the last read.
     enum Availability: Equatable {
@@ -19,11 +21,13 @@ final class ArchiveReadModel {
     private let store: ArchiveStore
     private let loadSummaries: @MainActor () -> Result<[ArchivedSessionSummary], ArchiveStore.ReadFailure>
     private let loadSummary: @MainActor (Int64) -> Result<ArchivedSessionSummary?, ArchiveStore.ReadFailure>
+    private let loadSession: @MainActor (Int64) -> ArchivedSession?
 
     private(set) var summaries: [ArchivedSessionSummary] = []
+    /// The one stored copy of the session opened in the transcript pane; the
+    /// pane's entries stay in `AppModel`.
+    private(set) var openSummary: ArchivedSessionSummary?
     private(set) var availability: Availability = .available
-    private(set) var revision = 0
-
     var isAvailable: Bool {
         availability == .available
     }
@@ -31,16 +35,19 @@ final class ArchiveReadModel {
     init(
         store: ArchiveStore,
         loadSummaries: (@MainActor () -> Result<[ArchivedSessionSummary], ArchiveStore.ReadFailure>)? = nil,
-        loadSummary: (@MainActor (Int64) -> Result<ArchivedSessionSummary?, ArchiveStore.ReadFailure>)? = nil
+        loadSummary: (@MainActor (Int64) -> Result<ArchivedSessionSummary?, ArchiveStore.ReadFailure>)? = nil,
+        loadSession: (@MainActor (Int64) -> ArchivedSession?)? = nil
     ) {
         self.store = store
         self.loadSummaries = loadSummaries ?? { store.loadSummaries() }
         self.loadSummary = loadSummary ?? { id in store.summaryResult(id: id) }
+        self.loadSession = loadSession ?? { id in store.load(id: id) }
         reload()
     }
 
-    /// Full re-read: success replaces the rows, a failure keeps the previous
-    /// rows and records why. Reads never touch the revision.
+    /// Full re-read: success replaces the rows and syncs the opened summary
+    /// when it is still listed; a failure keeps the previous rows and records
+    /// why. Reads never write to the store.
     func reload() {
         guard !store.isDegraded else {
             availability = .openFailed
@@ -49,6 +56,9 @@ final class ArchiveReadModel {
         switch loadSummaries() {
         case let .success(rows):
             summaries = rows
+            if let openSummary, let refreshed = rows.first(where: { row in row.id == openSummary.id }) {
+                self.openSummary = refreshed
+            }
             availability = .available
         case .failure(.openFailed):
             availability = .openFailed
@@ -64,7 +74,9 @@ final class ArchiveReadModel {
     }
 
     /// Re-reads one list row: replaces it in place, inserts a missing row at
-    /// its list position, or drops it when the store no longer holds it.
+    /// its list position, or drops it when the store no longer holds it. The
+    /// availability tests pin the typed-read failure mapping through it;
+    /// production writes use `refreshTouched`.
     func refreshRow(id: Int64) {
         guard !store.isDegraded else {
             availability = .openFailed
@@ -87,24 +99,43 @@ final class ArchiveReadModel {
         }
     }
 
+    // MARK: - Open session
+
+    /// Opens one stored session: loads its rows, stores its summary as the
+    /// one open copy, and refreshes a listed row from that same value. An
+    /// unlisted session is not inserted into the list. Returns nil when the
+    /// store cannot load it; the failure leaves availability untouched.
+    func open(id: Int64) -> ArchivedSession? {
+        guard let loaded = loadSession(id) else { return nil }
+        openSummary = loaded.summary
+        if summaries.contains(where: { row in row.id == loaded.id }) {
+            place(loaded.summary)
+        }
+        return loaded
+    }
+
+    /// Clears the opened summary without touching the store.
+    func closeOpen() {
+        openSummary = nil
+    }
+
     // MARK: - Mutations
 
     /// A recording row is never listed, so the append returns its session id
-    /// without touching the cache or the revision.
+    /// without touching the cache.
     @discardableResult
     func append(sentence: Sentence, sessionID: Int64?, metadata: SessionMetadata) -> Int64? {
         store.append(sentence: sentence, sessionID: sessionID, metadata: metadata)
     }
 
-    /// A landed translation bumps the revision and refreshes its row when the
-    /// row is currently listed.
+    /// A landed translation refreshes its listed row and/or the open summary
+    /// from one read.
     @discardableResult
     func upsert(translation: SentenceTranslation, index: Int, session: Int64) -> Bool {
         guard store.upsert(translation: translation, index: index, session: session) else {
             return false
         }
-        revision += 1
-        refreshIfListed(id: session)
+        refreshTouched(id: session)
         return true
     }
 
@@ -120,7 +151,6 @@ final class ArchiveReadModel {
         guard store.finalize(session: session, durationMS: durationMS, saved: saved) else {
             return false
         }
-        revision += 1
         reload()
         return true
     }
@@ -129,54 +159,81 @@ final class ArchiveReadModel {
     @discardableResult
     func sweepInterrupted() -> Bool {
         guard store.sweepInterrupted() else { return false }
-        revision += 1
         reload()
         return true
     }
 
-    /// A membership add bumps the revision and refreshes its row when listed.
+    /// A membership add refreshes its listed row and/or the open summary from
+    /// one read.
     @discardableResult
     func addLanguage(id: Int64, lang: String) -> Bool {
         guard store.addLanguage(id: id, lang: lang) else { return false }
-        revision += 1
-        refreshIfListed(id: id)
+        refreshTouched(id: id)
         return true
     }
 
-    /// A stored name bumps the revision and refreshes its row when listed.
+    /// A stored name refreshes its listed row and/or the open summary from
+    /// one read.
     @discardableResult
     func rename(id: Int64, name: String?) -> Bool {
         guard store.rename(id: id, name: name) else { return false }
-        revision += 1
-        refreshIfListed(id: id)
+        refreshTouched(id: id)
         return true
     }
 
-    /// A promotion bumps the revision and refreshes its row when listed.
+    /// A promotion refreshes its listed row and/or the open summary from one
+    /// read.
     @discardableResult
     func promote(id: Int64) -> Bool {
         guard store.promote(id: id) else { return false }
-        revision += 1
-        refreshIfListed(id: id)
+        refreshTouched(id: id)
         return true
     }
 
-    /// A delete bumps the revision and drops the row from the cache without
-    /// re-reading.
+    /// A delete drops the row from the cache without re-reading; an opened
+    /// copy of the same session clears with it.
     @discardableResult
     func delete(id: Int64) -> Bool {
         guard store.delete(id: id) else { return false }
-        revision += 1
         summaries.removeAll { row in row.id == id }
+        if openSummary?.id == id {
+            openSummary = nil
+        }
         return true
     }
 
     // MARK: - Cache
 
-    /// Refreshes a row only when the cache currently lists it.
-    private func refreshIfListed(id: Int64) {
-        guard summaries.contains(where: { row in row.id == id }) else { return }
-        refreshRow(id: id)
+    /// The one-read rule for a write that touched `id`: when the session is
+    /// listed or open, one summary read updates both copies from one value;
+    /// when it is neither, nothing is read. Internal so the read-count
+    /// contract can be pinned at the seam.
+    func refreshTouched(id: Int64) {
+        let wasListed = summaries.contains { row in row.id == id }
+        let wasOpen = openSummary?.id == id
+        guard wasListed || wasOpen else { return }
+        switch loadSummary(id) {
+        case let .success(summary):
+            if let summary {
+                if wasListed {
+                    place(summary)
+                }
+                if wasOpen {
+                    openSummary = summary
+                }
+            } else if wasListed {
+                summaries.removeAll { row in row.id == id }
+            }
+            if wasListed, availability == .readFailed {
+                availability = .available
+            }
+        case .failure(.openFailed):
+            availability = .openFailed
+        case .failure(.readFailed):
+            if wasListed {
+                availability = .readFailed
+            }
+        }
     }
 
     /// Replaces the row with `summary.id` in place, or inserts one at its

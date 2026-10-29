@@ -160,10 +160,10 @@ final class AppModel {
     /// default opens the production Application Support file.
     let archive: ArchiveStore
 
-    /// The archive window's cached read surface over `archive`: it owns the
-    /// listed summaries, the typed availability, and the revision every
-    /// landed archive mutation bumps. UI reads only this, never the store.
-    let archiveRead: ArchiveReadModel
+    /// The archive's one cached read surface over `archive`: it owns the
+    /// listed summaries, the opened session's summary, and the typed
+    /// availability. UI reads only this, never the store.
+    let archiveProjection: ArchiveProjection
 
     /// The stored row of the live recording, created lazily with the first
     /// finalized sentence. Nil before that (and when the archive is
@@ -177,10 +177,12 @@ final class AppModel {
     /// session begin. Mutated from the archive surface.
     var archiveWriteFailed = false
 
-    /// The stored session opened read-only in the transcript pane, or nil
-    /// when the pane shows live-session state. Mutated from the archive
-    /// surface.
-    var openArchive: ArchivedSession?
+    /// The stored session opened read-only in the transcript pane, or nil.
+    /// The summary is the projection's one copy; the entries are the pane's.
+    var openArchive: ArchivedSession? {
+        guard let summary = archiveProjection.openSummary else { return nil }
+        return ArchivedSession(summary: summary, entries: entries)
+    }
 
     /// The opened archive's viewing-language override (BCP-47 code): nil =
     /// the archive's stored target. View-only state — switching never
@@ -192,13 +194,6 @@ final class AppModel {
     /// archive's sentences, with its engine resolver and landing sink wired
     /// in the bulk archive-translation surface.
     let archiveTranslationJob = ArchiveTranslationJob()
-
-    /// Forwards the archive read model's revision, which bumps once per
-    /// landed archive mutation so the archive window reloads its rows when
-    /// it changes.
-    var archiveRevision: Int {
-        archiveRead.revision
-    }
 
     /// Latest resolve result per choice (bundled → downloaded → dev, SHA-256
     /// verified). The Settings Model section reads it to enable selection;
@@ -321,7 +316,7 @@ final class AppModel {
         self.asrModelSettings = asrModelSettings ?? ASRModelSettings()
         self.favorites = favorites ?? FavoritesStore()
         self.archive = archive ?? ArchiveStore()
-        archiveRead = ArchiveReadModel(store: self.archive)
+        archiveProjection = ArchiveProjection(store: self.archive)
         let jmDict = jmDictLookup ?? JMDictLookup()
         self.jmDictLookup = jmDict
         tapLookup = TapLookupSession(resolver: tapLookupResolver ?? LookupDisplay(lookup: jmDict))

@@ -84,9 +84,9 @@ final class ArchiveTranslationJob {
         }
 
     /// Lands one fresh translation: the caller (the app model) owns the
-    /// store upsert, the row swap, and the refresh revision, and reports
-    /// whether the result actually landed — a false return records the
-    /// index as a retryable failure instead of counting success.
+    /// store upsert and the row swap, and reports whether the result actually
+    /// landed — a false return records the index as a retryable failure
+    /// instead of counting success.
     @ObservationIgnored var land: @MainActor (Int, SentenceTranslation) -> Bool = { _, _ in true }
 
     /// Progress/finish notifications; nil stays silent (tests).

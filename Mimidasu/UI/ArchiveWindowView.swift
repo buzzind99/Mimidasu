@@ -11,7 +11,7 @@ enum ArchiveWindow {
 
 /// The archive window: the stored sessions split Recent/Saved, newest first.
 /// Rows are browsable and manageable at any time; only opening a transcript
-/// waits for a non-live phase (the inline hint). The read model's typed
+/// waits for a non-live phase (the inline hint). The projection's typed
 /// availability drives the unavailable state — the window still opens and
 /// explains itself, and retries a faulted read when it appears again.
 ///
@@ -29,7 +29,7 @@ struct ArchiveWindowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            if !model.canOpenArchivedSession, model.archiveRead.isAvailable {
+            if !model.canOpenArchivedSession, model.archiveProjection.isAvailable {
                 liveHint
             }
             content
@@ -37,7 +37,8 @@ struct ArchiveWindowView: View {
         .frame(width: 640, height: 720, alignment: .top)
         .background(Theme.window)
         .preferredColorScheme($appearance.resolvedColorScheme)
-        .onAppear { model.archiveRead.reloadIfUnavailable() }
+        .onAppear { model.archiveProjection.reloadIfUnavailable() }
+        .task { await model.appleTranslationAvailability.refreshIfNeeded() }
         .alert("Delete this session?", isPresented: deletePresented, presenting: state.pendingDelete) { summary in
             Button("Cancel", role: .cancel) { state.pendingDelete = nil }
             Button("Delete", role: .destructive) {
@@ -163,16 +164,16 @@ struct ArchiveWindowView: View {
     // MARK: - Body
 
     private var recentCount: Int {
-        model.archiveRead.summaries.reduce(0) { count, summary in
+        model.archiveProjection.summaries.reduce(0) { count, summary in
             count + (summary.saved ? 0 : 1)
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        if !model.archiveRead.isAvailable {
+        if !model.archiveProjection.isAvailable {
             unavailableState
-        } else if model.archiveRead.summaries.isEmpty {
+        } else if model.archiveProjection.summaries.isEmpty {
             emptyState
         } else {
             sessionList
@@ -240,11 +241,11 @@ struct ArchiveWindowView: View {
     }
 
     private var recents: [ArchivedSessionSummary] {
-        model.archiveRead.summaries.filter { summary in !summary.saved }
+        model.archiveProjection.summaries.filter { summary in !summary.saved }
     }
 
     private var savedSessions: [ArchivedSessionSummary] {
-        model.archiveRead.summaries.filter { summary in summary.saved }
+        model.archiveProjection.summaries.filter { summary in summary.saved }
     }
 
     private func sectionHeader(_ title: String, count: Int) -> some View {
@@ -338,11 +339,11 @@ struct ArchiveWindowView: View {
     /// summary is no longer listed.
     private func disclosureSentenceCount(_ disclosure: PendingCloudDisclosure) -> Int? {
         guard case let .archiveTranslation(_, lang, session, .archiveWindow) = disclosure,
-              let summary = model.archiveRead.summaries.first(where: { summary in
+              let summary = model.archiveProjection.summaries.first(where: { summary in
                   summary.id == session
               })
         else { return nil }
-        return model.archiveTranslationSendCount(summary: summary, lang: lang)
+        return model.archiveLanguageSet(for: summary).sendCount(lang)
     }
 
     private func row(_ summary: ArchivedSessionSummary) -> some View {

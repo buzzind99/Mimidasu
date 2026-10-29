@@ -2,19 +2,19 @@ import Foundation
 @testable import Mimidasu
 import Testing
 
-/// The read model's availability contract: a load that cannot open the
+/// The projection's availability contract: a load that cannot open the
 /// archive, a refresh on a terminally degraded store, a refresh that clears a
 /// transient read failure, and a refresh that cannot open the archive.
 @MainActor
-@Suite("ArchiveReadModel availability")
-struct ArchiveReadModelAvailabilityTests {
+@Suite("ArchiveProjection availability")
+struct ArchiveProjectionAvailabilityTests {
 
     // MARK: - Availability
 
     @Test("a load that cannot open the archive reports openFailed")
     func reloadReportsOpenFailed() {
         let store = isolatedArchive()
-        let model = ArchiveReadModel(
+        let model = ArchiveProjection(
             store: store,
             loadSummaries: { .failure(.openFailed) },
             loadSummary: { _ in .failure(.openFailed) }
@@ -27,10 +27,10 @@ struct ArchiveReadModelAvailabilityTests {
 
     @Test("a row refresh on a degraded store reports openFailed without reading")
     func refreshRowOnDegradedStoreReportsOpenFailed() {
-        let (store, cleanup) = ArchiveReadModelFixtures.degradedStore()
+        let (store, cleanup) = ArchiveProjectionFixtures.degradedStore()
         defer { cleanup() }
         let recorder = LoadRecorder()
-        let model = ArchiveReadModelFixtures.makeModel(store: store, recorder: recorder)
+        let model = ArchiveProjectionFixtures.makeProjection(store: store, recorder: recorder)
 
         model.refreshRow(id: 1)
 
@@ -43,7 +43,7 @@ struct ArchiveReadModelAvailabilityTests {
     @Test("a row refresh that succeeds clears a read failure")
     func refreshRowClearsReadFailure() {
         let store = isolatedArchive()
-        guard let id = ArchiveReadModelFixtures.finalizeSession(store, startedAt: 1000) else {
+        guard let id = ArchiveProjectionFixtures.finalizeSession(store, startedAt: 1000) else {
             Issue.record("seed should succeed")
             return
         }
@@ -62,7 +62,7 @@ struct ArchiveReadModelAvailabilityTests {
             firstSentence: "こんにちは"
         )
         let recorder = LoadRecorder()
-        let model = ArchiveReadModel(
+        let model = ArchiveProjection(
             store: store,
             loadSummaries: { store.loadSummaries() },
             loadSummary: { _ in
@@ -86,11 +86,11 @@ struct ArchiveReadModelAvailabilityTests {
     @Test("a row refresh that cannot open the archive reports openFailed and keeps the rows")
     func refreshRowOpenFailedKeepsTheCachedRows() {
         let store = isolatedArchive()
-        guard let id = ArchiveReadModelFixtures.finalizeSession(store, startedAt: 1000) else {
+        guard let id = ArchiveProjectionFixtures.finalizeSession(store, startedAt: 1000) else {
             Issue.record("seed should succeed")
             return
         }
-        let model = ArchiveReadModel(
+        let model = ArchiveProjection(
             store: store,
             loadSummaries: { store.loadSummaries() },
             loadSummary: { _ in .failure(.openFailed) }

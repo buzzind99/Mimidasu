@@ -440,6 +440,11 @@ extension AppModelArchiveTranslationTests {
             sut.model.openArchive?.summary.languageCount(for: "fr")?.translated == 3,
             "the summary reads complete after the fill"
         )
+        #expect(
+            sut.model.openArchiveLanguageSet?.isComplete("fr") == true
+                && sut.model.openArchiveLanguageSet?.sendCount("fr") == 3,
+            "the language set reads complete and a rerun re-sends the full session"
+        )
 
         sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
         #expect(

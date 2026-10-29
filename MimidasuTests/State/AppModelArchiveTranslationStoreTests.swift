@@ -106,10 +106,9 @@ struct AppModelArchiveTranslationStoreTests {
     func sendCountReportsMissingWhilePartial() async {
         let sut = await makeSUT(translations: [0: "Seed"])
 
-        let sendCount = sut.model.archiveTranslationSendCount(lang: "fr")
-        let complete = sut.model.archiveLanguageIsComplete("fr")
+        let languageSet = sut.model.openArchiveLanguageSet
 
-        #expect(sendCount == 2)
-        #expect(!complete)
+        #expect(languageSet?.sendCount("fr") == 2)
+        #expect(languageSet?.isComplete("fr") == false)
     }
 }

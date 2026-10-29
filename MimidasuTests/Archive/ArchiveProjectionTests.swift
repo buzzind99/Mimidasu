@@ -2,12 +2,13 @@ import Foundation
 @testable import Mimidasu
 import Testing
 
-/// The read model's caching contract: construction loads once, a failed read
+/// The projection's caching contract: construction loads once, a failed read
 /// keeps the previous rows with a typed availability, and a landed mutation
-/// bumps the revision with at most a single-row refresh.
+/// refreshes at most one summary read and updates the listed row and/or the
+/// open summary.
 @MainActor
-@Suite("ArchiveReadModel")
-struct ArchiveReadModelTests {
+@Suite("ArchiveProjection")
+struct ArchiveProjectionTests {
 
     // MARK: - Fixtures
 
@@ -15,8 +16,8 @@ struct ArchiveReadModelTests {
     /// finalized or swept.
     private func recordingSession(_ store: ArchiveStore, startedAt: TimeInterval) -> Int64? {
         store.append(
-            sentence: ArchiveReadModelFixtures.sentence(0), sessionID: nil,
-            metadata: ArchiveReadModelFixtures.metadata(startedAt: startedAt)
+            sentence: ArchiveProjectionFixtures.sentence(0), sessionID: nil,
+            metadata: ArchiveProjectionFixtures.metadata(startedAt: startedAt)
         )
     }
 
@@ -25,12 +26,12 @@ struct ArchiveReadModelTests {
     @Test("init loads the summaries once and reports available")
     func initLoadsOnceAndAvailable() throws {
         let store = isolatedArchive()
-        guard ArchiveReadModelFixtures.finalizeSession(store, startedAt: 1000) != nil else {
+        guard ArchiveProjectionFixtures.finalizeSession(store, startedAt: 1000) != nil else {
             Issue.record("seed should succeed")
             return
         }
         let recorder = LoadRecorder()
-        let model = ArchiveReadModelFixtures.makeModel(store: store, recorder: recorder)
+        let model = ArchiveProjectionFixtures.makeProjection(store: store, recorder: recorder)
 
         let storeRows = try store.loadSummaries().get()
         #expect(recorder.summariesCalls == 1)
@@ -42,10 +43,10 @@ struct ArchiveReadModelTests {
 
     @Test("a degraded store reports openFailed without calling the loader")
     func degradedStoreIsOpenFailed() {
-        let (store, cleanup) = ArchiveReadModelFixtures.degradedStore()
+        let (store, cleanup) = ArchiveProjectionFixtures.degradedStore()
         defer { cleanup() }
         let recorder = LoadRecorder()
-        let model = ArchiveReadModelFixtures.makeModel(store: store, recorder: recorder)
+        let model = ArchiveProjectionFixtures.makeProjection(store: store, recorder: recorder)
 
         #expect(model.availability == .openFailed)
         #expect(!model.isAvailable)
@@ -58,7 +59,7 @@ struct ArchiveReadModelTests {
     func failedLoadIsReadFailedNotEmpty() {
         let store = isolatedArchive()
         let recorder = LoadRecorder()
-        let model = ArchiveReadModel(
+        let model = ArchiveProjection(
             store: store,
             loadSummaries: {
                 recorder.summariesCalls += 1
@@ -72,15 +73,15 @@ struct ArchiveReadModelTests {
         #expect(recorder.summariesCalls == 1)
     }
 
-    @Test("reload recovers from a read failure without touching the revision")
+    @Test("reload recovers from a read failure")
     func reloadRecoversFromReadFailure() {
         let store = isolatedArchive()
-        guard let id = ArchiveReadModelFixtures.finalizeSession(store, startedAt: 1000) else {
+        guard let id = ArchiveProjectionFixtures.finalizeSession(store, startedAt: 1000) else {
             Issue.record("seed should succeed")
             return
         }
         let recorder = LoadRecorder()
-        let model = ArchiveReadModel(
+        let model = ArchiveProjection(
             store: store,
             loadSummaries: {
                 recorder.summariesCalls += 1
@@ -90,7 +91,6 @@ struct ArchiveReadModelTests {
                 return store.loadSummaries()
             }
         )
-        let revision = model.revision
 
         #expect(model.availability == .readFailed)
         model.reload()
@@ -98,18 +98,17 @@ struct ArchiveReadModelTests {
         #expect(recorder.summariesCalls == 2)
         #expect(model.availability == .available)
         #expect(model.summaries.map(\.id) == [id])
-        #expect(model.revision == revision)
     }
 
     @Test("reloadIfUnavailable retries only after a read failure")
     func reloadIfUnavailableRetriesOnlyAfterReadFailure() {
         let store = isolatedArchive()
-        guard ArchiveReadModelFixtures.finalizeSession(store, startedAt: 1000) != nil else {
+        guard ArchiveProjectionFixtures.finalizeSession(store, startedAt: 1000) != nil else {
             Issue.record("seed should succeed")
             return
         }
         let recorder = LoadRecorder()
-        let model = ArchiveReadModel(
+        let model = ArchiveProjection(
             store: store,
             loadSummaries: {
                 recorder.summariesCalls += 1
@@ -130,43 +129,40 @@ struct ArchiveReadModelTests {
         #expect(recorder.summariesCalls == 2, "available rows never re-read on appear")
     }
 
-    @Test("a landed write exposes the new summaries and revision to observers")
-    func observationTracksRevisionAndSummaries() async {
+    @Test("a landed write exposes the new summaries to observers")
+    func observationTracksSummaries() async {
         let store = isolatedArchive()
-        let model = ArchiveReadModel(store: store)
+        let model = ArchiveProjection(store: store)
         guard let id = model.append(
-            sentence: ArchiveReadModelFixtures.sentence(0), sessionID: nil,
-            metadata: ArchiveReadModelFixtures.metadata(startedAt: 1000)
+            sentence: ArchiveProjectionFixtures.sentence(0), sessionID: nil,
+            metadata: ArchiveProjectionFixtures.metadata(startedAt: 1000)
         ) else {
             Issue.record("append should succeed")
             return
         }
         let rows = ObservedValuesRecorder<[ArchivedSessionSummary]>(read: { model.summaries })
-        let revision = ObservedValuesRecorder<Int>(read: { model.revision })
 
         #expect(model.finalize(session: id, durationMS: 4000, saved: false))
 
         #expect(await pollUntil { !rows.values.isEmpty })
-        #expect(await pollUntil { revision.values.last == 1 })
         #expect(rows.values.last?.map(\.id) == [id])
     }
 }
 
 // MARK: - Mutations
 
-extension ArchiveReadModelTests {
+extension ArchiveProjectionTests {
 
-    @Test("append and syncPaused neither reload nor bump")
-    func appendAndSyncPausedDoNotReloadOrBump() {
+    @Test("append and syncPaused neither reload nor refresh")
+    func appendAndSyncPausedDoNotReloadOrRefresh() {
         let store = isolatedArchive()
         let recorder = LoadRecorder()
-        let model = ArchiveReadModelFixtures.makeModel(store: store, recorder: recorder)
+        let model = ArchiveProjectionFixtures.makeProjection(store: store, recorder: recorder)
         let summariesCalls = recorder.summariesCalls
-        let revision = model.revision
 
         guard let id = model.append(
-            sentence: ArchiveReadModelFixtures.sentence(0), sessionID: nil,
-            metadata: ArchiveReadModelFixtures.metadata()
+            sentence: ArchiveProjectionFixtures.sentence(0), sessionID: nil,
+            metadata: ArchiveProjectionFixtures.metadata()
         ) else {
             Issue.record("append should succeed")
             return
@@ -175,66 +171,62 @@ extension ArchiveReadModelTests {
 
         #expect(recorder.summariesCalls == summariesCalls)
         #expect(recorder.summaryCalls == 0)
-        #expect(model.revision == revision)
         #expect(!model.summaries.contains { row in row.id == id })
     }
 
-    @Test("an upsert on a listed row refreshes just that row and bumps")
-    func upsertListedRowRefreshesAndBumps() throws {
+    @Test("an upsert on a listed row refreshes just that row")
+    func upsertListedRowRefreshesRow() throws {
         let store = isolatedArchive()
-        guard let id = ArchiveReadModelFixtures.finalizeSession(store, startedAt: 1000) else {
+        guard let id = ArchiveProjectionFixtures.finalizeSession(store, startedAt: 1000) else {
             Issue.record("seed should succeed")
             return
         }
         let recorder = LoadRecorder()
-        let model = ArchiveReadModelFixtures.makeModel(store: store, recorder: recorder)
+        let model = ArchiveProjectionFixtures.makeProjection(store: store, recorder: recorder)
 
         #expect(model.upsert(translation: SentenceTranslation(lang: "fr", text: "Bonjour"), index: 0, session: id))
 
         #expect(recorder.summaryCalls == 1)
         #expect(recorder.summariesCalls == 1)
-        #expect(model.revision == 1)
         let cached = model.summaries.first { row in row.id == id }
         let stored = try store.loadSummaries().get().first { row in row.id == id }
         #expect(cached == stored)
         #expect(cached?.languageCount(for: "fr")?.translated == 1)
     }
 
-    @Test("an upsert on a recording row bumps without any read")
-    func upsertRecordingRowBumpsWithoutReads() {
+    @Test("an upsert on a recording row refreshes nothing and reads nothing")
+    func upsertRecordingRowReadsNothing() {
         let store = isolatedArchive()
         guard let id = recordingSession(store, startedAt: 1000) else {
             Issue.record("seed should succeed")
             return
         }
         let recorder = LoadRecorder()
-        let model = ArchiveReadModelFixtures.makeModel(store: store, recorder: recorder)
+        let model = ArchiveProjectionFixtures.makeProjection(store: store, recorder: recorder)
 
         #expect(model.upsert(translation: SentenceTranslation(lang: "fr", text: "Bonjour"), index: 0, session: id))
 
         #expect(recorder.summaryCalls == 0)
         #expect(recorder.summariesCalls == 1, "init is the only list read")
-        #expect(model.revision == 1)
         #expect(model.summaries.isEmpty)
     }
 
     @Test("an upsert on one listed row leaves the other rows alone")
     func foreignListedRowRefreshes() {
         let store = isolatedArchive()
-        guard let first = ArchiveReadModelFixtures.finalizeSession(store, startedAt: 1000),
-              let second = ArchiveReadModelFixtures.finalizeSession(store, startedAt: 2000)
+        guard let first = ArchiveProjectionFixtures.finalizeSession(store, startedAt: 1000),
+              let second = ArchiveProjectionFixtures.finalizeSession(store, startedAt: 2000)
         else {
             Issue.record("seed should succeed")
             return
         }
         let recorder = LoadRecorder()
-        let model = ArchiveReadModelFixtures.makeModel(store: store, recorder: recorder)
+        let model = ArchiveProjectionFixtures.makeProjection(store: store, recorder: recorder)
 
         #expect(model.upsert(translation: SentenceTranslation(lang: "fr", text: "Bonjour"), index: 0, session: second))
 
         #expect(recorder.summaryCalls == 1)
         #expect(recorder.summariesCalls == 1)
-        #expect(model.revision == 1)
         #expect(model.summaries.first { row in row.id == second }?.languageCount(for: "fr") != nil)
         #expect(model.summaries.first { row in row.id == first }?.languageCount(for: "fr") == nil)
     }
@@ -242,25 +234,22 @@ extension ArchiveReadModelTests {
     @Test("addLanguage, rename, and promote each refresh their listed row")
     func addLanguageRenamePromoteRefreshListedRows() {
         let store = isolatedArchive()
-        guard let id = ArchiveReadModelFixtures.finalizeSession(store, startedAt: 1000) else {
+        guard let id = ArchiveProjectionFixtures.finalizeSession(store, startedAt: 1000) else {
             Issue.record("seed should succeed")
             return
         }
         let recorder = LoadRecorder()
-        let model = ArchiveReadModelFixtures.makeModel(store: store, recorder: recorder)
+        let model = ArchiveProjectionFixtures.makeProjection(store: store, recorder: recorder)
 
         #expect(model.addLanguage(id: id, lang: "fr"))
-        #expect(model.revision == 1)
         #expect(recorder.summaryCalls == 1)
         #expect(model.summaries.first { row in row.id == id }?.languageCount(for: "fr") != nil)
 
         #expect(model.rename(id: id, name: "  Interview  "))
-        #expect(model.revision == 2)
         #expect(recorder.summaryCalls == 2)
         #expect(model.summaries.first { row in row.id == id }?.name == "Interview")
 
         #expect(model.promote(id: id))
-        #expect(model.revision == 3)
         #expect(recorder.summaryCalls == 3)
         #expect(model.summaries.first { row in row.id == id }?.saved == true)
         #expect(recorder.summariesCalls == 1, "no full re-read on any of the three")
@@ -269,17 +258,16 @@ extension ArchiveReadModelTests {
     @Test("delete drops the cached row without any read")
     func deleteRemovesRowWithoutRead() {
         let store = isolatedArchive()
-        guard let id = ArchiveReadModelFixtures.finalizeSession(store, startedAt: 1000) else {
+        guard let id = ArchiveProjectionFixtures.finalizeSession(store, startedAt: 1000) else {
             Issue.record("seed should succeed")
             return
         }
         let recorder = LoadRecorder()
-        let model = ArchiveReadModelFixtures.makeModel(store: store, recorder: recorder)
+        let model = ArchiveProjectionFixtures.makeProjection(store: store, recorder: recorder)
 
         #expect(model.delete(id: id))
 
         #expect(model.summaries.isEmpty)
-        #expect(model.revision == 1)
         #expect(recorder.summaryCalls == 0)
         #expect(recorder.summariesCalls == 1)
     }
@@ -288,11 +276,11 @@ extension ArchiveReadModelTests {
     func finalizeReloadsAndInserts() throws {
         let store = isolatedArchive()
         let recorder = LoadRecorder()
-        let model = ArchiveReadModelFixtures.makeModel(store: store, recorder: recorder)
+        let model = ArchiveProjectionFixtures.makeProjection(store: store, recorder: recorder)
 
         guard let id = model.append(
-            sentence: ArchiveReadModelFixtures.sentence(0), sessionID: nil,
-            metadata: ArchiveReadModelFixtures.metadata(startedAt: 1000)
+            sentence: ArchiveProjectionFixtures.sentence(0), sessionID: nil,
+            metadata: ArchiveProjectionFixtures.metadata(startedAt: 1000)
         ) else {
             Issue.record("append should succeed")
             return
@@ -302,7 +290,6 @@ extension ArchiveReadModelTests {
         #expect(model.finalize(session: id, durationMS: 4000, saved: false))
 
         #expect(recorder.summariesCalls == 2)
-        #expect(model.revision == 1)
         let storedIDs = try store.loadSummaries().get().map(\.id)
         #expect(storedIDs == [id])
         #expect(model.summaries.map(\.id) == storedIDs)
@@ -316,68 +303,64 @@ extension ArchiveReadModelTests {
             return
         }
         let recorder = LoadRecorder()
-        let model = ArchiveReadModelFixtures.makeModel(store: store, recorder: recorder)
+        let model = ArchiveProjectionFixtures.makeProjection(store: store, recorder: recorder)
         #expect(model.summaries.isEmpty)
 
         #expect(model.sweepInterrupted())
 
         #expect(recorder.summariesCalls == 2)
-        #expect(model.revision == 1)
         #expect(model.summaries.first { row in row.id == id }?.status == .interrupted)
     }
 
     @Test("a row refresh drops a row the store no longer holds")
     func refreshRowRemovesRowMissingFromTheStore() {
         let store = isolatedArchive()
-        guard let id = ArchiveReadModelFixtures.finalizeSession(store, startedAt: 1000) else {
+        guard let id = ArchiveProjectionFixtures.finalizeSession(store, startedAt: 1000) else {
             Issue.record("seed should succeed")
             return
         }
         let recorder = LoadRecorder()
-        let model = ArchiveReadModelFixtures.makeModel(store: store, recorder: recorder)
+        let model = ArchiveProjectionFixtures.makeProjection(store: store, recorder: recorder)
 
         #expect(store.delete(id: id))
         model.refreshRow(id: id)
 
         #expect(model.summaries.isEmpty)
         #expect(model.availability == .available)
-        #expect(model.revision == 0)
         #expect(recorder.summaryCalls == 1)
         #expect(recorder.summariesCalls == 1)
     }
 
-    @Test("a failed write changes neither the revision nor the cache")
+    @Test("a failed write changes neither the cached row nor the open summary")
     func lostWritesChangeNothing() {
         let store = isolatedArchive()
-        guard let id = ArchiveReadModelFixtures.finalizeSession(store, startedAt: 1000) else {
+        guard let id = ArchiveProjectionFixtures.finalizeSession(store, startedAt: 1000) else {
             Issue.record("seed should succeed")
             return
         }
         let recorder = LoadRecorder()
-        let model = ArchiveReadModelFixtures.makeModel(store: store, recorder: recorder)
+        let model = ArchiveProjectionFixtures.makeProjection(store: store, recorder: recorder)
         let before = model.summaries
-        let revision = model.revision
 
         #expect(store.delete(id: id), "the row vanishes underneath the model")
         #expect(model.upsert(translation: SentenceTranslation(lang: "fr", text: "Bonjour"), index: 0, session: id) == false)
 
-        #expect(model.revision == revision)
         #expect(model.summaries == before)
         #expect(recorder.summaryCalls == 0)
         #expect(recorder.summariesCalls == 1)
     }
 
     @Test("failed mutations on a degraded store change nothing")
-    func degradedStoreMutationsFailWithoutReadsOrBumps() {
-        let (store, cleanup) = ArchiveReadModelFixtures.degradedStore()
+    func degradedStoreMutationsFailWithoutReadsOrRefreshes() {
+        let (store, cleanup) = ArchiveProjectionFixtures.degradedStore()
         defer { cleanup() }
         let recorder = LoadRecorder()
-        let model = ArchiveReadModelFixtures.makeModel(store: store, recorder: recorder)
+        let model = ArchiveProjectionFixtures.makeProjection(store: store, recorder: recorder)
 
         #expect(
             model.append(
-                sentence: ArchiveReadModelFixtures.sentence(0), sessionID: 1,
-                metadata: ArchiveReadModelFixtures.metadata()
+                sentence: ArchiveProjectionFixtures.sentence(0), sessionID: 1,
+                metadata: ArchiveProjectionFixtures.metadata()
             ) == nil
         )
         #expect(model.syncPaused(session: 1, pausedMS: 10) == false)
@@ -389,7 +372,6 @@ extension ArchiveReadModelTests {
         #expect(model.promote(id: 1) == false)
         #expect(model.delete(id: 1) == false)
 
-        #expect(model.revision == 0)
         #expect(recorder.summariesCalls == 0)
         #expect(recorder.summaryCalls == 0)
         #expect(model.summaries.isEmpty)
@@ -399,12 +381,12 @@ extension ArchiveReadModelTests {
     @Test("a failed row refresh keeps the old row and reports readFailed")
     func failedRowRefreshKeepsOldRowAndSetsReadFailed() {
         let store = isolatedArchive()
-        guard let id = ArchiveReadModelFixtures.finalizeSession(store, startedAt: 1000) else {
+        guard let id = ArchiveProjectionFixtures.finalizeSession(store, startedAt: 1000) else {
             Issue.record("seed should succeed")
             return
         }
         let recorder = LoadRecorder()
-        let model = ArchiveReadModel(
+        let model = ArchiveProjection(
             store: store,
             loadSummaries: {
                 recorder.summariesCalls += 1
@@ -419,7 +401,6 @@ extension ArchiveReadModelTests {
 
         #expect(model.upsert(translation: SentenceTranslation(lang: "fr", text: "Bonjour"), index: 0, session: id))
 
-        #expect(model.revision == 1)
         #expect(recorder.summaryCalls == 1)
         #expect(model.summaries == before)
         #expect(model.availability == .readFailed)
@@ -429,12 +410,12 @@ extension ArchiveReadModelTests {
     @Test("a row inserted by refresh keeps the newest-first order")
     func incrementalInsertKeepsNewestFirstOrder() throws {
         let store = isolatedArchive()
-        guard let first = ArchiveReadModelFixtures.finalizeSession(store, startedAt: 1000) else {
+        guard let first = ArchiveProjectionFixtures.finalizeSession(store, startedAt: 1000) else {
             Issue.record("seed should succeed")
             return
         }
         let recorder = LoadRecorder()
-        let model = ArchiveReadModelFixtures.makeModel(store: store, recorder: recorder)
+        let model = ArchiveProjectionFixtures.makeProjection(store: store, recorder: recorder)
 
         guard let second = recordingSession(store, startedAt: 2000) else {
             Issue.record("second seed should succeed")
@@ -446,7 +427,6 @@ extension ArchiveReadModelTests {
 
         #expect(recorder.summaryCalls == 1)
         #expect(recorder.summariesCalls == 1)
-        #expect(model.revision == 0)
         let storedIDs = try store.loadSummaries().get().map(\.id)
         #expect(storedIDs == [second, first])
         #expect(model.summaries.map(\.id) == storedIDs)

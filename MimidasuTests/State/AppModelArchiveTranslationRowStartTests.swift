@@ -24,11 +24,15 @@ struct AppModelArchiveTranslationRowStartTests {
         )
         let engine = ScriptedArchiveEngine()
         install(engine, for: .google, on: sut.model)
-        sut.model.archiveRead.reload()
-        let before = sut.model.archiveRead.summaries.first { summary in summary.id == otherID }
+        sut.model.archiveProjection.reload()
+        let before = sut.model.archiveProjection.summaries.first { summary in summary.id == otherID }
         #expect(
             before?.languageCount(for: "fr") == ArchiveLanguageCount(lang: "fr", translated: 1),
             "the row's summary starts partial"
+        )
+        #expect(
+            before.map { summary in sut.model.archiveLanguageSet(for: summary).sendCount("fr") } == 1,
+            "the row's language set would send only the missing sentence"
         )
 
         sut.model.beginArchiveTranslation(engine: .google, lang: "fr", sessionID: otherID)
@@ -46,10 +50,18 @@ struct AppModelArchiveTranslationRowStartTests {
                 == ["Seed", "T:merci"],
             "the seed survives and the fresh landing persists in the row's own session"
         )
-        let after = sut.model.archiveRead.summaries.first { summary in summary.id == otherID }
+        let after = sut.model.archiveProjection.summaries.first { summary in summary.id == otherID }
         #expect(
             after?.languageCount(for: "fr") == ArchiveLanguageCount(lang: "fr", translated: 2),
-            "the row summary refreshes in place"
+            "the row summary refreshes from the projection"
+        )
+        #expect(
+            after.map { summary in sut.model.archiveLanguageSet(for: summary).isComplete("fr") } == true,
+            "the refreshed row's language set reads complete"
+        )
+        #expect(
+            after.map { summary in sut.model.archiveLanguageSet(for: summary).sendCount("fr") } == 2,
+            "a rerun of the complete row re-sends both sentences"
         )
         #expect(sut.model.openArchive?.id == sut.id, "the row start never swaps the pane")
         #expect(
@@ -63,7 +75,7 @@ struct AppModelArchiveTranslationRowStartTests {
     func rowStartOverADeletedSessionReportsUnavailable() async {
         let sut = await makeSUT()
         let otherID = appendArchive(to: sut.store)
-        sut.model.archiveRead.reload()
+        sut.model.archiveProjection.reload()
         sut.model.deleteArchive(id: otherID)
         #expect(sut.store.load(id: otherID) == nil, "the session is gone before the start")
         let engine = ScriptedArchiveEngine()

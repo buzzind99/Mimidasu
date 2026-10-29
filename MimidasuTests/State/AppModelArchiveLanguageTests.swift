@@ -4,10 +4,10 @@ import Testing
 
 /// Tests `AppModel`'s archive language surface over a seeded in-temp store:
 /// the viewing language default/switch/clear, membership adds on the open
-/// archive and on a stored sibling, add idempotence and revision bumps,
-/// membership persistence across a reopen, the summary's language set (the
-/// provider chooser's exclusion data), and the send-count/completeness reads
-/// after an add or a per-row delivery.
+/// archive and on a stored sibling, add idempotence, membership persistence
+/// across a reopen, the summary's language set (the provider chooser's
+/// exclusion data), and the language set's send-count/completeness reads after
+/// an add or a per-row delivery.
 @MainActor
 @Suite("AppModelArchiveLanguage")
 struct AppModelArchiveLanguageTests {
@@ -108,6 +108,12 @@ struct AppModelArchiveLanguageTests {
     func addOnStoredSiblingKeepsViewingLanguage() async {
         let sut = await makeSUT()
         let second = appendSecondSession(sut)
+        sut.model.archiveProjection.reload()
+        #expect(
+            sut.model.archiveProjection.summaries.first { summary in summary.id == second }?
+                .languageCount(for: "fr") == nil,
+            "the sibling row starts without the membership"
+        )
 
         let added = sut.model.addArchiveLanguage(id: second, lang: "fr")
 
@@ -123,23 +129,31 @@ struct AppModelArchiveLanguageTests {
                 == ["en", "fr"],
             "the list row carries it too"
         )
+        let secondRow = sut.model.archiveProjection.summaries.first { summary in summary.id == second }
+        #expect(
+            secondRow?.languageCount(for: "fr") == ArchiveLanguageCount(lang: "fr", translated: 0),
+            "the cached sibling row carries the membership"
+        )
+        #expect(
+            secondRow.map { summary in sut.model.archiveLanguageSet(for: summary).sendCount("fr") } == 2,
+            "the sibling's language set would send both missing sentences"
+        )
+        #expect(sut.model.archiveProjection.openSummary?.id == sut.id, "the open summary stays on the pane's session")
     }
 
-    @Test("a repeated add keeps one entry and every successful add bumps the revision")
-    func addIsIdempotentAndBumpsRevision() async {
+    @Test("a repeated add keeps one entry on both surfaces")
+    func addIsIdempotent() async {
         let sut = await makeSUT()
-        let revisionBefore = sut.model.archiveRevision
 
         let first = sut.model.addArchiveLanguage(id: sut.id, lang: "fr")
-        let revisionAfterFirst = sut.model.archiveRevision
+        let summariesAfterFirst = sut.model.archiveProjection.summaries
         let second = sut.model.addArchiveLanguage(id: sut.id, lang: "fr")
 
         #expect(first)
         #expect(second, "the idempotent re-add still reports its write as landed")
-        #expect(revisionAfterFirst != revisionBefore)
         #expect(
-            sut.model.archiveRevision != revisionAfterFirst,
-            "the add contract is bump-always, repeats included — every landed write bumps"
+            sut.model.archiveProjection.summaries == summariesAfterFirst,
+            "the repeated add writes the same membership"
         )
         #expect(
             sut.model.openArchive?.summary.languageCount(for: "fr")
@@ -147,9 +161,15 @@ struct AppModelArchiveLanguageTests {
             "the language stays one membership entry at zero"
         )
         #expect(
+            sut.model.archiveProjection.summaries.first { summary in summary.id == sut.id }?
+                .languageCount(for: "fr") == ArchiveLanguageCount(lang: "fr", translated: 0),
+            "the listed row carries the same one membership entry"
+        )
+        #expect(
             sut.model.openArchive?.summary.langs.filter { count in count.lang == "fr" }.count == 1,
             "the language set stays set-valued"
         )
+        #expect(sut.model.openArchive?.summary == sut.model.archiveProjection.openSummary)
     }
 
     @Test("membership survives a close and reopen")
@@ -200,19 +220,17 @@ struct AppModelArchiveLanguageTests {
             "the membership row exists before anything is translated"
         )
 
-        let sendCount = sut.model.archiveTranslationSendCount(lang: "fr")
-        let complete = sut.model.archiveLanguageIsComplete("fr")
+        let languageSet = sut.model.openArchiveLanguageSet
 
-        #expect(sendCount == 3, "every sentence is still missing")
-        #expect(!complete)
+        #expect(languageSet?.sendCount("fr") == 3, "every sentence is still missing")
+        #expect(languageSet?.isComplete("fr") == false)
     }
 
     // MARK: - Per-row deliveries
 
-    @Test("a per-row delivery refreshes the summary counts and bumps the revision")
+    @Test("a per-row delivery refreshes the summary counts on both surfaces")
     func perRowDeliveryRefreshesSummary() async {
         let sut = await makeSUT(translations: [0: SentenceTranslation(lang: "fr", text: "Seed")])
-        let revisionBefore = sut.model.archiveRevision
 
         sut.model.applyTranslation(index: 1, translation: SentenceTranslation(lang: "fr", text: "Second"))
         sut.model.applyTranslation(index: 2, translation: SentenceTranslation(lang: "fr", text: "Third"))
@@ -223,10 +241,15 @@ struct AppModelArchiveLanguageTests {
             "the banner's cached counts refresh in place"
         )
         #expect(
-            sut.model.archiveTranslationSendCount(lang: "fr") == 3,
+            sut.model.archiveProjection.summaries.first { summary in summary.id == sut.id }?
+                .languageCount(for: "fr") == ArchiveLanguageCount(lang: "fr", translated: 3),
+            "the listed row carries the same counts"
+        )
+        #expect(
+            sut.model.openArchiveLanguageSet?.sendCount("fr") == 3,
             "a complete language reads as a full re-send"
         )
-        #expect(sut.model.archiveLanguageIsComplete("fr"))
-        #expect(sut.model.archiveRevision != revisionBefore, "the revision bumps for the window's rows")
+        #expect(sut.model.openArchiveLanguageSet?.isComplete("fr") == true)
+        #expect(sut.model.openArchive?.summary == sut.model.archiveProjection.openSummary)
     }
 }

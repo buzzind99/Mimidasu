@@ -26,7 +26,7 @@ extension AppModel {
         // The metadata is assigned by `SessionController.begin` before any
         // chunk can flow, so it is always present when a sentence lands.
         guard let metadata = sessionController.sessionMetadata else { return }
-        guard let id = archiveRead.append(
+        guard let id = archiveProjection.append(
             sentence: sentence, sessionID: recordingSessionID, metadata: metadata
         ) else {
             latchArchiveWriteFailure(
@@ -46,7 +46,7 @@ extension AppModel {
         guard let id = recordingSessionID else { return false }
         recordingSessionID = nil
         guard !archiveWriteFailed, !archive.isDegraded,
-              archiveRead.finalize(session: id, durationMS: durationMS, saved: false)
+              archiveProjection.finalize(session: id, durationMS: durationMS, saved: false)
         else {
             if !archiveWriteFailed {
                 latchArchiveWriteFailure(
@@ -62,7 +62,7 @@ extension AppModel {
     /// Launch sweep: a `recording` row left by an unclean exit becomes an
     /// Interrupted recent before anything can list the archive.
     func sweepArchivesOnLaunch() {
-        guard archiveRead.sweepInterrupted() else { return }
+        guard archiveProjection.sweepInterrupted() else { return }
     }
 
     /// Whether session persistence can be trusted this session: the terminal
@@ -129,13 +129,12 @@ extension AppModel {
         if openArchive?.id == id {
             return true
         }
-        guard let loaded = archive.load(id: id) else { return false }
+        guard let loaded = archiveProjection.open(id: id) else { return false }
         // The main window's sheet is leaving the pane with the previous
         // archive; the archive window's own intents and other kinds stay.
         if case .archiveTranslation(_, _, _, .mainWindow) = providerAwaitingDisclosure {
             providerAwaitingDisclosure = nil
         }
-        openArchive = loaded
         archiveViewingLanguage = nil
         entries = loaded.entries
         entryPositionBySentence = Dictionary(
@@ -169,7 +168,7 @@ extension AppModel {
         if case .archiveTranslation(_, _, _, .mainWindow) = providerAwaitingDisclosure {
             providerAwaitingDisclosure = nil
         }
-        openArchive = nil
+        archiveProjection.closeOpen()
         archiveViewingLanguage = nil
         entries.removeAll()
         entryPositionBySentence.removeAll()
@@ -193,36 +192,41 @@ extension AppModel {
     /// language. Returns whether the membership write landed.
     @discardableResult
     func addArchiveLanguage(id: Int64, lang: String) -> Bool {
-        guard archiveRead.addLanguage(id: id, lang: lang) else { return false }
+        guard archiveProjection.addLanguage(id: id, lang: lang) else { return false }
         if openArchive?.id == id {
             archiveViewingLanguage = lang
-            refreshOpenArchiveLanguages()
         }
         return true
     }
 
-    /// Re-reads the opened archive's language payload from the store — the
-    /// banner chip's refresh after a membership add or a landed result.
-    func refreshOpenArchiveLanguages() {
-        guard let id = openArchive?.id, let refreshed = archive.summary(id: id) else { return }
-        openArchive?.summary.langs = refreshed.langs
+    /// The one language-set value for a stored summary. Reads the runtime
+    /// target catalog so the addability rule observes the probe.
+    func archiveLanguageSet(for summary: ArchivedSessionSummary) -> ArchiveLanguageSet {
+        ArchiveLanguageSet(
+            summary: summary,
+            targets: appleTranslationAvailability.targets,
+            targetsLoaded: appleTranslationAvailability.isLoaded
+        )
+    }
+
+    /// The opened archive's language set, or nil with no archive open.
+    var openArchiveLanguageSet: ArchiveLanguageSet? {
+        guard let summary = archiveProjection.openSummary else { return nil }
+        return archiveLanguageSet(for: summary)
     }
 
     // MARK: - Archive window commands
 
     /// Promotes a recent to the permanent Saved tier. One click, no
-    /// confirmation; updates the opened banner in place when it is the same
-    /// session.
+    /// confirmation; when the session is also open, the projection's refresh
+    /// updates the banner from the same summary read.
     func promoteArchive(id: Int64) {
-        guard archiveRead.promote(id: id) else {
+        guard archiveProjection.promote(id: id) else {
             postArchiveWriteWarning(
                 body: "The session store couldn't be written to. This session wasn't saved.",
                 isClosable: true
             )
             return
-        }
-        if openArchive?.id == id {
-            openArchive?.summary.saved = true
         }
     }
 
@@ -235,17 +239,15 @@ extension AppModel {
 
     /// Renames a stored session (Recent or Saved alike); an empty name
     /// clears back to the auto-title. Tier, eviction, ordering, and
-    /// timestamps are unaffected.
+    /// timestamps are unaffected. When the session is also open, the
+    /// projection's refresh updates the banner from the same summary read.
     func renameArchive(id: Int64, name: String?) {
-        guard archiveRead.rename(id: id, name: name) else {
+        guard archiveProjection.rename(id: id, name: name) else {
             postArchiveWriteWarning(
                 body: "The session store couldn't be written to. This rename wasn't applied.",
                 isClosable: true
             )
             return
-        }
-        if openArchive?.id == id {
-            openArchive?.summary.name = ArchiveStore.normalizedName(name)
         }
     }
 
@@ -257,7 +259,7 @@ extension AppModel {
         if openArchive?.id == id {
             closeArchive()
         }
-        guard archiveRead.delete(id: id) else {
+        guard archiveProjection.delete(id: id) else {
             postArchiveWriteWarning(
                 body: "The session store couldn't be written to. This session wasn't deleted.",
                 isClosable: true
@@ -269,10 +271,10 @@ extension AppModel {
 
 // The single write-back seam every landed translation funnels through —
 // per-row re-translate, bulk runs, and the live recording alike: one upsert
-// through the archive read model, whose landed write bumps the revision,
-// plus one conditional refresh of the opened archive's languages and one
-// landed report. Callers keep their row swaps and their own warning
-// policies (archive-mode cards closable; the live latch persistent).
+// through the archive projection, whose landed write refreshes the listed
+// row and/or the open summary from one read, plus one landed report. Callers
+// keep their row swaps and their own warning policies (archive-mode cards
+// closable; the live latch persistent).
 
 extension AppModel {
     /// The one shared body for a translation whose store write was lost —
@@ -283,20 +285,17 @@ extension AppModel {
             + "This translation wasn't added to the archive."
 
     /// Writes one landed translation through to `session` via the archive
-    /// read model: its upsert first, whose landed write bumps the revision,
-    /// then the opened archive's language payload refreshes when the write
-    /// targeted it. Reports whether the write landed — a lost write changes
-    /// nothing (no refresh, no bump), and the caller's policy decides the
-    /// warning and whether its row keeps its previous text.
+    /// projection: its upsert first, whose landed write refreshes the listed
+    /// row and/or the open summary from one read. Reports whether the write
+    /// landed — a lost write changes nothing (no refresh), and the caller's
+    /// policy decides the warning and whether its row keeps its previous
+    /// text.
     @discardableResult
     func writeBackTranslation(
         _ translation: SentenceTranslation, index: Int, session: Int64
     ) -> Bool {
-        guard archiveRead.upsert(translation: translation, index: index, session: session) else {
+        guard archiveProjection.upsert(translation: translation, index: index, session: session) else {
             return false
-        }
-        if openArchive?.id == session {
-            refreshOpenArchiveLanguages()
         }
         return true
     }

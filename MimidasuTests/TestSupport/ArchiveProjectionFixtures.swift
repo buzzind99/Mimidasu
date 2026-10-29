@@ -1,18 +1,20 @@
 import Foundation
 @testable import Mimidasu
 
-/// Counts the read model's typed reads so a test can pin exactly which reads
+/// Counts the projection's typed reads so a test can pin exactly which reads
 /// one operation triggered.
 @MainActor
 final class LoadRecorder {
     var summariesCalls = 0
     var summaryCalls = 0
+    var sessionCalls = 0
 }
 
-/// Shared seeds for the read model's suites: a sentence and its metadata, a
-/// finalized recent, a counting model, and a store whose database cannot open.
+/// Shared seeds for the projection's suites: a sentence and its metadata, a
+/// finalized recent, a counting projection, and a store whose database cannot
+/// open.
 @MainActor
-enum ArchiveReadModelFixtures {
+enum ArchiveProjectionFixtures {
     static func metadata(startedAt: TimeInterval = 1_000_000) -> SessionMetadata {
         SessionMetadata(
             startedAt: Date(timeIntervalSince1970: startedAt),
@@ -38,9 +40,10 @@ enum ArchiveReadModelFixtures {
         return id
     }
 
-    /// The model over `store` with counting reads for both entry points.
-    static func makeModel(store: ArchiveStore, recorder: LoadRecorder) -> ArchiveReadModel {
-        ArchiveReadModel(
+    /// The projection over `store` with counting reads for all three entry
+    /// points.
+    static func makeProjection(store: ArchiveStore, recorder: LoadRecorder) -> ArchiveProjection {
+        ArchiveProjection(
             store: store,
             loadSummaries: {
                 recorder.summariesCalls += 1
@@ -49,6 +52,10 @@ enum ArchiveReadModelFixtures {
             loadSummary: { id in
                 recorder.summaryCalls += 1
                 return store.summaryResult(id: id)
+            },
+            loadSession: { id in
+                recorder.sessionCalls += 1
+                return store.load(id: id)
             }
         )
     }
@@ -56,7 +63,7 @@ enum ArchiveReadModelFixtures {
     /// A store whose database cannot open: a file where the parent directory
     /// should be.
     static func degradedStore(
-        prefix: String = "mimidasu-archive-read-model"
+        prefix: String = "mimidasu-archive-projection"
     ) -> (ArchiveStore, () -> Void) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(prefix)-\(UUID().uuidString)", isDirectory: true)

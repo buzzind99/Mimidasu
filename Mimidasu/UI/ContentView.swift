@@ -204,7 +204,7 @@ struct ContentView: View {
     /// intents (their copy carries none here).
     private func disclosureSentenceCount(_ disclosure: PendingCloudDisclosure) -> Int? {
         if case let .archiveTranslation(_, lang, _, .mainWindow) = disclosure {
-            return model.archiveTranslationSendCount(lang: lang)
+            return model.openArchiveLanguageSet?.sendCount(lang)
         }
         return nil
     }

@@ -143,8 +143,7 @@ final class ArchiveStore: Sendable {
         }
     }
 
-    /// One session's list-row summary without loading its sentences — the
-    /// opened banner's refresh read after a landed result.
+    /// One session's list-row summary without loading its sentences.
     func summary(id: Int64) -> ArchivedSessionSummary? {
         (try? summaryResult(id: id).get()) ?? nil
     }

@@ -60,6 +60,7 @@ struct ArchiveBannerView: View {
             draft: $renameState.renameDraft,
             renamedName: { renameState.renameValue }
         )
+        .task { await model.appleTranslationAvailability.refreshIfNeeded() }
     }
 
     /// The status line above the title: the start datetime and the stored
@@ -134,10 +135,11 @@ struct ArchiveBannerView: View {
     /// translate/retranslate action, and the save bookmark. The three
     /// segments share one rounded toolbar so the right side reads as a single object.
     private func toolbar(_ archive: ArchivedSession) -> some View {
+        let languageSet = model.archiveLanguageSet(for: archive.summary)
         let viewedCode = model.archiveViewingCode
         let viewingCount = viewedCode.flatMap { code in
-            archive.summary.languageCount(for: code)
-        } ?? archive.summary.langs.first
+            languageSet.count(for: code)
+        } ?? languageSet.counts.first
         let busy = jobIsActive(on: archive, lang: viewedCode ?? viewingCount?.lang)
         return HStack(spacing: 0) {
             languageSegment(archive, count: viewingCount, busy: busy)
@@ -332,7 +334,7 @@ struct ArchiveBannerView: View {
     /// segment then reads Retranslate, mirroring the picker's action.
     private func viewedLanguageIsComplete(_ archive: ArchivedSession) -> Bool {
         guard let code = model.archiveViewingCode else { return false }
-        return model.archiveLanguageIsComplete(summary: archive.summary, lang: code)
+        return model.archiveLanguageSet(for: archive.summary).isComplete(code)
     }
 
     /// Routes the picker's start through the model: the request is refused
