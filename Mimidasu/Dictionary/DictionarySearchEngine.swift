@@ -77,20 +77,22 @@ final class DictionarySearchEngine: Sendable {
 
     // MARK: Lifecycle
 
-    /// The opened handle and the spellings read from it — one ladder
-    /// parameter rather than two, because the two are opened together and
-    /// always travel together.
+    /// The opened handle, the spellings read from it, and the capabilities the
+    /// connection reports — one ladder parameter rather than three, because
+    /// they are opened together and always travel together.
     struct Open: Sendable {
         let db: SQLiteDatabase
         let caseHeadwords: CaseHeadwordSpellings
+        let hasGlossIndex: Bool
     }
 
     private enum State {
         case idle
-        /// The read-only handle plus the spellings it carries: the case-bearing
-        /// headwords are read once, beside the open, because they answer from
-        /// memory and nothing else in the engine needs them.
-        case open(SQLiteDatabase, CaseHeadwordSpellings)
+        /// The read-only handle plus the spellings and capabilities it
+        /// carries: the case-bearing headwords are read once, beside the open,
+        /// because they answer from memory and nothing else in the engine needs
+        /// them.
+        case open(Open)
         case closed
     }
 
@@ -100,14 +102,14 @@ final class DictionarySearchEngine: Sendable {
     /// ladder without the dictionary dylib.
     private let tokenize: @Sendable (String) -> [DictionaryToken]?
 
-    /// `resolveDatabase` defaults to the prepared location
-    /// (`DictionaryStore.resolveJMDict`), so the search warms the same
-    /// database the tap lookup reads — two independent read-only handles, both
-    /// opened `SQLITE_OPEN_READONLY` with `PRAGMA query_only`. A failed open
-    /// is never cached, so a later call retries naturally (the database may
-    /// still be preparing). `close()` is permanent for this instance.
+    /// `resolveDatabase` defaults to the prepared location (`PreparedJMDict`),
+    /// so the search warms the same database the tap lookup reads — two
+    /// independent read-only handles, both opened `SQLITE_OPEN_READONLY` with
+    /// `PRAGMA query_only`. A failed open is never cached, so a later call
+    /// retries naturally (the database may still be preparing). `close()` is
+    /// permanent for this instance.
     init(
-        resolveDatabase: @escaping @Sendable () -> URL? = { DictionaryStore.resolveJMDict() },
+        resolveDatabase: @escaping @Sendable () -> URL? = { PreparedJMDict.resolve()?.url },
         tokenize: @escaping @Sendable (String) -> [DictionaryToken]? = { text in
             DictionaryEngine.shared.tokenize(text)
         }
@@ -125,8 +127,8 @@ final class DictionarySearchEngine: Sendable {
     /// seam for the closed-handle error path (the app never closes).
     func close() {
         state.withLock { current in
-            if case let .open(database, _) = current {
-                database.close()
+            if case let .open(open) = current {
+                open.db.close()
             }
             current = .closed
         }
@@ -188,31 +190,37 @@ final class DictionarySearchEngine: Sendable {
 
     private func openedDatabase(_ current: inout State) throws -> Open {
         switch current {
-        case let .open(database, spellings):
-            return Open(db: database, caseHeadwords: spellings)
+        case let .open(open):
+            return open
         case .closed:
             throw DictionaryError.databaseClosed
         case .idle:
             break
         }
-        guard let url = resolveDatabase(), FileManager.default.fileExists(atPath: url.path) else {
+        guard let url = resolveDatabase() else {
             throw DictionaryError.databaseMissing
         }
-        let database: SQLiteDatabase
-        do {
-            database = try SQLiteDatabase(path: url.path)
-        } catch {
-            throw DictionaryError(error)
-        }
+        let prepared = try PreparedJMDict(url: url).open()
         // Read once, here, where the handle first exists: the case-bearing
         // spellings are 2,357 rows of the pinned corpus, answered by binary
         // search from here on. A database without `JMDictCaseIndex` — one
         // whose artifact regressed, since the index ships in it and the app
         // builds nothing — answers off a full scan of `headwords` (~100 ms)
         // on the first search, and never again.
-        let spellings = try CaseHeadwordSpellings(db: database)
-        current = .open(database, spellings)
-        return Open(db: database, caseHeadwords: spellings)
+        let spellings: CaseHeadwordSpellings
+        do {
+            spellings = try CaseHeadwordSpellings(db: prepared.database)
+        } catch {
+            prepared.database.close()
+            throw DictionaryError(error)
+        }
+        let open = Open(
+            db: prepared.database,
+            caseHeadwords: spellings,
+            hasGlossIndex: prepared.hasGlossIndex
+        )
+        current = .open(open)
+        return open
     }
 }
 

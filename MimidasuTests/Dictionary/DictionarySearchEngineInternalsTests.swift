@@ -480,7 +480,7 @@ final class DictionarySearchEngineInternalsTests {
         #expect(kind.badgeLabel == label)
     }
 
-    @Test("the engine defaults to the store's prepared dictionary")
+    @Test("the engine defaults to the prepared dictionary")
     func defaultInit() throws {
         let sut = DictionarySearchEngine()
         defer { sut.close() }

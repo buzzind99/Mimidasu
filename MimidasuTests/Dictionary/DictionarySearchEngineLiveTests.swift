@@ -418,10 +418,9 @@ struct DictionarySearchEngineLiveTests {
         // The end-to-end shape of the "no hit" regression. `ion` is the densest
         // three-character crossing of the word/name offset in the corpus — 47,909
         // sense rows over 46,394 entries — and the gloss stage is the only
-        // source of all but a couple of dozen of them. A database adopted
-        // without `gloss_fts` throws out of `glossRows` rather than returning
-        // empty, and the search state turns that into the fault card (never
-        // "no matches"); this asserts the ladder itself still fills.
+        // source of all but a couple of dozen of them. A database without
+        // `gloss_fts` skips the gloss stage instead of aborting the ladder, so
+        // this asserts an indexed database's ladder still fills.
         //
         // It is also `i` + `on` as romaji (いおん / イオン), so the headword
         // stages contribute too — the gloss tier has to dominate the window

@@ -114,7 +114,7 @@ extension DictionarySearchEngine {
         let candidates = headwordCandidates(for: normalized, caseHeadwords: open.caseHeadwords)
         let exact = candidates.filter { candidate in candidate.probe == .exact }
         let prefixes = candidates.filter { candidate in candidate.probe == .prefix }
-        let glossEligible = acceptsGlossQuery(normalized)
+        let glossEligible = acceptsGlossQuery(normalized, glossCapable: open.hasGlossIndex)
         // A disabled group skips its stage outright: exact owns the lemma
         // retry too, which folds into `.exact`.
         let exactEnabled = filters.matchGroups.contains(.exact)
@@ -356,12 +356,13 @@ extension DictionarySearchEngine {
 
     /// The gloss stage's gate: Latin input only (Japanese input has already
     /// been searched as writing), long enough for a substring to mean
-    /// something, and runnable at all — a platform with no FTS5 has no index
-    /// to read, and the stage would abort the whole ladder on `no such table`.
+    /// something, and runnable at all — an opened database without the current
+    /// index has no FTS table to read, and the stage would abort the whole
+    /// ladder on `no such table`.
     static func acceptsGlossQuery(
-        _ query: String, fts5Available: Bool = JMDictFTSIndex.isAvailable
+        _ query: String, glossCapable: Bool
     ) -> Bool {
-        guard fts5Available else { return false }
+        guard glossCapable else { return false }
         guard !KanaClassification.containsJapanese(query) else { return false }
         let latin = query.unicodeScalars.filter { scalar in
             scalar.isASCII && scalar.properties.isAlphabetic

@@ -76,25 +76,67 @@ final class DictionarySearchEngineBadgeTests {
 
     // MARK: Gloss-stage gate
 
-    /// The adoption contract deliberately promotes an index-less database where
-    /// SQLite has no FTS5 (`DictionaryStore.isAdoptable`), so the ladder can
-    /// legitimately be handed one. The gloss stage reads `gloss_fts`
-    /// unconditionally, and `no such table: gloss_fts` would abort the *whole*
+    /// An adopted database can legitimately carry no gloss index: the build is
+    /// fail-soft where the platform's SQLite cannot create FTS5, and the ladder
+    /// can be handed a database promoted before the index existed. The gloss
+    /// stage reads `gloss_fts`, so running it there would abort the *whole*
     /// ladder — headword hits included — surfacing as "no matches". The gate
     /// closes instead, so the tiers that can still answer do.
-    @Test("closes the gloss stage where the platform cannot build the index")
+    @Test("closes the gloss stage where the opened database has no index")
     func glossGateNeedsAnIndex() {
-        #expect(DictionarySearchEngine.acceptsGlossQuery("bridge", fts5Available: true) == true)
+        #expect(DictionarySearchEngine.acceptsGlossQuery("bridge", glossCapable: true) == true)
         #expect(
-            DictionarySearchEngine.acceptsGlossQuery("bridge", fts5Available: false) == false,
-            "an index-less platform must not run a stage that reads the index"
+            DictionarySearchEngine.acceptsGlossQuery("bridge", glossCapable: false) == false,
+            "a database without an index must not run a stage that reads the index"
         )
-        // The default is the live platform's own capability, so this host is
-        // pinned to the path the ladder actually takes. Pinning the capability
-        // itself keeps the tripwire below two-directional: without it, a
-        // default hard-coded to `true` would be indistinguishable on this host.
-        #expect(JMDictFTSIndex.isAvailable)
-        #expect(DictionarySearchEngine.acceptsGlossQuery("bridge") == JMDictFTSIndex.isAvailable)
+    }
+
+    /// The capability comes from the opened handle, not the host: the built
+    /// fixture carries the stamp production writes, so it reports the index,
+    /// while the same file reports none once the table is gone.
+    @Test("reads gloss capability from the opened database")
+    func glossCapabilityComesFromTheOpenedDatabase() throws {
+        let built = try JMDictFixtureDatabase.build()
+        defer { built.remove() }
+
+        let indexed = try PreparedJMDict(url: built.url).open()
+        #expect(indexed.hasGlossIndex)
+        indexed.database.close()
+
+        let database = try SQLiteDatabase.writable(path: built.url.path)
+        try database.execute(JMDictFTSIndex.dropSQL)
+        database.close()
+
+        let indexless = try PreparedJMDict(url: built.url).open()
+        defer { indexless.database.close() }
+        #expect(indexless.hasGlossIndex == false)
+    }
+
+    /// Without the index the ladder skips the gloss stage rather than throwing
+    /// out of it. `bridge` has no headword in the fixture, so the Latin query
+    /// has no other stage to answer; the Japanese query still reaches its
+    /// entry, which is what proves the missing table no longer aborts the
+    /// search.
+    @Test("an index-less database skips the gloss stage instead of throwing")
+    func indexlessDatabaseSkipsGloss() throws {
+        let built = try JMDictFixtureDatabase.build()
+        defer { built.remove() }
+        let database = try SQLiteDatabase.writable(path: built.url.path)
+        try database.execute(JMDictFTSIndex.dropSQL)
+        database.close()
+
+        let engine = DictionarySearchEngine(resolveDatabase: { [url = built.url] in url })
+        defer { engine.close() }
+
+        let japanese = try engine.search("食べる", filters: DictionarySearchFilters())
+        #expect(japanese.hits.allSatisfy { hit in hit.matchedField != .gloss })
+        let exact = try #require(japanese.hits.first)
+        #expect(exact.entSeq == 1_358_280)
+        #expect(exact.matchKind == .exact)
+
+        let latin = try engine.search("bridge", filters: DictionarySearchFilters())
+        #expect(latin.hits.isEmpty)
+        #expect(latin.hits.allSatisfy { hit in hit.matchedField != .gloss })
     }
 
     // MARK: Name types
@@ -208,5 +250,74 @@ final class DictionarySearchEngineBadgeTests {
         #expect(sql.contains("IN (?,?)"))
         // Sense order is what makes the badge list deterministic.
         #expect(sql.contains("ORDER BY entry_id, ord"))
+    }
+
+    // MARK: Infrastructure failures
+
+    @Test("a missing resolver reports databaseMissing")
+    func missingResolverReportsDatabaseMissing() throws {
+        let engine = DictionarySearchEngine(resolveDatabase: { nil }, tokenize: { _ in nil })
+        defer { engine.close() }
+
+        let thrown = try #require(
+            #expect(throws: DictionaryError.self) {
+                try engine.search("食べる", filters: DictionarySearchFilters())
+            }
+        )
+
+        #expect(thrown == .databaseMissing)
+    }
+
+    @Test("a database whose case spellings cannot load reports a sqlite error")
+    func unloadableCaseSpellingsReportsSQLiteError() throws {
+        let empty = try Self.emptyDatabase()
+        defer { try? FileManager.default.removeItem(at: empty) }
+        let engine = DictionarySearchEngine(resolveDatabase: { empty }, tokenize: { _ in nil })
+        defer { engine.close() }
+
+        let thrown = try #require(
+            #expect(throws: DictionaryError.self) {
+                try engine.search("食べる", filters: DictionarySearchFilters())
+            }
+        )
+
+        #expect(Self.isSQLiteError(thrown))
+    }
+
+    @Test("a query failure maps to a sqlite error instead of escaping untyped")
+    func queryFailureMapsToSQLiteError() throws {
+        let built = try JMDictFixtureDatabase.build()
+        defer { built.remove() }
+        let database = try SQLiteDatabase.writable(path: built.url.path)
+        try database.execute("DROP TABLE senses")
+        database.close()
+        let engine = DictionarySearchEngine(
+            resolveDatabase: { [url = built.url] in url }, tokenize: { _ in nil }
+        )
+        defer { engine.close() }
+
+        let thrown = try #require(
+            #expect(throws: DictionaryError.self) {
+                try engine.search("食べる", filters: DictionarySearchFilters())
+            }
+        )
+
+        #expect(Self.isSQLiteError(thrown))
+    }
+
+    private static func emptyDatabase() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimidasu-search-empty-\(UUID().uuidString).sqlite")
+        let database = try SQLiteDatabase.writable(path: url.path)
+        defer { database.close() }
+        try database.execute("CREATE TABLE placeholder(value INTEGER)")
+        return url
+    }
+
+    private static func isSQLiteError(_ error: DictionaryError) -> Bool {
+        if case .sqliteError = error {
+            return true
+        }
+        return false
     }
 }

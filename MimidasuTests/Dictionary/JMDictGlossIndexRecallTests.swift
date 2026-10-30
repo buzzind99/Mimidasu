@@ -152,7 +152,7 @@ struct JMDictGlossIndexRecallTests {
         // with zero rows and no error — a silent total loss. The gate that
         // prevents it is `acceptsGlossQuery`, so this pins the gate against the
         // measured cost of removing it.
-        #expect(DictionarySearchEngine.acceptsGlossQuery("ma") == false)
+        #expect(DictionarySearchEngine.acceptsGlossQuery("ma", glossCapable: true) == false)
         #expect(try scanned("ma", db: db).count > 70000)
         #expect(try indexed("ma", db: db).isEmpty)
     }

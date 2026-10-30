@@ -63,9 +63,9 @@ struct DictionarySearchStateFaultTests {
 
     @Test("a SQLite-reported failure faults too, not just a closed database")
     func sqliteFailureIsAFault() async throws {
-        // A file that is present and is not a database: the engine opens it
-        // read-only, and the first statement is what SQLite refuses
-        // (SQLITE_NOTADB). The landing has to name it — the missing-database
+        // A file that is present and is not a database: the shared open
+        // refuses it before any statement runs (SQLITE_NOTADB). The landing
+        // has to name it — the missing-database
         // arm would offer a re-prepare the user already did and an empty result
         // is the one reading a corrupt artifact must never get.
         let corrupt = FileManager.default.temporaryDirectory

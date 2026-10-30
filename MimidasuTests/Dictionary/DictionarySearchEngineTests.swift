@@ -271,11 +271,11 @@ final class DictionarySearchEngineTests {
 
     @Test("gates the gloss stage on a Latin query of three letters or more")
     func glossGate() {
-        #expect(DictionarySearchEngine.acceptsGlossQuery("ab") == false)
-        #expect(DictionarySearchEngine.acceptsGlossQuery("abc") == true)
-        #expect(DictionarySearchEngine.acceptsGlossQuery("abc123") == true)
-        #expect(DictionarySearchEngine.acceptsGlossQuery("負ける") == false)
-        #expect(DictionarySearchEngine.acceptsGlossQuery("ま") == false)
+        #expect(DictionarySearchEngine.acceptsGlossQuery("ab", glossCapable: true) == false)
+        #expect(DictionarySearchEngine.acceptsGlossQuery("abc", glossCapable: true) == true)
+        #expect(DictionarySearchEngine.acceptsGlossQuery("abc123", glossCapable: true) == true)
+        #expect(DictionarySearchEngine.acceptsGlossQuery("負ける", glossCapable: true) == false)
+        #expect(DictionarySearchEngine.acceptsGlossQuery("ま", glossCapable: true) == false)
 
         // Three is the trigram tokenizer's floor, not a taste call: FTS5
         // answers a shorter phrase with no rows and no error, so anything below
