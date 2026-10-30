@@ -126,6 +126,16 @@ enum JMDictFTSIndex {
         try database.execute(stampSQL)
     }
 
+    /// Whether this connection carries the current index. Throws only when the
+    /// connection cannot answer at all (for example, the file is not SQLite).
+    static func isPresent(in database: SQLiteDatabase) throws(SQLiteDatabase.Error) -> Bool {
+        let stamp = try database.statement(schemaVersionSQL)
+        guard try stamp.step() else { return false }
+        guard stamp.requiredInt(0) == schemaVersion else { return false }
+        let presence = try database.statement(presenceSQL)
+        return try presence.step()
+    }
+
     /// Whether `url`'s database already carries **this** index.
     ///
     /// This is what makes adoption index-aware, and it is the second half of
@@ -149,12 +159,7 @@ enum JMDictFTSIndex {
     static func isPresent(at url: URL) -> Bool {
         guard let database = try? SQLiteDatabase(path: url.path) else { return false }
         defer { database.close() }
-        guard let stamp = try? database.statement(schemaVersionSQL),
-              (try? stamp.step()) == true,
-              stamp.requiredInt(0) == schemaVersion,
-              let presence = try? database.statement(presenceSQL)
-        else { return false }
-        return (try? presence.step()) == true
+        return (try? isPresent(in: database)) ?? false
     }
 
     static let presenceSQL =

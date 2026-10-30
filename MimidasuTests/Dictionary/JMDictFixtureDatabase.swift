@@ -153,6 +153,9 @@ enum JMDictFixtureDatabase {
         try exec(db, JMDictFTSIndex.createSQL)
         try exec(db, JMDictFTSIndex.insertSQL)
         try exec(db, JMDictFTSIndex.optimizeSQL)
+        // The stamp goes last, as production writes it, so `isPresent` sees a
+        // current index on the built fixture.
+        try exec(db, JMDictFTSIndex.stampSQL)
         try exec(db, "COMMIT")
         return Built(url: url)
     }
