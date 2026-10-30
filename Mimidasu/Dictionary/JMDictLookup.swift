@@ -19,42 +19,13 @@ final class JMDictLookup: Sendable {
     private let state: Mutex<State>
     private let resolveDatabase: @Sendable () -> URL?
 
-    /// Where the prepared JMDict database lives: the location `DictionaryStore`
-    /// promotes into (repo-local `build/prepared/` in debug checkouts,
-    /// Application Support in release), or — debug checkouts only — the
-    /// uncompressed intermediate `scripts/build_dictionary.sh` leaves in `build/`.
-    static var defaultDatabaseURL: URL? {
-        defaultDatabaseURL(
-            destination: DictionaryStore.defaultDestinationDirectory,
-            fileExists: { url in FileManager.default.fileExists(atPath: url.path) }
-        )
-    }
-
-    /// Injected core of `defaultDatabaseURL`: the prepared Application
-    /// Support location first, then the debug checkout, then none.
-    static func defaultDatabaseURL(
-        destination: URL, fileExists: (URL) -> Bool
-    ) -> URL? {
-        let prepared = destination.appendingPathComponent(JMDictPin.preparedFileName)
-        if fileExists(prepared) {
-            return prepared
-        }
-        #if DEBUG
-            let checkout = DictionaryStore.debugRepoURL(JMDictPin.debugCheckoutPath)
-            if fileExists(checkout) {
-                return checkout
-            }
-        #endif
-        return nil
-    }
-
-    /// `resolveDatabase` is injectable for tests; the default resolves the
-    /// prepared database location above. The mutex-guarded `State` opens the
-    /// database lazily on the first query and keeps it warm; a failed open is
-    /// never cached, so a later call retries naturally (the database may
-    /// still be preparing). `close()` is permanent for this instance —
-    /// subsequent queries throw `.databaseClosed`.
-    init(resolveDatabase: @escaping @Sendable () -> URL? = { JMDictLookup.defaultDatabaseURL }) {
+    /// `resolveDatabase` is injectable for tests; the default resolves through
+    /// `PreparedJMDict`. The mutex-guarded `State` opens the database lazily on
+    /// the first query and keeps it warm; a failed open is never cached, so a
+    /// later call retries naturally (the database may still be preparing).
+    /// `close()` is permanent for this instance — subsequent queries throw
+    /// `.databaseClosed`.
+    init(resolveDatabase: @escaping @Sendable () -> URL? = { PreparedJMDict.resolve()?.url }) {
         self.resolveDatabase = resolveDatabase
         state = Mutex(.idle)
     }
@@ -387,22 +358,12 @@ final class JMDictLookup: Sendable {
         case .idle:
             break
         }
-        guard let url = resolveDatabase(), FileManager.default.fileExists(atPath: url.path) else {
+        guard let url = resolveDatabase() else {
             throw DictionaryError.databaseMissing
         }
-        let database: SQLiteDatabase
-        do {
-            database = try SQLiteDatabase(path: url.path)
-        } catch let error as SQLiteDatabase.Error {
-            switch error {
-            case .unavailable:
-                throw DictionaryError.sqliteError(code: -1, message: "failed to open JMDict database")
-            case .sqlite:
-                throw DictionaryError(error)
-            }
-        }
-        current = .open(database)
-        return database
+        let opened = try PreparedJMDict(url: url).open()
+        current = .open(opened.database)
+        return opened.database
     }
 
     // MARK: - SQL

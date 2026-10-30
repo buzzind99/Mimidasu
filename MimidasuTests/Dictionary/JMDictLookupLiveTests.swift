@@ -9,11 +9,11 @@ import Testing
 /// intermediate `scripts/build_dictionary.sh` leaves in `build/`). Opt-in like
 /// the other `Live*` suites: it re-runs at every pin bump and pins the
 /// spot entries against the shipped data shape.
-/// Same resolution chain as `JMDictLookup.defaultDatabaseURL`, with a
-/// repo-root fallback the test host's working directory can't provide.
+/// Same resolution chain as `PreparedJMDict.resolve()`, with a repo-root
+/// fallback the test host's working directory can't provide.
 /// File-scope so the suite trait can gate on it.
 private let liveDatabaseURL: URL? = {
-    if let resolved = JMDictLookup.defaultDatabaseURL {
+    if let resolved = dictionaryEnvLock.withLock({ PreparedJMDict.resolve()?.url }) {
         return resolved
     }
     let repoRoot = URL(fileURLWithPath: #filePath)

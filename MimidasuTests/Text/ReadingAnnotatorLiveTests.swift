@@ -466,7 +466,7 @@ struct ReadingAnnotatorLiveTests {
 /// resolvable JMDict database — the same resolution chain as the live JMDict
 /// suite, plus a repo-root fallback for the test host's working directory.
 private let fallbackDatabaseURL: URL? = {
-    if let resolved = JMDictLookup.defaultDatabaseURL {
+    if let resolved = dictionaryEnvLock.withLock({ PreparedJMDict.resolve()?.url }) {
         return resolved
     }
     let repoRoot = URL(fileURLWithPath: #filePath)

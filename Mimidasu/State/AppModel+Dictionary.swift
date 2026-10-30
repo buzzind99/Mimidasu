@@ -87,14 +87,15 @@ extension AppModel {
     /// needed is what broke it: the natural gate is "does the file resolve",
     /// but `resolveJMDict()` answers "does the file exist", not "is the file
     /// usable". A database promoted before the gloss index existed resolves, so
-    /// it short-circuited every prepare, so the store's index-aware adoption
-    /// check was never reached, so the index-less database was adopted forever
-    /// — and with the `LIKE` scan deleted, every Latin gloss query returned
-    /// zero rows with no error to show for it.
+    /// it short-circuited every prepare, so the adoption verdict was never
+    /// reached, so the index-less database was adopted forever — and with the
+    /// `LIKE` scan deleted, every Latin gloss query returned zero rows with no
+    /// error to show for it.
     ///
-    /// So the check lives in exactly one place, `DictionaryStore.run`, which
-    /// adopts a current database for the cost of a `fileExists` and two pragma
-    /// reads and re-stages anything else. Calling it always is the cheap path.
+    /// So the verdict lives in `PreparedJMDict.isAdoptable`, and
+    /// `DictionaryStore.run` asks it unconditionally: a current database is
+    /// adopted for the cost of a `fileExists` and two pragma reads, anything
+    /// else re-stages. Calling it always is the cheap path.
     ///
     /// Purely opportunistic: until it succeeds (or if it never does) text
     /// renders unannotated and lookups fail soft, so failures are logged only

@@ -157,23 +157,16 @@ final class DictionaryStore: Sendable {
     }
 
     /// The prepared JMDict database, or nil when it still needs preparing.
-    /// Same resolution order as `resolve()` but keyed on `MIMIDASU_JMDICT`, the
-    /// versioned filename, and the `build/` intermediate the JMDict build
-    /// script leaves in debug checkouts.
+    /// Resolution lives in `PreparedJMDict`; this facade keeps the existing
+    /// test call sites on one entry point.
     static func resolveJMDict() -> URL? {
-        resolveJMDict(
-            environment: ProcessInfo.processInfo.environment,
-            fileExists: { url in FileManager.default.fileExists(atPath: url.path) }
-        )
+        PreparedJMDict.resolve()?.url
     }
 
-    /// Injectable core of `resolveJMDict()`.
+    /// Injectable core of `resolveJMDict()`; the resolution order lives in
+    /// `PreparedJMDict`.
     static func resolveJMDict(environment: [String: String], fileExists: (URL) -> Bool) -> URL? {
-        resolve(
-            environmentKey: "MIMIDASU_JMDICT", defaultURL: defaultJMDictURL,
-            debugCheckoutPath: JMDictPin.debugCheckoutPath,
-            environment: environment, fileExists: fileExists
-        )
+        PreparedJMDict.resolve(environment: environment, fileExists: fileExists)?.url
     }
 
     private static func resolve(
@@ -339,48 +332,13 @@ final class DictionaryStore: Sendable {
         }
     }
 
-    /// Whether a file already at the destination can be adopted as-is.
-    ///
-    /// **The single authority on this.** Nothing upstream may decide it from a
-    /// file's existence: `resolveJMDict()` answers "where is the artifact", not
-    /// "is the artifact usable", and a caller that gates on it would adopt an
-    /// index-less database forever. `run` is reached unconditionally, and this
-    /// is what it asks.
-    ///
-    /// Existence is the whole staleness key for the tokenizer dictionary. It is
-    /// not enough for JMDict: a database promoted before the gloss index existed
-    /// is complete and current, yet answers every Latin query with zero rows and
-    /// no error — the stage's `LIKE` scan is gone and there is nothing to fall
-    /// back to. Adoption therefore requires the gloss index at the current
-    /// `JMDictFTSIndex.schemaVersion`, so a database promoted before it existed
-    /// re-stages once and comes back carrying it.
-    ///
-    /// The case-headword index is deliberately **not** required here, although
-    /// the bundled artifact carries one: its absence never changes an answer,
-    /// only the cost of the case-spelling load, and the app has no builder to
-    /// heal a missing one with — gating on it would turn a regressed artifact
-    /// into a re-decompress on every launch, where tolerating it costs ~100 ms
-    /// once per launch. Retiring databases that predate the shipped index is
-    /// the versioned filename's job.
-    ///
-    /// This is load-bearing rather than an optimization, and it is why the
-    /// *filename* does not encode the gloss index: bumping
-    /// `JMDictPin.buildRevision` for a runtime-only derivation would force a
-    /// full ingestion rebuild and rename the shipped artifact for every user,
-    /// which is a far larger change than the situation warrants. Existing
-    /// installs instead re-stage themselves once — one decompress plus ~2 s —
-    /// and are then adopted normally. The cost when the database *is* current
-    /// is one `fileExists` plus a couple of `sqlite_master` probes on a
-    /// lazily-opened handle.
-    ///
-    /// A platform with no FTS5 is the one case where a missing gloss index is
-    /// correct: the gloss build is fail-soft there by design, so requiring it
-    /// unconditionally would re-decompress and rebuild on every launch forever.
+    /// Whether a file already at the destination can be adopted as-is: the
+    /// tokenizer needs only to exist, and the JMDict verdict is
+    /// `PreparedJMDict`'s.
     private func isAdoptable(_ artifact: Artifact, at url: URL) -> Bool {
         switch artifact {
         case .tokenizer: true
-        case .jmDict:
-            JMDictFTSIndex.isPresent(at: url) || !JMDictFTSIndex.isAvailable
+        case .jmDict: PreparedJMDict.isAdoptable(at: url)
         }
     }
 
@@ -528,7 +486,7 @@ final class DictionaryStore: Sendable {
     /// JMDict smoke check, delegated to the JMDict lookup engine: the smoke
     /// word must hit at least one entry in the staged database. A corrupt or
     /// truncated database surfaces here as the lookup's SQLite error, not as
-    /// a silent pass (an open alone would succeed — SQLite opens lazily).
+    /// a silent pass (the shared open probes the file before any query runs).
     ///
     /// When an index was built it must also *answer* — a present-but-empty
     /// `gloss_fts` passes every schema probe and then returns nothing for every

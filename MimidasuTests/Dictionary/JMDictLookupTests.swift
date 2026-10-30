@@ -316,8 +316,9 @@ final class JMDictLookupTests {
 
         // The prepared location wins whenever it exists.
         #expect(
-            JMDictLookup.defaultDatabaseURL(destination: destination, fileExists: { _ in true })
-                == prepared
+            PreparedJMDict.resolve(
+                environment: [:], destination: destination, fileExists: { _ in true }
+            )?.url == prepared
         )
 
         // Without it, the debug checkout (repo-anchored build/<tag>.dev.sqlite)
@@ -327,17 +328,20 @@ final class JMDictLookupTests {
         #if DEBUG
             let checkout = DictionaryStore.debugRepoURL(JMDictPin.debugCheckoutPath)
             #expect(
-                JMDictLookup.defaultDatabaseURL(
+                PreparedJMDict.resolve(
+                    environment: [:],
                     destination: destination,
                     fileExists: { url in url == checkout }
-                ) == checkout
+                )?.url == checkout
             )
             #expect(checkout.lastPathComponent == JMDictPin.devArtifactFileName)
         #endif
 
         // Neither resolves → nil (lookups then throw .databaseMissing).
         #expect(
-            JMDictLookup.defaultDatabaseURL(destination: destination, fileExists: { _ in false }) == nil
+            PreparedJMDict.resolve(
+                environment: [:], destination: destination, fileExists: { _ in false }
+            ) == nil
         )
     }
 
@@ -359,9 +363,10 @@ final class JMDictLookupTests {
         #expect(retryThrown == firstThrown, "the failure must repeat on retry")
     }
 
-    /// One lookup against `sut`. SQLite surfaces an unopenable path as
-    /// either the typed missing case or a CANTOPEN sqlite error, depending
-    /// on whether it handed back a handle — both are accepted here.
+    /// One lookup against `sut`. The shared open maps an unopenable path to
+    /// `.sqliteError` (code 14 on this host, -1 where SQLite cannot create a
+    /// handle); the typed missing case still covers an absent file — both are
+    /// accepted here.
     private func thrownForOneLookup(_ sut: JMDictLookup) throws -> DictionaryError {
         let thrown = try #require(
             #expect(throws: DictionaryError.self) {
@@ -405,6 +410,43 @@ final class JMDictLookupTests {
             Issue.record("expected .databaseCorrupt, got \(thrown)")
             return
         }
+    }
+
+    @Test("query failures surface as sqlite errors")
+    func queryFailuresSurfaceAsSQLiteErrors() throws {
+        let empty = try emptyDatabase()
+        defer { try? FileManager.default.removeItem(at: empty) }
+        let sut = JMDictLookup(resolveDatabase: { empty })
+        defer { sut.close() }
+
+        let lookupThrown = try #require(
+            #expect(throws: DictionaryError.self) {
+                try sut.lookup(LookupCandidate(text: "食べる"))
+            }
+        )
+        let readingThrown = try #require(
+            #expect(throws: DictionaryError.self) {
+                try sut.reading(forWriting: "食")
+            }
+        )
+        let headwordThrown = try #require(
+            #expect(throws: DictionaryError.self) {
+                try sut.hasHeadword("食")
+            }
+        )
+
+        #expect(isSQLiteError(lookupThrown))
+        #expect(isSQLiteError(readingThrown))
+        #expect(isSQLiteError(headwordThrown))
+    }
+
+    private func emptyDatabase() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimidasu-jmdict-empty-\(UUID().uuidString).sqlite")
+        let database = try SQLiteDatabase.writable(path: url.path)
+        defer { database.close() }
+        try database.execute("CREATE TABLE placeholder(value INTEGER)")
+        return url
     }
 
     // MARK: Cancellation
