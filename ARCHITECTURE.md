@@ -406,6 +406,15 @@ packaged apps in `Contents/Frameworks/`.
   `jmdict-<tag>.<rev>.dev.sqlite` (the build script's index-carrying
   intermediate in `build/`, which debug checkouts and the live tests
   resolve) sits outside the prepared directory and so is never swept.
+- **Prepared-JMDict handle:** `Dictionary/PreparedJMDict` owns the resolution
+  order (DEBUG `MIMIDASU_JMDICT` → prepared destination → DEBUG checkout),
+  the adoption verdict (current gloss index, or a host that cannot build one),
+  the gloss-capability fact, and the typed open shared by Search and Lookup.
+  `DictionaryStore` keeps prepare/decompress/index/smoke/sweep and delegates
+  its resolver; each engine still owns its own read-only connection and
+  `resolveDatabase:` test seam. The gloss stage runs only when the opened
+  database reports a usable index, so an index-less database skips the stage
+  instead of aborting the search.
 - **Tap-lookup engine:** `JMDictLookup` — typed errors (a No hit is
   distinct from infrastructure failure; a headword row whose entry is missing reports
   `databaseCorrupt`), homograph entries ranked by four keys (tapped
