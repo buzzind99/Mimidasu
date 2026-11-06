@@ -61,6 +61,10 @@ struct TranscriptView: View {
         // that hands the matcher down, and it re-runs this body when
         // membership changes.
         _ = model.favorites.snapshot
+        let plan = model.retranslatePlan(
+            surface: retranslateSurface,
+            target: retranslateTarget
+        )
         return ScrollViewReader { proxy in
             List {
                 Color.clear
@@ -77,11 +81,7 @@ struct TranscriptView: View {
                         .listRowBackground(Color.clear)
                 }
                 ForEach(model.entries) { entry in
-                    let rowPlan = model.retranslateRowPlan(
-                        for: entry,
-                        surface: retranslateSurface,
-                        target: retranslateTarget
-                    )
+                    let rowPlan = plan.row(for: entry)
                     TranscriptRow(
                         entry: entry,
                         displayLanguage: model.openArchive != nil
