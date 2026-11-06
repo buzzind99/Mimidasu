@@ -146,7 +146,7 @@ struct TranscriptView: View {
             } action: { old, new in
                 scroll.handle(old: old, new: new, proxy: proxy)
             }
-            .onChange(of: model.entries) { _, _ in
+            .onChange(of: model.entriesRevision) { _, _ in
                 // Covers appends and rows growing when a translation lands.
                 // Only the live feed follows its tail: a finished record
                 // stays where the reader put it.

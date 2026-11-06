@@ -49,7 +49,13 @@ final class AppModel {
     }
 
     /// Observed UI state
-    var entries: [SessionEntry] = []
+    var entries: [SessionEntry] = [] {
+        didSet { entriesRevision &+= 1 }
+    }
+
+    /// O(1) transcript-change signal: every `entries` mutation bumps it, so
+    /// observers react without comparing the whole array.
+    private(set) var entriesRevision = 0
     /// SESSION-card character total: Σ sentence text lengths (translations
     /// excluded), maintained incrementally on sentence append / session
     /// clear / archive swap instead of re-summing the transcript per render.

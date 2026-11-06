@@ -196,6 +196,18 @@ struct AppModelArchiveTests {
         #expect(model.lookupPresentation == nil)
     }
 
+    @Test("opening and closing an archive bumps the transcript revision")
+    func openCloseBumpsEntriesRevision() async {
+        let (model, id) = await makeModel()
+        let start = model.entriesRevision
+
+        #expect(model.openArchiveSession(id: id))
+        #expect(model.entriesRevision == start + 1)
+
+        model.closeArchive()
+        #expect(model.entriesRevision == start + 2)
+    }
+
     // MARK: - Bulk-run boundaries
 
     @Test("re-opening the open archive leaves its running run claimed")

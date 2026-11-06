@@ -133,6 +133,31 @@ struct AppModelTests {
         #expect(model.entries[0].joinedTranslations == nil)
     }
 
+    // MARK: - Transcript revision
+
+    @Test("entriesRevision bumps on every entries write shape")
+    func entriesRevisionTracksWrites() async {
+        let model = await makeSUT()
+        let start = model.entriesRevision
+
+        model.sessionController.onSessionBegin?()
+        #expect(model.entriesRevision == start + 1, "session-begin clear")
+
+        model.sessionController.onSentence?(makeSentence(index: 0))
+        #expect(model.entriesRevision == start + 2, "append")
+
+        model.applyTranslation(
+            index: 0, translation: SentenceTranslation(lang: "en", text: translationText)
+        )
+        #expect(model.entriesRevision == start + 3, "live translation landing")
+
+        model.entries = [SessionEntry(sentence: makeSentence(index: 1))]
+        #expect(model.entriesRevision == start + 4, "assignment")
+
+        model.entries.removeAll()
+        #expect(model.entriesRevision == start + 5, "removeAll")
+    }
+
     // MARK: - Capture errors
 
     @Test(
