@@ -102,7 +102,7 @@ extension ReadingAnnotator {
         _ token: DictionaryToken, surface: String, into pending: inout PendingNumber?
     ) {
         let ascii = surface.applyingTransform(.fullwidthToHalfwidth, reverse: false) ?? surface
-        if ascii.contains(#/^[0-9]+$/#) {
+        if Self.isASCIIDigitRun(ascii) {
             if var held = pending {
                 held.surface += held.gap
                 held.gap = ""
@@ -411,10 +411,31 @@ extension ReadingAnnotator {
         "800": "はっぴゃく", "900": "きゅうひゃく", "1000": "せん", "10000": "まん"
     ]
 
+    /// Whether the halfwidth-normalized surface is a non-empty run of ASCII
+    /// digits (U+0030…U+0039) — the glyphs the digit table is keyed by.
+    private static func isASCIIDigitRun(_ text: String) -> Bool {
+        !text.isEmpty && text.unicodeScalars.allSatisfy { scalar in
+            scalar >= "0" && scalar <= "9"
+        }
+    }
+
+    /// The numeral glyphs `isNumeralRun` accepts: ASCII and fullwidth digits
+    /// plus the kanji numerals 一 through 万.
+    private static func isNumeralScalar(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar {
+        case "0" ... "9", "０" ... "９",
+             "一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "百", "千", "万":
+            true
+        default:
+            false
+        }
+    }
+
     /// Pure numeral surfaces (Arabic or fullwidth digits, kanji numerals):
     /// held back for counter fusion. Engine-fused compounds (一回, 十四日)
-    /// contain non-numeral characters and never match.
+    /// contain non-numeral characters and never match. Scalar-based so
+    /// combining marks fail exactly like the old anchored regex did.
     static func isNumeralRun(_ surface: String) -> Bool {
-        surface.contains(#/^[0-9０-９一二三四五六七八九十百千万]+$/#)
+        !surface.isEmpty && surface.unicodeScalars.allSatisfy(isNumeralScalar)
     }
 }
