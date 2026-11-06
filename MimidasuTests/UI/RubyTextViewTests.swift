@@ -29,6 +29,7 @@ struct RubyTextViewTests {
         onCopy: ((String) -> Void)? = nil,
         onLookup: ((TapLookupRequest) -> Void)? = nil,
         lookupPopover: ((Int) -> RubyTextView.LookupPopover?)? = nil,
+        popoverAnchorToken: Int? = nil,
         reservesAnnotationLine: Bool = false,
         isFavoriteSegment: ((ReadingSegment) -> Bool)? = nil
     ) -> RubyTextView {
@@ -42,6 +43,7 @@ struct RubyTextViewTests {
             onCopy: onCopy,
             onLookup: onLookup,
             lookupPopover: lookupPopover,
+            popoverAnchorToken: popoverAnchorToken,
             isFavoriteSegment: isFavoriteSegment
         )
     }
@@ -115,7 +117,7 @@ struct RubyTextViewTests {
 
     // MARK: - Equality and fingerprint
 
-    @Test("== compares the mode only, never a copy, lookup, popover, or favorite closure")
+    @Test("== compares values only, never a copy, lookup, popover, or favorite closure")
     func equalityIsValueOnly() {
         #expect(view() != view(cursorMode: .dictionary))
 
@@ -140,6 +142,55 @@ struct RubyTextViewTests {
         let matcherA = view(isFavoriteSegment: { _ in true })
         let matcherB = view(isFavoriteSegment: { _ in false })
         #expect(matcherA == matcherB)
+    }
+
+    @Test("== tracks the popover anchor token so a moved anchor re-renders the body")
+    func equalityTracksPopoverAnchor() {
+        #expect(view(popoverAnchorToken: 1) != view(popoverAnchorToken: 2))
+        #expect(view(popoverAnchorToken: 1) != view(popoverAnchorToken: nil))
+        #expect(view(popoverAnchorToken: nil) == view(popoverAnchorToken: nil))
+    }
+
+    @Test("LookupPopover resolves its content only when invoked")
+    func popoverContentIsLazy() {
+        var resolutions = 0
+        let popover = RubyTextView.LookupPopover(
+            isPresented: .constant(false),
+            content: {
+                resolutions += 1
+                return nil
+            }
+        )
+
+        #expect(resolutions == 0)
+        #expect(popover.content() == nil)
+        #expect(resolutions == 1)
+    }
+
+    @Test("only the anchor token resolves the host popover")
+    func anchorOnlyPopoverResolution() {
+        var requested: [Int] = []
+        let resolver: (Int) -> RubyTextView.LookupPopover? = { index in
+            requested.append(index)
+            return RubyTextView.LookupPopover(
+                isPresented: .constant(true), content: { nil }
+            )
+        }
+
+        #expect(
+            RubyTextView.resolvedPopover(at: 0, anchorToken: 1, resolve: resolver) == nil
+        )
+        #expect(requested.isEmpty, "a non-anchor word never asks the host")
+
+        #expect(
+            RubyTextView.resolvedPopover(at: 1, anchorToken: 1, resolve: resolver) != nil
+        )
+        #expect(requested == [1])
+
+        #expect(
+            RubyTextView.resolvedPopover(at: 1, anchorToken: nil, resolve: resolver) == nil
+        )
+        #expect(requested == [1])
     }
 
     @Test("the fingerprint tracks cursor mode and the reserved line, never favorites")

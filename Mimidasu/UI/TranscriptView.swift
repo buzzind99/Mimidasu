@@ -102,6 +102,13 @@ struct TranscriptView: View {
                         lookupPopover: { tokenIndex in
                             lookupPopover(entry.sentence.index, tokenIndex)
                         },
+                        lookupAnchorToken: {
+                            guard case let .transcript(sentenceIndex, tokenIndex) =
+                                model.lookupPresentation?.anchor,
+                                sentenceIndex == entry.sentence.index
+                            else { return nil }
+                            return tokenIndex
+                        },
                         isFavorite: model.favoriteSegmentMatcher,
                         onRetry: { sentence in model.retranslateSentence(sentence) },
                         rowPlan: rowPlan,
@@ -208,15 +215,16 @@ struct TranscriptView: View {
         )
     }
 
-    /// Per-word popover presentation for the row's word units: the
-    /// binding is true only while this exact word is the presentation's
-    /// anchor (a different-word retap dismisses and re-presents), and the
-    /// content is the shared entry view once the async lookup has landed.
+    /// The anchor word's popover presentation: the binding is true only while
+    /// this exact word is the presentation's anchor (a different-word retap
+    /// dismisses and re-presents), and the content is resolved only when the
+    /// popover presents — reading the live presentation then, so pager steps,
+    /// promotions, and dismissals cannot leave stale content behind.
     ///
-    /// Handed to each row as a closure that `RubyTextView`'s body invokes at
-    /// layout time, so the `model.lookupPresentation` reads below register the
-    /// observation on the node that has to repaint — the word units — rather
-    /// than on this body, which never calls it.
+    /// Handed to each row as a closure that only the anchor word's
+    /// `RubyTextView` body invokes. The binding getter is that word's
+    /// presentation observation; the lazy content closure re-reads the live
+    /// presentation when the popover presents.
     private func lookupPopover(
         _ sentenceIndex: Int, _ tokenIndex: Int
     ) -> RubyTextView.LookupPopover {
@@ -225,12 +233,14 @@ struct TranscriptView: View {
         )
         return RubyTextView.LookupPopover(
             isPresented: model.lookupPopoverBinding(for: anchor),
-            content: model.lookupPresentation?.popoverItem(for: anchor).map { presentation in
-                DictionaryPopoverView(
-                    model: model,
-                    presentation: presentation,
-                    onFavoriteRemovalRequest: onFavoriteRemovalRequest
-                )
+            content: {
+                model.lookupPresentation?.popoverItem(for: anchor).map { presentation in
+                    DictionaryPopoverView(
+                        model: model,
+                        presentation: presentation,
+                        onFavoriteRemovalRequest: onFavoriteRemovalRequest
+                    )
+                }
             }
         )
     }

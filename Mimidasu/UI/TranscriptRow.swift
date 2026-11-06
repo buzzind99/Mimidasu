@@ -30,11 +30,15 @@ struct TranscriptRow: View {
     /// cursor mode is `.dictionary`; nil keeps `.dictionary` on the legacy
     /// rendering path.
     var onLookup: ((TapLookupRequest) -> Void)?
-    /// Per-word popover presentation resolver, invoked with a word unit's
-    /// segment index (`RubyTextView.LookupPopover`). Invoked from
-    /// `RubyTextView`'s body, which is where the presentation reads register
-    /// the observation that refreshes the owning word's popover.
+    /// The anchor word's popover presentation resolver, invoked only when
+    /// `lookupAnchorToken` matches that word's segment index. The binding
+    /// getter it returns is read by the anchor word's `.popover` leaf, where
+    /// the presentation observation registers.
     var lookupPopover: ((Int) -> RubyTextView.LookupPopover)?
+    /// The row's popover anchor reader: resolves the live presentation's
+    /// anchor for this sentence, so only that word receives the host's
+    /// popover binding. The reader's own body carries the presentation read.
+    var lookupAnchorToken: () -> Int?
     var isFavorite: ((ReadingSegment) -> Bool)?
     /// Invoked with the row's sentence when the hover retry button fires.
     var onRetry: ((Sentence) -> Void)?
@@ -71,22 +75,8 @@ struct TranscriptRow: View {
                 .padding(.top, 5)
 
             VStack(alignment: .leading, spacing: 5) {
-                // RubyTextView renders .none as plain text, so one call
-                // covers every annotation mode; selectable in all modes.
-                RubyTextView(
-                    text: entry.sentence.text,
-                    annotation: annotation,
-                    surfaceFont: .system(size: 22 * scale.factor),
-                    annotationFont: .system(size: 11 * scale.factor, design: .monospaced),
-                    furiganaFont: .system(size: 14 * scale.factor, design: .monospaced),
-                    annotationColor: Theme.annotationPink,
-                    cursorMode: cursorMode,
-                    onCopy: onCopy,
-                    onLookup: onLookup,
-                    lookupPopover: lookupPopover,
-                    isFavoriteSegment: isFavorite
-                )
-                .textSelection(.enabled)
+                rubyText
+                    .textSelection(.enabled)
 
                 translationRow
                     // A manual re-translation dims the stale line (bar and
@@ -133,6 +123,36 @@ struct TranscriptRow: View {
             withAnimation(.easeOut(duration: 0.25)) { shown = true }
         }
         .onDisappear { hovering = false }
+    }
+
+    /// The sentence view, scoped to the host's current popover anchor. Every
+    /// row's reader re-runs when the presentation changes; only the rows
+    /// whose token changed re-run the `RubyTextView` body.
+    private var rubyText: some View {
+        TranscriptRowLookupAnchor(token: lookupAnchorToken) { token in
+            rubyTextView(popoverAnchorToken: token)
+        }
+    }
+
+    /// `.equatable()` keeps the wrapped `RubyTextView` body out of
+    /// parent-driven updates when its value inputs did not change; the body's
+    /// own observation reads still re-run it directly.
+    private func rubyTextView(popoverAnchorToken: Int?) -> some View {
+        RubyTextView(
+            text: entry.sentence.text,
+            annotation: annotation,
+            surfaceFont: .system(size: 22 * scale.factor),
+            annotationFont: .system(size: 11 * scale.factor, design: .monospaced),
+            furiganaFont: .system(size: 14 * scale.factor, design: .monospaced),
+            annotationColor: Theme.annotationPink,
+            cursorMode: cursorMode,
+            onCopy: onCopy,
+            onLookup: onLookup,
+            lookupPopover: lookupPopover,
+            popoverAnchorToken: popoverAnchorToken,
+            isFavoriteSegment: isFavorite
+        )
+        .equatable()
     }
 
     /// The hover-revealed retry button: floats 32pt left of the translation
@@ -229,5 +249,17 @@ struct TranscriptRow: View {
         let suffix = Text("\u{00A0}\u{00A0}\(glued)")
             .foregroundStyle(Theme.secondaryText)
         return translation + suffix
+    }
+}
+
+/// Per-row reader for the transcript's word-popover anchor: the presentation
+/// read lands in this view's body, so a tap invalidates the row's reader
+/// instead of the row or every word unit.
+private struct TranscriptRowLookupAnchor<Content: View>: View {
+    let token: () -> Int?
+    let content: (Int?) -> Content
+
+    var body: some View {
+        content(token())
     }
 }

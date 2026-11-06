@@ -49,27 +49,32 @@ struct RubyTextView: View, Equatable {
     /// presentation, and error surfacing. When nil, `.dictionary` renders the
     /// legacy path and taps stay inert (the HUD).
     var onLookup: ((TapLookupRequest) -> Void)?
-    /// Per-word popover presentation for the transcript host: invoked with
-    /// a word unit's segment index at render time; a non-nil result
-    /// attaches `.popover` to that word, and only the anchor word's
-    /// binding is true, so the arrow points at the word. nil — the HUD,
-    /// the live strip — keeps word units popover-free. Excluded from `==`
-    /// (closures carry no value identity); this body invokes it, so the
-    /// reads behind it register their observation here.
+    /// The anchor word's popover presentation for the transcript host:
+    /// invoked with that word's segment index when `popoverAnchorToken`
+    /// matches; a non-nil result supplies the binding and lazy content. nil
+    /// — the HUD, the live strip — keeps word units popover-free. Excluded
+    /// from `==` (closures carry no value identity); the binding getter is
+    /// the presentation observation for the anchor word.
     var lookupPopover: ((Int) -> LookupPopover?)?
+    /// The segment index that receives the host's popover binding and
+    /// content, or nil for none. The host's per-row anchor reader derives it
+    /// from the live presentation, so a tap rebuilds only the owning row's
+    /// word units. Part of `==`: a moved anchor must reach the body.
+    var popoverAnchorToken: Int?
     /// Whether a rendered segment is a favorite; the host supplies the
     /// matcher (the store's in-memory key set) and the color follows wherever
     /// this view already renders per-segment surfaces. nil — any host that
     /// passes no matcher — leaves every surface its inherited host color.
     var isFavoriteSegment: ((ReadingSegment) -> Bool)?
 
-    /// One word unit's popover presentation, resolved by the host per
-    /// segment index: the binding presents only while that word is the
-    /// presentation's anchor; the content is the shared entry view (nil until
-    /// a lookup lands — the binding is false then, so nothing presents).
+    /// One word unit's popover presentation, resolved by the host for the
+    /// anchor word only: the binding presents only while that word is the
+    /// presentation's anchor, and the content is resolved when the popover
+    /// presents — re-evaluated when the pager, a promotion, a retap, or a
+    /// dismissal changes the presentation.
     struct LookupPopover {
         let isPresented: Binding<Bool>
-        let content: DictionaryPopoverView?
+        let content: () -> DictionaryPopoverView?
     }
 
     /// Dictionary mode is active only when the host handles lookups; with
@@ -317,25 +322,39 @@ struct RubyTextView: View, Equatable {
         }
     }
 
-    /// A tappable word unit, with the host's `.popover` attached when it
-    /// provides one. The modifier stays attached to every word unit for
-    /// stable identity — the binding is false (and the content nil) for
-    /// all but the anchor word.
+    /// The host popover for one word unit: only the anchor token resolves the
+    /// host's presentation; every other word gets none. Pure for tests.
+    static func resolvedPopover(
+        at index: Int, anchorToken: Int?, resolve: ((Int) -> LookupPopover?)?
+    ) -> LookupPopover? {
+        guard index == anchorToken else { return nil }
+        return resolve?(index)
+    }
+
+    /// A tappable word unit. When the host provides a popover resolver, the
+    /// modifier stays attached to every word for stable identity; only the
+    /// anchor word resolves the host's binding and content, so a move does
+    /// not add or remove presenters. Non-anchor words get a constant-false
+    /// binding and nil content, which reads no observable state. A host with
+    /// no resolver (the HUD, the live strip) gets no modifier at all.
     @ViewBuilder
     private func wordUnit(
         _ surface: String, note: String?, isFavorite: Bool, index: Int,
         segments: [ReadingSegment]
     ) -> some View {
         let action = lookupAction(at: index, segments: segments)
-        if let popover = lookupPopover?(index) {
-            wordContent(surface, note: note, isFavorite: isFavorite, action: action)
-                .popover(isPresented: popover.isPresented) {
-                    if let content = popover.content {
-                        content
-                    }
+        let popover = Self.resolvedPopover(
+            at: index, anchorToken: popoverAnchorToken, resolve: lookupPopover
+        )
+        let word = wordContent(surface, note: note, isFavorite: isFavorite, action: action)
+        if lookupPopover != nil {
+            word.popover(isPresented: popover?.isPresented ?? Binding.constant(false)) {
+                if let content = popover?.content() {
+                    content
                 }
+            }
         } else {
-            wordContent(surface, note: note, isFavorite: isFavorite, action: action)
+            word
         }
     }
 
@@ -352,17 +371,21 @@ struct RubyTextView: View, Equatable {
 
     /// Excludes `onCopy`, `onLookup`, `lookupPopover`, and `isFavoriteSegment`
     /// (closures have no value identity), which is safe because this body
-    /// *invokes* both render-time closures: `displayUnits` reads
-    /// `isFavoriteSegment` and `wordUnit` calls `lookupPopover`, so the reads
-    /// behind them register this node's own observation and an invalidation
-    /// re-runs this body directly, without consulting `==`. That invariant is
-    /// load-bearing — hoisting either call into a cached value would silently
-    /// freeze favorites and dictionary refreshes.
+    /// *invokes* the render-time closures: `displayUnits` reads
+    /// `isFavoriteSegment`, and the anchor word's `.popover` leaf reads the
+    /// binding getter. The favorite read registers this body's observation;
+    /// the presentation read registers on that leaf. Hoisting either call
+    /// into a cached value would silently freeze favorites or dictionary
+    /// refreshes.
     ///
-    /// The conformance otherwise exists for this view's unit tests, which
-    /// assert the rendered value directly. The witness is `nonisolated` so the
-    /// conformance needs no `@preconcurrency`: every compared property is an
-    /// immutable Sendable value.
+    /// The transcript host wraps this view in `.equatable()`, so a
+    /// parent-driven update skips the body when every value input is
+    /// unchanged; `popoverAnchorToken` is load-bearing there because a moved
+    /// anchor must re-render the body so the old word drops its presentation.
+    /// The conformance also lets this view's unit tests assert the rendered
+    /// value directly. The witness is `nonisolated` so the conformance needs
+    /// no `@preconcurrency`: every compared property is an immutable Sendable
+    /// value.
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.text == rhs.text
             && lhs.annotation == rhs.annotation
@@ -373,6 +396,7 @@ struct RubyTextView: View, Equatable {
             && lhs.surfaceItalic == rhs.surfaceItalic
             && lhs.reservesAnnotationLine == rhs.reservesAnnotationLine
             && lhs.cursorMode == rhs.cursorMode
+            && lhs.popoverAnchorToken == rhs.popoverAnchorToken
     }
 
     /// One rendered child on the legacy path. Internal (not private) so the
