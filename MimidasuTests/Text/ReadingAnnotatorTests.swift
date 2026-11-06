@@ -1,3 +1,4 @@
+import Foundation
 @testable import Mimidasu
 import Synchronization
 import Testing
@@ -49,6 +50,49 @@ struct ReadingAnnotatorGuardTests {
         #expect(describe(first) == [["桜", "sakura", "さくら"]])
         #expect(describe(second) == describe(first))
         #expect(calls.withLock { count in count } == 1)
+    }
+
+    @Test("retains more than 2,000 distinct sentences in the segment cache")
+    func cacheRetainsLongSession() {
+        let calls = Mutex(0)
+        let annotator = ReadingAnnotator(
+            tokenize: { text in
+                calls.withLock { count in count += 1 }
+                return tokens([text], readings: [nil])
+            },
+            readingFallback: { _ in nil },
+            headwordGate: { _ in true }
+        )
+        let sentences = (0 ..< 3000).map { index in "sentence-\(index)" }
+
+        for sentence in sentences {
+            _ = annotator.segments(for: sentence)
+        }
+        #expect(calls.withLock { count in count } == 3000)
+
+        for sentence in sentences {
+            _ = annotator.segments(for: sentence)
+        }
+        #expect(calls.withLock { count in count } == 3000)
+    }
+
+    @Test("the segment cache is sized for a long session and charges segment cost")
+    func cacheConfigurationAndCost() {
+        let cache = RecordingSegmentCache()
+        let annotator = ReadingAnnotator(
+            tokenize: { text in tokens([text], readings: [nil]) },
+            readingFallback: { _ in nil },
+            headwordGate: { _ in true },
+            cache: cache
+        )
+
+        _ = annotator.segments(for: "桜")
+
+        #expect(cache.costs == [1])
+        #expect(
+            makeAnnotator([]).segmentCacheLimits
+                == (count: 20000, totalCost: 24 * 1024 * 1024)
+        )
     }
 
     @Test("the static entry point returns the shared annotator's annotations")
@@ -556,5 +600,15 @@ struct ReadingAnnotatorFallbackCacheTests {
         cache.store(nil, for: "㐂")
 
         #expect(cache.cachedReading(for: "㐂") == .miss)
+    }
+}
+
+/// Records the cost charged by the annotator's segment cache.
+private final class RecordingSegmentCache: NSCache<NSString, NSArray> {
+    private(set) var costs: [Int] = []
+
+    override func setObject(_ obj: NSArray, forKey key: NSString, cost: Int) {
+        costs.append(cost)
+        super.setObject(obj, forKey: key, cost: cost)
     }
 }

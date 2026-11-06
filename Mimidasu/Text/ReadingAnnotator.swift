@@ -130,14 +130,26 @@ final class ReadingAnnotator: @unchecked Sendable {
         }
     }
 
-    /// Sized to hold a full transcription session's finalized sentences
-    /// so scroll-back re-renders hit instead of re-tokenizing.
-    /// Soft cap only — NSCache still evicts under real memory pressure.
-    private let cache: NSCache<NSString, NSArray> = {
+    /// The segment cache; `makeSegmentCache` carries its sizing. Injectable
+    /// so tests can observe the cost charged per render.
+    private let cache: NSCache<NSString, NSArray>
+
+    /// Sized for a long transcription session's finalized sentences so
+    /// scroll-back re-renders hit instead of re-tokenizing: a 20k-sentence
+    /// count cap is the effective bound, with a secondary 24M-segment cost
+    /// cap (each entry costs its segment count, not bytes). Soft caps only —
+    /// NSCache still evicts under real memory pressure.
+    private static func makeSegmentCache() -> NSCache<NSString, NSArray> {
         let cache = NSCache<NSString, NSArray>()
-        cache.countLimit = 2000
+        cache.countLimit = 20000
+        cache.totalCostLimit = 24 * 1024 * 1024
         return cache
-    }()
+    }
+
+    /// Test seam: the segment cache's configured soft limits.
+    var segmentCacheLimits: (count: Int, totalCost: Int) {
+        (cache.countLimit, cache.totalCostLimit)
+    }
 
     /// The default headword gate: a process-wide JMDict lookup answering
     /// whether any headword row (kanji or kana spelling) matches a surface,
@@ -220,11 +232,13 @@ final class ReadingAnnotator: @unchecked Sendable {
             DictionaryEngine.shared.tokenize(text)
         },
         readingFallback: @escaping @Sendable (String) -> String? = ReadingAnnotator.jmDictReadingFallback,
-        headwordGate: @escaping @Sendable (String) -> Bool? = ReadingAnnotator.jmDictHeadwordGate
+        headwordGate: @escaping @Sendable (String) -> Bool? = ReadingAnnotator.jmDictHeadwordGate,
+        cache: NSCache<NSString, NSArray>? = nil
     ) {
         self.tokenize = tokenize
         self.readingFallback = readingFallback
         self.headwordGate = headwordGate
+        self.cache = cache ?? Self.makeSegmentCache()
     }
 
     /// Returns per-run segments for `text` (surface + romaji + furigana), or
@@ -256,7 +270,10 @@ final class ReadingAnnotator: @unchecked Sendable {
         // A degraded pass decided whole-or-split without a real verdict;
         // caching would pin those decisions past the dictionary's arrival.
         if caching, !outcome.gateDegraded {
-            cache.setObject(outcome.segments as NSArray, forKey: trimmed as NSString)
+            cache.setObject(
+                outcome.segments as NSArray, forKey: trimmed as NSString,
+                cost: outcome.segments.count
+            )
         }
         return outcome.segments
     }
@@ -539,7 +556,7 @@ final class ReadingAnnotator: @unchecked Sendable {
         private let cache = NSCache<NSString, NSString>()
 
         init() {
-            cache.countLimit = 256
+            cache.countLimit = 2048
         }
 
         func cachedReading(for surface: String) -> CachedReading {
