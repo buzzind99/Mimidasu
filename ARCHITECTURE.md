@@ -48,7 +48,7 @@ rig.
              └──────────────┬──────────────┘
                             ▼
              ┌─────────────────────────────┐
-             │      AppModel (UI state)    │ transcript, live partial,
+             │  AppModel + TranscriptPane  │ transcript, live partial,
              │        (@MainActor)         │ translations, meters, toasts
              └─────────────────────────────┘
 ```
@@ -192,8 +192,9 @@ packaged apps in `Contents/Frameworks/`.
   the source and nothing mirrors it through `AppModel`.
   `AppleTierAvailability` owns the
   pair-scoped Apple Intelligence evidence/token/strategy resolution shared
-  with the lane; `RetranslateCoordinator` owns the lane. `AppModel` keeps phase,
-  entries, archive state, and toasts and forwards through façade extensions
+  with the lane; `RetranslateCoordinator` owns the lane. `AppModel` keeps
+  phase, archive store/projection state, toasts, and the composed
+  `TranscriptPane`, and forwards through façade extensions
   over `TranslationSessionPort` (`phase` · `toasts` · `applyTranslation` ·
   archive session/viewing language/running flag · `beginArchiveTranslation`),
   and publishes the live runtime to views as the one read-only
@@ -728,13 +729,14 @@ packaged apps in `Contents/Frameworks/`.
 
 ### AppModel + SessionController (`State/`, `Session/`)
 - `AppModel` (@MainActor `@Observable`): session phase (including
-  `.paused` and `.sourceLost`), transcript entries, the live translation
-  runtime (one read-only `translationRuntime` value forwarded from the
-  live-session coordinator — engine, attached provider, worker attachment,
-  status, fallback latch), archive state (`archive` /
+  `.paused` and `.sourceLost`), the transcript pane module
+  (`pane: TranscriptPane` — rows, sentence→position map, character total,
+  viewed archive language, the open record, and the live/archive swap), the
+  live translation runtime (one read-only `translationRuntime` value
+  forwarded from the live-session coordinator — engine, attached provider,
+  worker attachment, status, fallback latch), archive state (`archive` /
   `archiveProjection`, `recordingSessionID`, `archiveWriteFailed`,
-  `openArchive` (computed from the projection's open summary plus the pane
-  entries), `archiveViewingLanguage`, `archiveTranslationJob`), HUD pin, toast/notice
+  `archiveTranslationJob`), HUD pin, toast/notice
   stacks, audio level + latency, ASR model state, lookup state (popover +
   pinned card), the Favorites store (star outcomes + the segment matcher),
   session clock / loss / pause anchors, and the two translation
@@ -753,16 +755,19 @@ packaged apps in `Contents/Frameworks/`.
   availability forwards (`activeEngineKind` remains the identity test
   seam); `handleTranslationStatus` remains as a test seam over the
   coordinator's status landing. Split into extensions
-  (`AppModelArchive` / `ArchiveTranslation` / `ArchiveWriteBack` /
-  `CaptureWarnings` / `Dictionary` / `Export` / `Favorites` / `Lookup` /
-  `ModelSelection` / `Overlay` / `Pause` / `Retranslate` / `SessionControl`
-  / `Termination` / `Translation`) — `SessionControl` owns the start
-  surface (guards, failure freeze, the phase-race guard where a `stop`
-  during `begin` tears down whatever `begin` brought up, and the guard
-  that drops a start failure landing after a raced teardown so it can't
-  resurrect `.failed`); `Pause` owns pause-span accounting and the
-  resume/rebuild path; `Termination` latches `isTerminating` so a second
-  quit-time shutdown notification can't run a concurrent teardown.
+  (`Archive` / `ArchiveTranslation` / `Dictionary` / `Presentation` /
+  `RetranslatePlan` / `Session` / `SessionLifecycle` / `TapLookup` /
+  `Translation`) — `Presentation` owns the overlay master switch, export,
+  and the capture-warning cards; `Session` owns the start surface (guards,
+  failure freeze, the phase-race guard where a `stop` during `begin` tears
+  down whatever `begin` brought up, and the guard that drops a start failure
+  landing after a raced teardown so it can't resurrect `.failed`),
+  pause-span accounting and the resume/rebuild path, and stop; the quit-time
+  latch lives in the phase machine, and `SessionLifecycle` hosts the ordered
+  end seam. `TranscriptPane` owns the pane facts and their swaps; AppModel
+  composes it and keeps the cross-surface effects (lookup anchors,
+  HUD/overlay visibility, clock anchors, lane turnover) plus the
+  `archiveViewingCode` derivation and archive write-back latch.
   Injectable test seams: a scripted `SessionController` (engine / capture
   / warm-up / watchdog-grace factories), a stubbed model resolver, the
   terminate-notification center, the HTTP translation transport, the
@@ -840,9 +845,11 @@ packaged apps in `Contents/Frameworks/`.
   affects a listed or open session performs exactly one summary read and
   updates both copies from that value; a write to neither reads nothing. A
   terminal open failure degrades every operation; per-operation read
-  failures keep the prior rows and expose the typed state. `AppModel` joins
-  the projection's open summary with the pane's entries for `openArchive`;
-  entries, the position map, and the character count stay in `AppModel`.
+  failures keep the prior rows and expose the typed state. `TranscriptPane`
+  joins the projection's open summary with its rows for `openArchive`; the
+  pane owns the entries, the sentence→position map, the character total, the
+  viewed language, and the open record. `AppModel` still owns the archive
+  store/projection references and the write-back seam.
 - **Language set:** `ArchiveLanguageSet` is the one pure value for a
   summary's ordered counts, sentence total, stored target, and the runtime
   OS target catalog. Count, completeness, send count, and addability all
@@ -885,9 +892,13 @@ packaged apps in `Contents/Frameworks/`.
   stats, and a toolbar for the viewed-language switch, the Translate provider
   picker, and the save bookmark) and archived SessionEntries that still
   support lookup, copy, export, and per-SessionEntry re-translation. Opening
-  an Archived session cancels the bulk job, resets the viewing language and
-  dictionary/HUD anchors, and bumps the re-translate epoch; closing clears
-  the pane without restoring it.
+  an Archived session resets the viewing language and dictionary/HUD anchors,
+  clears the live-session clock anchors, and turns over the re-translate lane
+  epoch; a bulk translation run already in flight keeps running (its airborne
+  results still persist under their own session id). Closing clears the pane
+  without restoring it. The rows, viewing language, and open record live in
+  `TranscriptPane`; opening from the archive window and closing from the
+  sidebar or the stop confirmation make the swap.
 - **Interactions:** an open Archived session blocks starting a new Session
   until it is closed (the UI offers to close it); pause updates the live
   row's `paused_ms` but never finalizes; stop from paused closes the pause
@@ -921,7 +932,9 @@ packaged apps in `Contents/Frameworks/`.
 - **State split:** high-frequency partials (`LivePartialState`), the audio
   level ring (`AudioLevelState`), and latency (`LatencyState`) are small
   standalone observables, so partial-rate updates never re-render the
-  transcript.
+  transcript. The transcript pane's rows, position map, character total,
+  viewed language, and open record live in `TranscriptPane`; views read the
+  pane directly, and `AppModel` composes the cross-surface swaps.
 - **Floating HUD:** always-on-top, semi-transparent; padlock-locked it is
   click-through except its button cluster, unlocked it drags/resizes and
   its height auto-fits content (offscreen measurement host, top edge
@@ -986,7 +999,7 @@ packaged apps in `Contents/Frameworks/`.
 
 | Thread/queue | Work |
 |---|---|
-| Main actor | UI state (`AppModel`), session mechanics (`SessionController`), the serialized pause/resume/restart/stop transition tail and `SessionEngineChannel`, published transcripts/translations, 60 ms `poll()` loop, translation worker |
+| Main actor | UI state (`AppModel` + `TranscriptPane`), session mechanics (`SessionController`), the serialized pause/resume/restart/stop transition tail and `SessionEngineChannel`, published transcripts/translations, 60 ms `poll()` loop, translation worker |
 | Capture (tap IO queue, separate listener queue) | IO-block callback: extract PCM, downmix, track sample clock, slice 160 ms chunks; `SessionController` pushes to the engine and stages RMS/presence |
 | ASR decode queue (serial, dedicated) | Window partials + endpoint redecodes; jobs snapshot the session handle under the engine's `Mutex` |
 | VAD queue (serial, dedicated) | FireRedVAD passes; speech/silence verdicts feed endpointing |
@@ -1007,10 +1020,11 @@ opaque C handles stay inside the engine and HAL ownership types.
 2. Polling yields partials (HUD draft; transcript untouched) or finals.
 3. Finals append to `SentenceBuffer` with sample-accurate offsets.
 4. A tier-1/2/3 boundary closes the Sentence → immutable `Sentence`
-   published (JP SessionEntry), enqueued for translation, and persisted
-   (the first Sentence creates the archive's `recording` row).
+   appended to the transcript pane (JP SessionEntry), enqueued for
+   translation, and persisted (the first Sentence creates the archive's
+   `recording` row).
 5. `TranslationQueue` resolves → translation published (translated
-   SessionEntry), appended to the in-memory session, and upserted into the
+   SessionEntry), landed on the pane's row, and upserted into the
    archive.
 6. On Pause: the IOProc stops, the in-flight utterance flushes through the
    engine channel as a final, timers and translation keep running, and the
