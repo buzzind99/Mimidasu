@@ -66,7 +66,7 @@ struct AppModelRetranslateLaneOwnershipTests {
         // sentence refuses a lane click (`isAwaitingTranslation`).
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.entries[0].translations == [SentenceTranslation(lang: "en", text: "JA:テスト")]
+                model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "JA:テスト")]
             },
             "the initial delivery landed before the retry"
         )
@@ -119,7 +119,7 @@ struct AppModelRetranslateLaneOwnershipTests {
         // The new flight delivers normally once released.
         liveEngine.openGate()
         await expectPoll("the new epoch's retry lands stamped") {
-            model.entries[0].translations
+            model.pane.entries[0].translations
                 == [SentenceTranslation(lang: "en", text: "JA:テスト", engine: .google)]
         }
         #expect(model.pendingRetranslations.isEmpty, "the landing retires the marker")
@@ -222,7 +222,7 @@ struct AppModelRetranslateLaneOwnershipTests {
         model.retranslateSentence(retried)
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.entries[0].translations
+                model.pane.entries[0].translations
                     == [SentenceTranslation(lang: "en", text: "JA:一", engine: .google)]
             },
             "the lane result lands stamped on the backlog row"
@@ -237,12 +237,12 @@ struct AppModelRetranslateLaneOwnershipTests {
         defer { worker.cancel() }
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.entries[1].translations == [SentenceTranslation(lang: "en", text: "JA:二")]
+                model.pane.entries[1].translations == [SentenceTranslation(lang: "en", text: "JA:二")]
             },
             "the replay served the remaining backlog"
         )
         #expect(
-            model.entries[0].translations
+            model.pane.entries[0].translations
                 == [SentenceTranslation(lang: "en", text: "JA:一", engine: .google)],
             "the replay never overwrote the lane-stamped row"
         )
@@ -265,32 +265,32 @@ struct AppModelRetranslateLaneOwnershipTests {
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
         await expectPoll("the initial delivery landed and seeded the queue cache") {
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:\(sentenceText)")]
+            model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:\(sentenceText)")]
         }
 
-        // The retry parks mid-air; the transcript clears the row underneath
-        // it (the position map is what `applyTranslation` resolves through).
+        // The retry parks mid-air; the transcript clears underneath it — the
+        // production recipe for a row that vanishes while its result is in
+        // flight.
         model.retranslateSentence(sentence)
         await expectPoll("the flight parks in the engine") { engine.recordedBatches.count == 1 }
         let laneTask = model.retranslateLaneTask
-        model.entryPositionBySentence.removeValue(forKey: 7)
+        model.pane.beginLiveSession()
 
         engine.openGate()
         await laneTask?.value
 
-        #expect(model.pendingRetranslations.isEmpty, "a vanished row still retires its marker")
+        #expect(model.pane.entries.isEmpty, "the cleared transcript took the row with it")
+        #expect(model.pendingRetranslations.isEmpty, "a cleared pane still retires its marker")
         #expect(model.lanePendingRetranslations.isEmpty)
-        #expect(
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:\(sentenceText)")],
-            "the vanished row never took the retried text"
-        )
 
         // The repeat serves the ORIGINAL cached translation — a seeded
         // retried text would surface here instead.
         model.sessionController.onSentence?(makeSentence(index: 9))
         await expectPoll("the repeat served the original cache entry") {
-            model.entries[1].translations == [SentenceTranslation(lang: "en", text: "EN:\(sentenceText)")]
+            model.pane.entries.count == 1
+                && model.pane.entries[0].translations
+                == [SentenceTranslation(lang: "en", text: "EN:\(sentenceText)")]
         }
-        #expect(model.entries[1].translations.first?.engine == nil)
+        #expect(model.pane.entries[0].translations.first?.engine == nil)
     }
 }

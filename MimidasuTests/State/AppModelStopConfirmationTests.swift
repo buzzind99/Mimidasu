@@ -34,7 +34,7 @@ struct AppModelStopConfirmationTests {
         let model = await makeModel()
         #expect(model.archiveAvailable, "the healthy store reads as available")
         #expect(!model.archiveWriteFailed)
-        model.entries = [entry("こんにちは")]
+        model.pane.append(entry("こんにちは").sentence)
 
         for phase in livePhases {
             model.phase = phase
@@ -45,7 +45,7 @@ struct AppModelStopConfirmationTests {
     @Test("an empty transcript never prompts")
     func emptyTranscriptNeverPrompts() async {
         let model = await makeModel()
-        model.entries = []
+        model.pane.beginLiveSession()
 
         for phase in livePhases {
             model.phase = phase
@@ -56,7 +56,7 @@ struct AppModelStopConfirmationTests {
     @Test("quiet phases never prompt even with rows")
     func quietPhasesNeverPrompt() async {
         let model = await makeModel()
-        model.entries = [entry("こんにちは")]
+        model.pane.append(entry("こんにちは").sentence)
 
         for phase in quietPhases {
             model.phase = phase
@@ -67,7 +67,7 @@ struct AppModelStopConfirmationTests {
     @Test("a latched write failure skips the prompt")
     func writeFailureSkipsPrompt() async {
         let model = await makeModel()
-        model.entries = [entry("こんにちは")]
+        model.pane.append(entry("こんにちは").sentence)
         model.phase = .running
         model.archiveWriteFailed = true
 
@@ -86,7 +86,7 @@ struct AppModelStopConfirmationTests {
         #expect(store.isDegraded)
 
         let model = await makeModel(store: store)
-        model.entries = [entry("こんにちは")]
+        model.pane.append(entry("こんにちは").sentence)
         model.phase = .running
 
         #expect(!model.shouldConfirmStop)

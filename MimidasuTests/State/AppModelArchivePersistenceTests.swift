@@ -144,7 +144,7 @@ struct AppModelArchivePersistenceTests {
         #expect(sut.model.recordingSessionID == nil)
 
         #expect(await pollUntil { sut.model.recordingSessionID != nil }, "first sentence persists")
-        #expect(sut.model.entries.count == 1)
+        #expect(sut.model.pane.entries.count == 1)
         #expect(sut.store.list().isEmpty, "a recording row is not listed")
 
         await stop(sut)
@@ -168,7 +168,7 @@ struct AppModelArchivePersistenceTests {
             .final(text: "さようなら。", startSample: 16000, endSample: 32000, lang: "ja")
         ])
         await startRunning(sut)
-        #expect(await pollUntil { sut.model.entries.count == 2 }, "both sentences land")
+        #expect(await pollUntil { sut.model.pane.entries.count == 2 }, "both sentences land")
 
         guard let id = sut.model.recordingSessionID,
               let loaded = sut.store.load(id: id)
@@ -348,7 +348,7 @@ struct AppModelArchivePersistenceTests {
         await startRunning(sut)
         #expect(await pollUntil { sut.model.archiveWriteFailed }, "the failed write latches")
         #expect(!sut.model.archiveAvailable)
-        #expect(await pollUntil { sut.model.entries.count == 2 }, "transcription continues regardless")
+        #expect(await pollUntil { sut.model.pane.entries.count == 2 }, "transcription continues regardless")
 
         let warnings = sut.model.toasts.toasts.filter { toast in toast.key == ToastKey.archiveUnavailable }
         #expect(warnings.count == 1, "one warning for the whole session")

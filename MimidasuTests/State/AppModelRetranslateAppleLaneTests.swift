@@ -136,7 +136,7 @@ struct AppModelRetranslateAppleLaneTests {
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
         #expect(
-            await pollUntil(timeout: resultTimeout) { model.entries[0].joinedTranslations == "EN:テスト" },
+            await pollUntil(timeout: resultTimeout) { model.pane.entries[0].joinedTranslations == "EN:テスト" },
             "the initial session translation is delivered before the retry"
         )
 
@@ -147,7 +147,7 @@ struct AppModelRetranslateAppleLaneTests {
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.entries[0].translations
+                model.pane.entries[0].translations
                     == [SentenceTranslation(lang: "en", text: "JA:テスト", engine: .appleFast)]
             },
             "the fast-model result lands stamped"
@@ -158,7 +158,7 @@ struct AppModelRetranslateAppleLaneTests {
 
         // A later repeat of the sentence (a fresh row) serves unstamped.
         model.sessionController.onSentence?(makeSentence(index: 9))
-        let repeatEntry = model.entries.first(where: { entry in entry.sentence.index == 9 })
+        let repeatEntry = model.pane.entries.first(where: { entry in entry.sentence.index == 9 })
         #expect(repeatEntry?.translations == [SentenceTranslation(lang: "en", text: "JA:テスト")])
         #expect(repeatEntry?.translations.first?.engine == nil, "the seed is unstamped")
     }
@@ -199,7 +199,7 @@ struct AppModelRetranslateAppleLaneTests {
         #expect(toast?.title == "Re-translate unavailable")
         #expect(toast?.body == testCase.toastBody)
         #expect(
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the row keeps its previous translation"
         )
         #expect(
@@ -235,7 +235,7 @@ struct AppModelRetranslateAppleLaneTests {
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
         #expect(
-            await pollUntil(timeout: resultTimeout) { model.entries[0].joinedTranslations == "EN:テスト" },
+            await pollUntil(timeout: resultTimeout) { model.pane.entries[0].joinedTranslations == "EN:テスト" },
             "the initial session translation is delivered before the retry"
         )
 
@@ -247,7 +247,7 @@ struct AppModelRetranslateAppleLaneTests {
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.entries[0].translations
+                model.pane.entries[0].translations
                     == [SentenceTranslation(lang: "en", text: "JA:テスト", engine: .appleHighFidelity)]
             },
             "the Apple Intelligence result lands stamped"
@@ -322,7 +322,7 @@ struct AppModelRetranslateAppleLaneTests {
             "a cancellation is not a timeout — no report is posted"
         )
         #expect(
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the row keeps its previous translation"
         )
     }
@@ -349,8 +349,8 @@ struct AppModelRetranslateAppleLaneTests {
         // stop's clearAll, not refused by the delivery guard under test.
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:一")]
-                    && model.entries[1].translations == [SentenceTranslation(lang: "en", text: "EN:二")]
+                model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:一")]
+                    && model.pane.entries[1].translations == [SentenceTranslation(lang: "en", text: "EN:二")]
             },
             "the initial translations are delivered before the retries"
         )
@@ -381,7 +381,7 @@ struct AppModelRetranslateAppleLaneTests {
         #expect(model.pendingRetranslations.isEmpty)
         #expect(model.lanePendingRetranslations.isEmpty)
         #expect(
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:一")],
+            model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:一")],
             "the expired wait never touched its row"
         )
     }
@@ -407,7 +407,7 @@ struct AppModelRetranslateAppleLaneTests {
         let sentence = makeSentence(index: 3)
         model.sessionController.onSentence?(sentence)
         #expect(
-            await pollUntil(timeout: resultTimeout) { model.entries[0].joinedTranslations == "EN:テスト" },
+            await pollUntil(timeout: resultTimeout) { model.pane.entries[0].joinedTranslations == "EN:テスト" },
             "the initial session translation is delivered before the retry"
         )
 
@@ -422,7 +422,7 @@ struct AppModelRetranslateAppleLaneTests {
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.entries[0].translations
+                model.pane.entries[0].translations
                     == [SentenceTranslation(lang: "en", text: "JA:テスト", engine: .appleFast)]
             },
             "the row lands stamped with the model that actually ran"

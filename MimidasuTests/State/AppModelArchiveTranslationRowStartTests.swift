@@ -63,9 +63,9 @@ struct AppModelArchiveTranslationRowStartTests {
             after.map { summary in sut.model.archiveLanguageSet(for: summary).sendCount("fr") } == 2,
             "a rerun of the complete row re-sends both sentences"
         )
-        #expect(sut.model.openArchive?.id == sut.id, "the row start never swaps the pane")
+        #expect(sut.model.pane.openArchive?.id == sut.id, "the row start never swaps the pane")
         #expect(
-            sut.model.entries.map { entry in entry.sentence.text }
+            sut.model.pane.entries.map { entry in entry.sentence.text }
                 == ["こんにちは", "さようなら", "おはよう"],
             "the open pane keeps its own rows"
         )
@@ -165,7 +165,7 @@ struct AppModelArchiveTranslationRowStartTests {
             sut.model.archiveTranslationJob.isBusy(sessionID: otherID, lang: "fr"),
             "the delete guard reads the run's scoped gate"
         )
-        #expect(sut.model.openArchive?.id == sut.id, "the pane stays on its archive")
+        #expect(sut.model.pane.openArchive?.id == sut.id, "the pane stays on its archive")
 
         gate.release()
         gate.release()
@@ -232,7 +232,7 @@ struct ArchiveTranslationRowDisclosureTests {
             "the run never retargets the open archive"
         )
         #expect(engine.recordedBatches == [["bonjour"], ["merci"]])
-        #expect(sut.model.openArchive?.id == sut.id, "the confirm never swaps the pane")
+        #expect(sut.model.pane.openArchive?.id == sut.id, "the confirm never swaps the pane")
         #expect(
             sut.store.load(id: sut.id)?.entries.allSatisfy { entry in entry.translations.isEmpty } == true,
             "the open archive is untouched"

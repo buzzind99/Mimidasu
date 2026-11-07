@@ -45,8 +45,7 @@ struct AppModelArchiveWriteBackTests {
             "the live fixture seeds its recording row after launch"
         )
         model.recordingSessionID = recordingID
-        model.entries = [SessionEntry(sentence: sentence)]
-        model.entryPositionBySentence = [sentence.index: 0]
+        model.pane.append(sentence)
         return LiveSUT(model: model, store: store, recordingID: recordingID)
     }
 
@@ -72,15 +71,15 @@ struct AppModelArchiveWriteBackTests {
             "bulk: the shared copy"
         )
         #expect(
-            perRow.entries.first?.translation(for: "fr")?.text == "Seed",
+            perRow.pane.entries.first?.translation(for: "fr")?.text == "Seed",
             "per-row: the previous text stays"
         )
         #expect(
-            bulk.entries.first?.translation(for: "fr")?.text == "Seed",
+            bulk.pane.entries.first?.translation(for: "fr")?.text == "Seed",
             "bulk: the previous text stays"
         )
         #expect(
-            bulk.entries.dropFirst().allSatisfy { entry in
+            bulk.pane.entries.dropFirst().allSatisfy { entry in
                 entry.translation(for: "fr") == nil
             },
             "bulk: no row shows a translation the store lacks"
@@ -107,7 +106,7 @@ struct AppModelArchiveWriteBackTests {
             "the row reads back from the store"
         )
         #expect(
-            sut.model.openArchive?.summary.languageCount(for: "fr")
+            sut.model.pane.openArchive?.summary.languageCount(for: "fr")
                 == ArchiveLanguageCount(lang: "fr", translated: 1),
             "the open summary's count refreshes"
         )
@@ -117,7 +116,7 @@ struct AppModelArchiveWriteBackTests {
             "the listed row's count refreshes"
         )
         #expect(
-            sut.model.openArchive?.summary == sut.model.archiveProjection.openSummary,
+            sut.model.pane.openArchive?.summary == sut.model.archiveProjection.openSummary,
             "the open summary is the projection's one copy"
         )
         #expect(
@@ -132,7 +131,7 @@ struct AppModelArchiveWriteBackTests {
         let sut = await makeSUT(translations: [0: "Seed"])
         let summariesBefore = sut.model.archiveProjection.summaries
         let openSummaryBefore = sut.model.archiveProjection.openSummary
-        let langsBefore = sut.model.openArchive?.summary.langs
+        let langsBefore = sut.model.pane.openArchive?.summary.langs
         #expect(sut.store.delete(id: sut.id), "the session row is removed underneath")
 
         let landed = sut.model.writeBackTranslation(
@@ -142,8 +141,8 @@ struct AppModelArchiveWriteBackTests {
         #expect(!landed, "the lost write reports itself")
         #expect(sut.model.archiveProjection.summaries == summariesBefore, "the cached list is untouched")
         #expect(sut.model.archiveProjection.openSummary == openSummaryBefore, "the open summary is untouched")
-        #expect(sut.model.openArchive?.summary == openSummaryBefore, "the pane reads the unchanged summary")
-        #expect(sut.model.openArchive?.summary.langs == langsBefore, "the open summary is untouched")
+        #expect(sut.model.pane.openArchive?.summary == openSummaryBefore, "the pane reads the unchanged summary")
+        #expect(sut.model.pane.openArchive?.summary.langs == langsBefore, "the open summary is untouched")
         #expect(sut.store.load(id: sut.id) == nil, "the store still holds nothing")
         #expect(archiveWarnings(sut.model).isEmpty, "the seam itself posts no warning")
     }
@@ -154,14 +153,14 @@ struct AppModelArchiveWriteBackTests {
         let second = appendArchive(to: sut.store)
         sut.model.archiveProjection.reload()
         let translation = SentenceTranslation(lang: "fr", text: "Foreign")
-        let langsBefore = sut.model.openArchive?.summary.langs
+        let langsBefore = sut.model.pane.openArchive?.summary.langs
         let openSummaryBefore = sut.model.archiveProjection.openSummary
 
         let landed = sut.model.writeBackTranslation(translation, index: 0, session: second)
 
         #expect(landed, "a foreign session's write reports its landing")
         #expect(
-            sut.model.openArchive?.summary.langs == langsBefore,
+            sut.model.pane.openArchive?.summary.langs == langsBefore,
             "a foreign target never refreshes the open pane"
         )
         #expect(sut.model.archiveProjection.openSummary == openSummaryBefore, "the open summary is untouched")
@@ -195,7 +194,7 @@ struct AppModelArchiveWriteBackTests {
         let landed = sut.model.writeBackTranslation(translation, index: 0, session: sut.id)
 
         #expect(landed, "the write lands against the stored session")
-        #expect(sut.model.openArchive == nil, "nothing opens on the write")
+        #expect(sut.model.pane.openArchive == nil, "nothing opens on the write")
         #expect(sut.model.archiveProjection.openSummary == nil, "no open summary is stored")
         #expect(
             sut.store.load(id: sut.id)?.entries.first?.translations == [translation],
@@ -226,7 +225,7 @@ struct AppModelArchiveWriteBackTests {
             "the repeat replaced the row in place"
         )
         #expect(
-            sut.model.openArchive?.summary.languageCount(for: "fr")
+            sut.model.pane.openArchive?.summary.languageCount(for: "fr")
                 == ArchiveLanguageCount(lang: "fr", translated: 1),
             "the sentence tally stays one"
         )
@@ -262,7 +261,7 @@ extension AppModelArchiveWriteBackTests {
             "the store row reads back"
         )
         #expect(
-            sut.model.openArchive?.summary.languageCount(for: "fr")
+            sut.model.pane.openArchive?.summary.languageCount(for: "fr")
                 == ArchiveLanguageCount(lang: "fr", translated: 1),
             "the tally refreshes from the store"
         )
@@ -272,7 +271,7 @@ extension AppModelArchiveWriteBackTests {
             "the listed row's tally refreshes too"
         )
         #expect(
-            sut.model.entries.first?.translation(for: "fr") == translation,
+            sut.model.pane.entries.first?.translation(for: "fr") == translation,
             "the pane row swaps"
         )
         #expect(
@@ -295,7 +294,7 @@ extension AppModelArchiveWriteBackTests {
 
         #expect(!landed, "the lost write reports itself")
         #expect(
-            sut.model.entries.first?.translation(for: "fr")?.text == "Seed",
+            sut.model.pane.entries.first?.translation(for: "fr")?.text == "Seed",
             "the row keeps its previous text"
         )
         let warnings = archiveWarnings(sut.model)
@@ -328,7 +327,7 @@ extension AppModelArchiveWriteBackTests {
             "the recording row carries the landed write"
         )
         #expect(
-            sut.model.entries.first?.translation(for: "en") == translation,
+            sut.model.pane.entries.first?.translation(for: "en") == translation,
             "the pane row swaps to the landed text"
         )
         #expect(sut.model.archiveProjection.summaries.isEmpty, "the recording row never joins the window list")
@@ -352,7 +351,7 @@ extension AppModelArchiveWriteBackTests {
         #expect(warnings.count == 1, "one warning for the session")
         #expect(warnings.first?.isClosable == false, "the live warning is a persistent condition")
         #expect(
-            sut.model.entries.first?.translation(for: "en") == translation,
+            sut.model.pane.entries.first?.translation(for: "en") == translation,
             "the row is swapped although the store lacks the write"
         )
         #expect(sut.model.archiveProjection.summaries == summariesBefore, "a lost write leaves the window list alone")
@@ -381,11 +380,11 @@ extension AppModelArchiveWriteBackTests {
             "every landed pull persists in the store"
         )
         #expect(
-            sut.model.entries.map { entry in entry.translations } == expectedLandings,
+            sut.model.pane.entries.map { entry in entry.translations } == expectedLandings,
             "the pane swaps each row to its landed translation"
         )
         #expect(
-            sut.model.openArchive?.summary.languageCount(for: "fr")
+            sut.model.pane.openArchive?.summary.languageCount(for: "fr")
                 == ArchiveLanguageCount(lang: "fr", translated: 3),
             "the banner's language count refreshes from the projection"
         )
@@ -411,7 +410,7 @@ extension AppModelArchiveWriteBackTests {
         sut.model.closeArchive()
         sut.model.openArchiveSession(id: sut.id)
         #expect(
-            sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.text }
+            sut.model.pane.entries.compactMap { entry in entry.translation(for: "fr")?.text }
                 == ["T:こんにちは", "T:さようなら", "T:おはよう"],
             "a reopen reads every write-back out of the store"
         )

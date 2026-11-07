@@ -27,7 +27,7 @@ struct AppModelRetranslationTests {
     /// Waits for the row to carry a translation, i.e. for the queue's `result`
     /// handler to have run `applyTranslation`.
     private func waitForTranslation(_ model: AppModel) async -> Bool {
-        await pollUntil(timeout: resultTimeout) { model.entries.first?.joinedTranslations != nil }
+        await pollUntil(timeout: resultTimeout) { model.pane.entries.first?.joinedTranslations != nil }
     }
 
     // MARK: - Replace-on-arrival routing
@@ -47,7 +47,7 @@ struct AppModelRetranslationTests {
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
         #expect(await waitForTranslation(model), "the first pass translates the row")
-        #expect(model.entries[0].joinedTranslations == "EN:\(sentenceText)")
+        #expect(model.pane.entries[0].joinedTranslations == "EN:\(sentenceText)")
 
         model.retranslateSentence(sentence)
         #expect(model.pendingRetranslations == [7], "the row dims while the retry is in flight")
@@ -56,8 +56,8 @@ struct AppModelRetranslationTests {
             "the landing result clears the in-flight marker"
         )
 
-        #expect(model.entries[0].translations.count == 1, "replaced, not appended")
-        #expect(model.entries[0].joinedTranslations == "EN:\(sentenceText)")
+        #expect(model.pane.entries[0].translations.count == 1, "replaced, not appended")
+        #expect(model.pane.entries[0].joinedTranslations == "EN:\(sentenceText)")
     }
 
     /// A second click while the first retry is still outstanding must not queue
@@ -106,7 +106,7 @@ struct AppModelRetranslationTests {
             "the single retry result lands and clears the marker"
         )
         #expect(
-            model.entries[0].translations.count == 1,
+            model.pane.entries[0].translations.count == 1,
             "exactly one retry result lands, replaced in place"
         )
         #expect(engine.recordedBatches.map(\.count) == [1, 1], "one flight per pass, no more")
@@ -144,7 +144,7 @@ struct AppModelRetranslationTests {
 
         engine.openGate()
         #expect(await waitForTranslation(model), "the original flight still delivers")
-        #expect(model.entries[0].translations.count == 1)
+        #expect(model.pane.entries[0].translations.count == 1)
     }
 
     // MARK: - Gating
@@ -184,7 +184,7 @@ struct AppModelRetranslationTests {
             "the retry is served while the source is lost"
         )
         #expect(engine.recordedBatches.count == 2)
-        #expect(model.entries[0].translations.count == 1)
+        #expect(model.pane.entries[0].translations.count == 1)
     }
 
     /// A session with no attached worker (the language pack was never
@@ -362,8 +362,8 @@ struct AppModelRetranslationTests {
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "First."))
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Second."))
 
-        #expect(model.entries[0].translations.count == 1, "replaced, not appended")
-        #expect(model.entries[0].joinedTranslations == "Second.")
+        #expect(model.pane.entries[0].translations.count == 1, "replaced, not appended")
+        #expect(model.pane.entries[0].joinedTranslations == "Second.")
     }
 
     /// The converse: a genuinely new target language still joins the row,
@@ -376,8 +376,8 @@ struct AppModelRetranslationTests {
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "First."))
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "ko", text: "두번째."))
 
-        #expect(model.entries[0].translations.count == 2)
-        #expect(model.entries[0].joinedTranslations == "First. / 두번째.")
+        #expect(model.pane.entries[0].translations.count == 2)
+        #expect(model.pane.entries[0].joinedTranslations == "First. / 두번째.")
     }
 }
 

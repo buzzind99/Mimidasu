@@ -40,7 +40,7 @@ struct AppModelArchiveTranslationBoundaryTests {
 
         sut.model.openArchiveSession(id: otherID)
 
-        #expect(sut.model.openArchive?.id == otherID, "the boundary swapped the pane")
+        #expect(sut.model.pane.openArchive?.id == otherID, "the boundary swapped the pane")
         #expect(
             !sut.model.archiveTranslationJob.isCancelled,
             "the boundary never trips the run's abort probe"
@@ -129,7 +129,7 @@ struct AppModelArchiveTranslationBoundaryTests {
         sut.model.retranslateSessionArrived(engine)
 
         sut.model.openArchiveSession(id: otherID)
-        #expect(sut.model.openArchive?.id == otherID, "the boundary swapped the pane")
+        #expect(sut.model.pane.openArchive?.id == otherID, "the boundary swapped the pane")
         // Short enough that a lost engine would time out and report instead
         // of flying; a stored engine resolves without touching the window.
         sut.model.laneArmTimeout = .milliseconds(60)

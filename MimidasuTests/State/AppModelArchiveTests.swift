@@ -120,8 +120,8 @@ struct AppModelArchiveTests {
         let opened = model.openArchiveSession(id: id)
 
         #expect(!opened)
-        #expect(model.openArchive == nil)
-        #expect(model.entries.isEmpty)
+        #expect(model.pane.openArchive == nil)
+        #expect(model.pane.entries.isEmpty)
     }
 
     @Test("starting is refused while an archive is open")
@@ -129,13 +129,13 @@ struct AppModelArchiveTests {
         let (model, id) = await makeModel()
         model.phase = .idle
         model.openArchiveSession(id: id)
-        let entriesBefore = model.entries
+        let entriesBefore = model.pane.entries
 
         model.start()
 
         #expect(model.phase == .idle, "the start never leaves idle")
-        #expect(model.openArchive?.id == id, "the archive stays open")
-        #expect(model.entries == entriesBefore, "the pane keeps showing the archive")
+        #expect(model.pane.openArchive?.id == id, "the archive stays open")
+        #expect(model.pane.entries == entriesBefore, "the pane keeps showing the archive")
         #expect(model.sessionStartedAt == nil, "no session began")
     }
 
@@ -144,8 +144,7 @@ struct AppModelArchiveTests {
     @Test("opening swaps in the rows, metadata, and anchors")
     func openLoadsRowsAndResetsAnchors() async {
         let (model, id) = await makeModel(tapLookupResolver: StubTapLookupResolver())
-        model.entries = [entry("live row")]
-        model.sessionCharacterCount = 42
+        model.pane.append(entry("live row").sentence)
         model.hudVisible = true
         model.translationOverlayVisible = true
         model.sessionStartedAt = ContinuousClock.now
@@ -156,10 +155,9 @@ struct AppModelArchiveTests {
         let opened = model.openArchiveSession(id: id)
 
         #expect(opened)
-        #expect(model.openArchive?.id == id)
-        #expect(model.entries.map { entry in entry.sentence.text } == ["こんにちは", "さようなら"])
-        #expect(model.entryPositionBySentence == [0: 0, 1: 1])
-        #expect(model.sessionCharacterCount == "こんにちは".count + "さようなら".count)
+        #expect(model.pane.openArchive?.id == id)
+        #expect(model.pane.entries.map { entry in entry.sentence.text } == ["こんにちは", "さようなら"])
+        #expect(model.pane.characterCount == "こんにちは".count + "さようなら".count)
         #expect(model.lookupPresentation == nil)
         #expect(!model.hudVisible)
         #expect(!model.translationOverlayVisible)
@@ -175,37 +173,36 @@ struct AppModelArchiveTests {
         let opened = model.openArchiveSession(id: 9999)
 
         #expect(!opened)
-        #expect(model.openArchive == nil)
-        #expect(model.entries.isEmpty)
+        #expect(model.pane.openArchive == nil)
+        #expect(model.pane.entries.isEmpty)
     }
 
     @Test("closing empties the pane without restoring the live rows")
     func closeEmptiesPane() async {
         let (model, id) = await makeModel(tapLookupResolver: StubTapLookupResolver())
         model.openArchiveSession(id: id)
-        #expect(!model.entries.isEmpty)
+        #expect(!model.pane.entries.isEmpty)
         await seedLookup(model)
         #expect(model.lookupPresentation != nil)
 
         model.closeArchive()
 
-        #expect(model.openArchive == nil)
-        #expect(model.entries.isEmpty)
-        #expect(model.entryPositionBySentence.isEmpty)
-        #expect(model.sessionCharacterCount == 0)
+        #expect(model.pane.openArchive == nil)
+        #expect(model.pane.entries.isEmpty)
+        #expect(model.pane.characterCount == 0)
         #expect(model.lookupPresentation == nil)
     }
 
     @Test("opening and closing an archive bumps the transcript revision")
     func openCloseBumpsEntriesRevision() async {
         let (model, id) = await makeModel()
-        let start = model.entriesRevision
+        let start = model.pane.entriesRevision
 
         #expect(model.openArchiveSession(id: id))
-        #expect(model.entriesRevision == start + 1)
+        #expect(model.pane.entriesRevision == start + 1)
 
         model.closeArchive()
-        #expect(model.entriesRevision == start + 2)
+        #expect(model.pane.entriesRevision == start + 2)
     }
 
     // MARK: - Bulk-run boundaries
@@ -229,7 +226,7 @@ struct AppModelArchiveTests {
             sut.model.openArchiveSession(id: sut.id),
             "the same-id reopen reports success"
         )
-        #expect(sut.model.openArchive?.id == sut.id, "the same archive stays open")
+        #expect(sut.model.pane.openArchive?.id == sut.id, "the same archive stays open")
 
         #expect(sut.model.archiveTranslationJob.activity != .idle, "the same-id reopen must not cancel the run")
         #expect(archiveToast(sut.model) != nil, "its progress card stays up")
@@ -299,16 +296,16 @@ struct AppModelArchiveTests {
     func saveOpenArchivePromotesOnce() async {
         let (model, id) = await makeModel()
         model.openArchiveSession(id: id)
-        #expect(model.openArchive?.summary.saved == false)
+        #expect(model.pane.openArchive?.summary.saved == false)
 
         model.saveOpenArchive()
         #expect(model.archive.list().first?.saved == true)
-        #expect(model.openArchive?.summary.saved == true)
+        #expect(model.pane.openArchive?.summary.saved == true)
         #expect(
             model.archiveProjection.summaries.first { summary in summary.id == id }?.saved == true,
             "the cached row flips to saved"
         )
-        #expect(model.openArchive?.summary == model.archiveProjection.openSummary)
+        #expect(model.pane.openArchive?.summary == model.archiveProjection.openSummary)
 
         let summariesAfterPromote = model.archiveProjection.summaries
         let openSummaryAfterPromote = model.archiveProjection.openSummary
@@ -343,14 +340,14 @@ struct AppModelArchiveTests {
             model.archiveProjection.summaries.first?.name == "Lecture 3",
             "the cached row carries the new name"
         )
-        #expect(model.openArchive?.summary.name == "Lecture 3")
-        #expect(model.openArchive?.summary == model.archiveProjection.openSummary)
+        #expect(model.pane.openArchive?.summary.name == "Lecture 3")
+        #expect(model.pane.openArchive?.summary == model.archiveProjection.openSummary)
 
         model.renameArchive(id: id, name: "  ")
         #expect(model.archive.list().first?.name == nil)
         #expect(model.archiveProjection.summaries.first?.name == nil, "the cached row clears the name")
-        #expect(model.openArchive?.summary.name == nil)
-        #expect(model.openArchive?.summary == model.archiveProjection.openSummary)
+        #expect(model.pane.openArchive?.summary.name == nil)
+        #expect(model.pane.openArchive?.summary == model.archiveProjection.openSummary)
     }
 
     @Test("each failed archive command warns dismissibly without changing either surface")
@@ -393,10 +390,10 @@ struct AppModelArchiveTests {
 
         model.deleteArchive(id: id)
 
-        #expect(model.openArchive == nil)
+        #expect(model.pane.openArchive == nil)
         #expect(model.archiveProjection.openSummary == nil)
         #expect(model.archiveProjection.summaries.isEmpty)
-        #expect(model.entries.isEmpty)
+        #expect(model.pane.entries.isEmpty)
         #expect(model.archive.list().isEmpty)
         #expect(model.archive.load(id: id) == nil)
     }
@@ -442,7 +439,7 @@ extension AppModelArchiveTests {
 
         sut.model.openArchiveSession(id: secondID)
 
-        #expect(sut.model.openArchive?.id == secondID)
+        #expect(sut.model.pane.openArchive?.id == secondID)
         #expect(sut.model.archiveTranslationRunning, "the swap keeps the run claimed")
         #expect(
             sut.model.archiveTranslationJob.activity(for: sut.id).isRunning,

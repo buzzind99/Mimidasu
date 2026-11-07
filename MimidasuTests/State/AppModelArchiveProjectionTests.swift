@@ -85,7 +85,7 @@ struct AppModelArchiveProjectionTests {
         #expect(row?.status == .complete, "the finalized row joins the cache")
         #expect(row == store.summary(id: id), "the cached row matches a fresh store read")
         #expect(model.archiveProjection.openSummary == nil, "finalizing opens no session")
-        #expect(model.openArchive == nil, "the pane stays empty")
+        #expect(model.pane.openArchive == nil, "the pane stays empty")
     }
 
     @Test("an archive write-back refreshes both the cached row and the open banner")
@@ -108,12 +108,12 @@ struct AppModelArchiveProjectionTests {
             "the cached row matches a fresh store read"
         )
         #expect(
-            sut.model.openArchive?.summary.languageCount(for: "fr")
+            sut.model.pane.openArchive?.summary.languageCount(for: "fr")
                 == ArchiveLanguageCount(lang: "fr", translated: 1),
             "the open summary refreshes from the projection"
         )
         #expect(
-            sut.model.openArchive?.summary == sut.model.archiveProjection.openSummary,
+            sut.model.pane.openArchive?.summary == sut.model.archiveProjection.openSummary,
             "the open summary is the projection's one copy"
         )
         #expect(
@@ -126,12 +126,12 @@ struct AppModelArchiveProjectionTests {
     func promoteRenameDeleteTrackTheCache() async throws {
         let sut = try await makeListedSUT()
         sut.model.openArchiveSession(id: sut.id)
-        #expect(sut.model.openArchive?.summary.saved == false)
+        #expect(sut.model.pane.openArchive?.summary.saved == false)
 
         sut.model.promoteArchive(id: sut.id)
 
         #expect(cachedRow(sut.model, id: sut.id)?.saved == true, "the cached row flips to saved")
-        #expect(sut.model.openArchive?.summary.saved == true, "the open summary flips to saved")
+        #expect(sut.model.pane.openArchive?.summary.saved == true, "the open summary flips to saved")
         #expect(
             cachedRow(sut.model, id: sut.id) == sut.model.archiveProjection.openSummary,
             "the promotion updates both surfaces from one value"
@@ -143,7 +143,7 @@ struct AppModelArchiveProjectionTests {
             cachedRow(sut.model, id: sut.id)?.name == "Interview",
             "the cached row carries the trimmed name"
         )
-        #expect(sut.model.openArchive?.summary.name == "Interview", "the open summary carries the trimmed name")
+        #expect(sut.model.pane.openArchive?.summary.name == "Interview", "the open summary carries the trimmed name")
         #expect(
             cachedRow(sut.model, id: sut.id) == sut.model.archiveProjection.openSummary,
             "the rename updates both surfaces from one value"
@@ -153,7 +153,7 @@ struct AppModelArchiveProjectionTests {
 
         #expect(cachedRow(sut.model, id: sut.id) == nil, "the deleted row leaves the cache")
         #expect(sut.model.archiveProjection.openSummary == nil, "the deleted open summary clears")
-        #expect(sut.model.openArchive == nil, "the pane closes with the deleted session")
+        #expect(sut.model.pane.openArchive == nil, "the pane closes with the deleted session")
         #expect(sut.store.summary(id: sut.id) == nil, "the store holds nothing")
     }
 
@@ -164,8 +164,7 @@ struct AppModelArchiveProjectionTests {
         let id = try #require(seedRecording(store))
         model.recordingSessionID = id
         let seed = archiveSentence(0, text: "こんにちは")
-        model.entries = [SessionEntry(sentence: seed)]
-        model.entryPositionBySentence = [seed.index: 0]
+        model.pane.append(seed)
         #expect(model.archiveProjection.summaries.isEmpty, "the recording row is not listed")
 
         let landed = model.applyTranslation(
@@ -175,7 +174,7 @@ struct AppModelArchiveProjectionTests {
         #expect(landed, "the live row swap reports its landing")
         #expect(model.archiveProjection.summaries.isEmpty, "the window list gains no recording row")
         #expect(model.archiveProjection.openSummary == nil, "a live write opens no session")
-        #expect(model.openArchive == nil, "the pane stays empty")
+        #expect(model.pane.openArchive == nil, "the pane stays empty")
         #expect(
             store.load(id: id)?.entries.first?.translations
                 == [SentenceTranslation(lang: "en", text: "Hello")],
@@ -215,7 +214,7 @@ struct AppModelArchiveProjectionTests {
 
         #expect(model.archiveProjection.summaries == summariesBefore, "the cache keeps its rows")
         #expect(model.archiveProjection.openSummary == openSummaryBefore, "the open summary is unchanged")
-        #expect(model.openArchive == nil, "the pane stays empty")
+        #expect(model.pane.openArchive == nil, "the pane stays empty")
         #expect(
             model.archiveProjection.availability == .openFailed,
             "the degraded store reads as unopenable"
@@ -250,7 +249,7 @@ struct AppModelArchiveProjectionTests {
         model.openArchiveSession(id: archiveID)
         #expect(model.archiveProjection.openSummary?.id == archiveID, "opening stores the projection's open summary")
         #expect(
-            model.openArchive?.summary == model.archiveProjection.openSummary,
+            model.pane.openArchive?.summary == model.archiveProjection.openSummary,
             "the pane reads the projection's open summary"
         )
     }
@@ -267,7 +266,7 @@ struct AppModelArchiveProjectionTests {
             "the listed row carries the new membership"
         )
         #expect(
-            sut.model.openArchive?.summary.languageCount(for: "fr")
+            sut.model.pane.openArchive?.summary.languageCount(for: "fr")
                 == ArchiveLanguageCount(lang: "fr", translated: 0),
             "the open summary carries the new membership"
         )
@@ -305,18 +304,18 @@ struct AppModelArchiveProjectionTests {
 
         sut.model.promoteArchive(id: sut.id)
         #expect(cachedRow(sut.model, id: sut.id)?.saved == true, "the listed row flips to saved")
-        #expect(sut.model.openArchive?.summary.saved == true, "the open summary flips to saved")
+        #expect(sut.model.pane.openArchive?.summary.saved == true, "the open summary flips to saved")
         #expect(cachedRow(sut.model, id: sut.id) == sut.model.archiveProjection.openSummary)
 
         sut.model.renameArchive(id: sut.id, name: "Named")
         #expect(cachedRow(sut.model, id: sut.id)?.name == "Named", "the listed row carries the new name")
-        #expect(sut.model.openArchive?.summary.name == "Named", "the open summary carries the new name")
+        #expect(sut.model.pane.openArchive?.summary.name == "Named", "the open summary carries the new name")
         #expect(cachedRow(sut.model, id: sut.id) == sut.model.archiveProjection.openSummary)
 
         sut.model.deleteArchive(id: sut.id)
         #expect(cachedRow(sut.model, id: sut.id) == nil, "the deleted row leaves the cache")
         #expect(sut.model.archiveProjection.openSummary == nil, "the deleted open summary clears")
-        #expect(sut.model.openArchive == nil, "the pane closes with the deleted session")
+        #expect(sut.model.pane.openArchive == nil, "the pane closes with the deleted session")
         #expect(sut.store.summary(id: sut.id) == nil, "the store holds nothing")
     }
 

@@ -52,14 +52,14 @@ struct AppModelTranslationTests {
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                !(model.entries.first?.translations.isEmpty ?? true)
+                !(model.pane.entries.first?.translations.isEmpty ?? true)
             },
             "the translation lands in the transcript"
         )
-        let translation = try #require(model.entries.first?.translations.first)
+        let translation = try #require(model.pane.entries.first?.translations.first)
         #expect(translation.lang == "en")
         #expect(!translation.text.isEmpty)
-        #expect(model.entries[0].joinedTranslations == translation.text)
+        #expect(model.pane.entries[0].joinedTranslations == translation.text)
         #expect(model.translationRuntime.status == .ready)
     }
 
@@ -77,16 +77,16 @@ struct AppModelTranslationTests {
         model.sessionController.onSentence?(makeSentence(index: 0, text: sentenceText))
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                !(model.entries.first?.translations.isEmpty ?? true)
+                !(model.pane.entries.first?.translations.isEmpty ?? true)
             },
             "the first translation lands before the repeat"
         )
 
         model.sessionController.onSentence?(makeSentence(index: 1, text: sentenceText))
 
-        #expect(model.entries.count == 2)
+        #expect(model.pane.entries.count == 2)
         #expect(
-            model.entries[1].translations == model.entries[0].translations,
+            model.pane.entries[1].translations == model.pane.entries[0].translations,
             "same text must resolve from the cache without a second round-trip"
         )
     }

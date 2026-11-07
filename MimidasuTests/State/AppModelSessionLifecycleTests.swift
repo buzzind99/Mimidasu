@@ -222,7 +222,7 @@ struct AppModelSessionLifecycleTests {
         }
         #expect(summary.status == .complete)
         #expect(summary.sentenceCount == 1, "the drain-flushed sentence is in the finalized row")
-        #expect(sut.model.entries.count == 1)
+        #expect(sut.model.pane.entries.count == 1)
         #expect(sut.model.sessionEndedAt != nil, "the end anchor is stamped")
         #expect(
             sut.model.toasts.toasts.contains { toast in toast.key == ToastKey.archiveRecent },

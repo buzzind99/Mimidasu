@@ -26,12 +26,12 @@ struct AppModelSessionStatsTests {
     func characterCountSumsTranscriptText() async {
         let model = await makeSUT()
 
-        #expect(model.sessionCharacterCount == 0, "a fresh session counts nothing")
+        #expect(model.pane.characterCount == 0, "a fresh session counts nothing")
 
         model.sessionController.onSentence?(makeSentence(index: 0, text: "テスト"))
         model.sessionController.onSentence?(makeSentence(index: 1, text: "こんにちは"))
 
-        #expect(model.sessionCharacterCount == 8)
+        #expect(model.pane.characterCount == 8)
     }
 
     // MARK: - Session clock

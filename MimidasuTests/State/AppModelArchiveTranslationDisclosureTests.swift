@@ -29,7 +29,7 @@ extension AppModelArchiveTranslationTests {
         #expect(sut.model.archiveTranslationJob.lastRun?.request.engine == .deepl)
         #expect(sut.model.archiveTranslationJob.lastRun?.kind == .deepl)
         #expect(
-            sut.model.entries.first?.translation(for: "fr")
+            sut.model.pane.entries.first?.translation(for: "fr")
                 == SentenceTranslation(lang: "fr", text: "T:こんにちは", engine: .deepl)
         )
     }

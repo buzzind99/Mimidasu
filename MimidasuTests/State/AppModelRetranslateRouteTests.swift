@@ -180,7 +180,7 @@ struct AppModelRetranslateRouteTests {
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
         #expect(
-            await pollUntil(timeout: resultTimeout) { model.entries[0].joinedTranslations == "EN:テスト" },
+            await pollUntil(timeout: resultTimeout) { model.pane.entries[0].joinedTranslations == "EN:テスト" },
             "the initial session translation is delivered before the retry"
         )
 
@@ -189,8 +189,8 @@ struct AppModelRetranslateRouteTests {
         #expect(
             await pollUntil(timeout: resultTimeout) {
                 queueEngine.recordedBatches.count == 2
-                    && model.entries[0].joinedTranslations == "EN:テスト"
-                    && model.entries[0].translations.first?.engine == nil
+                    && model.pane.entries[0].joinedTranslations == "EN:テスト"
+                    && model.pane.entries[0].translations.first?.engine == nil
             },
             "the queue's engine served the retry as a second unstamped flight"
         )
@@ -217,7 +217,7 @@ struct AppModelRetranslateRouteTests {
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
         #expect(
-            await pollUntil(timeout: resultTimeout) { model.entries[0].joinedTranslations == "EN:テスト" },
+            await pollUntil(timeout: resultTimeout) { model.pane.entries[0].joinedTranslations == "EN:テスト" },
             "the initial session translation is delivered before the retry"
         )
 
@@ -226,8 +226,8 @@ struct AppModelRetranslateRouteTests {
         #expect(
             await pollUntil(timeout: resultTimeout) {
                 queueEngine.recordedBatches.count == 2
-                    && model.entries[0].joinedTranslations == "EN:テスト"
-                    && model.entries[0].translations.first?.engine == nil
+                    && model.pane.entries[0].joinedTranslations == "EN:テスト"
+                    && model.pane.entries[0].translations.first?.engine == nil
             },
             "the queue's engine served the retry as a second unstamped flight"
         )

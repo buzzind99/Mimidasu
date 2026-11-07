@@ -52,7 +52,7 @@ struct AppModelRetranslateLaneFailureTests {
         #expect(model.pendingRetranslations.isEmpty, "the failed build leaves no marker")
         #expect(model.lanePendingRetranslations.isEmpty)
         #expect(
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the row keeps its previous translation"
         )
         let toast = model.toasts.toasts.first(where: { candidate in
@@ -69,7 +69,7 @@ struct AppModelRetranslateLaneFailureTests {
         let worker = await harness.attachWorker(model)
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.entries[0].translations
+                model.pane.entries[0].translations
                     == [SentenceTranslation(lang: "en", text: "EN:テスト")]
             },
             "the failed build left the queued sentence in the backlog"
@@ -127,7 +127,7 @@ struct AppModelRetranslateLaneFailureTests {
             )
         )
         #expect(
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the row keeps its previous translation"
         )
     }
@@ -153,7 +153,7 @@ struct AppModelRetranslateLaneFailureTests {
         // "Original" text is what the failed flight must not replace.
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:テスト")]
+                model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:テスト")]
             },
             "the worker's initial delivery landed"
         )
@@ -181,7 +181,7 @@ struct AppModelRetranslateLaneFailureTests {
         #expect(model.pendingRetranslations.isEmpty, "no marker outlives the stop")
         #expect(model.lanePendingRetranslations.isEmpty)
         #expect(
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the failed flight must not swap the row"
         )
     }
@@ -221,7 +221,7 @@ struct AppModelRetranslateLaneFailureTests {
             "a cancelled flight posts nothing"
         )
         #expect(
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the cancelled flight must not swap the row"
         )
     }

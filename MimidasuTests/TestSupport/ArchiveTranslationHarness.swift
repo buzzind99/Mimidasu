@@ -30,7 +30,7 @@ func archiveSentence(_ index: Int, text: String) -> Sentence {
 /// The open archive's row for `index`.
 @MainActor
 func entrySentence(in model: AppModel, at index: Int) -> Sentence {
-    model.entries.first { entry in entry.sentence.index == index }!.sentence
+    model.pane.entries.first { entry in entry.sentence.index == index }!.sentence
 }
 
 /// The three rows a full `fr` run of the default fixture lands, in sentence

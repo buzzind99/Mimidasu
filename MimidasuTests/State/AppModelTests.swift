@@ -87,8 +87,8 @@ struct AppModelTests {
 
         model.sessionController.onSentence?(sentence)
 
-        #expect(model.entries.count == 1)
-        #expect(model.entries.first?.sentence == sentence)
+        #expect(model.pane.entries.count == 1)
+        #expect(model.pane.entries.first?.sentence == sentence)
         // The queue holds the untranslated sentence, so a bounded drain
         // times out instead of completing immediately.
         let drained = await model.translationQueue.drain(timeout: 0.05)
@@ -102,7 +102,7 @@ struct AppModelTests {
         model.sessionController.onSentence?(makeSentence(index: 0))
         model.sessionController.onSentence?(makeSentence(index: 1))
 
-        #expect(model.entries.map(\.sentence.index) == [0, 1])
+        #expect(model.pane.entries.map(\.sentence.index) == [0, 1])
     }
 
     // MARK: - applyTranslation(index:translation:)
@@ -116,10 +116,10 @@ struct AppModelTests {
             index: 7, translation: SentenceTranslation(lang: "en", text: translationText)
         )
 
-        #expect(model.entries[0].translations == [
+        #expect(model.pane.entries[0].translations == [
             SentenceTranslation(lang: "en", text: translationText)
         ])
-        #expect(model.entries[0].joinedTranslations == translationText)
+        #expect(model.pane.entries[0].joinedTranslations == translationText)
     }
 
     @Test("a translation for an unknown index is ignored")
@@ -129,33 +129,33 @@ struct AppModelTests {
 
         model.applyTranslation(index: 99, translation: SentenceTranslation(lang: "en", text: translationText))
 
-        #expect(model.entries[0].translations == [])
-        #expect(model.entries[0].joinedTranslations == nil)
+        #expect(model.pane.entries[0].translations == [])
+        #expect(model.pane.entries[0].joinedTranslations == nil)
     }
 
     // MARK: - Transcript revision
 
-    @Test("entriesRevision bumps on every entries write shape")
+    @Test("entriesRevision bumps on every pane write shape")
     func entriesRevisionTracksWrites() async {
         let model = await makeSUT()
-        let start = model.entriesRevision
+        let start = model.pane.entriesRevision
 
         model.sessionController.onSessionBegin?()
-        #expect(model.entriesRevision == start + 1, "session-begin clear")
+        #expect(model.pane.entriesRevision == start + 1, "session-begin clear")
 
         model.sessionController.onSentence?(makeSentence(index: 0))
-        #expect(model.entriesRevision == start + 2, "append")
+        #expect(model.pane.entriesRevision == start + 2, "append")
 
         model.applyTranslation(
             index: 0, translation: SentenceTranslation(lang: "en", text: translationText)
         )
-        #expect(model.entriesRevision == start + 3, "live translation landing")
+        #expect(model.pane.entriesRevision == start + 3, "live translation landing")
 
-        model.entries = [SessionEntry(sentence: makeSentence(index: 1))]
-        #expect(model.entriesRevision == start + 4, "assignment")
+        model.pane.append(makeSentence(index: 1))
+        #expect(model.pane.entriesRevision == start + 4, "append")
 
-        model.entries.removeAll()
-        #expect(model.entriesRevision == start + 5, "removeAll")
+        model.pane.beginLiveSession()
+        #expect(model.pane.entriesRevision == start + 5, "live clear")
     }
 
     // MARK: - Capture errors
@@ -283,7 +283,7 @@ struct AppModelTests {
 
         model.sessionController.onSessionBegin?()
 
-        #expect(model.entries.isEmpty)
+        #expect(model.pane.entries.isEmpty)
         #expect(model.hudPinnedIndex == nil)
     }
 

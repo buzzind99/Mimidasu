@@ -49,7 +49,7 @@ struct AppModelArchiveTranslationStoreTests {
         #expect(warnings.count == 1, "one warning card covers the run, not one per sentence")
         #expect(warnings.first?.isClosable == true, "the archive-mode warning is dismissible")
         #expect(
-            sut.model.entries.allSatisfy { entry in entry.translation(for: "fr") == nil },
+            sut.model.pane.entries.allSatisfy { entry in entry.translation(for: "fr") == nil },
             "a lost write leaves the pane row on its previous placeholder"
         )
         #expect(

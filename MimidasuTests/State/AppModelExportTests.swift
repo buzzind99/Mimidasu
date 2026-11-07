@@ -272,7 +272,7 @@ struct AppModelExportTests {
     @Test("json export in archive mode stamps the archive's stored metadata")
     func exportJsonUsesArchiveMetadata() async throws {
         let sut = await makeArchiveModel()
-        #expect(sut.model.openArchive?.id == sut.id)
+        #expect(sut.model.pane.openArchive?.id == sut.id)
 
         let data = try sut.model.export(format: .json)
 

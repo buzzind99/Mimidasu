@@ -67,7 +67,7 @@ struct AppModelArchiveLanguageTests {
         let sut = await makeSUT()
 
         #expect(sut.model.archiveViewingCode == "en", "the default is the stored target")
-        #expect(sut.model.archiveViewingLanguage == nil, "no override until one is picked")
+        #expect(sut.model.pane.viewingLanguage == nil, "no override until one is picked")
 
         sut.model.selectArchiveViewingLanguage("fr")
 
@@ -81,7 +81,7 @@ struct AppModelArchiveLanguageTests {
 
         sut.model.closeArchive()
 
-        #expect(sut.model.openArchive == nil)
+        #expect(sut.model.pane.openArchive == nil)
         #expect(sut.model.archiveViewingCode == nil)
     }
 
@@ -96,11 +96,11 @@ struct AppModelArchiveLanguageTests {
         #expect(added)
         #expect(sut.model.archiveViewingCode == "fr", "the added language becomes the viewed one")
         #expect(
-            sut.model.openArchive?.summary.languageCount(for: "fr")
+            sut.model.pane.openArchive?.summary.languageCount(for: "fr")
                 == ArchiveLanguageCount(lang: "fr", translated: 0),
             "the banner's chip appears at 0/3"
         )
-        #expect(sut.model.openArchive?.summary.sentenceCount == 3)
+        #expect(sut.model.pane.openArchive?.summary.sentenceCount == 3)
     }
 
     @Test("adding a language to another stored session never switches the pane")
@@ -155,7 +155,7 @@ struct AppModelArchiveLanguageTests {
             "the repeated add writes the same membership"
         )
         #expect(
-            sut.model.openArchive?.summary.languageCount(for: "fr")
+            sut.model.pane.openArchive?.summary.languageCount(for: "fr")
                 == ArchiveLanguageCount(lang: "fr", translated: 0),
             "the language stays one membership entry at zero"
         )
@@ -165,10 +165,10 @@ struct AppModelArchiveLanguageTests {
             "the listed row carries the same one membership entry"
         )
         #expect(
-            sut.model.openArchive?.summary.langs.filter { count in count.lang == "fr" }.count == 1,
+            sut.model.pane.openArchive?.summary.langs.filter { count in count.lang == "fr" }.count == 1,
             "the language set stays set-valued"
         )
-        #expect(sut.model.openArchive?.summary == sut.model.archiveProjection.openSummary)
+        #expect(sut.model.pane.openArchive?.summary == sut.model.archiveProjection.openSummary)
     }
 
     @Test("membership survives a close and reopen")
@@ -180,7 +180,7 @@ struct AppModelArchiveLanguageTests {
         sut.model.openArchiveSession(id: sut.id)
 
         #expect(
-            sut.model.openArchive?.summary.languageCount(for: "fr")
+            sut.model.pane.openArchive?.summary.languageCount(for: "fr")
                 == ArchiveLanguageCount(lang: "fr", translated: 0),
             "the membership is still there"
         )
@@ -193,14 +193,14 @@ struct AppModelArchiveLanguageTests {
     func summaryLanguageSetLeadsWithTarget() async {
         let sut = await makeSUT(translations: [0: SentenceTranslation(lang: "de", text: "Seed")])
         #expect(
-            sut.model.openArchive?.summary.langs.map(\.lang) == ["en", "de"],
+            sut.model.pane.openArchive?.summary.langs.map(\.lang) == ["en", "de"],
             "the stored target leads, the translation-only language follows"
         )
 
         sut.model.addArchiveLanguage(id: sut.id, lang: "fr")
 
         #expect(
-            sut.model.openArchive?.summary.langs.map(\.lang) == ["en", "fr", "de"],
+            sut.model.pane.openArchive?.summary.langs.map(\.lang) == ["en", "fr", "de"],
             "the added membership lands after the target — a chooser subtracting this set offers no re-add"
         )
     }
@@ -214,7 +214,7 @@ struct AppModelArchiveLanguageTests {
 
         #expect(added)
         #expect(
-            sut.model.openArchive?.summary.languageCount(for: "fr")
+            sut.model.pane.openArchive?.summary.languageCount(for: "fr")
                 == ArchiveLanguageCount(lang: "fr", translated: 0),
             "the membership row exists before anything is translated"
         )
@@ -235,7 +235,7 @@ struct AppModelArchiveLanguageTests {
         sut.model.applyTranslation(index: 2, translation: SentenceTranslation(lang: "fr", text: "Third"))
 
         #expect(
-            sut.model.openArchive?.summary.languageCount(for: "fr")
+            sut.model.pane.openArchive?.summary.languageCount(for: "fr")
                 == ArchiveLanguageCount(lang: "fr", translated: 3),
             "the banner's cached counts refresh in place"
         )
@@ -249,6 +249,6 @@ struct AppModelArchiveLanguageTests {
             "a complete language reads as a full re-send"
         )
         #expect(sut.model.openArchiveLanguageSet?.isComplete("fr") == true)
-        #expect(sut.model.openArchive?.summary == sut.model.archiveProjection.openSummary)
+        #expect(sut.model.pane.openArchive?.summary == sut.model.archiveProjection.openSummary)
     }
 }

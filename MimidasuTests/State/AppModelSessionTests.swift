@@ -318,7 +318,7 @@ struct AppModelSessionTests {
         ])
         sut.model.start()
         #expect(await pollUntil { sut.model.phase == .running }, "start brings the session up to running")
-        #expect(await pollUntil { sut.model.entries.count == 1 }, "the scripted final lands in the transcript")
+        #expect(await pollUntil { sut.model.pane.entries.count == 1 }, "the scripted final lands in the transcript")
 
         sut.capture.onIOError?(.setupFailed("stream died"))
         #expect(await pollUntil { sut.model.phase == .sourceLost }, "the capture death parks the model on source lost")
@@ -332,7 +332,7 @@ struct AppModelSessionTests {
 
         #expect(await pollUntil { sut.model.phase == .running }, "the restart brings the session back up")
         #expect(sut.model.toasts.toasts.isEmpty, "the capture.lost card is dismissed on recovery")
-        #expect(sut.model.entries.count == 1, "entries survive the restart")
+        #expect(sut.model.pane.entries.count == 1, "entries survive the restart")
         #expect(
             sut.log.contains(inOrder: ["capture.start", "capture.stop", "capture.start"]),
             "only the capture stream was rebuilt"

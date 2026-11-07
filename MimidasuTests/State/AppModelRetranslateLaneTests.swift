@@ -83,7 +83,7 @@ struct AppModelRetranslateLaneTests {
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.entries[0].translations
+                model.pane.entries[0].translations
                     == [SentenceTranslation(lang: "en", text: "JA:テスト", engine: .google)]
             },
             "the lane result lands stamped"
@@ -95,7 +95,7 @@ struct AppModelRetranslateLaneTests {
         // A later repeat of the sentence (a fresh row) serves through the
         // normal queue path: the retried text, no provenance.
         model.sessionController.onSentence?(makeSentence(index: 9))
-        let repeatEntry = model.entries.first(where: { entry in entry.sentence.index == 9 })
+        let repeatEntry = model.pane.entries.first(where: { entry in entry.sentence.index == 9 })
         #expect(repeatEntry?.translations == [SentenceTranslation(lang: "en", text: "JA:テスト")])
         #expect(repeatEntry?.translations.first?.engine == nil, "the seed is unstamped")
     }
@@ -128,7 +128,7 @@ struct AppModelRetranslateLaneTests {
         #expect(model.pendingRetranslations.isEmpty, "nothing is in flight — no marker")
         #expect(model.lanePendingRetranslations.isEmpty)
         #expect(
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the row keeps its previous translation"
         )
         let toast = model.toasts.toasts.first(where: { candidate in candidate.key == ToastKey.retranslate })
@@ -224,8 +224,8 @@ struct AppModelRetranslateLaneTests {
         // emptied backlog is what keeps the stop's drain instant.
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:一")]
-                    && model.entries[1].translations == [SentenceTranslation(lang: "en", text: "EN:二")]
+                model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:一")]
+                    && model.pane.entries[1].translations == [SentenceTranslation(lang: "en", text: "EN:二")]
             },
             "the initial translations are delivered before the retries"
         )
@@ -302,7 +302,7 @@ struct AppModelRetranslateLaneTests {
             "a flight the lane cannot deliver retires its marker"
         )
         #expect(
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the row keeps its previous translation"
         )
     }
@@ -324,7 +324,7 @@ struct AppModelRetranslateLaneTests {
         // from the late lane landing this test hunts.
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:テスト")]
+                model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:テスト")]
             },
             "the worker's initial delivery landed"
         )
@@ -344,7 +344,7 @@ struct AppModelRetranslateLaneTests {
         engine.openGate()
         await laneTask?.value
         #expect(
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the late landing must not swap the row"
         )
         #expect(
@@ -369,7 +369,7 @@ struct AppModelRetranslateLaneTests {
         // "Original" overwrite below must not race the worker's landing.
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:テスト")]
+                model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:テスト")]
             },
             "the initial delivery landed before the retry"
         )
@@ -403,7 +403,7 @@ struct AppModelRetranslateLaneTests {
 
         await laneTask?.value
         #expect(
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Next session")],
+            model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "Next session")],
             "the previous session's translation must not land on this session's row"
         )
         #expect(model.pendingRetranslations.isEmpty, "no stale marker survives the boundary")
@@ -444,7 +444,7 @@ struct AppModelRetranslateLaneTests {
         )
         #expect(!model.lanePendingRetranslations.contains(4))
         #expect(
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the row keeps its previous translation"
         )
     }
@@ -491,7 +491,7 @@ struct AppModelRetranslateLaneTests {
             "the refused flight leaves no marker behind"
         )
         #expect(
-            model.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
+            model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the torn-down lane's result never lands"
         )
         #expect(

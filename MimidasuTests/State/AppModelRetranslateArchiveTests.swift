@@ -149,7 +149,7 @@ struct AppModelRetranslateArchiveTests {
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                sut.model.entries.first?.translations
+                sut.model.pane.entries.first?.translations
                     == [SentenceTranslation(lang: "fr", text: "FR:こんにちは", engine: .appleFast)]
             },
             "the fast-model result lands stamped with the archive target"
@@ -169,7 +169,7 @@ struct AppModelRetranslateArchiveTests {
         sut.model.closeArchive()
         sut.model.openArchiveSession(id: sut.id)
         #expect(
-            sut.model.entries.first?.translations
+            sut.model.pane.entries.first?.translations
                 == [SentenceTranslation(lang: "fr", text: "FR:こんにちは", engine: .appleFast)]
         )
     }
@@ -191,7 +191,7 @@ struct AppModelRetranslateArchiveTests {
         engine.open()
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                sut.model.entries.first?.translations.first?.engine == .appleFast
+                sut.model.pane.entries.first?.translations.first?.engine == .appleFast
             }
         )
         #expect(engine.callCount == 1, "exactly one flight ran")
@@ -214,7 +214,7 @@ struct AppModelRetranslateArchiveTests {
         // the store never sees the orphan.
         #expect(await pollUntil(timeout: resultTimeout) { sut.model.pendingRetranslations.isEmpty })
         #expect(sut.store.load(id: sut.id)?.entries.first?.translations.isEmpty == true)
-        #expect(sut.model.entries.isEmpty, "the pane emptied with the close")
+        #expect(sut.model.pane.entries.isEmpty, "the pane emptied with the close")
     }
 
     // MARK: - External route
@@ -234,7 +234,7 @@ struct AppModelRetranslateArchiveTests {
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                sut.model.entries.last?.translations
+                sut.model.pane.entries.last?.translations
                     == [SentenceTranslation(lang: "fr", text: "FR:さようなら", engine: .google)]
             },
             "the external result lands stamped with the archive target"
@@ -278,7 +278,7 @@ struct AppModelRetranslateArchiveTests {
         #expect(archivePlan(sut.model).isAlternate)
         #expect(
             sut.model.retranslateRowPlan(
-                for: sut.model.entries[0], surface: .archive, target: target
+                for: sut.model.pane.entries[0], surface: .archive, target: target
             ).isEnabled
         )
 
@@ -288,7 +288,7 @@ struct AppModelRetranslateArchiveTests {
         #expect(!archivePlan(sut.model).isAlternate)
         #expect(
             !sut.model.retranslateRowPlan(
-                for: sut.model.entries[0], surface: .archive, target: target
+                for: sut.model.pane.entries[0], surface: .archive, target: target
             ).isEnabled,
             "the unavailable route hides the retry button"
         )
@@ -405,11 +405,11 @@ struct AppModelRetranslateArchiveTests {
             "both stored results name the click-time language, not the switched viewing language"
         )
         #expect(
-            sut.model.entries.compactMap { entry in entry.translation(for: "de") }.isEmpty,
+            sut.model.pane.entries.compactMap { entry in entry.translation(for: "de") }.isEmpty,
             "no result is stored under the switched language"
         )
         #expect(
-            sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
+            sut.model.pane.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
                 == [.appleFast, .appleFast],
             "both row markers describe the click-time language's result"
         )

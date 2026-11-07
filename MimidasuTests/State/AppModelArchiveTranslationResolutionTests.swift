@@ -52,7 +52,7 @@ struct ArchiveTranslationResolutionTests {
         )
         #expect(sut.model.archiveTranslationJob.lastRun?.kind == .appleHighFidelity)
         #expect(
-            sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
+            sut.model.pane.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
                 == [.appleHighFidelity, .appleHighFidelity, .appleHighFidelity],
             "every landed row is stamped high fidelity"
         )
@@ -192,7 +192,7 @@ struct ArchiveTranslationResolutionTests {
         )
         #expect(sut.model.archiveTranslationJob.lastRun?.kind == lane.kind)
         #expect(
-            sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
+            sut.model.pane.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
                 == [lane.kind, lane.kind, lane.kind],
             "every landed row is stamped with the resolved model"
         )
@@ -274,7 +274,7 @@ struct ArchiveTranslationResolutionTests {
         )
         #expect(sut.model.archiveTranslationJob.lastRun?.kind == .appleHighFidelity)
         #expect(
-            sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
+            sut.model.pane.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
                 == [.appleHighFidelity, .appleHighFidelity, .appleHighFidelity],
             "every landed row is stamped high fidelity"
         )
@@ -316,7 +316,7 @@ struct ArchiveTranslationResolutionTests {
         )
         #expect(sut.model.archiveTranslationJob.lastRun?.kind == .appleFast)
         #expect(
-            sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
+            sut.model.pane.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
                 == [.appleFast, .appleFast, .appleFast],
             "the stamps name the model that actually ran"
         )
@@ -342,7 +342,7 @@ struct ArchiveTranslationResolutionTests {
         )
         #expect(sut.model.archiveTranslationJob.lastRun?.kind == .appleFast)
         #expect(
-            sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
+            sut.model.pane.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
                 == [.appleFast, .appleFast, .appleFast],
             "the stamps name the model that actually ran"
         )
@@ -571,7 +571,7 @@ struct ArchiveTranslationAdoptionTests {
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                sut.model.entries.first(where: { entry in entry.sentence.index == 1 })?
+                sut.model.pane.entries.first(where: { entry in entry.sentence.index == 1 })?
                     .translation(for: "de") != nil
             },
             "the de retry lands normally"
@@ -581,7 +581,7 @@ struct ArchiveTranslationAdoptionTests {
             "only the de flight flew — the fr lane never adopted the de engine"
         )
         #expect(
-            sut.model.entries.compactMap { entry in entry.translation(for: "fr") }.isEmpty,
+            sut.model.pane.entries.compactMap { entry in entry.translation(for: "fr") }.isEmpty,
             "the fr row keeps no wrong-language result"
         )
         #expect(sut.model.pendingRetranslations.isEmpty, "the timed-out fr marker retires too")
@@ -615,7 +615,7 @@ struct ArchiveTranslationAdoptionTests {
             "the run times out and releases its claim"
         )
         #expect(
-            sut.model.entries.compactMap { entry in entry.translation(for: "fr") }.isEmpty,
+            sut.model.pane.entries.compactMap { entry in entry.translation(for: "fr") }.isEmpty,
             "no fr-stamped result ever lands"
         )
         #expect(engine.recordedBatches.isEmpty, "the de engine is never flown for the fr run")

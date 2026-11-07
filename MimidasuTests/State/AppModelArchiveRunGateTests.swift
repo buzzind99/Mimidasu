@@ -26,7 +26,7 @@ struct AppModelArchiveRunGateTests {
         sut.model.deleteArchive(id: sut.id)
 
         #expect(sut.store.load(id: sut.id) != nil, "the run's session survives the refused delete")
-        #expect(sut.model.openArchive?.id == sut.id, "the pane stays on the run's session")
+        #expect(sut.model.pane.openArchive?.id == sut.id, "the pane stays on the run's session")
         #expect(sut.model.archiveTranslationJob.activity.runStatus == claimed, "the run stays claimed")
 
         gate.open()
@@ -83,7 +83,7 @@ struct AppModelArchiveRunGateTests {
         sut.model.deleteArchive(id: otherID)
 
         #expect(sut.store.load(id: otherID) == nil, "the foreign session is deleted")
-        #expect(sut.model.openArchive?.id == sut.id, "the run's pane is untouched")
+        #expect(sut.model.pane.openArchive?.id == sut.id, "the run's pane is untouched")
 
         gate.open()
         #expect(
@@ -114,7 +114,7 @@ struct AppModelArchiveRunGateTests {
             sut.model.archiveTranslationJob.activity.runStatus?.sessionID == otherID,
             "the running status names the run's session"
         )
-        #expect(sut.model.openArchive?.id == sut.id, "the pane shows the other session")
+        #expect(sut.model.pane.openArchive?.id == sut.id, "the pane shows the other session")
 
         gate.release()
         gate.release()

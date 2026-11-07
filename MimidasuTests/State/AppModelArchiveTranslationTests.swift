@@ -115,7 +115,7 @@ struct AppModelArchiveTranslationTests {
             "the second run sends exactly the failed index"
         )
         #expect(
-            sut.model.entries.allSatisfy { entry in entry.translation(for: "fr") != nil },
+            sut.model.pane.entries.allSatisfy { entry in entry.translation(for: "fr") != nil },
             "every row now carries a translation"
         )
         #expect(
@@ -162,7 +162,7 @@ struct AppModelArchiveTranslationTests {
 
         let otherID = appendArchive(to: sut.store)
         sut.model.openArchiveSession(id: otherID)
-        #expect(sut.model.openArchive?.id == otherID, "the other archive is open")
+        #expect(sut.model.pane.openArchive?.id == otherID, "the other archive is open")
         #expect(
             archiveToast(sut.model)?.id == failureCard?.id,
             "the card stays up while another session is open"
@@ -222,7 +222,7 @@ extension AppModelArchiveTranslationTests {
         )
         #expect(sut.model.archiveTranslationJob.lastRun?.kind == .appleFast)
         #expect(
-            sut.model.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
+            sut.model.pane.entries.compactMap { entry in entry.translation(for: "fr")?.engine }
                 == [.appleFast, .appleFast, .appleFast],
             "every landed row is stamped fast"
         )
@@ -320,7 +320,7 @@ extension AppModelArchiveTranslationTests {
 
         sut.model.deleteArchive(id: sut.id)
 
-        #expect(sut.model.openArchive?.id == sut.id, "the open archive stays")
+        #expect(sut.model.pane.openArchive?.id == sut.id, "the open archive stays")
         #expect(sut.store.load(id: sut.id) != nil, "the session stays in the archive")
         #expect(sut.model.archiveTranslationRunning, "the run stays claimed")
         #expect(archiveToast(sut.model) != nil, "the run's card stays up")
@@ -345,7 +345,7 @@ extension AppModelArchiveTranslationTests {
 
         sut.model.deleteArchive(id: sut.id)
 
-        #expect(sut.model.openArchive == nil, "the delete after the run closes the archive")
+        #expect(sut.model.pane.openArchive == nil, "the delete after the run closes the archive")
         #expect(sut.store.load(id: sut.id) == nil, "the delete after the run removes it")
     }
 
@@ -368,7 +368,7 @@ extension AppModelArchiveTranslationTests {
         let claimed = sut.model.archiveTranslationJob.activity.runStatus
 
         sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
-        sut.model.retranslateSentence(sut.model.entries[1].sentence)
+        sut.model.retranslateSentence(sut.model.pane.entries[1].sentence)
 
         #expect(sut.model.archiveTranslationJob.activity.runStatus == claimed, "the second start is refused")
         #expect(engine.recordedBatches == [["こんにちは"]], "only the claimed run's flight is airborne")
@@ -451,7 +451,7 @@ extension AppModelArchiveTranslationTests {
             "the first run fills the sentences missing when the archive opened"
         )
         #expect(
-            sut.model.openArchive?.summary.languageCount(for: "fr")?.translated == 3,
+            sut.model.pane.openArchive?.summary.languageCount(for: "fr")?.translated == 3,
             "the summary reads complete after the fill"
         )
         #expect(
@@ -488,10 +488,10 @@ extension AppModelArchiveTranslationTests {
         // leaves behind: the open summary keeps its open-time counts while
         // the entries carry every landing.
         for (index, translations) in expectedFRLandings.enumerated() {
-            sut.model.entries[index].replaceTranslation(translations[0])
+            sut.model.pane.replaceTranslation(index: index, translation: translations[0])
         }
-        #expect(sut.model.openArchive?.summary.languageCount(for: "fr")?.translated == 0)
-        #expect(sut.model.entries.allSatisfy { entry in entry.translation(for: "fr") != nil })
+        #expect(sut.model.pane.openArchive?.summary.languageCount(for: "fr")?.translated == 0)
+        #expect(sut.model.pane.entries.allSatisfy { entry in entry.translation(for: "fr") != nil })
 
         sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
 
