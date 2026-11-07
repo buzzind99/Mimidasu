@@ -98,7 +98,7 @@ func install(
     _ engine: ScriptedArchiveEngine, for provider: TranslationProvider, on model: AppModel
 ) {
     try? model.translationSettings.saveKey("sk-test-\(provider.rawValue)", for: provider)
-    model.retranslateEngineFactory = { requested, _ in requested == provider ? engine : nil }
+    model.retranslate.retranslateEngineFactory = { requested, _ in requested == provider ? engine : nil }
 }
 
 @MainActor

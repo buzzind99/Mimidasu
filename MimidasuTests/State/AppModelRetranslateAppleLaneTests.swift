@@ -64,25 +64,32 @@ struct AppModelRetranslateAppleLaneTests {
     )
     func arrivalStoresEngineOnlyWhileArmed(kind: TranslationEngineKind) async {
         let model = await harness.makeModel()
+        let target = model.translationSettings.targetLanguage.code
 
         // An unarmed config refuses the hand-over: a session for a lane that
         // was never armed must not be stored for the next lane to acquire
         // instantly.
         switch kind {
         case .appleFast:
-            model.retranslateSessionArrived(LaneEchoEngine())
-            #expect(model.retranslateSessionEngine == nil)
-            model.armRetranslateSessionIfNeeded(for: kind)
-            model.retranslateSessionArrived(LaneEchoEngine())
-            #expect(model.retranslateSessionEngine != nil)
-            #expect(model.retranslateHifiSessionEngine == nil, "the intelligence lane's slot is untouched")
+            model.retranslate.retranslateSessionArrived(.appleFast, engine: LaneEchoEngine())
+            #expect(model.retranslate.appleSessions.engine(for: .appleFast, target: target) == nil)
+            model.retranslate.appleSessions.arm(kind: kind, target: target)
+            model.retranslate.retranslateSessionArrived(.appleFast, engine: LaneEchoEngine())
+            #expect(model.retranslate.appleSessions.engine(for: .appleFast, target: target) != nil)
+            #expect(
+                model.retranslate.appleSessions.engine(for: .appleHighFidelity, target: target) == nil,
+                "the intelligence lane's slot is untouched"
+            )
         case .appleHighFidelity:
-            model.retranslateHifiSessionArrived(LaneEchoEngine())
-            #expect(model.retranslateHifiSessionEngine == nil)
-            model.armRetranslateSessionIfNeeded(for: kind)
-            model.retranslateHifiSessionArrived(LaneEchoEngine())
-            #expect(model.retranslateHifiSessionEngine != nil)
-            #expect(model.retranslateSessionEngine == nil, "the fast lane's slot is untouched")
+            model.retranslate.retranslateSessionArrived(.appleHighFidelity, engine: LaneEchoEngine())
+            #expect(model.retranslate.appleSessions.engine(for: .appleHighFidelity, target: target) == nil)
+            model.retranslate.appleSessions.arm(kind: kind, target: target)
+            model.retranslate.retranslateSessionArrived(.appleHighFidelity, engine: LaneEchoEngine())
+            #expect(model.retranslate.appleSessions.engine(for: .appleHighFidelity, target: target) != nil)
+            #expect(
+                model.retranslate.appleSessions.engine(for: .appleFast, target: target) == nil,
+                "the fast lane's slot is untouched"
+            )
         default:
             Issue.record("unexpected Apple lane kind \(kind.rawValue)")
         }
@@ -92,12 +99,12 @@ struct AppModelRetranslateAppleLaneTests {
     func armingExternalKindArmsNothing() async {
         let model = await harness.makeModel()
 
-        model.armRetranslateSessionIfNeeded(for: .google)
+        model.retranslate.appleSessions.arm(kind: .google, target: model.translationSettings.targetLanguage.code)
 
-        #expect(model.retranslateConfig == nil)
-        #expect(model.retranslateHifiConfig == nil)
+        #expect(model.retranslate.fastSessionConfig == nil)
+        #expect(model.retranslate.hifiSessionConfig == nil)
         #expect(
-            model.retranslate.laneEngineStorage(for: .google, target: "en") == nil,
+            model.retranslate.appleSessions.engine(for: .google, target: "en") == nil,
             "an external kind has no stored session to adopt"
         )
     }
@@ -105,14 +112,14 @@ struct AppModelRetranslateAppleLaneTests {
     @Test("arming an already-armed kind never reassigns its config")
     func armingArmedKindKeepsConfig() async {
         let model = await harness.makeModel()
-        model.armRetranslateSessionIfNeeded(for: .appleFast)
-        let armed = model.retranslateConfig
+        model.retranslate.appleSessions.arm(kind: .appleFast, target: model.translationSettings.targetLanguage.code)
+        let armed = model.retranslate.fastSessionConfig
         #expect(armed != nil)
 
-        model.armRetranslateSessionIfNeeded(for: .appleFast)
+        model.retranslate.appleSessions.arm(kind: .appleFast, target: model.translationSettings.targetLanguage.code)
 
         #expect(
-            model.retranslateConfig == armed,
+            model.retranslate.fastSessionConfig == armed,
             "a reassignment would be a `.translationTask` re-fire gamble — the armed config stays put"
         )
     }
@@ -142,8 +149,8 @@ struct AppModelRetranslateAppleLaneTests {
 
         // No session engine yet: the lane arms the config and waits (bounded)
         // while the `.translationTask` host hands one over.
-        model.retranslateSentence(sentence)
-        model.retranslateSessionArrived(LaneEchoEngine())
+        model.retranslate.retranslateSentence(sentence)
+        model.retranslate.retranslateSessionArrived(.appleFast, engine: LaneEchoEngine())
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
@@ -152,9 +159,8 @@ struct AppModelRetranslateAppleLaneTests {
             },
             "the fast-model result lands stamped"
         )
-        #expect(model.pendingRetranslations.isEmpty)
-        #expect(model.lanePendingRetranslations.isEmpty)
-        #expect(model.retranslateConfig != nil, "the armed config survives a successful run")
+        #expect(model.retranslate.pendingRetranslations.isEmpty)
+        #expect(model.retranslate.fastSessionConfig != nil, "the armed config survives a successful run")
 
         // A later repeat of the sentence (a fresh row) serves unstamped.
         model.sessionController.onSentence?(makeSentence(index: 9))
@@ -186,12 +192,12 @@ struct AppModelRetranslateAppleLaneTests {
         // No engine ever arrives; the bounded wait runs out on its own (a
         // short injected bound, so the timeout is exercised for real — task
         // cancellation is the separate `.cancelled` outcome, covered below).
-        model.laneArmTimeout = .milliseconds(50)
-        model.retranslateSentence(sentence)
+        model.retranslate.laneArmTimeout = .milliseconds(50)
+        model.retranslate.retranslateSentence(sentence)
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
+                model.retranslate.pendingRetranslations.isEmpty
             },
             "the timed-out wait retires the markers"
         )
@@ -203,11 +209,11 @@ struct AppModelRetranslateAppleLaneTests {
             "the row keeps its previous translation"
         )
         #expect(
-            (model.retranslateConfig != nil) == testCase.armsFastConfig,
+            (model.retranslate.fastSessionConfig != nil) == testCase.armsFastConfig,
             "the fast config stays armed exactly for its own lane"
         )
         #expect(
-            (model.retranslateHifiConfig != nil) == testCase.armsHifiConfig,
+            (model.retranslate.hifiSessionConfig != nil) == testCase.armsHifiConfig,
             "the hifi config stays armed exactly for its own lane"
         )
     }
@@ -239,11 +245,11 @@ struct AppModelRetranslateAppleLaneTests {
             "the initial session translation is delivered before the retry"
         )
 
-        model.retranslateSentence(sentence)
+        model.retranslate.retranslateSentence(sentence)
         // The probe lands installed mid-lane: the pair genuinely serves the
         // Intelligence model, so the deferred lane flies as armed.
         model.appleHighFidelityProbe = (true, "en")
-        model.retranslateHifiSessionArrived(LaneEchoEngine())
+        model.retranslate.retranslateSessionArrived(.appleHighFidelity, engine: LaneEchoEngine())
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
@@ -252,10 +258,9 @@ struct AppModelRetranslateAppleLaneTests {
             },
             "the Apple Intelligence result lands stamped"
         )
-        #expect(model.pendingRetranslations.isEmpty)
-        #expect(model.lanePendingRetranslations.isEmpty)
-        #expect(model.retranslateHifiConfig != nil, "the armed hifi config survives a successful run")
-        #expect(model.retranslateConfig == nil, "the fast lane's session is never armed")
+        #expect(model.retranslate.pendingRetranslations.isEmpty)
+        #expect(model.retranslate.hifiSessionConfig != nil, "the armed hifi config survives a successful run")
+        #expect(model.retranslate.fastSessionConfig == nil, "the fast lane's session is never armed")
     }
 
     @Test("a cancelled wait retires the markers without reporting a starting session")
@@ -274,16 +279,18 @@ struct AppModelRetranslateAppleLaneTests {
         model.sessionController.onSentence?(sentence)
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
 
-        // A long bound, so the wait is still sleeping when the cancellation
-        // lands — the interleaved-stop shape.
-        model.laneArmTimeout = .seconds(30)
-        model.retranslateSentence(sentence)
-        model.retranslateLaneTask?.cancel()
+        // A long bound, so a working cancellation is the only way the wait
+        // ends promptly; the phase stays live, so a timeout would post the
+        // still-starting toast and fail the assertion below.
+        model.retranslate.laneArmTimeout = .seconds(30)
+        model.retranslate.retranslateSentence(sentence)
+        let start = ContinuousClock.now
+        model.retranslate.cancelNewestLaneLink()
+        _ = await model.retranslate.waitForLaneChainIdle()
 
+        #expect(ContinuousClock.now - start < .seconds(5), "the wait must cancel, not time out")
         #expect(
-            await pollUntil(timeout: resultTimeout) {
-                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
-            },
+            model.retranslate.pendingRetranslations.isEmpty,
             "a cancelled wait still retires the markers"
         )
         #expect(
@@ -307,14 +314,15 @@ struct AppModelRetranslateAppleLaneTests {
         model.sessionController.onSentence?(sentence)
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
 
-        model.retranslateSentence(sentence)
-        #expect(model.pendingRetranslations == [7], "the click marks the row")
-        model.retranslateLaneTask?.cancel()
+        model.retranslate.retranslateSentence(sentence)
+        #expect(model.retranslate.pendingRetranslations == [7], "the click marks the row")
+        let start = ContinuousClock.now
+        model.retranslate.cancelNewestLaneLink()
+        _ = await model.retranslate.waitForLaneChainIdle()
 
+        #expect(ContinuousClock.now - start < .seconds(2), "the deferral must cancel, not time out")
         #expect(
-            await pollUntil(timeout: resultTimeout) {
-                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
-            },
+            model.retranslate.pendingRetranslations.isEmpty,
             "a cancelled deferral retires the markers"
         )
         #expect(
@@ -360,26 +368,20 @@ struct AppModelRetranslateAppleLaneTests {
         // dies. Its expiry is the `.timedOut` outcome most likely to cross a
         // stop — it must pass the delivery guard instead of reposting a
         // "still starting" toast over the cleared stack.
-        model.laneArmTimeout = .milliseconds(500)
-        model.retranslateSentence(first)
-        let firstTask = model.retranslateLaneTask
-        model.retranslateSentence(second)
-        let secondTask = model.retranslateLaneTask
+        model.retranslate.laneArmTimeout = .milliseconds(500)
+        model.retranslate.retranslateSentence(first)
+        model.retranslate.retranslateSentence(second)
         await model.performStop()
-
-        // Await both tasks instead of sleeping past the deadline: the stop
-        // returns in milliseconds now, so the first task's expiry genuinely
-        // lands after it — in `.idle`, stale epoch — where refusing the
-        // toast is the delivery guard's doing. The second was cancelled with
-        // the stop and must stay silent as well.
-        await firstTask?.value
-        await secondTask?.value
+        // Waiting for the chain to idle covers both links: the second was
+        // cancelled with the stop, and the first is still parked in its
+        // bounded wait behind it. Its expiry lands in `.idle`, stale epoch,
+        // where refusing the toast is the delivery guard's doing.
+        _ = await model.retranslate.waitForLaneChainIdle()
         #expect(
             !model.toasts.toasts.contains(where: { toast in toast.key == ToastKey.retranslate }),
             "a timed-out wait whose session is gone posts nothing"
         )
-        #expect(model.pendingRetranslations.isEmpty)
-        #expect(model.lanePendingRetranslations.isEmpty)
+        #expect(model.retranslate.pendingRetranslations.isEmpty)
         #expect(
             model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "EN:一")],
             "the expired wait never touched its row"
@@ -417,8 +419,8 @@ struct AppModelRetranslateAppleLaneTests {
         #expect(plan.context.effectiveSelection == .appleFast)
         #expect(plan.route == .lane(.appleFast), "the degrade routes through the fast lane")
 
-        model.retranslateSentence(sentence)
-        model.retranslateSessionArrived(LaneEchoEngine())
+        model.retranslate.retranslateSentence(sentence)
+        model.retranslate.retranslateSessionArrived(.appleFast, engine: LaneEchoEngine())
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
@@ -427,8 +429,8 @@ struct AppModelRetranslateAppleLaneTests {
             },
             "the row lands stamped with the model that actually ran"
         )
-        #expect(model.retranslateConfig != nil, "the fast lane is the one armed")
-        #expect(model.retranslateHifiConfig == nil, "the high-fidelity session is never armed")
+        #expect(model.retranslate.fastSessionConfig != nil, "the fast lane is the one armed")
+        #expect(model.retranslate.hifiSessionConfig == nil, "the high-fidelity session is never armed")
         #expect(
             model.translationSettings.retranslateEngine == .appleHighFidelity,
             "the persisted selection is not rewritten — only its resolution degrades"

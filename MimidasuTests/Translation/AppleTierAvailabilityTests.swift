@@ -337,3 +337,135 @@ struct AppleTierAvailabilityTests {
         }
     }
 }
+
+/// Drives the awaited probe-landing member: immediate landed evidence,
+/// landing/timeout/cancellation outcomes, pair scoping, and the
+/// lane-generation cancel.
+@MainActor
+@Suite("Apple tier availability waits")
+struct AppleTierAvailabilityWaitTests {
+
+    private let pair = "fr"
+    private let foreignPair = "de"
+
+    private func makeSUT() -> AppleTierAvailability {
+        AppleTierAvailability(check: { _ in false })
+    }
+
+    // MARK: - Awaited probe landing
+
+    @Test("landed evidence answers a wait immediately")
+    func landedEvidenceAnswersWait() async {
+        let sut = makeSUT()
+        sut.land(installed: true, targetCode: pair)
+
+        switch await sut.awaitProbeLanding(for: pair, timeout: .seconds(1), laneOwned: true) {
+        case .landed:
+            break
+        case .timedOut, .cancelled:
+            Issue.record("landed evidence must not wait")
+        }
+    }
+
+    @Test("a landing resolves the parked wait")
+    func landingResolvesWait() async {
+        let sut = makeSUT()
+        let wait = Task {
+            await sut.awaitProbeLanding(for: pair, timeout: .seconds(5), laneOwned: true)
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+
+        sut.land(installed: true, targetCode: pair)
+
+        switch await wait.value {
+        case .landed:
+            break
+        case .timedOut, .cancelled:
+            Issue.record("the landing must resolve the wait")
+        }
+    }
+
+    @Test("a foreign pair's landing does not resolve the wait")
+    func foreignLandingDoesNotResolveWait() async {
+        let sut = makeSUT()
+        sut.beginProbe(for: foreignPair)
+        let wait = Task {
+            await sut.awaitProbeLanding(for: pair, timeout: .milliseconds(100), laneOwned: true)
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+
+        sut.land(installed: true, targetCode: foreignPair)
+
+        switch await wait.value {
+        case .timedOut:
+            break
+        case .landed, .cancelled:
+            Issue.record("only the requested pair's landing may answer")
+        }
+    }
+
+    @Test("an unlanded probe times the wait out")
+    func unlandedProbeTimesOut() async {
+        let sut = makeSUT()
+
+        switch await sut.awaitProbeLanding(for: pair, timeout: .milliseconds(50), laneOwned: true) {
+        case .timedOut:
+            break
+        case .landed, .cancelled:
+            Issue.record("an unlanded pair must time out")
+        }
+    }
+
+    @Test("cancelling the waiting task reports cancellation")
+    func cancelledWaitReportsCancellation() async {
+        let sut = makeSUT()
+        let wait = Task {
+            await sut.awaitProbeLanding(for: pair, timeout: .seconds(10), laneOwned: true)
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+
+        wait.cancel()
+
+        switch await wait.value {
+        case .cancelled:
+            break
+        case .landed, .timedOut:
+            Issue.record("task cancellation must win over the timeout")
+        }
+    }
+
+    @Test("an already-cancelled task reports cancellation without registering")
+    func cancelledTaskReportsCancellation() async {
+        let sut = makeSUT()
+
+        let result = await Task {
+            withUnsafeCurrentTask { current in current?.cancel() }
+            return await sut.awaitProbeLanding(for: pair, timeout: .seconds(10), laneOwned: true)
+        }.value
+
+        switch result {
+        case .cancelled:
+            break
+        case .landed, .timedOut:
+            Issue.record("a cancelled task must not wait for a landing")
+        }
+    }
+
+    @Test("a lane-generation cancel abandons a parked probe wait")
+    func laneCancelAbandonsProbeWait() async {
+        let sut = makeSUT()
+        let wait = Task {
+            await sut.awaitProbeLanding(for: pair, timeout: .seconds(5), laneOwned: true)
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+
+        sut.cancelLaneWaiters()
+
+        switch await wait.value {
+        case .cancelled:
+            break
+        case .landed, .timedOut:
+            Issue.record("the probe wait must be abandoned")
+        }
+    }
+}

@@ -2,7 +2,8 @@ import Foundation
 @testable import Mimidasu
 import Testing
 
-/// Tests `AppModel.activeEngineKind` — the row marker's comparison target.
+/// Tests `RetranslateCoordinator.activeEngineKind` — the row marker's
+/// comparison target.
 /// An attached external provider maps through its kind; the Apple branch
 /// reads `.appleFast` provisionally until the high-fidelity probe lands, and
 /// only for the pair the probe actually measured.
@@ -64,7 +65,7 @@ struct AppModelTranslationEngineKindTests {
         model.translationProviderDidChange()
         #expect(model.translationRuntime.engine == .external)
 
-        #expect(model.activeEngineKind == .openrouter)
+        #expect(model.retranslate.activeEngineKind == .openrouter)
 
         model.stop()
         #expect(
@@ -77,7 +78,7 @@ struct AppModelTranslationEngineKindTests {
     func unprobedAppleReadsFastProvisionally() {
         let model = makeModel(settings: makeSettings(provider: .apple))
 
-        #expect(model.activeEngineKind == .appleFast)
+        #expect(model.retranslate.activeEngineKind == .appleFast)
     }
 
     @Test(
@@ -98,6 +99,6 @@ struct AppModelTranslationEngineKindTests {
         let model = makeModel(settings: makeSettings(provider: .apple))
         model.appleHighFidelityProbe = (true, probeTarget)
 
-        #expect(model.activeEngineKind == expected)
+        #expect(model.retranslate.activeEngineKind == expected)
     }
 }

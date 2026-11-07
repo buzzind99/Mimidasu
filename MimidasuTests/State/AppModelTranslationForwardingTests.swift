@@ -1,16 +1,14 @@
 @testable import Mimidasu
 import Testing
 
-/// Tests the app-model façade over the translation coordinators: writes
-/// route into the coordinator, and coordinator-side changes propagate
-/// through the read-only forwarders — chiefly the `translationRuntime`
-/// snapshot — as observation events, the mechanism SwiftUI's view
-/// invalidation depends on for the `.translationTask` configs, the status
-/// pill, and the row markers. Engine identity
-/// (`activeTranslationEngine` / `activeExternalProvider`) is stamped
-/// through the session accessors into the runtime snapshot — no
-/// coordinator→facade observation test for it (the value-level reads live
-/// in `AppModelTranslationEngineTests`).
+/// Tests the observation paths the translation surfaces depend on: the
+/// `translationRuntime` snapshot the status surfaces read, the
+/// provider-intent token the disclosure sheet tracks, the lane's armed
+/// session config its `.translationTask` hosts observe, and the row plan's
+/// in-flight marker. Engine identity (`activeTranslationEngine` /
+/// `activeExternalProvider`) is stamped through the session accessors into
+/// the runtime snapshot — no coordinator→view observation test for it (the
+/// value-level reads live in `AppModelTranslationEngineTests`).
 @MainActor
 @Suite("AppModel translation forwarding")
 struct AppModelTranslationForwardingTests {
@@ -21,23 +19,13 @@ struct AppModelTranslationForwardingTests {
         return model
     }
 
-    @Test("provider intent and lane-factory forwarders write through")
-    func providerIntentAndFactoryForward() async {
+    @Test("each provider-row click advances the intent token")
+    func providerIntentTokensAdvance() async {
         let model = await makeModel()
 
         let firstIntent = model.noteTranslationProviderIntent()
         let secondIntent = model.noteTranslationProviderIntent()
         #expect(secondIntent > firstIntent, "each row click gets a new token")
-
-        model.retranslateEngineFactory = { _, _ in nil }
-        #expect(
-            model.retranslate.retranslateEngineFactory != nil,
-            "the AppModel setter reaches the coordinator"
-        )
-        #expect(
-            model.retranslateEngineFactory?(.openai, .english) == nil,
-            "the AppModel getter returns the coordinator's factory"
-        )
     }
 
     @Test("a coordinator-side status change propagates through the AppModel forwarder")
@@ -79,41 +67,54 @@ struct AppModelTranslationForwardingTests {
         #expect(model.translationSession.runtime.externalProvider == .google)
     }
 
-    @Test("a coordinator-side marker mutation propagates through the AppModel forwarder")
-    func markerForwarderPropagates() async {
+    @Test("the row plan observes a lane retry's in-flight marker")
+    func rowPlanObservesInFlightMarker() async {
         let model = await makeModel()
-        let observed = ObservedValuesRecorder(read: { model.pendingRetranslations })
+        let gate = LaneGatedEngine()
+        model.phase = .running
+        try? model.translationSettings.saveKey("sk-test-google", for: .google)
+        model.translationSettings.selectRetranslate(.google)
+        model.retranslate.retranslateEngineFactory = { _, _ in gate }
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+        let target = model.translationSettings.targetLanguage
+        let entry = model.pane.entries[0]
+        let observed = ObservedValuesRecorder(read: {
+            model.retranslateRowPlan(for: entry, surface: .live, target: target).isRetranslating
+        })
 
-        model.retranslate.pendingRetranslations.insert(7)
-
-        #expect(
-            await pollUntil { observed.values == [[7]] },
-            "the marker-set forwarder fires observation"
-        )
-    }
-
-    @Test("a lane-config change propagates through the AppModel forwarder")
-    func laneConfigForwarderPropagates() async {
-        let model = await makeModel()
-        let observed = ObservedValuesRecorder(read: { model.retranslateConfig != nil })
-
-        model.armRetranslateSessionIfNeeded(for: .appleFast)
+        model.retranslate.retranslateSentence(sentence)
 
         #expect(
             await pollUntil { observed.values == [true] },
-            "the lane-config forwarder fires observation"
+            "the row plan observes the pending marker"
+        )
+        gate.openGate()
+        _ = await model.retranslate.waitForLaneChainIdle()
+    }
+
+    @Test("an armed lane session config is observable")
+    func laneConfigObservesArming() async {
+        let model = await makeModel()
+        let observed = ObservedValuesRecorder(read: { model.retranslate.fastSessionConfig != nil })
+
+        model.retranslate.appleSessions.arm(kind: .appleFast, target: model.translationSettings.targetLanguage.code)
+
+        #expect(
+            await pollUntil { observed.values == [true] },
+            "arming fires observation for the host's config read"
         )
     }
 
-    @Test("the lane tuning getters read the coordinator's knobs")
-    func laneTuningForwarders() async {
+    @Test("the lane tuning knobs live on the coordinator")
+    func laneTuningKnobs() async {
         let model = await makeModel()
 
-        #expect(model.laneArmTimeout == .seconds(5))
-        #expect(model.probeSettleTimeout == .seconds(3))
+        #expect(model.retranslate.laneArmTimeout == .seconds(5))
+        #expect(model.retranslate.probeSettleTimeout == .seconds(3))
 
-        model.laneArmTimeout = .milliseconds(25)
-        model.probeSettleTimeout = .milliseconds(25)
+        model.retranslate.laneArmTimeout = .milliseconds(25)
+        model.retranslate.probeSettleTimeout = .milliseconds(25)
 
         #expect(model.retranslate.laneArmTimeout == .milliseconds(25))
         #expect(model.retranslate.probeSettleTimeout == .milliseconds(25))

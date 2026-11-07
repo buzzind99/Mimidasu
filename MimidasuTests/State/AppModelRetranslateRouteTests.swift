@@ -78,25 +78,42 @@ struct AppModelRetranslateRouteTests {
     func stopDropsArmedDedicatedSessions() async {
         let model = await makeSUT()
         model.phase = .running
-        model.retranslateConfig = model.makeRetranslateConfig(highFidelity: false)
-        model.retranslateSessionEngine = LaneEchoEngine()
-        model.retranslateHifiConfig = model.makeRetranslateConfig(highFidelity: true)
-        model.retranslateHifiSessionEngine = LaneEchoEngine()
-        model.lanePendingRetranslations = [3]
-        model.retranslateLaneTask = Task {}
+        let target = model.translationSettings.targetLanguage.code
+        model.retranslate.appleSessions.arm(kind: .appleFast, target: target)
+        model.retranslate.retranslateSessionArrived(.appleFast, engine: LaneEchoEngine())
+        model.retranslate.appleSessions.arm(kind: .appleHighFidelity, target: target)
+        model.retranslate.retranslateSessionArrived(.appleHighFidelity, engine: LaneEchoEngine())
+
+        // A live lane flight gives the stop a marker and a chained task to
+        // retire, instead of staging both by hand.
+        let gate = LaneGatedEngine()
+        model.retranslate.retranslateEngineFactory = { _, _ in gate }
+        try? model.translationSettings.saveKey("sk-test-google", for: .google)
+        model.translationSettings.selectRetranslate(.google)
+        let sentence = makeSentence(index: 3)
+        model.sessionController.onSentence?(sentence)
+        model.retranslate.retranslateSentence(sentence)
+        #expect(
+            await pollUntil(timeout: resultTimeout) { gate.recordedBatches.count == 1 },
+            "the lane flight parks in its engine"
+        )
 
         await model.performStop()
+        gate.openGate()
+        _ = await model.retranslate.waitForLaneChainIdle()
 
         // The configs are rebuilt in place, never nil-ed: a nil →
         // fresh-equal-config transition is the `.translationTask` path that
         // does not reliably re-fire, and the next Apple-kind retry would arm
-        // onto it (see `teardownRetranslateSession`).
-        #expect(model.retranslateConfig != nil, "the armed config is rebuilt, not nil-ed")
-        #expect(model.retranslateSessionEngine == nil, "the stored engine goes with the old config")
-        #expect(model.retranslateHifiConfig != nil, "the hifi config is rebuilt, not nil-ed")
-        #expect(model.retranslateHifiSessionEngine == nil)
-        #expect(model.lanePendingRetranslations.isEmpty)
-        #expect(model.retranslateLaneTask == nil, "stop clears the stored lane task")
+        // onto it.
+        #expect(model.retranslate.fastSessionConfig != nil, "the armed config is rebuilt, not nil-ed")
+        #expect(
+            model.retranslate.appleSessions.engine(for: .appleFast, target: target) == nil,
+            "the stored engine goes with the old config"
+        )
+        #expect(model.retranslate.hifiSessionConfig != nil, "the hifi config is rebuilt, not nil-ed")
+        #expect(model.retranslate.appleSessions.engine(for: .appleHighFidelity, target: target) == nil)
+        #expect(model.retranslate.pendingRetranslations.isEmpty, "stop retires the lane marker")
     }
 
     /// The explicit strategy is what keeps the dedicated lanes off the live
@@ -109,13 +126,16 @@ struct AppModelRetranslateRouteTests {
             try Test.cancel("preferredStrategy requires macOS 26.4")
         }
         let model = await makeSUT()
+        let target = model.translationSettings.targetLanguage.code
+        model.retranslate.appleSessions.arm(kind: .appleFast, target: target)
+        model.retranslate.appleSessions.arm(kind: .appleHighFidelity, target: target)
 
         #expect(
-            model.makeRetranslateConfig(highFidelity: false).preferredStrategy == .lowLatency,
+            model.retranslate.fastSessionConfig?.preferredStrategy == .lowLatency,
             "the fast lane pins the fast model"
         )
         #expect(
-            model.makeRetranslateConfig(highFidelity: true).preferredStrategy == .highFidelity,
+            model.retranslate.hifiSessionConfig?.preferredStrategy == .highFidelity,
             "the hifi lane pins the high-fidelity strategy"
         )
     }
@@ -161,7 +181,7 @@ struct AppModelRetranslateRouteTests {
     func duplicateExternalSelectionUsesSessionEngine() async {
         let model = await makeSUT()
         let laneCalls = Mutex(0)
-        model.retranslateEngineFactory = { _, _ in
+        model.retranslate.retranslateEngineFactory = { _, _ in
             laneCalls.withLock { counter in counter += 1 }
             return LaneEchoEngine()
         }
@@ -184,7 +204,7 @@ struct AppModelRetranslateRouteTests {
             "the initial session translation is delivered before the retry"
         )
 
-        model.retranslateSentence(sentence)
+        model.retranslate.retranslateSentence(sentence)
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
@@ -205,7 +225,7 @@ struct AppModelRetranslateRouteTests {
         let model = await makeSUT()
         model.appleHighFidelityProbe = testCase.probe
         let laneCalls = Mutex(0)
-        model.retranslateEngineFactory = { provider, _ in
+        model.retranslate.retranslateEngineFactory = { provider, _ in
             laneCalls.withLock { counter in counter += 1 }
             #expect(provider == .google, "only external selections reach the factory")
             return LaneEchoEngine()
@@ -221,7 +241,7 @@ struct AppModelRetranslateRouteTests {
             "the initial session translation is delivered before the retry"
         )
 
-        model.retranslateSentence(sentence)
+        model.retranslate.retranslateSentence(sentence)
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
@@ -232,7 +252,7 @@ struct AppModelRetranslateRouteTests {
             "the queue's engine served the retry as a second unstamped flight"
         )
         #expect(laneCalls.withLock { counter in counter } == 0, "the lane factory is never consulted")
-        #expect(model.retranslateHifiConfig == nil, "the degraded route never arms the hifi session")
+        #expect(model.retranslate.hifiSessionConfig == nil, "the degraded route never arms the hifi session")
     }
 
     @Test("a session-route retry with no attached worker reports instead of no-oping")
@@ -245,12 +265,12 @@ struct AppModelRetranslateRouteTests {
         model.sessionController.onSentence?(sentence)
         model.applyTranslation(index: 4, translation: SentenceTranslation(lang: "en", text: "Original"))
 
-        model.retranslateSentence(sentence)
+        model.retranslate.retranslateSentence(sentence)
 
         let toast = model.toasts.toasts.first(where: { candidate in candidate.key == ToastKey.retranslate })
         #expect(toast?.title == "Re-translate unavailable")
         #expect(toast?.body == "No translation engine attached — try again in a moment.")
-        #expect(model.pendingRetranslations.isEmpty, "no marker is set — nothing dangles")
+        #expect(model.retranslate.pendingRetranslations.isEmpty, "no marker is set — nothing dangles")
     }
 
     // MARK: - High-fidelity probe
@@ -294,15 +314,15 @@ struct AppModelRetranslateRouteTests {
     func selectRetranslateEngineHoldsExternalBehindDisclosure() async {
         let model = await makeSUT()
 
-        model.selectRetranslateEngine(.appleFast)
+        model.retranslate.selectRetranslateEngine(.appleFast)
         #expect(model.translationSettings.retranslateEngine == .appleFast)
         #expect(model.providerAwaitingDisclosure == nil)
 
-        model.selectRetranslateEngine(.appleHighFidelity)
+        model.retranslate.selectRetranslateEngine(.appleHighFidelity)
         #expect(model.translationSettings.retranslateEngine == .appleHighFidelity)
         #expect(model.providerAwaitingDisclosure == nil)
 
-        model.selectRetranslateEngine(.deepl)
+        model.retranslate.selectRetranslateEngine(.deepl)
         #expect(model.providerAwaitingDisclosure == .retranslateEngine(.deepl))
         #expect(
             model.translationSettings.retranslateEngine == .appleHighFidelity,

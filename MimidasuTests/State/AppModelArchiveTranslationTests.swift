@@ -210,9 +210,12 @@ extension AppModelArchiveTranslationTests {
         let engine = ScriptedArchiveEngine()
         // The host's hand-over precedes the start, so the run acquires the
         // stored session instead of waiting out an arm window.
-        sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "fr")
-        sut.model.retranslateSessionArrived(engine)
-        #expect(sut.model.retranslateSessionEngine != nil, "the hand-over stores the session")
+        sut.model.retranslate.appleSessions.arm(kind: .appleFast, target: "fr")
+        sut.model.retranslate.retranslateSessionArrived(.appleFast, engine: engine)
+        #expect(
+            sut.model.retranslate.appleSessions.engine(for: .appleFast, target: "fr") != nil,
+            "the hand-over stores the session"
+        )
 
         sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
 
@@ -368,11 +371,11 @@ extension AppModelArchiveTranslationTests {
         let claimed = sut.model.archiveTranslationJob.activity.runStatus
 
         sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
-        sut.model.retranslateSentence(sut.model.pane.entries[1].sentence)
+        sut.model.retranslate.retranslateSentence(sut.model.pane.entries[1].sentence)
 
         #expect(sut.model.archiveTranslationJob.activity.runStatus == claimed, "the second start is refused")
         #expect(engine.recordedBatches == [["こんにちは"]], "only the claimed run's flight is airborne")
-        #expect(sut.model.pendingRetranslations.isEmpty, "the per-row lane never takes a marker")
+        #expect(sut.model.retranslate.pendingRetranslations.isEmpty, "the per-row lane never takes a marker")
         #expect(retranslateToast(sut.model) == nil, "the per-row lane never reports")
 
         gate.release()
@@ -419,7 +422,7 @@ extension AppModelArchiveTranslationTests {
         // The stored key admits the route; the factory's nil is the build
         // failure the run reports.
         try? sut.model.translationSettings.saveKey("sk-test-google", for: .google)
-        sut.model.retranslateEngineFactory = { _, _ in nil }
+        sut.model.retranslate.retranslateEngineFactory = { _, _ in nil }
 
         sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
 

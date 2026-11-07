@@ -29,11 +29,11 @@ struct AppModelArchiveTranslationBoundaryTests {
         let sut = await makeSUT()
         let otherID = appendArchive(to: sut.store)
         let engine = ScriptedArchiveEngine()
-        sut.model.laneArmTimeout = .seconds(2)
+        sut.model.retranslate.laneArmTimeout = .seconds(2)
 
         sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
         #expect(
-            await pollUntil(timeout: resultTimeout) { sut.model.retranslateConfig != nil },
+            await pollUntil(timeout: resultTimeout) { sut.model.retranslate.fastSessionConfig != nil },
             "the run's resolution arms the fast session"
         )
         #expect(sut.model.archiveTranslationRunning, "the run is claimed while it resolves")
@@ -47,7 +47,7 @@ struct AppModelArchiveTranslationBoundaryTests {
         )
         #expect(sut.model.archiveTranslationRunning, "the boundary keeps the run claimed")
 
-        sut.model.retranslateSessionArrived(engine)
+        sut.model.retranslate.retranslateSessionArrived(.appleFast, engine: engine)
 
         #expect(
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
@@ -72,11 +72,11 @@ struct AppModelArchiveTranslationBoundaryTests {
     func cancelDuringResolutionDiscardsSilently() async {
         let sut = await makeSUT()
         let engine = ScriptedArchiveEngine()
-        sut.model.laneArmTimeout = .seconds(10)
+        sut.model.retranslate.laneArmTimeout = .seconds(10)
 
         sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
         #expect(
-            await pollUntil(timeout: resultTimeout) { sut.model.retranslateConfig != nil },
+            await pollUntil(timeout: resultTimeout) { sut.model.retranslate.fastSessionConfig != nil },
             "the run's resolution arms the fast session"
         )
 
@@ -86,7 +86,7 @@ struct AppModelArchiveTranslationBoundaryTests {
             await pollUntil(timeout: resultTimeout) { !sut.model.archiveTranslationRunning },
             "the cancel releases the claim well inside the arm window"
         )
-        sut.model.retranslateSessionArrived(engine)
+        sut.model.retranslate.retranslateSessionArrived(.appleFast, engine: engine)
 
         #expect(sut.model.archiveTranslationJob.lastRun == nil, "no run ever starts")
         #expect(engine.recordedBatches.isEmpty, "the late hand-over engine is never flown")
@@ -102,10 +102,13 @@ struct AppModelArchiveTranslationBoundaryTests {
     func boundaryKeepsArmedHighFidelitySession(boundary: ArchiveBoundary) async {
         let sut = await makeSUT()
         let engine = ScriptedArchiveEngine()
-        sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleHighFidelity, target: "fr")
-        sut.model.retranslateHifiSessionArrived(engine)
-        #expect(sut.model.retranslateHifiConfig != nil, "the high-fidelity session starts armed")
-        #expect(sut.model.retranslateHifiSessionEngine != nil, "the hand-over stores the engine")
+        sut.model.retranslate.appleSessions.arm(kind: .appleHighFidelity, target: "fr")
+        sut.model.retranslate.retranslateSessionArrived(.appleHighFidelity, engine: engine)
+        #expect(sut.model.retranslate.hifiSessionConfig != nil, "the high-fidelity session starts armed")
+        #expect(
+            sut.model.retranslate.appleSessions.engine(for: .appleHighFidelity, target: "fr") != nil,
+            "the hand-over stores the engine"
+        )
 
         switch boundary {
         case .swap:
@@ -114,8 +117,11 @@ struct AppModelArchiveTranslationBoundaryTests {
             sut.model.closeArchive()
         }
 
-        #expect(sut.model.retranslateHifiConfig != nil, "the boundary keeps the armed config")
-        #expect(sut.model.retranslateHifiSessionEngine != nil, "the boundary keeps the stored engine")
+        #expect(sut.model.retranslate.hifiSessionConfig != nil, "the boundary keeps the armed config")
+        #expect(
+            sut.model.retranslate.appleSessions.engine(for: .appleHighFidelity, target: "fr") != nil,
+            "the boundary keeps the stored engine"
+        )
     }
 
     // MARK: - Stored engine after a boundary
@@ -125,14 +131,14 @@ struct AppModelArchiveTranslationBoundaryTests {
         let sut = await makeSUT()
         let otherID = appendArchive(to: sut.store)
         let engine = ScriptedArchiveEngine()
-        sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "fr")
-        sut.model.retranslateSessionArrived(engine)
+        sut.model.retranslate.appleSessions.arm(kind: .appleFast, target: "fr")
+        sut.model.retranslate.retranslateSessionArrived(.appleFast, engine: engine)
 
         sut.model.openArchiveSession(id: otherID)
         #expect(sut.model.pane.openArchive?.id == otherID, "the boundary swapped the pane")
         // Short enough that a lost engine would time out and report instead
         // of flying; a stored engine resolves without touching the window.
-        sut.model.laneArmTimeout = .milliseconds(60)
+        sut.model.retranslate.laneArmTimeout = .milliseconds(60)
 
         sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr", sessionID: otherID)
 

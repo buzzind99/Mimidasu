@@ -194,6 +194,26 @@ struct ArchiveTranslationJobTests {
         #expect(job.lastRun?.processed == 2, "the cancel keeps the last published count")
     }
 
+    @Test("a cancel between claim and run starts no resolution")
+    func cancelBeforeRunStartsNoResolution() async {
+        let job = makeJob()
+        var resolutionCalls = 0
+        job.resolveEngine = { _, _ in
+            resolutionCalls += 1
+            return .unavailable(reason: "a cancelled run must not resolve")
+        }
+        let recorder = Recorder()
+        job.onEvent = recorder.recordEvent
+
+        #expect(job.claim(ArchiveTranslationJobFixtures.makeRequest()))
+        job.cancel()
+        await job.run()
+
+        #expect(resolutionCalls == 0, "a pre-run cancel starts no engine resolution")
+        #expect(recorder.events.isEmpty, "the cancelled run reports nothing")
+        #expect(job.activity == .idle)
+    }
+
     @Test("a real cancel surfacing as a CancellationError stops the walk")
     func realCancelThroughCancellationErrorStopsWalk() async {
         let job = makeJob()

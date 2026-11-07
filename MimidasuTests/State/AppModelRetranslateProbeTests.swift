@@ -48,8 +48,8 @@ struct AppModelRetranslateProbeTests {
             "the initial session translation is delivered before the retry"
         )
 
-        model.retranslateSentence(sentence)
-        #expect(model.retranslateConfig != nil, "the click arms the dedicated fast session")
+        model.retranslate.retranslateSentence(sentence)
+        #expect(model.retranslate.fastSessionConfig != nil, "the click arms the dedicated fast session")
         // The probe lands installed — the live session turns out to run the
         // Intelligence model. The dedicated fast lane flies anyway: a
         // genuine alternate, stamped so.
@@ -58,7 +58,7 @@ struct AppModelRetranslateProbeTests {
             liveRoute(model) == .lane(.appleFast),
             "the landed hifi identity leaves the fast lane a genuine alternate"
         )
-        model.retranslateSessionArrived(LaneEchoEngine())
+        model.retranslate.retranslateSessionArrived(.appleFast, engine: LaneEchoEngine())
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
@@ -67,8 +67,7 @@ struct AppModelRetranslateProbeTests {
             },
             "the fast-model result lands stamped even though the live session is hifi"
         )
-        #expect(model.pendingRetranslations.isEmpty)
-        #expect(model.lanePendingRetranslations.isEmpty)
+        #expect(model.retranslate.pendingRetranslations.isEmpty)
     }
 
     @Test("a fast retry during a pending probe is served by the session once the probe rules the live session fast")
@@ -92,8 +91,8 @@ struct AppModelRetranslateProbeTests {
             "the initial session translation is delivered before the retry"
         )
 
-        model.retranslateSentence(sentence)
-        #expect(model.retranslateConfig != nil)
+        model.retranslate.retranslateSentence(sentence)
+        #expect(model.retranslate.fastSessionConfig != nil)
         // The probe lands NOT installed — the live session runs the fast
         // model, i.e. the engine the retry asked for. The lane hands the
         // retry to the session path instead of flying a duplicate.
@@ -105,7 +104,7 @@ struct AppModelRetranslateProbeTests {
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
+                model.retranslate.pendingRetranslations.isEmpty
             },
             "the deferred retry landed and retired its markers"
         )
@@ -140,8 +139,8 @@ struct AppModelRetranslateProbeTests {
             "the initial session translation is delivered before the retry"
         )
 
-        model.retranslateSentence(sentence)
-        #expect(model.retranslateHifiConfig != nil, "the click arms the hifi lane on the pending probe")
+        model.retranslate.retranslateSentence(sentence)
+        #expect(model.retranslate.hifiSessionConfig != nil, "the click arms the hifi lane on the pending probe")
         // The probe lands installed: the live Apple session itself runs the
         // Intelligence model — the retry asked for the engine the session
         // already is. Flying a second hifi session would return
@@ -155,7 +154,7 @@ struct AppModelRetranslateProbeTests {
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
+                model.retranslate.pendingRetranslations.isEmpty
             },
             "the handed-off retry landed and retired its markers"
         )
@@ -190,14 +189,14 @@ struct AppModelRetranslateProbeTests {
             "the initial session translation is delivered before the retry"
         )
 
-        model.retranslateSentence(sentence)
-        #expect(model.retranslateHifiConfig != nil, "the click armed the hifi lane on the pending probe")
+        model.retranslate.retranslateSentence(sentence)
+        #expect(model.retranslate.hifiSessionConfig != nil, "the click armed the hifi lane on the pending probe")
         // A stale hifi hand-over arrives before the probe lands: the
         // degraded lane must not fly it — it belongs to the abandoned
         // high-fidelity generation. The landing re-reads the (newly armed)
         // fast lane's own storage instead.
         let staleHifiEngine = LaneEchoEngine()
-        model.retranslateHifiSessionArrived(staleHifiEngine)
+        model.retranslate.retranslateSessionArrived(.appleHighFidelity, engine: staleHifiEngine)
         // The probe lands NOT installed: the selection degrades to the fast
         // model. The lane arms the fast lane and flies IT — stamping the
         // model that actually ran, never hifi over fallback-fast text. The
@@ -209,10 +208,10 @@ struct AppModelRetranslateProbeTests {
             "the landed degrade re-plans the click to the fast lane"
         )
         #expect(
-            await pollUntil(timeout: resultTimeout) { model.retranslateConfig != nil },
+            await pollUntil(timeout: resultTimeout) { model.retranslate.fastSessionConfig != nil },
             "the degrade armed the fast lane"
         )
-        model.retranslateSessionArrived(LaneEchoEngine())
+        model.retranslate.retranslateSessionArrived(.appleFast, engine: LaneEchoEngine())
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
@@ -225,8 +224,7 @@ struct AppModelRetranslateProbeTests {
             staleHifiEngine.recordedBatches.isEmpty,
             "the abandoned high-fidelity engine is never flown"
         )
-        #expect(model.pendingRetranslations.isEmpty)
-        #expect(model.lanePendingRetranslations.isEmpty)
+        #expect(model.retranslate.pendingRetranslations.isEmpty)
         #expect(
             model.translationSettings.retranslateEngine == .appleHighFidelity,
             "the persisted selection is not rewritten — only its resolution degrades"
@@ -255,16 +253,16 @@ struct AppModelRetranslateProbeTests {
         // cancels the task out of the wait itself. The cancellation must
         // exit silently — the teardown's toast stack is the user's chosen
         // activation, not a failure surface.
-        model.retranslateSentence(sentence)
+        model.retranslate.retranslateSentence(sentence)
         #expect(
-            await pollUntil(timeout: resultTimeout) { model.lanePendingRetranslations.count == 1 },
+            await pollUntil(timeout: resultTimeout) { model.retranslate.pendingRetranslations.count == 1 },
             "the deferred lane owns the marker"
         )
-        model.teardownRetranslateSession()
+        model.cancelArchiveTranslation(); model.retranslate.teardown()
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
+                model.retranslate.pendingRetranslations.isEmpty
             },
             "the cancelled wait retires the markers"
         )
@@ -297,9 +295,9 @@ struct AppModelRetranslateProbeTests {
         // Live Apple, probe unlanded, NO queue worker: the click defers on
         // the unknown identity, and the landing resolves the live session
         // as the fast model — the queue path — whose worker is missing.
-        model.retranslateSentence(sentence)
+        model.retranslate.retranslateSentence(sentence)
         #expect(
-            await pollUntil(timeout: resultTimeout) { model.lanePendingRetranslations.count == 1 },
+            await pollUntil(timeout: resultTimeout) { model.retranslate.pendingRetranslations.count == 1 },
             "the deferred lane owns the marker"
         )
         model.appleHighFidelityProbe = (false, "en")
@@ -310,7 +308,7 @@ struct AppModelRetranslateProbeTests {
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
+                model.retranslate.pendingRetranslations.isEmpty
             },
             "the failed hand-over retires the markers"
         )
@@ -343,12 +341,12 @@ struct AppModelRetranslateProbeTests {
 
         // The probe never lands; the deferral runs out on its own (a short
         // injected bound, so the timeout is exercised for real).
-        model.probeSettleTimeout = .milliseconds(80)
-        model.retranslateSentence(sentence)
+        model.retranslate.probeSettleTimeout = .milliseconds(80)
+        model.retranslate.retranslateSentence(sentence)
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
+                model.retranslate.pendingRetranslations.isEmpty
             },
             "the timed-out deferral retires the markers"
         )
@@ -362,7 +360,7 @@ struct AppModelRetranslateProbeTests {
             "the row keeps its previous translation"
         )
         #expect(
-            model.retranslateHifiConfig != nil,
+            model.retranslate.hifiSessionConfig != nil,
             "the config stays armed — the next click reuses it once the probe lands"
         )
     }

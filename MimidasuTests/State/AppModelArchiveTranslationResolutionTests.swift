@@ -41,8 +41,8 @@ struct ArchiveTranslationResolutionTests {
         }
         let sut = await makeSUT()
         let engine = ScriptedArchiveEngine()
-        sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleHighFidelity, target: "fr")
-        sut.model.retranslateHifiSessionArrived(engine)
+        sut.model.retranslate.appleSessions.arm(kind: .appleHighFidelity, target: "fr")
+        sut.model.retranslate.retranslateSessionArrived(.appleHighFidelity, engine: engine)
 
         sut.model.beginArchiveTranslation(engine: .appleHighFidelity, lang: "fr")
 
@@ -61,7 +61,7 @@ struct ArchiveTranslationResolutionTests {
     @Test("an Apple start with no hand-over reports the fast model's still-starting copy")
     func appleArmTimeoutReportsStillStarting() async {
         let sut = await makeSUT()
-        sut.model.laneArmTimeout = .milliseconds(60)
+        sut.model.retranslate.laneArmTimeout = .milliseconds(60)
 
         sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
 
@@ -84,7 +84,7 @@ struct ArchiveTranslationResolutionTests {
             try Test.cancel("the high-fidelity arm requires macOS 26.4")
         }
         let sut = await makeSUT()
-        sut.model.laneArmTimeout = .milliseconds(60)
+        sut.model.retranslate.laneArmTimeout = .milliseconds(60)
 
         sut.model.beginArchiveTranslation(engine: .appleHighFidelity, lang: "fr")
 
@@ -102,20 +102,21 @@ struct ArchiveTranslationResolutionTests {
     @Test("a teardown during the arm wait cancels the start silently")
     func teardownDuringArmWaitCancelsStart() async {
         let sut = await makeSUT()
-        sut.model.laneArmTimeout = .seconds(2)
+        sut.model.retranslate.laneArmTimeout = .seconds(2)
 
         sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
         #expect(
-            await pollUntil(timeout: resultTimeout) { sut.model.retranslateConfig != nil },
+            await pollUntil(timeout: resultTimeout) { sut.model.retranslate.fastSessionConfig != nil },
             "the run's resolution armed the fast session"
         )
         // Turn the lane generation over under the airborne wait. The rebuild
         // keeps a config armed, so the hand-over that follows still stores
         // its engine — a post-teardown engine with a stale epoch, which the
         // resolving run must not adopt.
-        sut.model.teardownRetranslateSession()
+        sut.model.cancelArchiveTranslation()
+        sut.model.retranslate.teardown()
         let engine = ScriptedArchiveEngine()
-        sut.model.retranslateSessionArrived(engine)
+        sut.model.retranslate.retranslateSessionArrived(.appleFast, engine: engine)
 
         #expect(
             await pollUntil(timeout: resultTimeout) { !sut.model.archiveTranslationRunning },
@@ -174,16 +175,16 @@ struct ArchiveTranslationResolutionTests {
         switch lane {
         case .fast:
             #expect(
-                await pollUntil(timeout: resultTimeout) { sut.model.retranslateConfig != nil },
+                await pollUntil(timeout: resultTimeout) { sut.model.retranslate.fastSessionConfig != nil },
                 "the run's resolution arms the fast session"
             )
-            sut.model.retranslateSessionArrived(engine)
+            sut.model.retranslate.retranslateSessionArrived(.appleFast, engine: engine)
         case .highFidelity:
             #expect(
-                await pollUntil(timeout: resultTimeout) { sut.model.retranslateHifiConfig != nil },
+                await pollUntil(timeout: resultTimeout) { sut.model.retranslate.hifiSessionConfig != nil },
                 "the run's resolution arms the high-fidelity session"
             )
-            sut.model.retranslateHifiSessionArrived(engine)
+            sut.model.retranslate.retranslateSessionArrived(.appleHighFidelity, engine: engine)
         }
 
         #expect(
@@ -210,7 +211,7 @@ struct ArchiveTranslationResolutionTests {
         // instrumented engine builder.
         try? sut.model.translationSettings.saveKey("sk-test-google", for: .google)
         let recorded = Mutex<[(provider: TranslationProvider, target: String)]>([])
-        sut.model.retranslateEngineFactory = { provider, target in
+        sut.model.retranslate.retranslateEngineFactory = { provider, target in
             recorded.withLock { current in current.append((provider, target.code)) }
             return provider == .google ? engine : nil
         }
@@ -233,7 +234,7 @@ struct ArchiveTranslationResolutionTests {
         // The key makes the plan's route executable; the factory's nil is
         // the build failure the resolution reports.
         try? sut.model.translationSettings.saveKey("sk-test-google", for: .google)
-        sut.model.retranslateEngineFactory = { _, _ in nil }
+        sut.model.retranslate.retranslateEngineFactory = { _, _ in nil }
 
         sut.model.beginArchiveTranslation(engine: .google, lang: "fr")
 
@@ -263,8 +264,8 @@ struct ArchiveTranslationResolutionTests {
         // evidence against the picker's explicit high-fidelity choice.
         sut.model.appleHighFidelityProbe = (false, "en")
         let engine = ScriptedArchiveEngine()
-        sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleHighFidelity, target: "fr")
-        sut.model.retranslateHifiSessionArrived(engine)
+        sut.model.retranslate.appleSessions.arm(kind: .appleHighFidelity, target: "fr")
+        sut.model.retranslate.retranslateSessionArrived(.appleHighFidelity, engine: engine)
 
         sut.model.beginArchiveTranslation(engine: .appleHighFidelity, lang: "fr")
 
@@ -291,8 +292,8 @@ struct ArchiveTranslationResolutionTests {
         sut.model.appleHighFidelityProbe = (false, "fr")
         let gate = PermitGate()
         let engine = ScriptedArchiveEngine(gate: gate)
-        sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "fr")
-        sut.model.retranslateSessionArrived(engine)
+        sut.model.retranslate.appleSessions.arm(kind: .appleFast, target: "fr")
+        sut.model.retranslate.retranslateSessionArrived(.appleFast, engine: engine)
 
         sut.model.beginArchiveTranslation(engine: .appleHighFidelity, lang: "fr")
 
@@ -320,7 +321,7 @@ struct ArchiveTranslationResolutionTests {
                 == [.appleFast, .appleFast, .appleFast],
             "the stamps name the model that actually ran"
         )
-        #expect(sut.model.retranslateHifiConfig == nil, "the high-fidelity session is never armed")
+        #expect(sut.model.retranslate.hifiSessionConfig == nil, "the high-fidelity session is never armed")
     }
 
     @Test("an NMT pick flies fast even where high fidelity is installed, ignoring the settings pick")
@@ -331,8 +332,8 @@ struct ArchiveTranslationResolutionTests {
         // run takes only the picker's explicit tier.
         sut.model.translationSettings.selectRetranslate(.google)
         let engine = ScriptedArchiveEngine()
-        sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "fr")
-        sut.model.retranslateSessionArrived(engine)
+        sut.model.retranslate.appleSessions.arm(kind: .appleFast, target: "fr")
+        sut.model.retranslate.retranslateSessionArrived(.appleFast, engine: engine)
 
         sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
 
@@ -346,7 +347,7 @@ struct ArchiveTranslationResolutionTests {
                 == [.appleFast, .appleFast, .appleFast],
             "the stamps name the model that actually ran"
         )
-        #expect(sut.model.retranslateHifiConfig == nil, "an explicit NMT pick never upgrades")
+        #expect(sut.model.retranslate.hifiSessionConfig == nil, "an explicit NMT pick never upgrades")
     }
 
     @Test("the high-fidelity known-unavailable plan fact is scoped to the target")
@@ -455,8 +456,8 @@ struct ArchiveTranslationAdoptionTests {
     func queuedRunChainsOnAirborneLaneWork() async {
         let sut = await makeSUT()
         let engine = ScriptedArchiveEngine()
-        sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "fr")
-        sut.model.retranslateSessionArrived(engine)
+        sut.model.retranslate.appleSessions.arm(kind: .appleFast, target: "fr")
+        sut.model.retranslate.retranslateSessionArrived(.appleFast, engine: engine)
 
         // Park a real lane link on a gated external engine: the row retry
         // registers through `runRetranslateLane`, so the chain bookkeeping
@@ -465,7 +466,7 @@ struct ArchiveTranslationAdoptionTests {
         let laneEngine = ScriptedArchiveEngine(gate: gate)
         install(laneEngine, for: .google, on: sut.model)
         sut.model.translationSettings.selectRetranslate(.google)
-        sut.model.retranslateSentence(entrySentence(in: sut.model, at: 0))
+        sut.model.retranslate.retranslateSentence(entrySentence(in: sut.model, at: 0))
         #expect(
             await pollUntil(timeout: resultTimeout) { laneEngine.recordedBatches.count == 1 },
             "the lane link parks in its engine"
@@ -495,20 +496,18 @@ struct ArchiveTranslationAdoptionTests {
     func closeDuringResolutionKeepsClaimBehindAirborneLane() async {
         let sut = await makeSUT()
         let engine = ScriptedArchiveEngine()
-        sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "fr")
-        sut.model.retranslateSessionArrived(engine)
+        sut.model.retranslate.appleSessions.arm(kind: .appleFast, target: "fr")
+        sut.model.retranslate.retranslateSessionArrived(.appleFast, engine: engine)
 
         let gate = PermitGate()
         let laneEngine = ScriptedArchiveEngine(gate: gate)
         install(laneEngine, for: .google, on: sut.model)
         sut.model.translationSettings.selectRetranslate(.google)
-        sut.model.retranslateSentence(entrySentence(in: sut.model, at: 0))
+        sut.model.retranslate.retranslateSentence(entrySentence(in: sut.model, at: 0))
         #expect(
             await pollUntil(timeout: resultTimeout) { laneEngine.recordedBatches.count == 1 },
             "the lane link parks in its engine"
         )
-        let laneTask = sut.model.retranslateLaneTask
-
         let signal = signalResolutionEntry(on: sut)
         sut.model.beginArchiveTranslation(engine: .appleFast, lang: "fr")
         #expect(
@@ -525,7 +524,7 @@ struct ArchiveTranslationAdoptionTests {
         #expect(sut.model.archiveTranslationRunning, "the close keeps the job claim")
 
         gate.release()
-        await laneTask?.value
+        _ = await sut.model.retranslate.waitForLaneChainIdle()
 
         #expect(
             await pollUntil(timeout: resultTimeout) { runFinished(sut.model, translated: 3) },
@@ -550,24 +549,24 @@ struct ArchiveTranslationAdoptionTests {
     @Test("a lane whose kind was re-armed for another target never adopts that engine")
     func foreignTargetLaneNeverAdoptsRearmedEngine() async {
         let sut = await makeSUT()
-        sut.model.laneArmTimeout = .milliseconds(300)
+        sut.model.retranslate.laneArmTimeout = .milliseconds(300)
         let engine = ScriptedArchiveEngine()
 
         // A `fr` retry with no engine armed: the lane parks in the arm wait.
-        sut.model.retranslateSentence(entrySentence(in: sut.model, at: 0))
-        #expect(sut.model.pendingRetranslations.contains(0), "the fr click marks its row")
+        sut.model.retranslate.retranslateSentence(entrySentence(in: sut.model, at: 0))
+        #expect(sut.model.retranslate.pendingRetranslations.contains(0), "the fr click marks its row")
 
         // The pane moves to `de` and a `de` retry re-arms the fast config for
         // its own target; its lane chains behind the parked fr link.
         sut.model.selectArchiveViewingLanguage("de")
-        sut.model.retranslateSentence(entrySentence(in: sut.model, at: 1))
+        sut.model.retranslate.retranslateSentence(entrySentence(in: sut.model, at: 1))
         #expect(
-            sut.model.retranslate.retranslateConfigTarget == "de",
+            sut.model.retranslate.appleSessions.armedTarget(for: .appleFast) == "de",
             "the de click rebuilds the armed config for its target"
         )
 
         // The hand-over serves the de config only.
-        sut.model.retranslateSessionArrived(engine)
+        sut.model.retranslate.retranslateSessionArrived(.appleFast, engine: engine)
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
@@ -584,14 +583,13 @@ struct ArchiveTranslationAdoptionTests {
             sut.model.pane.entries.compactMap { entry in entry.translation(for: "fr") }.isEmpty,
             "the fr row keeps no wrong-language result"
         )
-        #expect(sut.model.pendingRetranslations.isEmpty, "the timed-out fr marker retires too")
-        #expect(sut.model.lanePendingRetranslations.isEmpty)
+        #expect(sut.model.retranslate.pendingRetranslations.isEmpty, "the timed-out fr marker retires too")
     }
 
     @Test("a bulk run resolving for another target never adopts a re-armed engine")
     func foreignTargetJobResolutionNeverAdoptsRearmedEngine() async {
         let sut = await makeSUT()
-        sut.model.laneArmTimeout = .milliseconds(300)
+        sut.model.retranslate.laneArmTimeout = .milliseconds(300)
         let engine = ScriptedArchiveEngine()
 
         // No pre-armed engine: the run's resolution parks in the arm wait.
@@ -607,8 +605,8 @@ struct ArchiveTranslationAdoptionTests {
         // The pane moves to `de` and the same config is re-armed for it; the
         // hand-over stores a `de` engine.
         sut.model.selectArchiveViewingLanguage("de")
-        sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "de")
-        sut.model.retranslateSessionArrived(engine)
+        sut.model.retranslate.appleSessions.arm(kind: .appleFast, target: "de")
+        sut.model.retranslate.retranslateSessionArrived(.appleFast, engine: engine)
 
         #expect(
             await pollUntil(timeout: resultTimeout) { !sut.model.archiveTranslationRunning },

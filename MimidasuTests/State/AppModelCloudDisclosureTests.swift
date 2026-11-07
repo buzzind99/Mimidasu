@@ -262,7 +262,7 @@ struct AppModelCloudDisclosureTests {
 
         // With the slot free, the Apple Intelligence pick needs no sheet and starts.
         sut.model.providerAwaitingDisclosure = nil
-        sut.model.laneArmTimeout = .milliseconds(40)
+        sut.model.retranslate.laneArmTimeout = .milliseconds(40)
         sut.model.requestArchiveTranslation(engine: .appleHighFidelity, lang: "fr")
 
         #expect(

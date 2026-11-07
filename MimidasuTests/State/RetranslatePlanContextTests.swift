@@ -160,7 +160,26 @@ struct RetranslatePlanContextTests {
     @Test("copies pending indexes, the marker toggle, and the probe target")
     func copiesRowFacts() async {
         let model = await makeModel()
-        model.pendingRetranslations = [3, 5]
+        // Two parked lane clicks own the pending indexes; the divide is
+        // driven through the retry path, not seeded by hand.
+        let gate = LaneGatedEngine()
+        model.phase = .running
+        try? model.translationSettings.saveKey("sk-test-google", for: .google)
+        model.translationSettings.selectRetranslate(.google)
+        model.retranslate.retranslateEngineFactory = { _, _ in gate }
+        let first = makeSentence(index: 3)
+        let second = makeSentence(index: 5)
+        model.sessionController.onSentence?(first)
+        model.sessionController.onSentence?(second)
+        model.retranslate.retranslateSentence(first)
+        model.retranslate.retranslateSentence(second)
+        defer { gate.openGate() }
+        #expect(
+            await pollUntil(timeout: 5) {
+                model.retranslate.pendingRetranslations == [3, 5]
+            },
+            "both parked retries own their markers"
+        )
         model.translationSettings.showsRetranslateMarker = false
         model.appleHighFidelityProbe = (installed: true, targetCode: "de")
 

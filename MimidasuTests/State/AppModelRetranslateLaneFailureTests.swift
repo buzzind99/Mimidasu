@@ -37,7 +37,7 @@ struct AppModelRetranslateLaneFailureTests {
     @Test("a keyed external whose engine cannot build reports unavailable")
     func keyedExternalBuildFailureReportsUnavailable() async {
         let model = await harness.makeModel()
-        model.retranslateEngineFactory = { _, _ in nil }
+        model.retranslate.retranslateEngineFactory = { _, _ in nil }
         model.translationSettings.selectRetranslate(.google)
         saveTestKey(.google, on: model)
         model.phase = .running
@@ -47,10 +47,9 @@ struct AppModelRetranslateLaneFailureTests {
             index: 7, translation: SentenceTranslation(lang: "en", text: "Original")
         )
 
-        model.retranslateSentence(sentence)
+        model.retranslate.retranslateSentence(sentence)
 
-        #expect(model.pendingRetranslations.isEmpty, "the failed build leaves no marker")
-        #expect(model.lanePendingRetranslations.isEmpty)
+        #expect(model.retranslate.pendingRetranslations.isEmpty, "the failed build leaves no marker")
         #expect(
             model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the row keeps its previous translation"
@@ -86,7 +85,7 @@ struct AppModelRetranslateLaneFailureTests {
         let sentence = makeSentence(index: 7)
         model.sessionController.onSentence?(sentence)
 
-        model.retranslateSentence(sentence)
+        model.retranslate.retranslateSentence(sentence)
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
@@ -96,14 +95,13 @@ struct AppModelRetranslateLaneFailureTests {
             },
             "the live-built engine's flight reports its failure"
         )
-        #expect(model.pendingRetranslations.isEmpty)
-        #expect(model.lanePendingRetranslations.isEmpty)
+        #expect(model.retranslate.pendingRetranslations.isEmpty)
     }
 
     @Test("a failed lane run posts the failure toast and clears the marker")
     func failedLaneRunPostsFailureToastAndClearsMarker() async {
         let model = await harness.makeModel()
-        model.retranslateEngineFactory = { _, _ in LaneEmptyEngine() }
+        model.retranslate.retranslateEngineFactory = { _, _ in LaneEmptyEngine() }
         model.translationSettings.selectRetranslate(.google)
         saveTestKey(.google, on: model)
         model.phase = .running
@@ -111,11 +109,11 @@ struct AppModelRetranslateLaneFailureTests {
         model.sessionController.onSentence?(sentence)
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
 
-        model.retranslateSentence(sentence)
+        model.retranslate.retranslateSentence(sentence)
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
-                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
+                model.retranslate.pendingRetranslations.isEmpty
             },
             "the failed run has no deliverer — the marker clears"
         )
@@ -136,7 +134,7 @@ struct AppModelRetranslateLaneFailureTests {
     func laneFailureCrossingStopPostsNoToast() async {
         let model = await harness.makeModel()
         let engine = LaneGatedFailingEngine()
-        model.retranslateEngineFactory = { _, _ in engine }
+        model.retranslate.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
         saveTestKey(.google, on: model)
         model.phase = .running
@@ -163,23 +161,20 @@ struct AppModelRetranslateLaneFailureTests {
         // bounded wait out and the failure surfaces once the stop has
         // landed — the fixture's `try?` keeps it a real failure, not a
         // `CancellationError`.
-        model.retranslateSentence(sentence)
+        model.retranslate.retranslateSentence(sentence)
         #expect(
             await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
             "the flight parks in the engine"
         )
-        let laneTask = model.retranslateLaneTask
-
         await model.performStop()
         engine.openGate()
-        await laneTask?.value
+        _ = await model.retranslate.waitForLaneChainIdle()
 
         #expect(
             !model.toasts.toasts.contains(where: { toast in toast.key == ToastKey.retranslate }),
             "a failure whose catch runs after the stop must not repost over the cleared stack"
         )
-        #expect(model.pendingRetranslations.isEmpty, "no marker outlives the stop")
-        #expect(model.lanePendingRetranslations.isEmpty)
+        #expect(model.retranslate.pendingRetranslations.isEmpty, "no marker outlives the stop")
         #expect(
             model.pane.entries[0].translations == [SentenceTranslation(lang: "en", text: "Original")],
             "the failed flight must not swap the row"
@@ -190,7 +185,7 @@ struct AppModelRetranslateLaneFailureTests {
     func cancelledLaneFlightIsDroppedSilently() async {
         let model = await harness.makeModel()
         let engine = LaneCancellableEngine()
-        model.retranslateEngineFactory = { _, _ in engine }
+        model.retranslate.retranslateEngineFactory = { _, _ in engine }
         model.translationSettings.selectRetranslate(.google)
         saveTestKey(.google, on: model)
         model.phase = .running
@@ -198,21 +193,18 @@ struct AppModelRetranslateLaneFailureTests {
         model.sessionController.onSentence?(sentence)
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: "Original"))
 
-        model.retranslateSentence(sentence)
+        model.retranslate.retranslateSentence(sentence)
         #expect(
             await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
             "the flight entered the engine"
         )
-        // Direct cancellation (production reaches this only via stop, which
-        // clears the markers and the toast stack itself).
-        model.retranslateLaneTask?.cancel()
-        // The cancellation surfaces as CancellationError out of the parked
-        // engine call; its catch path is what retires the markers — poll for
-        // it rather than sleeping past it.
+        // Cancel the newest link while the session stays live: the parked
+        // engine call throws CancellationError, whose catch path retires the
+        // markers. A generic failure would post the failure toast instead.
+        model.retranslate.cancelNewestLaneLink()
+        _ = await model.retranslate.waitForLaneChainIdle()
         #expect(
-            await pollUntil(timeout: resultTimeout) {
-                model.pendingRetranslations.isEmpty && model.lanePendingRetranslations.isEmpty
-            },
+            model.retranslate.pendingRetranslations.isEmpty,
             "the cancelled flight retired its markers"
         )
 

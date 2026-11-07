@@ -115,9 +115,9 @@ struct AppModelRetranslateArchiveTests {
         let target = entrySentence(in: sut.model, at: 0)
         sut.model.closeArchive()
 
-        sut.model.retranslateSentence(target)
+        sut.model.retranslate.retranslateSentence(target)
 
-        #expect(sut.model.pendingRetranslations.isEmpty)
+        #expect(sut.model.retranslate.pendingRetranslations.isEmpty)
         #expect(sut.store.load(id: sut.id)?.entries.first?.translations.isEmpty == true)
     }
 
@@ -125,13 +125,30 @@ struct AppModelRetranslateArchiveTests {
     func openRetiresMarkers() async {
         let sut = await makeSUT()
         let other = appendArchive(to: sut.store)
-        sut.model.pendingRetranslations = [0, 1]
-        sut.model.lanePendingRetranslations = [0]
+        let gate = LaneGatedEngine()
+        try? sut.model.translationSettings.saveKey("sk-test-google", for: .google)
+        sut.model.translationSettings.selectRetranslate(.google)
+        sut.model.retranslate.retranslateEngineFactory = { _, _ in gate }
+
+        // Two parked archive retries own both markers; the divide is applied
+        // by the boundary, not seeded by hand.
+        sut.model.retranslate.retranslateSentence(entrySentence(in: sut.model, at: 0))
+        sut.model.retranslate.retranslateSentence(entrySentence(in: sut.model, at: 1))
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                sut.model.retranslate.pendingRetranslations == [0, 1]
+            },
+            "both retries own their marker"
+        )
+        // A queue-owned cue (the index a live queue retry would own) must be
+        // cleared by the same boundary, not just the lane-owned markers.
+        sut.model.retranslate.markPending(2, laneOwned: false)
 
         sut.model.openArchiveSession(id: other)
+        gate.openGate()
+        _ = await sut.model.retranslate.waitForLaneChainIdle()
 
-        #expect(sut.model.pendingRetranslations.isEmpty)
-        #expect(sut.model.lanePendingRetranslations.isEmpty)
+        #expect(sut.model.retranslate.pendingRetranslations.isEmpty)
     }
 
     // MARK: - Apple route
@@ -141,11 +158,11 @@ struct AppModelRetranslateArchiveTests {
         let sut = await makeSUT()
         let target = entrySentence(in: sut.model, at: 0)
 
-        sut.model.retranslateSentence(target)
+        sut.model.retranslate.retranslateSentence(target)
         // Unarmed at click time: the lane armed the fast config and waits;
         // the host hand-over serves the flight.
-        #expect(sut.model.retranslateConfig != nil, "the archive route arms its own session")
-        sut.model.retranslateSessionArrived(ArchiveEchoEngine())
+        #expect(sut.model.retranslate.fastSessionConfig != nil, "the archive route arms its own session")
+        sut.model.retranslate.retranslateSessionArrived(.appleFast, engine: ArchiveEchoEngine())
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
@@ -154,8 +171,7 @@ struct AppModelRetranslateArchiveTests {
             },
             "the fast-model result lands stamped with the archive target"
         )
-        #expect(sut.model.pendingRetranslations.isEmpty)
-        #expect(sut.model.lanePendingRetranslations.isEmpty)
+        #expect(sut.model.retranslate.pendingRetranslations.isEmpty)
         #expect(
             !sut.model.toasts.toasts.contains { toast in toast.key == ToastKey.retranslate },
             "the queue path was never consulted"
@@ -180,14 +196,14 @@ struct AppModelRetranslateArchiveTests {
         let target = entrySentence(in: sut.model, at: 0)
         let engine = GatedArchiveEngine()
 
-        sut.model.retranslateSentence(target)
+        sut.model.retranslate.retranslateSentence(target)
         // The click arms the archive-target config; the hand-over then
         // serves the lane's wait.
-        sut.model.retranslateSessionArrived(engine)
+        sut.model.retranslate.retranslateSessionArrived(.appleFast, engine: engine)
         #expect(await pollUntil(timeout: resultTimeout) { engine.callCount == 1 }, "the flight starts")
-        sut.model.retranslateSentence(target)
+        sut.model.retranslate.retranslateSentence(target)
 
-        #expect(sut.model.pendingRetranslations == [0], "the marker holds a second click back")
+        #expect(sut.model.retranslate.pendingRetranslations == [0], "the marker holds a second click back")
         engine.open()
         #expect(
             await pollUntil(timeout: resultTimeout) {
@@ -203,8 +219,8 @@ struct AppModelRetranslateArchiveTests {
         let target = entrySentence(in: sut.model, at: 0)
         let engine = GatedArchiveEngine()
 
-        sut.model.retranslateSentence(target)
-        sut.model.retranslateSessionArrived(engine)
+        sut.model.retranslate.retranslateSentence(target)
+        sut.model.retranslate.retranslateSessionArrived(.appleFast, engine: engine)
         #expect(await pollUntil(timeout: resultTimeout) { engine.callCount == 1 }, "the flight starts")
 
         sut.model.closeArchive()
@@ -212,7 +228,7 @@ struct AppModelRetranslateArchiveTests {
 
         // The flight resolves and its guards retire it; nothing lands and
         // the store never sees the orphan.
-        #expect(await pollUntil(timeout: resultTimeout) { sut.model.pendingRetranslations.isEmpty })
+        #expect(await pollUntil(timeout: resultTimeout) { sut.model.retranslate.pendingRetranslations.isEmpty })
         #expect(sut.store.load(id: sut.id)?.entries.first?.translations.isEmpty == true)
         #expect(sut.model.pane.entries.isEmpty, "the pane emptied with the close")
     }
@@ -223,14 +239,14 @@ struct AppModelRetranslateArchiveTests {
     func externalSelectionStampsArchiveTarget() async {
         let sut = await makeSUT()
         let engine = ArchiveEchoEngine()
-        sut.model.retranslateEngineFactory = { provider, _ in
+        sut.model.retranslate.retranslateEngineFactory = { provider, _ in
             provider == .google ? engine : nil
         }
         sut.model.translationSettings.selectRetranslate(.google)
         saveTestKey(.google, on: sut.model)
         let target = entrySentence(in: sut.model, at: 1)
 
-        sut.model.retranslateSentence(target)
+        sut.model.retranslate.retranslateSentence(target)
 
         #expect(
             await pollUntil(timeout: resultTimeout) {
@@ -240,7 +256,7 @@ struct AppModelRetranslateArchiveTests {
             "the external result lands stamped with the archive target"
         )
         #expect(engine.recordedBatches == [["さようなら"]])
-        #expect(sut.model.retranslateConfig == nil, "no dedicated session is armed for an external")
+        #expect(sut.model.retranslate.fastSessionConfig == nil, "no dedicated session is armed for an external")
     }
 
     @Test("an external selection with no usable engine reports unavailable and keeps the row")
@@ -249,13 +265,13 @@ struct AppModelRetranslateArchiveTests {
         // The stored key admits the route; the factory's nil is the build
         // failure that must leave the row and its backlog untouched.
         try? sut.model.translationSettings.saveKey("sk-test-google", for: .google)
-        sut.model.retranslateEngineFactory = { _, _ in nil }
+        sut.model.retranslate.retranslateEngineFactory = { _, _ in nil }
         sut.model.translationSettings.selectRetranslate(.google)
         let target = entrySentence(in: sut.model, at: 0)
 
-        sut.model.retranslateSentence(target)
+        sut.model.retranslate.retranslateSentence(target)
 
-        #expect(sut.model.pendingRetranslations.isEmpty)
+        #expect(sut.model.retranslate.pendingRetranslations.isEmpty)
         #expect(
             sut.model.toasts.toasts.contains { toast in toast.key == ToastKey.retranslate },
             "the unbuildable engine reports unavailable"
@@ -311,11 +327,11 @@ struct AppModelRetranslateArchiveTests {
         let sut = await makeSUT()
         sut.model.translationSettings.selectRetranslate(.appleHighFidelity)
 
-        sut.model.retranslateSentence(entrySentence(in: sut.model, at: 0))
+        sut.model.retranslate.retranslateSentence(entrySentence(in: sut.model, at: 0))
 
-        #expect(sut.model.retranslateHifiConfig != nil, "the hifi lane armed, not the fast one")
-        #expect(sut.model.retranslateConfig == nil)
-        #expect(sut.model.retranslate.retranslateHifiConfigTarget == "fr")
+        #expect(sut.model.retranslate.hifiSessionConfig != nil, "the hifi lane armed, not the fast one")
+        #expect(sut.model.retranslate.fastSessionConfig == nil)
+        #expect(sut.model.retranslate.appleSessions.armedTarget(for: .appleHighFidelity) == "fr")
     }
 
     @Test("a second archive with a different stored target rebuilds the armed config")
@@ -323,8 +339,8 @@ struct AppModelRetranslateArchiveTests {
         let sut = await makeSUT()
         // First archive (fr) arms the config; the click needs no hand-over
         // for the arming to happen.
-        sut.model.retranslateSentence(entrySentence(in: sut.model, at: 0))
-        #expect(sut.model.retranslate.retranslateConfigTarget == "fr")
+        sut.model.retranslate.retranslateSentence(entrySentence(in: sut.model, at: 0))
+        #expect(sut.model.retranslate.appleSessions.armedTarget(for: .appleFast) == "fr")
 
         // A second archive stored German replaces the pane.
         let secondID = sut.store.append(
@@ -338,10 +354,10 @@ struct AppModelRetranslateArchiveTests {
         sut.model.closeArchive()
         sut.model.openArchiveSession(id: secondID ?? -1)
 
-        sut.model.retranslateSentence(entrySentence(in: sut.model, at: 0))
+        sut.model.retranslate.retranslateSentence(entrySentence(in: sut.model, at: 0))
 
         #expect(
-            sut.model.retranslate.retranslateConfigTarget == "de",
+            sut.model.retranslate.appleSessions.armedTarget(for: .appleFast) == "de",
             "the armed config was rebuilt for the new archive's target"
         )
     }
@@ -357,11 +373,11 @@ struct AppModelRetranslateArchiveTests {
         // row path degrades with the same target-scoped rule as the bulk run.
         sut.model.appleHighFidelityProbe = (false, "fr")
 
-        sut.model.retranslateSentence(entrySentence(in: sut.model, at: 0))
+        sut.model.retranslate.retranslateSentence(entrySentence(in: sut.model, at: 0))
 
-        #expect(sut.model.retranslateConfig != nil, "the degraded row retry arms the fast session")
-        #expect(sut.model.retranslateHifiConfig == nil, "the high-fidelity session is never armed")
-        #expect(sut.model.retranslate.retranslateConfigTarget == "fr")
+        #expect(sut.model.retranslate.fastSessionConfig != nil, "the degraded row retry arms the fast session")
+        #expect(sut.model.retranslate.hifiSessionConfig == nil, "the high-fidelity session is never armed")
+        #expect(sut.model.retranslate.appleSessions.armedTarget(for: .appleFast) == "fr")
     }
 
     @Test("a row retry that lands after a viewing-language switch keeps the click-time target")
@@ -371,19 +387,19 @@ struct AppModelRetranslateArchiveTests {
         let engine = ScriptedArchiveEngine(gate: gate)
         // The archive route arms its own dedicated session; seed it with the
         // gated engine so both chained flights park on the same double.
-        sut.model.retranslate.armRetranslateSessionIfNeeded(for: .appleFast, target: "fr")
-        sut.model.retranslateSessionArrived(engine)
+        sut.model.retranslate.appleSessions.arm(kind: .appleFast, target: "fr")
+        sut.model.retranslate.retranslateSessionArrived(.appleFast, engine: engine)
 
         let first = entrySentence(in: sut.model, at: 0)
         let second = entrySentence(in: sut.model, at: 1)
-        sut.model.retranslateSentence(first)
+        sut.model.retranslate.retranslateSentence(first)
         #expect(
             await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
             "the first flight parks in the engine"
         )
 
-        sut.model.retranslateSentence(second)
-        #expect(sut.model.pendingRetranslations == [0, 1], "the second click chains behind the first")
+        sut.model.retranslate.retranslateSentence(second)
+        #expect(sut.model.retranslate.pendingRetranslations == [0, 1], "the second click chains behind the first")
 
         // A viewing-language switch during the arm/flight window must not
         // retarget the airborne work: both flights were clicked for `fr`.
@@ -414,7 +430,7 @@ struct AppModelRetranslateArchiveTests {
             "both row markers describe the click-time language's result"
         )
         #expect(
-            sut.model.retranslate.retranslateConfigTarget == "fr",
+            sut.model.retranslate.appleSessions.armedTarget(for: .appleFast) == "fr",
             "the armed config kept the click-time target"
         )
     }

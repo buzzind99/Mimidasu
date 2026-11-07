@@ -8,8 +8,8 @@ import Testing
 /// replace-in-place routing are all exercised through the same path the app
 /// uses rather than by hand-delivering into `applyTranslation`.
 ///
-/// The gating and clearing tests poke the marker directly — they are about
-/// when it is inserted and cleared, and a worker would only make them wait.
+/// The gating and clearing tests park a real queue retry, so the marker they
+/// observe was inserted by the same path the app runs.
 @MainActor
 @Suite("AppModel manual re-translation")
 struct AppModelRetranslationTests {
@@ -28,6 +28,32 @@ struct AppModelRetranslationTests {
     /// handler to have run `applyTranslation`.
     private func waitForTranslation(_ model: AppModel) async -> Bool {
         await pollUntil(timeout: resultTimeout) { model.pane.entries.first?.joinedTranslations != nil }
+    }
+
+    /// Drives a real queue-path retry to a parked state: the initial delivery
+    /// lands, the gate closes again, and the retry's batch parks in the
+    /// engine. The caller owns releasing the gate and cancelling the worker.
+    private func parkQueueRetry(
+        _ model: AppModel
+    ) async -> (engine: GatedRetranslateEngine, worker: Task<Void, Never>) {
+        let engine = GatedRetranslateEngine()
+        let worker = await harness.attachWorker(model, engine: engine)
+        model.phase = .running
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+        #expect(
+            await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 1 },
+            "the initial delivery is airborne"
+        )
+        engine.openGate()
+        #expect(await waitForTranslation(model), "the initial delivery lands")
+        engine.closeGate()
+        model.retranslate.retranslateSentence(sentence)
+        #expect(
+            await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 2 },
+            "the retry's batch is airborne"
+        )
+        return (engine, worker)
     }
 
     // MARK: - Replace-on-arrival routing
@@ -49,10 +75,10 @@ struct AppModelRetranslationTests {
         #expect(await waitForTranslation(model), "the first pass translates the row")
         #expect(model.pane.entries[0].joinedTranslations == "EN:\(sentenceText)")
 
-        model.retranslateSentence(sentence)
-        #expect(model.pendingRetranslations == [7], "the row dims while the retry is in flight")
+        model.retranslate.retranslateSentence(sentence)
+        #expect(model.retranslate.pendingRetranslations == [7], "the row dims while the retry is in flight")
         #expect(
-            await pollUntil(timeout: resultTimeout) { model.pendingRetranslations.isEmpty },
+            await pollUntil(timeout: resultTimeout) { model.retranslate.pendingRetranslations.isEmpty },
             "the landing result clears the in-flight marker"
         )
 
@@ -86,15 +112,15 @@ struct AppModelRetranslationTests {
         // second click must be refused with the retry genuinely outstanding.
         engine.closeGate()
 
-        model.retranslateSentence(sentence)
-        #expect(model.pendingRetranslations == [7], "the first click marks the row")
+        model.retranslate.retranslateSentence(sentence)
+        #expect(model.retranslate.pendingRetranslations == [7], "the first click marks the row")
         #expect(
             await pollUntil(timeout: resultTimeout) { engine.recordedBatches.count == 2 },
             "the retry's batch is airborne"
         )
 
-        model.retranslateSentence(sentence)
-        #expect(model.pendingRetranslations == [7], "the second click must not churn the marker")
+        model.retranslate.retranslateSentence(sentence)
+        #expect(model.retranslate.pendingRetranslations == [7], "the second click must not churn the marker")
         #expect(
             engine.recordedBatches.count == 2,
             "the second click must not start another flight"
@@ -102,7 +128,7 @@ struct AppModelRetranslationTests {
 
         engine.openGate()
         #expect(
-            await pollUntil(timeout: resultTimeout) { model.pendingRetranslations.isEmpty },
+            await pollUntil(timeout: resultTimeout) { model.retranslate.pendingRetranslations.isEmpty },
             "the single retry result lands and clears the marker"
         )
         #expect(
@@ -134,10 +160,10 @@ struct AppModelRetranslationTests {
             "the first pass is airborne and parked on the gate"
         )
 
-        model.retranslateSentence(sentence)
+        model.retranslate.retranslateSentence(sentence)
 
         #expect(
-            model.pendingRetranslations.isEmpty,
+            model.retranslate.pendingRetranslations.isEmpty,
             "a no-op must not dim the row it refused to serve"
         )
         #expect(engine.recordedBatches.count == 1, "no competing flight was queued")
@@ -156,9 +182,9 @@ struct AppModelRetranslationTests {
         let model = await harness.makeModel()
         model.phase = .idle
 
-        model.retranslateSentence(makeSentence(index: 7))
+        model.retranslate.retranslateSentence(makeSentence(index: 7))
 
-        #expect(model.pendingRetranslations.isEmpty)
+        #expect(model.retranslate.pendingRetranslations.isEmpty)
         let drained = await model.translationQueue.drain(timeout: 0.05)
         #expect(drained, "the gated retry must not enter the queue without a live session")
     }
@@ -178,9 +204,9 @@ struct AppModelRetranslationTests {
         model.sessionController.onSentence?(sentence)
         #expect(await waitForTranslation(model))
 
-        model.retranslateSentence(sentence)
+        model.retranslate.retranslateSentence(sentence)
         #expect(
-            await pollUntil(timeout: resultTimeout) { model.pendingRetranslations.isEmpty },
+            await pollUntil(timeout: resultTimeout) { model.retranslate.pendingRetranslations.isEmpty },
             "the retry is served while the source is lost"
         )
         #expect(engine.recordedBatches.count == 2)
@@ -196,11 +222,11 @@ struct AppModelRetranslationTests {
         let model = await harness.makeModel()
         model.phase = .running
 
-        model.retranslateSentence(makeSentence(index: 7))
+        model.retranslate.retranslateSentence(makeSentence(index: 7))
 
         #expect(!model.translationQueue.hasWorker, "the fixture attaches no worker")
         #expect(
-            model.pendingRetranslations.isEmpty,
+            model.retranslate.pendingRetranslations.isEmpty,
             "no worker means no result, so the row must not dim"
         )
         let drained = await model.translationQueue.drain(timeout: 0.05)
@@ -254,12 +280,12 @@ struct AppModelRetranslationTests {
         model.phase = .running
         model.translationSession.activeTranslationEngine = .external
 
-        model.retranslateSentence(makeSentence(index: 7))
-        #expect(model.pendingRetranslations == [7], "the retry is marked pending")
+        model.retranslate.retranslateSentence(makeSentence(index: 7))
+        #expect(model.retranslate.pendingRetranslations == [7], "the retry is marked pending")
 
         model.handleTranslationStatus(.unavailable("engine failed", .permanent))
 
-        #expect(model.pendingRetranslations == [7], "the fallback will replay the sentence")
+        #expect(model.retranslate.pendingRetranslations == [7], "the fallback will replay the sentence")
         #expect(model.translationRuntime.fallbackLatched, "the fallback latched onto Apple")
     }
 
@@ -281,13 +307,13 @@ struct AppModelRetranslationTests {
         model.phase = .running
         model.translationSession.activeTranslationEngine = .apple
 
-        model.retranslateSentence(makeSentence(index: 7))
-        #expect(model.pendingRetranslations == [7], "the retry is marked pending")
+        model.retranslate.retranslateSentence(makeSentence(index: 7))
+        #expect(model.retranslate.pendingRetranslations == [7], "the retry is marked pending")
 
         model.handleTranslationStatus(.unavailable("Apple failed", .permanent))
 
         #expect(
-            model.pendingRetranslations.isEmpty,
+            model.retranslate.pendingRetranslations.isEmpty,
             "no engine swap follows, so the dim must not outlive the session"
         )
     }
@@ -297,14 +323,17 @@ struct AppModelRetranslationTests {
     @Test("an unavailable status after the fallback latched clears the marker")
     func unavailableAfterFallbackClearsPendingRetranslations() async {
         let model = await harness.makeModel()
-        model.phase = .running
-        model.pendingRetranslations = [7]
+        let parked = await parkQueueRetry(model)
+        defer {
+            parked.engine.openGate()
+            parked.worker.cancel()
+        }
         model.translationSession.translationFallbackActive = true
         model.translationSession.activeTranslationEngine = .apple
 
         model.handleTranslationStatus(.unavailable("Apple replay failed", .permanent))
 
-        #expect(model.pendingRetranslations.isEmpty)
+        #expect(model.retranslate.pendingRetranslations.isEmpty)
     }
 
     /// Sentence indexes restart at 0 every session, so a marker left over from
@@ -313,11 +342,16 @@ struct AppModelRetranslationTests {
     @Test("a new session clears pending re-translations so indexes cannot alias")
     func sessionBeginClearsPendingRetranslations() async {
         let model = await harness.makeModel()
-        model.pendingRetranslations = [7]
+        let parked = await parkQueueRetry(model)
+        defer {
+            parked.engine.openGate()
+            parked.worker.cancel()
+        }
+        #expect(model.retranslate.pendingRetranslations == [7], "the retry owns a marker")
 
         model.sessionController.onSessionBegin?()
 
-        #expect(model.pendingRetranslations.isEmpty)
+        #expect(model.retranslate.pendingRetranslations.isEmpty)
     }
 
     /// The latch is per session: a fresh session re-attempts the configured
@@ -338,12 +372,19 @@ struct AppModelRetranslationTests {
     @Test("a result for an unknown row still clears its marker")
     func applyTranslationClearsMarkerForUnknownIndex() async {
         let model = await harness.makeModel()
-        model.pendingRetranslations = [7]
+        let parked = await parkQueueRetry(model)
+        defer {
+            parked.engine.openGate()
+            parked.worker.cancel()
+        }
+        // The row vanishes while the retry is airborne.
+        model.pane.beginLiveSession()
+        #expect(model.retranslate.pendingRetranslations == [7], "the retry owns a marker")
 
         model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: translationText))
 
         #expect(
-            model.pendingRetranslations.isEmpty,
+            model.retranslate.pendingRetranslations.isEmpty,
             "the marker must not outlive the row it was dimming"
         )
     }
