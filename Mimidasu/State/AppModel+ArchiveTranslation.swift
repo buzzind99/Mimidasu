@@ -19,8 +19,7 @@ extension AppModel {
         archiveTranslationJob.resolveEngine = { [weak self] engine, target in
             guard let self else { return .cancelled }
             return await retranslate.resolveArchiveJobEngine(
-                selection: engine, target: target,
-                shouldAbort: { self.archiveTranslationJob.isCancelled }
+                selection: engine, target: target
             )
         }
         archiveTranslationJob.land = { [weak self] index, translation in

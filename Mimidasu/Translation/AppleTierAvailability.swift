@@ -10,12 +10,32 @@ import Translation
 @MainActor
 @Observable
 final class AppleTierAvailability {
+    /// Outcome of waiting for a pair's probe to land. `.cancelled` is
+    /// distinct from `.timedOut`: a stop already cleared the toast stack,
+    /// so a cancelled wait must report nothing.
+    enum ProbeLandingWait: Sendable {
+        case landed
+        case timedOut
+        case cancelled
+    }
+
     /// Landed probe evidence: (installed, the pair it was probed for).
     /// `(false, nil)` until a landing; every `beginProbe` resets it.
     private(set) var probe: (installed: Bool, targetCode: String?) = (false, nil)
 
     @ObservationIgnored private var sequence = 0
     @ObservationIgnored private let check: @Sendable (String) async -> Bool
+
+    /// One bound wait for a pair's landing.
+    private struct LandingWaiter {
+        let targetCode: String
+        let laneOwned: Bool
+        let continuation: CheckedContinuation<ProbeLandingWait, Never>
+    }
+
+    @ObservationIgnored private var landingWaiters: [Int: LandingWaiter] = [:]
+    @ObservationIgnored private var landingTimeouts: [Int: Task<Void, Never>] = [:]
+    @ObservationIgnored private var nextLandingWaiterID = 0
 
     init(check: @escaping @Sendable (String) async -> Bool = AppleTierAvailability.check) {
         self.check = check
@@ -43,14 +63,85 @@ final class AppleTierAvailability {
         }
     }
 
-    /// Records a landing — the probe task's write and the test seam.
+    /// Records a landing — the probe task's write and the test seam —
+    /// resuming every wait registered for the landed pair.
     func land(installed: Bool, targetCode: String?) {
         probe = (installed, targetCode)
+        guard let targetCode else { return }
+        let matching = landingWaiters.filter { entry in
+            entry.value.targetCode == targetCode
+        }.map(\.key)
+        for waiterID in matching {
+            finishLandingWaiter(waiterID, with: .landed)
+        }
+    }
+
+    /// Cancels the probe waits a lane generation turn makes stale. The probe
+    /// only gates lane deferrals, so every waiter is lane-owned today.
+    func cancelLaneWaiters() {
+        let matching = landingWaiters.filter { entry in
+            entry.value.laneOwned
+        }.map(\.key)
+        for waiterID in matching {
+            finishLandingWaiter(waiterID, with: .cancelled)
+        }
     }
 
     /// Drops an airborne probe without touching the landed evidence.
     func supersedeInFlightProbe() {
         sequence += 1
+    }
+
+    /// Waits bounded for `targetCode`'s probe to land. Already-landed
+    /// evidence answers immediately; otherwise a continuation is resumed by
+    /// the landing, the timeout, or task cancellation. The probe itself is a
+    /// fast async check fired by an activation — the bound only catches
+    /// pathological cases, and a monotonic clock keeps a wall-clock change
+    /// from stretching it.
+    func awaitProbeLanding(
+        for targetCode: String, timeout: Duration, laneOwned: Bool
+    ) async -> ProbeLandingWait {
+        if Task.isCancelled {
+            return .cancelled
+        }
+        if probeLanded(for: targetCode) {
+            return .landed
+        }
+        let waiterID = nextLandingWaiterID
+        nextLandingWaiterID += 1
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                // No suspension exists between the landed check above and
+                // this registration, so the evidence cannot land in between.
+                landingWaiters[waiterID] = LandingWaiter(
+                    targetCode: targetCode, laneOwned: laneOwned,
+                    continuation: continuation
+                )
+                landingTimeouts[waiterID] = Task { [weak self] in
+                    guard let self else { return }
+                    do {
+                        try await Task.sleep(for: timeout)
+                    } catch {
+                        return
+                    }
+                    finishLandingWaiter(waiterID, with: .timedOut)
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.finishLandingWaiter(waiterID, with: .cancelled)
+            }
+        }
+    }
+
+    /// Resumes one wait at most once; the record is removed before the
+    /// continuation is resumed, and everything runs on the main actor.
+    private func finishLandingWaiter(
+        _ waiterID: Int, with outcome: ProbeLandingWait
+    ) {
+        guard let waiter = landingWaiters.removeValue(forKey: waiterID) else { return }
+        landingTimeouts.removeValue(forKey: waiterID)?.cancel()
+        waiter.continuation.resume(returning: outcome)
     }
 
     // Pair-scoped evidence

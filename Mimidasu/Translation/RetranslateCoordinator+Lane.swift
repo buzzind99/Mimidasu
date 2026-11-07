@@ -59,7 +59,7 @@ extension RetranslateCoordinator {
                 )
                 return
             }
-            pendingRetranslations.insert(sentence.index)
+            markPending(sentence.index, laneOwned: false)
             queue.retranslate(sentence)
         case let .lane(engine):
             startRetranslateLane(sentence, engine: engine, target: target, plan: plan)
@@ -98,11 +98,10 @@ extension RetranslateCoordinator {
             built = nil
         }
         // Both sets: `pendingRetranslations` is the row cue + double-click
-        // guard every view reads; `lanePendingRetranslations` records lane
-        // ownership so the queue's terminal `.unavailable` clear can't drop
-        // a marker whose translation still has a deliverer.
-        pendingRetranslations.insert(sentence.index)
-        lanePendingRetranslations.insert(sentence.index)
+        // guard every view reads; the lane-ownership record keeps the
+        // queue's terminal `.unavailable` clear from dropping a marker whose
+        // translation still has a deliverer.
+        markPending(sentence.index, laneOwned: true)
         // The lane owns this sentence now: if it sits in a failed-out
         // backlog, drop the queued copy so a later Reconnect replay cannot
         // re-translate it and overwrite the lane's stamped result with an
@@ -113,7 +112,7 @@ extension RetranslateCoordinator {
         if built == nil {
             // The dedicated Apple session is armed optimistically; the
             // lane reads its storage once the config has handed over.
-            armRetranslateSessionIfNeeded(for: kind, target: target.code)
+            appleSessions.arm(kind: kind, target: target.code)
         }
         runRetranslateLane(sentence, kind: kind, engine: built, plan: plan)
     }
@@ -164,13 +163,13 @@ extension RetranslateCoordinator {
         _ sentence: Sentence, kind: TranslationEngineKind,
         engine: (any TranslationEngine)?, plan: RetranslatePlan
     ) {
-        let previous = retranslateLaneTask
-        // The session this retry belongs to. See `retranslateSessionEpoch`: a
-        // lane task outliving its session would otherwise land on an
-        // unrelated row of the next one, whose indexes restart at 0.
-        let epoch = retranslateSessionEpoch
+        let previous = newestLaneTask
+        // The session this retry belongs to. See `currentLaneEpoch`: a lane
+        // task outliving its session would otherwise land on an unrelated
+        // row of the next one, whose indexes restart at 0.
+        let epoch = currentLaneEpoch
         let serial = beginLaneChainLink()
-        retranslateLaneTask = Task { [weak self] in
+        let task = Task { [weak self] in
             await previous?.value
             // A deallocated coordinator has no markers left to retire, so
             // the weak unwrap is the only exit that skips `retireLaneMarker`.
@@ -194,6 +193,7 @@ extension RetranslateCoordinator {
                 sentence, laneKind: laneKind, engine: engine, epoch: epoch, plan: plan
             )
         }
+        trackLaneTask(task)
     }
 
     /// The lane task's second half, split out at the function-length gate:
@@ -211,12 +211,12 @@ extension RetranslateCoordinator {
         let targetCode = plan.context.target.code
         let laneEngineCandidate: (any TranslationEngine)? = switch laneKind {
         case .appleFast, .appleHighFidelity:
-            laneEngineStorage(for: laneKind, target: targetCode)
+            appleSessions.engine(for: laneKind, target: targetCode)
         default:
             engine
         }
         let resolved = await laneEngine(
-            laneEngineCandidate, kind: laneKind, epoch: epoch, target: targetCode
+            laneEngineCandidate, kind: laneKind, target: targetCode
         )
         switch resolved {
         case .cancelled:
@@ -252,6 +252,24 @@ extension RetranslateCoordinator {
         }
     }
 
+    /// Resolves the lane's engine: a built engine passes through; nil (an
+    /// Apple selection while its dedicated session is still arming) waits a
+    /// bounded interval for the `.translationTask` host to hand one over —
+    /// acquisition is sub-second once armed, the bound only catches
+    /// pathological cases. Storage is read for `target` only: a config
+    /// re-armed for another target never serves this wait. A cancelled lane
+    /// task exits promptly instead of waiting out the arm window.
+    private func laneEngine(
+        _ engine: (any TranslationEngine)?, kind: TranslationEngineKind, target: String
+    ) async -> LaneEngineResolution {
+        if let engine {
+            return .ready(engine)
+        }
+        return await appleSessions.awaitEngine(
+            for: kind, target: target, timeout: laneArmTimeout, laneOwned: true
+        )
+    }
+
     /// Outcome of the probe-deferral gate at the head of a lane task.
     private enum ProbeGateOutcome {
         /// Continue with the (possibly re-resolved) lane kind.
@@ -282,7 +300,9 @@ extension RetranslateCoordinator {
             return .proceed(kind)
         }
         guard AppleTierAvailability.supportsStrategySelection else { return .proceed(kind) }
-        switch await probeLanding(epoch: epoch, targetCode: plan.context.target.code) {
+        switch await tierAvailability.awaitProbeLanding(
+            for: plan.context.target.code, timeout: probeSettleTimeout, laneOwned: true
+        ) {
         case .cancelled:
             // The stop already cleared every toast; reporting here
             // would outlive it and misreport a cancellation.
@@ -299,6 +319,12 @@ extension RetranslateCoordinator {
             )
             return .done
         case .landed:
+            // The landing can race a stop between the wait's resume and
+            // this point; a stopped lane must not re-plan or hand over.
+            guard retranslateLaneCanDeliver(epoch: epoch) else {
+                retireLaneMarker(sentence.index, epoch: epoch)
+                return .done
+            }
             return probeLandedOutcome(kind: kind, epoch: epoch, sentence: sentence, plan: plan)
         }
     }
@@ -324,53 +350,20 @@ extension RetranslateCoordinator {
         }
         let laneKind = refreshed.context.effectiveSelection.kind ?? kind
         if laneKind != kind {
-            armRetranslateSessionIfNeeded(for: laneKind, target: plan.context.target.code)
+            appleSessions.arm(kind: laneKind, target: plan.context.target.code)
         }
         return .proceed(laneKind)
     }
 
-    /// Outcome of waiting for the activation probe to land. `.timedOut` and
-    /// `.cancelled` are distinct on purpose, mirroring
-    /// `LaneEngineResolution`: a timeout reports a probe that never landed,
-    /// a cancellation is a stop/teardown whose toasts are already cleared.
-    private enum ProbeLanding {
-        case landed
-        case timedOut
-        case cancelled
-    }
-
-    /// Waits bounded for the activation probe to land for `targetCode` — the
-    /// click-time lane target, so an archive-target lane never waits on the
-    /// settings pair's evidence. The probe is a fast async availability
-    /// check fired by every activation; the bound only catches pathological
-    /// cases. Monotonic deadline (`ContinuousClock`) — wall-clock `Date`
-    /// would skew on clock changes.
-    private func probeLanding(epoch: Int, targetCode: String) async -> ProbeLanding {
-        let deadline = ContinuousClock.now + probeSettleTimeout
-        while !tierAvailability.probeLanded(for: targetCode) {
-            guard ContinuousClock.now < deadline else { return .timedOut }
-            do {
-                try await Task.sleep(for: Duration.milliseconds(50))
-            } catch {
-                return .cancelled
-            }
-            guard retranslateLaneCanDeliver(epoch: epoch) else { return .cancelled }
-        }
-        // The final landing can race a stop between the loop's last check
-        // and this exit; a stopped lane must not go on to re-plan or fly.
-        return retranslateLaneCanDeliver(epoch: epoch) ? .landed : .cancelled
-    }
-
     /// Hands a deferred same-engine retry to the queue path — what the
     /// `.session` route would have done had the probe been landed at click
-    /// time. The markers are already in place: `pendingRetranslations`
-    /// stays (the queue's landing, failure, or stop clears it) while the
-    /// lane-ownership record goes, so the queue's terminal `.unavailable`
-    /// clear can drop the cue.
+    /// time. The cue is already in place and stays (the queue's landing,
+    /// failure, or stop clears it) while the lane-ownership record goes, so
+    /// the queue's terminal `.unavailable` clear can drop the cue.
     private func handRetranslateToSession(_ sentence: Sentence) {
-        lanePendingRetranslations.remove(sentence.index)
+        handPendingToQueue(sentence.index)
         guard queue.hasWorker else {
-            pendingRetranslations.remove(sentence.index)
+            clearMarkers(at: sentence.index)
             postRetranslateUnavailableToast(
                 "No translation engine attached — try again in a moment."
             )
@@ -429,48 +422,6 @@ extension RetranslateCoordinator {
             guard retranslateLaneCanDeliver(epoch: epoch) else { return }
             postRetranslateFailedToast(error)
         }
-    }
-
-    /// Whether a lane result captured against `epoch` may still be applied.
-    /// Live: the session must be live (so a stop, or a capture restart that
-    /// parks the phase in `.starting`, refuses the delivery) and must be the
-    /// one the retry was clicked in. Archive mode: no phase to read — the
-    /// open archive is the delivery target — and the epoch carries the
-    /// whole check, since open and close both turn the lane generation over.
-    /// (Internal, not private: the lane wait in `+Sessions` polls it, for
-    /// the lane and for the bulk job.)
-    func retranslateLaneCanDeliver(epoch: Int) -> Bool {
-        guard epoch == retranslateSessionEpoch else { return false }
-        if archiveOpen {
-            return true
-        }
-        return SessionPhaseMachine.isLive(sessionPhase)
-    }
-
-    /// Retires the dim cue for a lane-owned index. Every exit that will not
-    /// deliver must call this: a marker with no deliverer left dims the row
-    /// and disables its retry button until session stop. Stop and a new
-    /// session's begin clear the sets wholesale, but neither covers a capture
-    /// restart — the phase simply parks in `.starting` while the device
-    /// reopens, and a lane task crossing that window has to retire its own
-    /// marker. Accepted loss: a same-session result that crosses the restart
-    /// window is dropped without a toast (the row keeps its translation) —
-    /// delivering mid-restart would race the transcript swap, and the
-    /// alternative (a toast per dropped result) reads as an error the user
-    /// did not cause.
-    ///
-    /// Gated on the captured epoch: retirement is the one lane operation a
-    /// *stale* task still performs after its own delivery guards fail, and a
-    /// blind remove by index could clobber a marker a NEW session's retry
-    /// just inserted for the same (restarted-at-0) index — undimming a row
-    /// whose translation is still in flight and reopening the double-click
-    /// guard. A stale task's own markers were already retired by whichever
-    /// boundary bumped the epoch, so skipping is always correct; the one
-    /// epoch-preserving boundary (capture restart) still retires.
-    private func retireLaneMarker(_ index: Int, epoch: Int) {
-        guard epoch == retranslateSessionEpoch else { return }
-        pendingRetranslations.remove(index)
-        lanePendingRetranslations.remove(index)
     }
 
     // MARK: - Lane toasts

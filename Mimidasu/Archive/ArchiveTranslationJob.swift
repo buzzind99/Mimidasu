@@ -83,6 +83,11 @@ final class ArchiveTranslationJob {
     /// failure (the surface is going away) from a genuine store fault.
     private(set) var isCancelled = false
 
+    /// The run's engine-resolution task, cancellable from `cancel()` so a
+    /// resolution parked on an awaited session wait exits without polling.
+    @ObservationIgnored private var resolutionTask:
+        Task<ArchiveTranslationJob.EngineResolution, Never>?
+
     /// Resolves the run's engine — the coordinator's archive-job route.
     /// Injected by the app model; the default refuses, so an unwired job
     /// can never fly.
@@ -118,13 +123,25 @@ final class ArchiveTranslationJob {
     /// the surface that would have reported it is already gone.
     func run() async {
         guard case .claimed = activity, let request = claimedRequest else { return }
+        // A cancel that landed between the claim and this task's start must
+        // not arm a session or wait out an arm window.
+        guard !isCancelled else {
+            endActivity()
+            return
+        }
         let indexes = Self.indexes(for: request)
         guard !indexes.isEmpty else {
             endActivity()
             onEvent?(.finished(translated: 0, failedIndexes: []))
             return
         }
-        let resolution = await resolveEngine(request.engine, TargetLanguage(code: request.lang))
+        let resolutionTask = Task { @MainActor [weak self] in
+            guard let self else { return EngineResolution.cancelled }
+            return await resolveEngine(request.engine, TargetLanguage(code: request.lang))
+        }
+        self.resolutionTask = resolutionTask
+        let resolution = await resolutionTask.value
+        self.resolutionTask = nil
         guard !isCancelled else {
             endActivity()
             return
@@ -149,9 +166,11 @@ final class ArchiveTranslationJob {
     }
 
     /// Cooperative cancel: no new sentence starts; whatever is airborne
-    /// finishes and lands.
+    /// finishes and lands. A resolution still armed or waiting on its
+    /// session is cancelled outright — it produced no run to finish.
     func cancel() {
         isCancelled = true
+        resolutionTask?.cancel()
     }
 
     // MARK: - Run internals

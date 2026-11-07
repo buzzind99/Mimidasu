@@ -4,17 +4,19 @@ import Translation
 /// The re-translate lane: the transcript row's retry button re-running one
 /// sentence through a chosen engine. Deep module behind one seam —
 /// `retranslateSentence` / `selectRetranslateEngine` — owning the lane's
-/// marker sets, epoch clock, dedicated Apple sessions, and the serialized
-/// one-at-a-time runner. Engine identity and the high-fidelity probe resolve
-/// through `AppleTierAvailability` — the pair-scoped probe evidence shared
-/// with the sibling `TranslationSessionCoordinator` (the live session);
-/// phase, transcript pane, and toasts come from the host through
+/// marker ownership, epoch clock, serialized one-at-a-time runner, and the
+/// two dedicated Apple sessions (behind `RetranslateAppleSessions`). Engine
+/// identity and the high-fidelity probe resolve through
+/// `AppleTierAvailability` — the pair-scoped probe evidence shared with the
+/// sibling `TranslationSessionCoordinator` (the live session); phase,
+/// transcript pane, and toasts come from the host through
 /// `TranslationSessionPort`.
 ///
-/// File split: identity + selection live here; the decision builder sits in
-/// `RetranslateCoordinator+Plan.swift`; `RetranslateCoordinator+Lane.swift`
-/// executes the row lane; `RetranslateCoordinator+Sessions.swift` holds the
-/// dedicated-session arming/teardown lifecycle.
+/// File split: identity + selection + lane bookkeeping live here; the
+/// decision builder sits in `RetranslateCoordinator+Plan.swift`;
+/// `RetranslateCoordinator+Lane.swift` executes the row lane;
+/// `RetranslateCoordinator+Sessions.swift` holds the session/archive
+/// boundaries and the bulk job's engine resolution.
 @Observable
 @MainActor
 final class RetranslateCoordinator {
@@ -26,44 +28,20 @@ final class RetranslateCoordinator {
     /// deliver (`retireLaneMarker`), by the queue's terminal `.unavailable`
     /// that engages no replay (queue-owned markers only), by session stop,
     /// and by the next session's begin.
-    var pendingRetranslations: Set<Int> = []
+    private(set) var pendingRetranslations: Set<Int> = []
 
     /// The lane-owned subset of `pendingRetranslations`: markers the
-    /// re-translate lane itself inserted. The queue engine's terminal
-    /// `.unavailable` clear drops queue-owned markers only — a lane
-    /// translation in flight still has its deliverer, and losing the marker
-    /// would re-open the double-click guard.
-    var lanePendingRetranslations: Set<Int> = []
-
-    /// Config for the dedicated low-latency (fast model) re-translate
-    /// session, armed by the first Apple-fast retry.
-    var retranslateConfig: TranslationSession.Configuration?
-
-    /// The target code `retranslateConfig` was built for. Arming rebuilds a
-    /// config whose target no longer matches (an armed config pins its
-    /// target); nil while the config is unarmed.
-    @ObservationIgnored var retranslateConfigTarget: String?
-
-    /// The fast-model session handed out by the second `.translationTask`
-    /// host, stored as the queue-side engine adapter.
-    var retranslateSessionEngine: (any TranslationEngine)?
-
-    /// Config for the dedicated high-fidelity (Apple Intelligence)
-    /// re-translate session, armed by the first Apple-Intelligence retry.
-    var retranslateHifiConfig: TranslationSession.Configuration?
-
-    /// The target code `retranslateHifiConfig` was built for (see
-    /// `retranslateConfigTarget`).
-    @ObservationIgnored var retranslateHifiConfigTarget: String?
-
-    /// The high-fidelity session handed out by the third `.translationTask`
-    /// host, stored as the queue-side engine adapter.
-    var retranslateHifiSessionEngine: (any TranslationEngine)?
+    /// re-translate lane itself inserted. Fully internal — callers see the
+    /// visible cue above, while the queue's terminal `.unavailable` clear
+    /// uses this record to drop queue-owned markers only.
+    @ObservationIgnored private var lanePendingRetranslations: Set<Int> = []
 
     /// Serialized one-at-a-time runner for alternate-engine retries: each
     /// new lane task awaits the previous one, so a session-backed engine
-    /// never sees concurrent `translate` calls.
-    @ObservationIgnored var retranslateLaneTask: Task<Void, Never>?
+    /// never sees concurrent `translate` calls. Only the newest link can be
+    /// cancelled; earlier ones run to completion and drop their results at
+    /// the delivery guard.
+    @ObservationIgnored private var laneChainTask: Task<Void, Never>?
 
     /// True while the newest lane-chain link has not finished. The chain is
     /// serial (each link awaits the previous), so the newest link's
@@ -71,38 +49,27 @@ final class RetranslateCoordinator {
     /// this instead of a captured task, so a close/swap releases the job's
     /// claim without awaiting a link the teardown already made
     /// undeliverable.
-    @ObservationIgnored private(set) var laneChainIdle = true
+    @ObservationIgnored private var laneChainIdle = true
 
     /// Serial of the newest lane-chain link (see `laneChainIdle`): an older
     /// link finishing after a newer one exists must not idle the chain.
     @ObservationIgnored private var laneChainSerial = 0
 
-    /// Registers a new lane-chain link and returns its serial. The chain is
-    /// marked busy before the link task exists, so a wait never observes an
-    /// idle chain mid-registration.
-    func beginLaneChainLink() -> Int {
-        laneChainSerial += 1
-        laneChainIdle = false
-        return laneChainSerial
-    }
-
-    /// Marks the chain idle when `serial` is still the newest link's.
-    func endLaneChainLink(serial: Int) {
-        guard serial == laneChainSerial else { return }
-        laneChainIdle = true
-    }
+    /// Waits registered on the chain going idle, keyed by waiter id.
+    @ObservationIgnored private var chainIdleWaiters: [Int: CheckedContinuation<Bool, Never>] = [:]
+    @ObservationIgnored private var nextChainWaiterID = 0
 
     /// Session boundary token for the re-translate lane, in the same spirit
     /// as `TranslationQueue`'s session epoch: bumped in
-    /// `sessionWillBegin`, `sessionDidEnd`, and `teardown` (a mid-session
-    /// Apple activation is a lane-generation change, not a session one),
-    /// captured when a retry is clicked, and compared after the flight. A
-    /// lane task that outlives its session — stop cancels only the newest
-    /// chained link, so earlier ones run to completion — would otherwise
-    /// pass the phase guard (the next session is `.running` again) and
-    /// write the *previous* session's translation onto an unrelated row,
-    /// since `Sentence.index` restarts at 0.
-    @ObservationIgnored var retranslateSessionEpoch = 0
+    /// `sessionWillBegin`, `sessionDidEnd` (through `teardown`), and
+    /// archive boundaries (a mid-session Apple activation is a lane-
+    /// generation change too), captured when a retry is clicked, and
+    /// compared after the flight. A lane task that outlives its session —
+    /// stop cancels only the newest chained link, so earlier ones run to
+    /// completion — would otherwise pass the phase guard (the next session
+    /// is `.running` again) and write the *previous* session's translation
+    /// onto an unrelated row, since `Sentence.index` restarts at 0.
+    @ObservationIgnored private var laneEpoch = 0
 
     /// How long the re-translate lane waits for an arming dedicated Apple
     /// session before giving up on a click. Injectable so the timeout test
@@ -138,6 +105,9 @@ final class RetranslateCoordinator {
     let settings: TranslationSettings
     let tierAvailability: AppleTierAvailability
 
+    /// The two dedicated Apple sessions, one arm per kind.
+    let appleSessions: RetranslateAppleSessions
+
     init(
         live: TranslationSessionCoordinator,
         queue: TranslationQueue,
@@ -148,6 +118,17 @@ final class RetranslateCoordinator {
         self.queue = queue
         self.settings = settings
         self.tierAvailability = tierAvailability
+        appleSessions = RetranslateAppleSessions(tierAvailability: tierAvailability)
+    }
+
+    /// The fast-model session's config for its `.translationTask` host.
+    var fastSessionConfig: TranslationSession.Configuration? {
+        appleSessions.fastConfig
+    }
+
+    /// The Apple Intelligence session's config for its host.
+    var hifiSessionConfig: TranslationSession.Configuration? {
+        appleSessions.hifiConfig
     }
 
     /// The live session phase from the host; `.idle` when the host is gone
@@ -179,6 +160,218 @@ final class RetranslateCoordinator {
             return settings.targetLanguage
         }
         return TargetLanguage(code: code)
+    }
+
+    // MARK: - Lane bookkeeping
+
+    /// The epoch a click captures; compared after every flight.
+    var currentLaneEpoch: Int {
+        laneEpoch
+    }
+
+    /// The newest chained link, for chaining the next one and for tests that
+    /// need its lifetime. Read-only: only the boundary verbs replace it.
+    var newestLaneTask: Task<Void, Never>? {
+        laneChainTask
+    }
+
+    /// Registers a new lane-chain link and returns its serial. The chain is
+    /// marked busy before the link task exists, so a wait never observes an
+    /// idle chain mid-registration.
+    func beginLaneChainLink() -> Int {
+        laneChainSerial += 1
+        laneChainIdle = false
+        return laneChainSerial
+    }
+
+    /// Adopts the newest link's task so a boundary can cancel it.
+    func trackLaneTask(_ task: Task<Void, Never>) {
+        laneChainTask = task
+    }
+
+    /// Cancels the newest lane-chain link without a generation change — the
+    /// shape a scheduler cancellation has. Teardown and the archive
+    /// boundaries use their own verbs; this stays a narrow test seam.
+    func cancelNewestLaneLink() {
+        laneChainTask?.cancel()
+    }
+
+    /// Marks the chain idle when `serial` is still the newest link's, and
+    /// answers every wait that was parked on the chain.
+    func endLaneChainLink(serial: Int) {
+        guard serial == laneChainSerial else { return }
+        laneChainIdle = true
+        resumeChainIdleWaiters(with: true)
+    }
+
+    /// Waits for the newest lane-chain link to finish. Returns false when
+    /// the wait was abandoned by a teardown or by task cancellation — the
+    /// bulk run resolving an engine treats that as its own cancellation.
+    func waitForLaneChainIdle() async -> Bool {
+        if Task.isCancelled {
+            return false
+        }
+        if laneChainIdle {
+            return true
+        }
+        let waiterID = nextChainWaiterID
+        nextChainWaiterID += 1
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                // No suspension exists between the idle check above and this
+                // registration, so the chain cannot turn idle in between.
+                chainIdleWaiters[waiterID] = continuation
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.finishChainWaiter(waiterID, with: false)
+            }
+        }
+    }
+
+    private func finishChainWaiter(_ waiterID: Int, with idle: Bool) {
+        guard let waiter = chainIdleWaiters.removeValue(forKey: waiterID) else { return }
+        waiter.resume(returning: idle)
+    }
+
+    private func resumeChainIdleWaiters(with idle: Bool) {
+        for waiterID in Array(chainIdleWaiters.keys) {
+            finishChainWaiter(waiterID, with: idle)
+        }
+    }
+
+    /// Abandons every chain wait. Teardown is the only caller: an archive
+    /// boundary deliberately keeps the bulk run's chain wait alive, since the
+    /// run outlives the pane it was started from.
+    private func abandonChainIdleWaiters() {
+        resumeChainIdleWaiters(with: false)
+    }
+
+    // MARK: - Markers
+
+    /// Inserts the visible cue, and records lane ownership when the lane is
+    /// the deliverer.
+    func markPending(_ index: Int, laneOwned: Bool) {
+        pendingRetranslations.insert(index)
+        if laneOwned {
+            lanePendingRetranslations.insert(index)
+        }
+    }
+
+    /// Hands a lane marker to the queue path: the cue stays (the queue's
+    /// landing, failure, or stop clears it) while the lane-ownership record
+    /// goes, so the queue's terminal `.unavailable` clear may drop it.
+    func handPendingToQueue(_ index: Int) {
+        lanePendingRetranslations.remove(index)
+    }
+
+    /// Retires the row's re-translation marker for a landed result.
+    func clearMarkers(at index: Int) {
+        pendingRetranslations.remove(index)
+        lanePendingRetranslations.remove(index)
+    }
+
+    /// Drops every marker — a session/archive boundary.
+    func clearAllMarkers() {
+        pendingRetranslations.removeAll()
+        lanePendingRetranslations.removeAll()
+    }
+
+    /// Drops lane-owned markers only; a queue-owned marker still has the
+    /// queue as its deliverer.
+    func retractLaneOwnedMarkers() {
+        pendingRetranslations.subtract(lanePendingRetranslations)
+        lanePendingRetranslations.removeAll()
+    }
+
+    /// The queue's terminal-`.unavailable` clear: no engine swap follows the
+    /// failure, so queue-owned markers have lost their deliverer — but a
+    /// lane translation in flight still has its own, and dropping its marker
+    /// would re-open the double-click guard.
+    func dropQueueOwnedMarkers() {
+        pendingRetranslations.formIntersection(lanePendingRetranslations)
+    }
+
+    /// Retires the dim cue for a lane-owned index. Every exit that will not
+    /// deliver must call this: a marker with no deliverer left dims the row
+    /// and disables its retry button until session stop. Stop and a new
+    /// session's begin clear the sets wholesale, but neither covers a capture
+    /// restart — the phase simply parks in `.starting` while the device
+    /// reopens, and a lane task crossing that window has to retire its own
+    /// marker. Accepted loss: a same-session result that crosses the restart
+    /// window is dropped without a toast (the row keeps its translation) —
+    /// delivering mid-restart would race the transcript swap, and the
+    /// alternative (a toast per dropped result) reads as an error the user
+    /// did not cause.
+    ///
+    /// Gated on the captured epoch: retirement is the one lane operation a
+    /// *stale* task still performs after its own delivery guards fail, and a
+    /// blind remove by index could clobber a marker a NEW session's retry
+    /// just inserted for the same (restarted-at-0) index — undimming a row
+    /// whose translation is still in flight and reopening the double-click
+    /// guard. A stale task's own markers were already retired by whichever
+    /// boundary bumped the epoch, so skipping is always correct; the one
+    /// epoch-preserving boundary (capture restart) still retires.
+    func retireLaneMarker(_ index: Int, epoch: Int) {
+        guard epoch == laneEpoch else { return }
+        clearMarkers(at: index)
+    }
+
+    /// Whether a lane result captured against `epoch` may still be applied.
+    /// Live: the session must be live (so a stop, or a capture restart that
+    /// parks the phase in `.starting`, refuses the delivery) and must be the
+    /// one the retry was clicked in. Archive mode: no phase to read — the
+    /// open archive is the delivery target — and the epoch carries the whole
+    /// check, since open and close both turn the lane generation over.
+    func retranslateLaneCanDeliver(epoch: Int) -> Bool {
+        guard epoch == laneEpoch else { return false }
+        if archiveOpen {
+            return true
+        }
+        return SessionPhaseMachine.isLive(sessionPhase)
+    }
+
+    /// Turns the lane generation over.
+    func beginLaneEpoch() {
+        laneEpoch += 1
+    }
+
+    /// Cancels the waits a lane generation turn makes stale: per-row retry
+    /// engine hand-overs and the activation-probe deferral. The bulk run's
+    /// resolution waits are not lane-owned and stay parked.
+    func cancelLaneWaits() {
+        appleSessions.cancelLaneWaiters()
+        tierAvailability.cancelLaneWaiters()
+    }
+
+    /// Drops both armed-session states and invalidates in-flight lane work
+    /// with them. Called from every explicit Apple activation and from
+    /// session end. Cancelling the stored task and bumping the epoch makes
+    /// the reset a lane-generation change, not just a session one; the
+    /// marker split retires lane-owned cues synchronously while a
+    /// queue-owned marker keeps its deliverer. Chain waits are abandoned so
+    /// a bulk run resolving against the old generation reports cancelled
+    /// instead of parking on a link this teardown made undeliverable.
+    func teardown() {
+        laneChainTask?.cancel()
+        laneChainTask = nil
+        beginLaneEpoch()
+        retractLaneOwnedMarkers()
+        abandonChainIdleWaiters()
+        tierAvailability.cancelLaneWaiters()
+        appleSessions.teardown()
+    }
+
+    /// Lane work and markers only: cancels the in-flight lane generation,
+    /// drops every marker, and bumps the epoch so nothing still airborne can
+    /// deliver. The dedicated Apple configs and stored engines are left
+    /// untouched — they are target-scoped, not archive-scoped.
+    func retireLaneWork() {
+        clearAllMarkers()
+        laneChainTask?.cancel()
+        laneChainTask = nil
+        beginLaneEpoch()
+        cancelLaneWaits()
     }
 }
 
