@@ -36,8 +36,10 @@ struct RetranslateSessionHost: View {
     var body: some View {
         Color.clear
             .frame(width: 0, height: 0)
-            .translationTask(model.retranslateConfig) { session in
-                model.retranslateSessionArrived(AppleSessionEngine(session))
+            .translationTask(model.retranslate.fastSessionConfig) { session in
+                model.retranslate.retranslateSessionArrived(
+                    .appleFast, engine: AppleSessionEngine(session)
+                )
             }
     }
 }
@@ -52,8 +54,10 @@ struct RetranslateHiFiSessionHost: View {
     var body: some View {
         Color.clear
             .frame(width: 0, height: 0)
-            .translationTask(model.retranslateHifiConfig) { session in
-                model.retranslateHifiSessionArrived(AppleSessionEngine(session))
+            .translationTask(model.retranslate.hifiSessionConfig) { session in
+                model.retranslate.retranslateSessionArrived(
+                    .appleHighFidelity, engine: AppleSessionEngine(session)
+                )
             }
     }
 }

@@ -115,7 +115,7 @@ struct TranscriptView: View {
                         },
                         annotationEpoch: annotationEpoch,
                         isFavorite: model.favoriteSegmentMatcher,
-                        onRetry: { sentence in model.retranslateSentence(sentence) },
+                        onRetry: { sentence in model.retranslate.retranslateSentence(sentence) },
                         rowPlan: rowPlan,
                         fadesIn: TranscriptScrollPin.rowFadesIn(
                             in: scrollMode, isNewest: entry.id == model.pane.entries.last?.id

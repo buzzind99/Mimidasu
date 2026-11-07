@@ -147,7 +147,7 @@ struct SettingsRetranslateCard: View {
             // The persisted row is inert: re-running the action would
             // re-raise the privacy disclosure sheet for a no-op pick.
             guard !isPersisted else { return }
-            model.selectRetranslateEngine(option.engine)
+            model.retranslate.selectRetranslateEngine(option.engine)
             showsOptions = false
         } label: {
             VStack(alignment: .leading, spacing: 3) {
