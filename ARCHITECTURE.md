@@ -67,9 +67,10 @@ Sidecars off the main flow:
   FavoritesPromotion** — starred words: SQLite persistence, one identity
   value behind star/highlight/promotion, transcript highlight matching,
   Favorite-first lookup ranking.
-- **RetranslateCoordinator + the re-translate lane** — manual
-  re-translate of a finalized Sentence through a selected provider
-  (dedicated Apple sessions, serialized lane, provenance stamps).
+- **RetranslateCoordinator + RetranslateAppleSessions + the re-translate
+  lane** — manual re-translate of a finalized Sentence through a selected
+  provider (the two dedicated Apple sessions behind one arm module, the
+  serialized lane, provenance stamps).
 - **ArchiveStore / ArchiveProjection / ArchiveTranslationJob** — every
   finalized sentence and landed translation persists to `archives.sqlite`;
   Recent/Saved browsing, interrupted-session sweep, bulk multi-language
@@ -334,7 +335,24 @@ packaged apps in `Contents/Frameworks/`.
   26.4 or where the pair-scoped strategy is known unavailable; delivery is
   session-epoch-guarded (archive open/close bumps the epoch) and phase- or
   archive-open-guarded so a stale lane can't write into a new session;
-  failures post yellow toasts.
+  failures post yellow toasts. The two dedicated sessions live behind
+  `RetranslateAppleSessions`: one arm per Apple kind owning its config, the
+  target it pins, and the session handed over by its `.translationTask`
+  host, with arming that invalidates-and-rebuilds only on a target change
+  (the proven `.translationTask` re-fire path) and a teardown that rebuilds
+  rather than nils. Waits are awaited members, not storage polls: a lane
+  flight or the bulk run's engine resolution awaits the session hand-over,
+  the activation probe's landing, or the lane chain going idle through
+  continuations, and cancellation (a stopped lane, a torn-down generation,
+  a cancelled bulk run) resolves them as cancelled. Lane waits are
+  generation-scoped: a stop or archive boundary cancels the per-row retry
+  waits it makes stale while leaving the bulk run's resolution parked, and
+  only a teardown cancels both. The marker sets, the epoch clock, and the
+  lane chain are private; the host seam (`applyTranslation`, queue status,
+  session/archive boundaries) mutates them, and the bulk job cancels its own
+  engine-resolution task instead of polling an abort flag. Arming and
+  teardown invalidate the stored config in place before reassigning a fresh
+  one, the same re-fire shape the live session's refresh uses.
 - **Status surface:** `TranslationPill.map(status:activeEngine:fallbackActive:)`
   is a pure tone mapping (a latched `.ready` reads yellow); the sidebar
   ENGINES card's provider row consumes its `tone` (there is no separate
@@ -744,16 +762,19 @@ packaged apps in `Contents/Frameworks/`.
   `AppleTierAvailability` module. The coordinators own provider attach /
   fallback latch / lane machinery and the **three**
   `TranslationSession.Configuration`s (the live session's plus the
-  re-translate lane's dedicated Apple (NMT) / Apple Intelligence pair), exposed
-  through computed façade pass-throughs: the live runtime surface is the
+  re-translate lane's dedicated Apple (NMT) / Apple Intelligence pair,
+  owned by `RetranslateAppleSessions`), read by their `.translationTask`
+  hosts directly from the coordinators. The live runtime surface is the
   single read-only `translationRuntime` (every mutation happens inside
   `TranslationSessionCoordinator`, which also owns the queue's handler
-  wiring — `AppModel` stores no live-runtime state), the re-translate lane
+  wiring — `AppModel` stores no live-runtime state); the re-translate lane
   exposes a read-only plan façade — `retranslatePlan(surface:target:)`,
   `retranslatePlan(surface:target:selection:)`, and
-  `retranslateRowPlan(for:surface:target:)` — instead of derived
-  availability forwards (`activeEngineKind` remains the identity test
-  seam); `handleTranslationStatus` remains as a test seam over the
+  `retranslateRowPlan(for:surface:target:)` — plus its commands
+  (`retranslateSentence`, `selectRetranslateEngine`, the session
+  hand-over) and the two session configs, called on
+  `model.retranslate` directly, with no lane forwarding properties on
+  `AppModel`. `handleTranslationStatus` remains as a test seam over the
   coordinator's status landing. Split into extensions
   (`Archive` / `ArchiveTranslation` / `Dictionary` / `Presentation` /
   `RetranslatePlan` / `Session` / `SessionLifecycle` / `TapLookup` /
