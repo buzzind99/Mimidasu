@@ -54,6 +54,7 @@ struct ReadingAnnotatorDigitTests {
         ("一。", false),
         ("①", false),
         ("1\u{0301}", false),
+        ("\u{F9D1}", true),
         ("壱", false),
         ("弐", false),
         ("", false)

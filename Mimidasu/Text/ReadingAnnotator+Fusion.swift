@@ -419,23 +419,24 @@ extension ReadingAnnotator {
         }
     }
 
-    /// The numeral glyphs `isNumeralRun` accepts: ASCII and fullwidth digits
-    /// plus the kanji numerals 一 through 万.
-    private static func isNumeralScalar(_ scalar: Unicode.Scalar) -> Bool {
-        switch scalar {
-        case "0" ... "9", "０" ... "９",
-             "一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "百", "千", "万":
-            true
-        default:
-            false
-        }
-    }
+    /// The numeral characters `isNumeralRun` accepts: ASCII and fullwidth
+    /// digits plus the kanji numerals 一 through 万. Character-based, not
+    /// scalar-based, so canonically equivalent compatibility ideographs
+    /// (U+F9D1 六) match exactly as the old anchored regex did.
+    private static let numeralCharacters: Set<Character> = {
+        var characters = Set("0123456789")
+        characters.formUnion("０１２３４５６７８９")
+        characters.formUnion("一二三四五六七八九十百千万")
+        return characters
+    }()
 
     /// Pure numeral surfaces (Arabic or fullwidth digits, kanji numerals):
     /// held back for counter fusion. Engine-fused compounds (一回, 十四日)
-    /// contain non-numeral characters and never match. Scalar-based so
-    /// combining marks fail exactly like the old anchored regex did.
+    /// contain non-numeral characters and never match. Combining-mark
+    /// sequences still fail because no single grapheme equals a numeral.
     static func isNumeralRun(_ surface: String) -> Bool {
-        !surface.isEmpty && surface.unicodeScalars.allSatisfy(isNumeralScalar)
+        !surface.isEmpty && surface.allSatisfy { character in
+            numeralCharacters.contains(character)
+        }
     }
 }
