@@ -42,9 +42,9 @@ extension AppModel {
     /// a session no longer in the archive reports that instead of claiming.
     func beginArchiveTranslation(engine: RetranslateEngine, lang: String, sessionID: Int64) {
         let entries: [SessionEntry]
-        if let opened = openArchive, opened.id == sessionID {
+        if let opened = pane.openArchive, opened.id == sessionID {
             // The pane's rows carry every landing since the archive opened.
-            entries = self.entries
+            entries = pane.entries
         } else if let stored = archive.load(id: sessionID) {
             entries = stored.entries
         } else {
@@ -72,7 +72,7 @@ extension AppModel {
 
     /// The open archive's spelling, for the banner and existing callers.
     func beginArchiveTranslation(engine: RetranslateEngine, lang: String) {
-        guard let sessionID = openArchive?.id else { return }
+        guard let sessionID = pane.openSessionID else { return }
         beginArchiveTranslation(engine: engine, lang: lang, sessionID: sessionID)
     }
 
@@ -129,7 +129,7 @@ extension AppModel {
 
     /// The open archive's spelling at the main window, for the banner.
     func requestArchiveTranslation(engine: RetranslateEngine, lang: String) {
-        guard let sessionID = openArchive?.id else { return }
+        guard let sessionID = pane.openSessionID else { return }
         requestArchiveTranslation(
             engine: engine, lang: lang, sessionID: sessionID, presenter: .mainWindow
         )
@@ -198,9 +198,7 @@ extension AppModel {
             }
             return false
         }
-        if openArchive?.id == sessionID, let at = entryPositionBySentence[index] {
-            entries[at].replaceTranslation(translation)
-        }
+        _ = pane.replaceTranslation(in: sessionID, index: index, translation: translation)
         return true
     }
 

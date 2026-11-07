@@ -9,9 +9,9 @@ extension SidebarView {
         VStack(alignment: .leading, spacing: 10) {
             KickerLabel("SESSION")
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                stat(value: "\(model.entries.count)", label: "Sentences")
+                stat(value: "\(model.pane.entries.count)", label: "Sentences")
                 durationStat
-                stat(value: "\(model.sessionCharacterCount)", label: "Characters")
+                stat(value: "\(model.pane.characterCount)", label: "Characters")
                 stat(
                     value: model.latency.seconds.formatted(.number.precision(.fractionLength(1)))
                         + "s",

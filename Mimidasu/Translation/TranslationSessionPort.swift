@@ -1,8 +1,8 @@
 /// The app-model state the translation coordinators act through — the port
 /// side of the coordination seam. `TranslationSessionCoordinator` owns every
 /// engine, fallback, and probe field and `RetranslateCoordinator` owns the
-/// lane; phase, transcript entries, and toasts stay with the host, which the
-/// coordinators reach through this port.
+/// lane; phase, the composed transcript pane, and toasts stay with the host,
+/// which the coordinators reach through this port.
 @MainActor
 protocol TranslationSessionPort: AnyObject {
     /// The session phase gating provider re-attachment and lane delivery:

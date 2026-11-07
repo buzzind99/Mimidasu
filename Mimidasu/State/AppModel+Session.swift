@@ -19,7 +19,7 @@ extension AppModel {
         // would upsert live results into the opened archive's id, and closing
         // the archive would wipe the live transcript. The stop-confirmation's
         // confirm path closes the archive first.
-        guard openArchive == nil else { return }
+        guard pane.openArchive == nil else { return }
         guard !isCheckingModel else { return }
         // A failed session restarts like an idle one (the sidebar offers
         // Start from `.failed`, and the failure card clears on the
@@ -250,7 +250,7 @@ extension AppModel {
     /// directly; the quit path never prompts at all. The window presents the
     /// alert — this is the policy it branches on.
     var shouldConfirmStop: Bool {
-        guard !entries.isEmpty, archiveAvailable else { return false }
+        guard !pane.entries.isEmpty, archiveAvailable else { return false }
         return SessionPhaseMachine.isLive(phase)
     }
 

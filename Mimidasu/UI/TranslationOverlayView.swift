@@ -69,7 +69,7 @@ struct TranslationOverlayView: View {
             } action: { old, new in
                 scroll.handle(old: old, new: new, proxy: proxy)
             }
-            .onChange(of: model.entriesRevision) { _, _ in
+            .onChange(of: model.pane.entriesRevision) { _, _ in
                 // Covers appends and rows growing when a translation lands.
                 scroll.reAnchor(proxy)
             }
@@ -101,7 +101,7 @@ struct TranslationOverlayView: View {
     /// Translated entries only; finalized-but-untranslated sentences never
     /// enter the list (each row's text lands with its translation).
     private var translatedEntries: [SessionEntry] {
-        model.entries.filter { entry in entry.joinedTranslations != nil }
+        model.pane.entries.filter { entry in entry.joinedTranslations != nil }
     }
 
     private var emptyState: some View {

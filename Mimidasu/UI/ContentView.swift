@@ -230,7 +230,7 @@ struct ContentView: View {
     /// translation never refuses outright — it asks first; otherwise start
     /// is direct.
     private func requestStart() {
-        if model.openArchive != nil || model.archiveTranslationRunning {
+        if model.pane.openArchive != nil || model.archiveTranslationRunning {
             pendingArchiveStart = true
         } else {
             model.start()
@@ -256,7 +256,7 @@ struct ContentView: View {
                 .frame(width: 1)
                 .ignoresSafeArea()
             VStack(spacing: 0) {
-                if model.openArchive != nil {
+                if model.pane.openArchive != nil {
                     ArchiveBannerView(model: model)
                 }
                 transcriptArea
@@ -280,7 +280,7 @@ struct ContentView: View {
             // Archive mode: the live strip hides entirely (nothing is
             // live; the banner carries the archived stats) and its
             // strip-anchored popover has no anchor to mount on.
-            if model.openArchive == nil {
+            if model.pane.openArchive == nil {
                 LiveStripView(
                     live: live,
                     onCopy: { text in model.copySnippet(text) },

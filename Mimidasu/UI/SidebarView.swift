@@ -55,7 +55,7 @@ struct SidebarView: View {
 
             // Archive mode hides the SESSION card: the archived stats live
             // in the transcript pane's banner instead.
-            if model.openArchive == nil {
+            if model.pane.openArchive == nil {
                 sessionCard
                     .padding(.bottom, 14)
             }
@@ -146,7 +146,7 @@ struct SidebarView: View {
     private var status: SidebarStatus {
         SidebarStatus.map(
             phase: model.phase, isCheckingModel: model.isCheckingModel,
-            archiveOpen: model.openArchive != nil
+            archiveOpen: model.pane.openArchive != nil
         )
     }
 
@@ -444,12 +444,12 @@ extension SidebarView {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .hoverHighlight(iconButtonShape, isEnabled: model.openArchive == nil)
+        .hoverHighlight(iconButtonShape, isEnabled: model.pane.openArchive == nil)
         // The floating overlays are live-session chrome: forced hidden and
         // untogglable while an archived session fills the pane.
-        .disabled(model.openArchive != nil)
+        .disabled(model.pane.openArchive != nil)
         .help(
-            model.openArchive != nil
+            model.pane.openArchive != nil
                 ? "Unavailable in archive mode"
                 : "Show or hide the floating overlays (subtitle + translations)"
         )

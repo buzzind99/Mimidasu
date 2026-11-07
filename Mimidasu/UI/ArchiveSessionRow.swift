@@ -226,13 +226,13 @@ struct ArchiveSessionRow: View {
                     ArchiveSwitchLanguagePopover(
                         model: model,
                         summary: summary,
-                        viewingCode: model.openArchive?.id == summary.id
+                        viewingCode: model.pane.openArchive?.id == summary.id
                             ? model.archiveViewingCode : nil,
                         onSelect: { lang in
                             // Never mutates another archive's viewing
                             // language: a row picker only serves its own
                             // (opened) session.
-                            guard model.openArchive?.id == summary.id else { return }
+                            guard model.pane.openArchive?.id == summary.id else { return }
                             model.selectArchiveViewingLanguage(lang)
                         },
                         initiallyShowingChooser: true
@@ -250,7 +250,7 @@ struct ArchiveSessionRow: View {
         var parts = ["total:\(summary.sentenceCount)"]
         for count in languageSet.counts {
             let busy = activity.runStatus?.lang == count.lang
-            let selected = model.openArchive?.id == summary.id
+            let selected = model.pane.openArchive?.id == summary.id
                 && count.lang == model.archiveViewingCode
             parts.append("\(count.lang):\(count.translated):\(busy ? 1 : 0):\(selected ? 1 : 0)")
         }
@@ -269,7 +269,7 @@ struct ArchiveSessionRow: View {
                 count: count,
                 total: summary.sentenceCount,
                 busy: activity.runStatus?.lang == count.lang,
-                selected: model.openArchive?.id == summary.id
+                selected: model.pane.openArchive?.id == summary.id
                     && count.lang == model.archiveViewingCode
             )
         }

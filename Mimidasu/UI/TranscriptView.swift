@@ -78,17 +78,17 @@ struct TranscriptView: View {
                     .listRowInsets(EdgeInsets())
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
-                if model.entries.isEmpty {
+                if model.pane.entries.isEmpty {
                     emptyState
                         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                 }
-                ForEach(model.entries) { entry in
+                ForEach(model.pane.entries) { entry in
                     let rowPlan = plan.row(for: entry)
                     TranscriptRow(
                         entry: entry,
-                        displayLanguage: model.openArchive != nil
+                        displayLanguage: model.pane.openArchive != nil
                             ? model.archiveViewingCode : nil,
                         annotation: readingAnnotation,
                         scale: uiScale,
@@ -118,7 +118,7 @@ struct TranscriptView: View {
                         onRetry: { sentence in model.retranslateSentence(sentence) },
                         rowPlan: rowPlan,
                         fadesIn: TranscriptScrollPin.rowFadesIn(
-                            in: scrollMode, isNewest: entry.id == model.entries.last?.id
+                            in: scrollMode, isNewest: entry.id == model.pane.entries.last?.id
                         )
                     )
                     .id(entry.id)
@@ -158,14 +158,14 @@ struct TranscriptView: View {
             } action: { old, new in
                 scroll.handle(old: old, new: new, proxy: proxy)
             }
-            .onChange(of: model.entriesRevision) { _, _ in
+            .onChange(of: model.pane.entriesRevision) { _, _ in
                 // Covers appends and rows growing when a translation lands.
                 // Only the live feed follows its tail: a finished record
                 // stays where the reader put it.
                 guard TranscriptScrollPin.followsTail(in: scrollMode) else { return }
                 scroll.reAnchor(proxy)
             }
-            .onChange(of: model.openArchive?.id) { _, newID in
+            .onChange(of: model.pane.openArchive?.id) { _, newID in
                 // A record opens at its oldest sentence; the live feed
                 // resumes following its tail. A second record is a change
                 // too: the mode does not move, the content does.
@@ -175,7 +175,7 @@ struct TranscriptView: View {
                 // List has no `.initialOffset` anchor (ScrollView-only);
                 // start pinned at the newest sentence — unless a record is
                 // already open, which starts at its oldest.
-                scroll.applyRecord(model.openArchive?.id, proxy: proxy)
+                scroll.applyRecord(model.pane.openArchive?.id, proxy: proxy)
                 guard TranscriptScrollPin.followsTail(in: scrollMode) else { return }
                 scroll.reAnchor(proxy)
             }
@@ -202,19 +202,19 @@ struct TranscriptView: View {
     /// decided from one source — the record is already open when its rows
     /// land, and a content change must not be read as a live append.
     private var scrollMode: TranscriptScrollPin.Mode {
-        model.openArchive == nil ? .live : .archive
+        model.pane.openArchive == nil ? .live : .archive
     }
 
     /// Which surface the transcript is rendering for the re-translate plan:
     /// the opened record's pane, or the live feed.
     private var retranslateSurface: RetranslateSurface {
-        model.openArchive == nil ? .live : .archive
+        model.pane.openArchive == nil ? .live : .archive
     }
 
     /// The language the pane retries toward: the opened record's viewed
     /// language, or the configured live target.
     private var retranslateTarget: TargetLanguage {
-        guard model.openArchive != nil else { return model.translationSettings.targetLanguage }
+        guard model.pane.openArchive != nil else { return model.translationSettings.targetLanguage }
         return TargetLanguage(
             code: model.archiveViewingCode ?? model.translationSettings.targetLanguage.code
         )

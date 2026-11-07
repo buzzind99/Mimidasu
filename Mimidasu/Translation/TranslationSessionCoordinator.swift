@@ -79,7 +79,7 @@ enum PendingCloudDisclosure: Equatable, Identifiable {
 /// evidence owned by `AppleTierAvailability`, and the provider-selection
 /// machinery (key verification + cloud disclosure). Deep module behind one
 /// seam — `activate` / `retry` / `providerDidChange` / `handleStatus` — with
-/// the host's phase, entries, and toasts reached through
+/// the host's phase, transcript pane, and toasts reached through
 /// `TranslationSessionPort`.
 ///
 /// Invalidates its sibling `RetranslateCoordinator` whenever the live engine

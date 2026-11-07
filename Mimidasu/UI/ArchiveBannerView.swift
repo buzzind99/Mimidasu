@@ -26,7 +26,7 @@ struct ArchiveBannerView: View {
     private static let renameHelp = "Rename this session"
 
     var body: some View {
-        if let archive = model.openArchive {
+        if let archive = model.pane.openArchive {
             banner(archive)
         }
     }
@@ -343,7 +343,7 @@ struct ArchiveBannerView: View {
     /// starts its run directly, and an external pick is parked for the
     /// disclosure whose confirm callback starts the run.
     private func startTranslation(_ engine: RetranslateEngine, lang: String) {
-        guard let sessionID = model.openArchive?.id else { return }
+        guard let sessionID = model.pane.openArchive?.id else { return }
         model.requestArchiveTranslation(
             engine: engine, lang: lang, sessionID: sessionID, presenter: .mainWindow
         )

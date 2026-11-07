@@ -8,7 +8,7 @@ import Translation
 /// one-at-a-time runner. Engine identity and the high-fidelity probe resolve
 /// through `AppleTierAvailability` — the pair-scoped probe evidence shared
 /// with the sibling `TranslationSessionCoordinator` (the live session);
-/// phase, entries, and toasts come from the host through
+/// phase, transcript pane, and toasts come from the host through
 /// `TranslationSessionPort`.
 ///
 /// File split: identity + selection live here; the decision builder sits in

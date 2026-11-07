@@ -36,11 +36,11 @@ extension AppModel {
 /// behind the export menu).
 extension AppModel {
     var isExportable: Bool {
-        !entries.isEmpty
+        !pane.entries.isEmpty
     }
 
     func exportText() -> String {
-        SessionExporter.plainText(entries: entries)
+        SessionExporter.plainText(entries: pane.entries)
     }
 
     /// Shared by the ⌘⇧C command and the export menu.
@@ -59,15 +59,15 @@ extension AppModel {
     func export(format: SessionExporter.Format) throws -> Data {
         switch format {
         case .txt:
-            return Data(SessionExporter.plainText(entries: entries).utf8)
+            return Data(SessionExporter.plainText(entries: pane.entries).utf8)
         case .srt:
-            return Data(SessionExporter.subtitles(entries: entries, format: .srt).utf8)
+            return Data(SessionExporter.subtitles(entries: pane.entries, format: .srt).utf8)
         case .vtt:
-            return Data(SessionExporter.subtitles(entries: entries, format: .vtt).utf8)
+            return Data(SessionExporter.subtitles(entries: pane.entries, format: .vtt).utf8)
         case .json:
             let results = snapshotTranslationResults()
             return try SessionExporter.json(
-                entries: entries, metadata: exportMetadata, results: results
+                entries: pane.entries, metadata: exportMetadata, results: results
             )
         }
     }
@@ -77,7 +77,7 @@ extension AppModel {
     /// default. The auto-title is deliberately not used: it embeds 「」 and a
     /// date, which reads as noise in a save dialog.
     var exportFilenameBase: String {
-        guard let name = openArchive?.summary.name,
+        guard let name = pane.openArchive?.summary.name,
               let sanitized = SessionExporter.sanitizedFilenameStem(name)
         else { return "mimidasu-session" }
         return sanitized
@@ -88,7 +88,7 @@ extension AppModel {
     /// belongs to a session the archive replaced — else the live session's.
     /// Nil without either (the exporter's defaults apply).
     private var exportMetadata: SessionMetadata? {
-        guard let summary = openArchive?.summary else {
+        guard let summary = pane.openArchive?.summary else {
             return sessionController.sessionMetadata
         }
         return SessionMetadata(
@@ -102,7 +102,7 @@ extension AppModel {
 
     private func snapshotTranslationResults() -> [Int: SentenceTranslation] {
         var snapshot: [Int: SentenceTranslation] = [:]
-        for entry in entries {
+        for entry in pane.entries {
             if let translation = entry.translations.last {
                 snapshot[entry.sentence.index] = translation
             }

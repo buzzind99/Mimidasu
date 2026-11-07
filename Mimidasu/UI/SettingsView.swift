@@ -337,7 +337,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             KickerLabel("SESSION", color: Palette.label)
             row(label: "Entries") {
-                Text("\(model.entries.count)")
+                Text("\(model.pane.entries.count)")
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(Palette.primaryText)
             }

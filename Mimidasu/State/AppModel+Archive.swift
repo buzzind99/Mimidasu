@@ -126,23 +126,15 @@ extension AppModel {
         guard canOpenArchivedSession else { return false }
         // The window's "back to pane" move: nothing swaps, so the running
         // bulk job and its card must survive.
-        if openArchive?.id == id {
+        if pane.openSessionID == id {
             return true
         }
-        guard let loaded = archiveProjection.open(id: id) else { return false }
+        guard pane.openSession(id: id) else { return false }
         // The main window's sheet is leaving the pane with the previous
         // archive; the archive window's own intents and other kinds stay.
         if case .archiveTranslation(_, _, _, .mainWindow) = providerAwaitingDisclosure {
             providerAwaitingDisclosure = nil
         }
-        archiveViewingLanguage = nil
-        entries = loaded.entries
-        entryPositionBySentence = Dictionary(
-            uniqueKeysWithValues: loaded.entries.enumerated().map { position, entry in
-                (entry.sentence.index, position)
-            }
-        )
-        sessionCharacterCount = loaded.characterCount
         // The transcript swapped under the pane: the dictionary anchors and
         // any in-flight lookup belong to the previous rows.
         tapLookup.clear()
@@ -164,15 +156,11 @@ extension AppModel {
     /// stay stored); the viewing language and a pending main-window
     /// archive-translation pick clear with the archive.
     func closeArchive() {
-        guard openArchive != nil else { return }
+        guard pane.openSessionID != nil else { return }
         if case .archiveTranslation(_, _, _, .mainWindow) = providerAwaitingDisclosure {
             providerAwaitingDisclosure = nil
         }
-        archiveProjection.closeOpen()
-        archiveViewingLanguage = nil
-        entries.removeAll()
-        entryPositionBySentence.removeAll()
-        sessionCharacterCount = 0
+        pane.closeSession()
         // The pane emptied: anchors and in-flight lookups belong to the
         // closed archive's rows.
         tapLookup.clear()
@@ -182,8 +170,8 @@ extension AppModel {
     /// Selects the opened archive's viewing language — view-only: the
     /// stored translations are untouched.
     func selectArchiveViewingLanguage(_ lang: String) {
-        guard openArchive != nil else { return }
-        archiveViewingLanguage = lang
+        guard pane.openSessionID != nil else { return }
+        pane.selectViewingLanguage(lang)
     }
 
     /// Adds a language to a stored session: membership persists from this
@@ -193,8 +181,8 @@ extension AppModel {
     @discardableResult
     func addArchiveLanguage(id: Int64, lang: String) -> Bool {
         guard archiveProjection.addLanguage(id: id, lang: lang) else { return false }
-        if openArchive?.id == id {
-            archiveViewingLanguage = lang
+        if pane.openSessionID == id {
+            pane.selectViewingLanguage(lang)
         }
         return true
     }
@@ -233,7 +221,7 @@ extension AppModel {
     /// The opened banner's save icon: promotes whatever it displays, when it
     /// is still a Recent.
     func saveOpenArchive() {
-        guard let summary = openArchive?.summary, !summary.saved else { return }
+        guard let summary = pane.openArchive?.summary, !summary.saved else { return }
         promoteArchive(id: summary.id)
     }
 
@@ -256,7 +244,7 @@ extension AppModel {
     /// its rows mid-flight.
     func deleteArchive(id: Int64) {
         guard !archiveTranslationJob.isBusy(sessionID: id, lang: nil) else { return }
-        if openArchive?.id == id {
+        if pane.openSessionID == id {
             closeArchive()
         }
         guard archiveProjection.delete(id: id) else {

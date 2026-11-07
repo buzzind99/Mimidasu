@@ -24,7 +24,7 @@ final class ArchiveProjection {
 
     private(set) var summaries: [ArchivedSessionSummary] = []
     /// The one stored copy of the session opened in the transcript pane; the
-    /// pane's entries stay in `AppModel`.
+    /// pane's rows live in `TranscriptPane`.
     private(set) var openSummary: ArchivedSessionSummary?
     private(set) var availability: Availability = .available
     var isAvailable: Bool {

@@ -18,7 +18,8 @@ enum SessionPhase: Equatable {
 /// Orchestrates capture → ASR → sentence buffering → translation, and owns
 /// the published UI state. All public state is @MainActor. The mechanics of
 /// a live session (engine, capture, buffering, timers) live in
-/// `SessionController`.
+/// `SessionController`; the transcript's rows and swaps live in the
+/// composed `TranscriptPane`.
 @Observable
 @MainActor
 final class AppModel {
@@ -49,18 +50,6 @@ final class AppModel {
     }
 
     /// Observed UI state
-    var entries: [SessionEntry] = [] {
-        didSet { entriesRevision &+= 1 }
-    }
-
-    /// O(1) transcript-change signal: every `entries` mutation bumps it, so
-    /// observers react without comparing the whole array.
-    private(set) var entriesRevision = 0
-    /// SESSION-card character total: Σ sentence text lengths (translations
-    /// excluded), maintained incrementally on sentence append / session
-    /// clear / archive swap instead of re-summing the transcript per render.
-    /// Internal setter: the archive swap lives in the archive surface.
-    var sessionCharacterCount = 0
     var engineIsMock = false
     var modelURL: URL?
     /// Floating subtitle overlay, shown/hidden from the sidebar's overlay
@@ -183,6 +172,14 @@ final class AppModel {
     /// availability. UI reads only this, never the store.
     let archiveProjection: ArchiveProjection
 
+    /// The transcript pane module: the rows the pane shows, their
+    /// sentence-to-position map, the character total, the viewed archive
+    /// language, the open record, and the live/archive swaps. Views read it
+    /// directly; AppModel composes it and keeps the surrounding surfaces —
+    /// lookup anchors, overlay visibility, the session clock, and the
+    /// re-translate lane's epoch.
+    let pane: TranscriptPane
+
     /// The stored row of the live recording, created lazily with the first
     /// finalized sentence. Nil before that (and when the archive is
     /// unavailable). Mutated from the persistence path in the archive
@@ -194,19 +191,6 @@ final class AppModel {
     /// nothing (and skips its prompt) for the rest of the session. Reset at
     /// session begin. Mutated from the archive surface.
     var archiveWriteFailed = false
-
-    /// The stored session opened read-only in the transcript pane, or nil.
-    /// The summary is the projection's one copy; the entries are the pane's.
-    var openArchive: ArchivedSession? {
-        guard let summary = archiveProjection.openSummary else { return nil }
-        return ArchivedSession(summary: summary, entries: entries)
-    }
-
-    /// The opened archive's viewing-language override (BCP-47 code): nil =
-    /// the archive's stored target. View-only state — switching never
-    /// mutates stored translations. Reset on open, cleared on close;
-    /// mutated from the archive surface and the bulk job's add flows.
-    var archiveViewingLanguage: String?
 
     /// The bulk archive-translation job: one run at a time over the opened
     /// archive's sentences, with its engine resolver and landing sink wired
@@ -281,14 +265,6 @@ final class AppModel {
     /// Internal: invoked from the termination surface.
     let retireWarmEngine: @Sendable () -> Void
 
-    /// Sentence index → position in `entries`. Entries are append-only within
-    /// a session (positions never shift), so translations resolve in O(1)
-    /// instead of scanning the transcript per arrival. Cleared with
-    /// `entries` on session begin. Written by `handleSentence` and the
-    /// session-begin clear (both in this file); `applyTranslation` only
-    /// reads it.
-    var entryPositionBySentence: [Int: Int] = [:]
-
     /// Injectable so the terminate-notification wiring can be tested
     /// hermetically — posting on the shared `.default` center from a parallel
     /// test would stop every other live `AppModel`. The default is the
@@ -335,6 +311,7 @@ final class AppModel {
         self.favorites = favorites ?? FavoritesStore()
         self.archive = archive ?? ArchiveStore()
         archiveProjection = ArchiveProjection(store: self.archive)
+        pane = TranscriptPane(projection: archiveProjection)
         let jmDict = jmDictLookup ?? JMDictLookup()
         self.jmDictLookup = jmDict
         tapLookup = TapLookupSession(resolver: tapLookupResolver ?? LookupDisplay(lookup: jmDict))
@@ -412,8 +389,7 @@ final class AppModel {
     private func wireSessionController() {
         sessionController.onSessionBegin = { [weak self] in
             guard let self else { return }
-            entries.removeAll()
-            entryPositionBySentence.removeAll()
+            pane.beginLiveSession()
             // Sentence indexes restart at 0 in every session, so a backlog
             // left by the last one has no row to land on — drop it, and with
             // it any re-translation marker still waiting on its result and
@@ -426,7 +402,6 @@ final class AppModel {
             // The Apple-fallback latch is per session: a fresh session
             // re-attempts the configured provider from scratch.
             translationSession.sessionWillBegin()
-            sessionCharacterCount = 0
             hudPinnedIndex = nil
             sessionStartedAt = .now
             sessionEndedAt = nil
@@ -543,9 +518,7 @@ final class AppModel {
     // MARK: - Event handling (main actor)
 
     private func handleSentence(_ sentence: Sentence) {
-        entryPositionBySentence[sentence.index] = entries.count
-        entries.append(SessionEntry(sentence: sentence))
-        sessionCharacterCount += sentence.text.count
+        pane.append(sentence)
         // The archive row follows the transcript: persistence is the same
         // synchronous main-actor path, governed by the per-session latch.
         persistSentence(sentence)

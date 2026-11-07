@@ -10,8 +10,8 @@ import Translation
 // Translation-engine façade of `AppModel`: forwarding accessors over
 // `TranslationSessionCoordinator`, which owns the attach ritual, the
 // manual retry, the one-way Apple fallback latch, the high-fidelity probe,
-// and the provider-selection machinery. The app model keeps phase,
-// entries, and toasts; the coordinator reaches them through
+// and the provider-selection machinery. The app model keeps phase, toasts,
+// and the composed transcript pane; the coordinator reaches them through
 // `TranslationSessionPort`.
 
 extension AppModel: TranslationSessionPort {
@@ -20,7 +20,7 @@ extension AppModel: TranslationSessionPort {
 
     /// The archived session open in the transcript pane, or nil.
     var archiveSessionID: Int64? {
-        openArchive?.id
+        pane.openSessionID
     }
 
     /// The language the opened archive's pane shows: the viewing-language
@@ -28,8 +28,8 @@ extension AppModel: TranslationSessionPort {
     /// time, so a row retried after the viewing language switched (or after
     /// the archive closed) re-resolves against whatever is current then.
     var archiveViewingCode: String? {
-        guard let archive = openArchive else { return nil }
-        return archiveViewingLanguage ?? archive.summary.targetLang
+        guard let archive = pane.openArchive else { return nil }
+        return pane.viewingLanguage ?? archive.summary.targetLang
     }
 
     /// True from the bulk job's synchronous claim (engine resolution
@@ -85,9 +85,7 @@ extension AppModel: TranslationSessionPort {
                 )
             }
         }
-        guard let at = entryPositionBySentence[index] else { return false }
-        entries[at].replaceTranslation(translation)
-        return true
+        return pane.replaceTranslation(index: index, translation: translation)
     }
 }
 
@@ -197,7 +195,7 @@ extension AppModel {
 // `RetranslateCoordinator`, which owns the route resolution, the
 // serialized alternate-engine runner, the dedicated Apple sessions, the
 // marker sets, and the lane's epoch clock. The app model keeps phase,
-// entries, and toasts.
+// toasts, and the composed transcript pane.
 
 // MARK: - Forwarded engine identity
 

@@ -150,7 +150,7 @@ struct HUDView: View {
     /// Translated entries only; finalized-but-untranslated sentences never
     /// enter the cycle (the view doesn't move until their translation lands).
     private var translatedEntries: [SessionEntry] {
-        model.entries.filter { entry in entry.joinedTranslations != nil }
+        model.pane.entries.filter { entry in entry.joinedTranslations != nil }
     }
 
     private var completedSection: some View {
