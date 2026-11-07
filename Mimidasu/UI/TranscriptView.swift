@@ -61,6 +61,10 @@ struct TranscriptView: View {
         // that hands the matcher down, and it re-runs this body when
         // membership changes.
         _ = model.favorites.snapshot
+        // Reading it here makes the transcript re-render all rows when a
+        // dictionary artifact becomes ready: degraded cold-start renders are
+        // not cached, and the epoch also remeasures FlowLayout.
+        let annotationEpoch = model.dictionaryRevision
         let plan = model.retranslatePlan(
             surface: retranslateSurface,
             target: retranslateTarget
@@ -109,6 +113,7 @@ struct TranscriptView: View {
                             else { return nil }
                             return tokenIndex
                         },
+                        annotationEpoch: annotationEpoch,
                         isFavorite: model.favoriteSegmentMatcher,
                         onRetry: { sentence in model.retranslateSentence(sentence) },
                         rowPlan: rowPlan,

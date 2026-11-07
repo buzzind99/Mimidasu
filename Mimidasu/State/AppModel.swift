@@ -96,6 +96,19 @@ final class AppModel {
     /// (see `ensureDictionaryReady`). Mutated only by the preparation
     /// surface in the dictionary surface.
     var isPreparingDictionary = false
+    /// Bumped when a dictionary artifact (tokenizer or JMDict) finishes
+    /// preparing. The transcript reads it so rows mounted during the cold
+    /// start re-annotate once the artifact is usable; the accompanying cache
+    /// clear lives in `dictionaryArtifactDidBecomeReady`. Bumped once per
+    /// artifact per process, on its first readiness.
+    /// Internal setter: the dictionary preparation surface owns the bump.
+    var dictionaryRevision = 0
+    /// The artifacts whose first successful preparation this process has
+    /// observed. Readiness lasts the process lifetime: preparing an artifact
+    /// that is already ready (every Start adopts the store) must not clear
+    /// the segment cache or bump `dictionaryRevision` again. Pure
+    /// bookkeeping, never read from a view body.
+    @ObservationIgnored var readyDictionaryArtifacts: Set<DictionaryArtifactKind> = []
     /// True while model discovery (resolve + SHA-256 verify) is in flight —
     /// at launch and on a Settings re-check. Start is gated on it: the
     /// verify hashes up to ~1.2 GB and must never run on the main thread.

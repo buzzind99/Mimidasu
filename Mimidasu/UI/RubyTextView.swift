@@ -52,15 +52,21 @@ struct RubyTextView: View, Equatable {
     /// The anchor word's popover presentation for the transcript host:
     /// invoked with that word's segment index when `popoverAnchorToken`
     /// matches; a non-nil result supplies the binding and lazy content. nil
-    /// — the HUD, the live strip — keeps word units popover-free. Excluded
-    /// from `==` (closures carry no value identity); the binding getter is
-    /// the presentation observation for the anchor word.
+    /// — the HUD, the live strip — keeps word units popover-free. Its
+    /// presence is part of `==` (it decides whether the anchor word mounts a
+    /// presenter); its identity is not. The binding getter is the
+    /// presentation observation for the anchor word.
     var lookupPopover: ((Int) -> LookupPopover?)?
     /// The segment index that receives the host's popover binding and
     /// content, or nil for none. The host's per-row anchor reader derives it
     /// from the live presentation, so a tap rebuilds only the owning row's
     /// word units. Part of `==`: a moved anchor must reach the body.
     var popoverAnchorToken: Int?
+    /// Bumped when a dictionary artifact finishes preparing, so an equatable
+    /// host re-runs this body even though the text and annotation mode are
+    /// unchanged. Part of `==` and `fingerprint` (readiness can change every
+    /// note, so FlowLayout must remeasure).
+    var annotationEpoch = 0
     /// Whether a rendered segment is a favorite; the host supplies the
     /// matcher (the store's in-memory key set) and the color follows wherever
     /// this view already renders per-segment surfaces. nil — any host that
@@ -69,9 +75,10 @@ struct RubyTextView: View, Equatable {
 
     /// One word unit's popover presentation, resolved by the host for the
     /// anchor word only: the binding presents only while that word is the
-    /// presentation's anchor, and the content is resolved when the popover
-    /// presents — re-evaluated when the pager, a promotion, a retap, or a
-    /// dismissal changes the presentation.
+    /// presentation's anchor, and the binding getter is the presentation
+    /// observation. SwiftUI evaluates the content closure when the popover
+    /// presents, and re-evaluates it when the pager, a promotion, a retap, or
+    /// a dismissal changes the presentation.
     struct LookupPopover {
         let isPresented: Binding<Bool>
         let content: () -> DictionaryPopoverView?
@@ -369,23 +376,27 @@ struct RubyTextView: View, Equatable {
         }
     }
 
-    /// Excludes `onCopy`, `onLookup`, `lookupPopover`, and `isFavoriteSegment`
-    /// (closures have no value identity), which is safe because this body
-    /// *invokes* the render-time closures: `displayUnits` reads
-    /// `isFavoriteSegment`, and the anchor word's `.popover` leaf reads the
-    /// binding getter. The favorite read registers this body's observation;
-    /// the presentation read registers on that leaf. Hoisting either call
-    /// into a cached value would silently freeze favorites or dictionary
-    /// refreshes.
+    /// Closure *identity* is not compared — closures have no value identity —
+    /// but closure *presence* is load-bearing and is: `lookupPopover` decides
+    /// whether the anchor word mounts a presenter, `dictionaryLookupActive`
+    /// selects the render path, and `onCopy`/`isFavoriteSegment` presence
+    /// changes click/color behavior. The body still *invokes* the closures and
+    /// observes favorites and presentation through body reads, so those
+    /// effects refresh without comparing closure values. Hoisting any of
+    /// those calls into a cached value would silently freeze favorites or
+    /// dictionary refreshes.
     ///
     /// The transcript host wraps this view in `.equatable()`, so a
-    /// parent-driven update skips the body when every value input is
+    /// parent-driven update skips the body when every compared input is
     /// unchanged; `popoverAnchorToken` is load-bearing there because a moved
     /// anchor must re-render the body so the old word drops its presentation.
-    /// The conformance also lets this view's unit tests assert the rendered
-    /// value directly. The witness is `nonisolated` so the conformance needs
-    /// no `@preconcurrency`: every compared property is an immutable Sendable
-    /// value.
+    /// `annotationEpoch` is a value input bumped when a dictionary artifact
+    /// becomes ready, so a cold-start row re-renders once annotations are
+    /// available; it is also in `fingerprint`, so the flow remeasures. The
+    /// conformance also lets this view's unit tests assert the rendered value
+    /// directly. The witness is `nonisolated` so the conformance needs no
+    /// `@preconcurrency`: it only reads immutable stored properties, and the
+    /// closures are tested for presence, never invoked or sent.
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.text == rhs.text
             && lhs.annotation == rhs.annotation
@@ -397,6 +408,11 @@ struct RubyTextView: View, Equatable {
             && lhs.reservesAnnotationLine == rhs.reservesAnnotationLine
             && lhs.cursorMode == rhs.cursorMode
             && lhs.popoverAnchorToken == rhs.popoverAnchorToken
+            && lhs.annotationEpoch == rhs.annotationEpoch
+            && lhs.dictionaryLookupActive == rhs.dictionaryLookupActive
+            && (lhs.onCopy != nil) == (rhs.onCopy != nil)
+            && (lhs.lookupPopover != nil) == (rhs.lookupPopover != nil)
+            && (lhs.isFavoriteSegment != nil) == (rhs.isFavoriteSegment != nil)
     }
 
     /// One rendered child on the legacy path. Internal (not private) so the
@@ -424,12 +440,14 @@ struct RubyTextView: View, Equatable {
     /// Pins FlowLayout's size cache: annotation and cursor mode change
     /// child structure (the dictionary path drops plain-run folding), the
     /// italic flag changes child structure, the fonts change child sizes,
-    /// the text changes surfaces, and the reservation adds or drops the
-    /// spacer line above plain/annotated units. Colors paint only, so they
-    /// are excluded.
+    /// the text changes surfaces, the reservation adds or drops the spacer
+    /// line above plain/annotated units, and the annotation epoch marks a
+    /// dictionary artifact preparing — readiness can add notes to every unit,
+    /// so the flow must remeasure. Colors paint only, so they are excluded.
     var fingerprint: String {
         "\(annotation)-\(cursorMode)-\(reservesAnnotationLine)-\(dictionaryLookupActive)-"
-            + "\(surfaceItalic)-\(surfaceFont.hashValue)-\(noteFont.hashValue)-\(text)"
+            + "\(annotationEpoch)-\(surfaceItalic)-\(surfaceFont.hashValue)-"
+            + "\(noteFont.hashValue)-\(text)"
     }
 
     /// Pure folding rule for the legacy path: consecutive runs without a

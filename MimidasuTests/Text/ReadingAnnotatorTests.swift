@@ -17,13 +17,23 @@ struct ReadingAnnotatorGuardTests {
         #expect(segments == nil)
     }
 
-    @Test("degrades to an empty segment list when the dictionary runtime is unavailable")
-    func emptyWhenRuntimeUnavailable() {
-        let annotator = ReadingAnnotator(tokenize: { _ in nil })
+    @Test("re-probes after the tokenizer becomes available instead of pinning the degraded render")
+    func unavailableRuntimeIsNotCached() throws {
+        let ready = Mutex(false)
+        let annotator = ReadingAnnotator(
+            tokenize: { text in
+                guard ready.withLock({ flag in flag }) else { return nil }
+                return tokens([text], readings: [nil])
+            },
+            readingFallback: { _ in nil },
+            headwordGate: { _ in true }
+        )
 
-        let segments = annotator.segments(for: "こんにちは")
+        #expect(annotator.segments(for: "こんにちは")?.isEmpty == true)
 
-        #expect(segments?.isEmpty == true)
+        ready.withLock { flag in flag = true }
+        let segments = try #require(annotator.segments(for: "こんにちは"))
+        #expect(!segments.isEmpty)
     }
 
     @Test("renders an all-plain run when the runtime returns no tokens")
@@ -76,23 +86,30 @@ struct ReadingAnnotatorGuardTests {
         #expect(calls.withLock { count in count } == 3000)
     }
 
-    @Test("the segment cache is sized for a long session and charges segment cost")
-    func cacheConfigurationAndCost() {
-        let cache = RecordingSegmentCache()
+    @Test("the segment cache is sized for a long session")
+    func cacheConfiguration() {
+        #expect(makeAnnotator([]).segmentCacheCountLimit == 20000)
+    }
+
+    @Test("invalidating the segment cache forces the next render to re-tokenize")
+    func invalidationReTokenizes() {
+        let calls = Mutex(0)
         let annotator = ReadingAnnotator(
-            tokenize: { text in tokens([text], readings: [nil]) },
+            tokenize: { text in
+                calls.withLock { count in count += 1 }
+                return tokens([text], readings: [nil])
+            },
             readingFallback: { _ in nil },
-            headwordGate: { _ in true },
-            cache: cache
+            headwordGate: { _ in true }
         )
 
         _ = annotator.segments(for: "桜")
+        _ = annotator.segments(for: "桜")
+        #expect(calls.withLock { count in count } == 1)
 
-        #expect(cache.costs == [1])
-        #expect(
-            makeAnnotator([]).segmentCacheLimits
-                == (count: 20000, totalCost: 24 * 1024 * 1024)
-        )
+        annotator.invalidateSegmentCache()
+        _ = annotator.segments(for: "桜")
+        #expect(calls.withLock { count in count } == 2)
     }
 
     @Test("the static entry point returns the shared annotator's annotations")
@@ -600,15 +617,5 @@ struct ReadingAnnotatorFallbackCacheTests {
         cache.store(nil, for: "㐂")
 
         #expect(cache.cachedReading(for: "㐂") == .miss)
-    }
-}
-
-/// Records the cost charged by the annotator's segment cache.
-private final class RecordingSegmentCache: NSCache<NSString, NSArray> {
-    private(set) var costs: [Int] = []
-
-    override func setObject(_ obj: NSArray, forKey key: NSString, cost: Int) {
-        costs.append(cost)
-        super.setObject(obj, forKey: key, cost: cost)
     }
 }

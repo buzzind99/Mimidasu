@@ -30,6 +30,7 @@ struct RubyTextViewTests {
         onLookup: ((TapLookupRequest) -> Void)? = nil,
         lookupPopover: ((Int) -> RubyTextView.LookupPopover?)? = nil,
         popoverAnchorToken: Int? = nil,
+        annotationEpoch: Int = 0,
         reservesAnnotationLine: Bool = false,
         isFavoriteSegment: ((ReadingSegment) -> Bool)? = nil
     ) -> RubyTextView {
@@ -44,6 +45,7 @@ struct RubyTextViewTests {
             onLookup: onLookup,
             lookupPopover: lookupPopover,
             popoverAnchorToken: popoverAnchorToken,
+            annotationEpoch: annotationEpoch,
             isFavoriteSegment: isFavoriteSegment
         )
     }
@@ -117,8 +119,8 @@ struct RubyTextViewTests {
 
     // MARK: - Equality and fingerprint
 
-    @Test("== compares values only, never a copy, lookup, popover, or favorite closure")
-    func equalityIsValueOnly() {
+    @Test("== compares value inputs and handler presence, never closure identity")
+    func equalityComparesValuesAndPresence() {
         #expect(view() != view(cursorMode: .dictionary))
 
         let copyA = view(cursorMode: .copy, onCopy: { _ in })
@@ -128,6 +130,8 @@ struct RubyTextViewTests {
         let lookupA = view(cursorMode: .dictionary, onLookup: { _ in })
         let lookupB = view(cursorMode: .dictionary, onLookup: { _ in })
         #expect(lookupA == lookupB)
+        // `.none` keeps `dictionaryLookupActive` false in both, so onLookup
+        // presence alone does not distinguish them.
         #expect(view() == view(onLookup: { _ in }))
 
         let hostedA = view(
@@ -137,11 +141,28 @@ struct RubyTextViewTests {
             cursorMode: .dictionary, onLookup: { _ in }, lookupPopover: { _ in nil }
         )
         #expect(hostedA == hostedB)
-        #expect(hostedA == view(cursorMode: .dictionary, onLookup: { _ in }))
+        #expect(hostedA != view(cursorMode: .dictionary, onLookup: { _ in }))
 
         let matcherA = view(isFavoriteSegment: { _ in true })
         let matcherB = view(isFavoriteSegment: { _ in false })
         #expect(matcherA == matcherB)
+    }
+
+    @Test("== tracks handler presence so a mounted presenter or click behavior cannot go stale")
+    func equalityTracksHandlerPresence() {
+        #expect(view() != view(onCopy: { _ in }))
+        #expect(
+            view(cursorMode: .dictionary, onLookup: { _ in })
+                != view(cursorMode: .dictionary)
+        )
+        #expect(view() != view(lookupPopover: { _ in nil }))
+        #expect(view() != view(isFavoriteSegment: { _ in false }))
+        #expect(view(onCopy: { _ in }) == view(onCopy: { _ in }))
+    }
+
+    @Test("== tracks the annotation epoch so a dictionary becoming ready re-renders the body")
+    func equalityTracksAnnotationEpoch() {
+        #expect(view(annotationEpoch: 0) != view(annotationEpoch: 1))
     }
 
     @Test("== tracks the popover anchor token so a moved anchor re-renders the body")
@@ -193,10 +214,11 @@ struct RubyTextViewTests {
         #expect(requested == [1])
     }
 
-    @Test("the fingerprint tracks cursor mode and the reserved line, never favorites")
+    @Test("the fingerprint tracks cursor mode, the reserved line, and the epoch, never favorites")
     func fingerprintTracksRenderingInputs() {
         #expect(view().fingerprint != view(cursorMode: .dictionary).fingerprint)
         #expect(view().fingerprint != view(reservesAnnotationLine: true).fingerprint)
+        #expect(view().fingerprint != view(annotationEpoch: 1).fingerprint)
         #expect(view().fingerprint == view(isFavoriteSegment: { _ in true }).fingerprint)
     }
 

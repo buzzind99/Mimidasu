@@ -66,9 +66,19 @@ extension AppModel {
     }
 }
 
+/// Which preparable dictionary artifact reported readiness. Readiness is
+/// tracked per artifact because each gates a different render (tokenizer
+/// segments vs the JMDict reading fallback and fragmentation gate) and they
+/// can become usable at different times.
+enum DictionaryArtifactKind: Hashable {
+    case tokenizer
+    case jmDict
+}
+
 /// One preparable dictionary artifact: its async builder and the log line a
 /// failure of it is reported with.
 private struct DictionaryArtifact {
+    let kind: DictionaryArtifactKind
     let prepare: () async throws -> URL
     let log: String
 }
@@ -107,18 +117,21 @@ extension AppModel {
     ) {
         let artifacts = [
             DictionaryArtifact(
+                kind: .tokenizer,
                 prepare: prepare,
                 log: "[dictionary] first-launch build failed; text stays unannotated"
             ),
             DictionaryArtifact(
+                kind: .jmDict,
                 prepare: prepareJMDict,
                 log: "[jmdict] first-launch build failed; lookups stay unavailable"
             )
         ]
         for artifact in artifacts {
-            Task {
+            Task { [weak self] in
                 do {
                     _ = try await artifact.prepare()
+                    self?.dictionaryArtifactDidBecomeReady(artifact.kind)
                 } catch {
                     print("\(artifact.log): \(error.localizedDescription)")
                 }
@@ -141,7 +154,23 @@ extension AppModel {
         isPreparingDictionary = true
         defer { isPreparingDictionary = false }
         _ = try await prepare()
+        dictionaryArtifactDidBecomeReady(.tokenizer)
         _ = try await prepareJMDict()
+        dictionaryArtifactDidBecomeReady(.jmDict)
+    }
+
+    /// A dictionary artifact became usable: on its first readiness this
+    /// process, drop any segment renders computed without it and bump the
+    /// observable revision so mounted transcript rows rebuild (their
+    /// equatable view includes the revision). A later preparation of the same
+    /// artifact — every Start adopts the already-ready store — is a no-op:
+    /// clearing the cache then would discard the scroll-back renders for no
+    /// state change. Degraded renders are never cached, so this is a refresh
+    /// signal, not a correctness fix for the store.
+    func dictionaryArtifactDidBecomeReady(_ kind: DictionaryArtifactKind) {
+        guard readyDictionaryArtifacts.insert(kind).inserted else { return }
+        ReadingAnnotator.invalidateSharedSegmentCache()
+        dictionaryRevision &+= 1
     }
 }
 

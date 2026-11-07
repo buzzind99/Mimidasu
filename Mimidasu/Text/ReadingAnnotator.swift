@@ -131,24 +131,37 @@ final class ReadingAnnotator: @unchecked Sendable {
     }
 
     /// The segment cache; `makeSegmentCache` carries its sizing. Injectable
-    /// so tests can observe the cost charged per render.
+    /// so tests can substitute the store.
     private let cache: NSCache<NSString, NSArray>
 
     /// Sized for a long transcription session's finalized sentences so
-    /// scroll-back re-renders hit instead of re-tokenizing: a 20k-sentence
-    /// count cap is the effective bound, with a secondary 24M-segment cost
-    /// cap (each entry costs its segment count, not bytes). Soft caps only —
-    /// NSCache still evicts under real memory pressure.
+    /// scroll-back re-renders hit instead of re-tokenizing: the 20k-sentence
+    /// count cap is the effective bound (entries are small, so a byte cost
+    /// would not bind). Soft caps only — NSCache still evicts under real
+    /// memory pressure.
     private static func makeSegmentCache() -> NSCache<NSString, NSArray> {
         let cache = NSCache<NSString, NSArray>()
         cache.countLimit = 20000
-        cache.totalCostLimit = 24 * 1024 * 1024
         return cache
     }
 
-    /// Test seam: the segment cache's configured soft limits.
-    var segmentCacheLimits: (count: Int, totalCost: Int) {
-        (cache.countLimit, cache.totalCostLimit)
+    /// Test seam: the segment cache's configured count cap.
+    var segmentCacheCountLimit: Int {
+        cache.countLimit
+    }
+
+    /// Drops every cached segment render. Called when a dictionary artifact
+    /// becomes ready: a degraded pass is never cached, but renders made before
+    /// a previously missing artifact loaded can differ from what the runtime
+    /// produces now.
+    func invalidateSegmentCache() {
+        cache.removeAllObjects()
+    }
+
+    /// Process-wide counterpart: the app's dictionary preparation calls this
+    /// when an artifact becomes usable so mounted rows re-annotate.
+    static func invalidateSharedSegmentCache() {
+        shared.invalidateSegmentCache()
     }
 
     /// The default headword gate: a process-wide JMDict lookup answering
@@ -242,10 +255,11 @@ final class ReadingAnnotator: @unchecked Sendable {
     }
 
     /// Returns per-run segments for `text` (surface + romaji + furigana), or
-    /// `nil` for empty input. Cached — except when the pass ran degraded
-    /// (the headword gate's database was unreachable): those whole-or-split
-    /// decisions carry no real verdict, so they are not pinned and the next
-    /// render re-probes once the dictionary is up.
+    /// `nil` for empty input. Cached — except when the pass ran degraded (the
+    /// headword gate's database was unreachable, or the tokenizer was
+    /// unavailable): those whole-or-split decisions and empty renders carry no
+    /// real verdict, so they are not pinned and the next render re-probes once
+    /// the runtime is up.
     static func segments(for text: String) -> [ReadingSegment]? {
         shared.segments(for: text)
     }
@@ -267,13 +281,11 @@ final class ReadingAnnotator: @unchecked Sendable {
         }
 
         let outcome = transcribe(trimmed)
-        // A degraded pass decided whole-or-split without a real verdict;
-        // caching would pin those decisions past the dictionary's arrival.
+        // A degraded pass (headword gate unreachable or tokenizer unavailable)
+        // took decisions without a real verdict; caching would pin them past
+        // the runtime's arrival.
         if caching, !outcome.gateDegraded {
-            cache.setObject(
-                outcome.segments as NSArray, forKey: trimmed as NSString,
-                cost: outcome.segments.count
-            )
+            cache.setObject(outcome.segments as NSArray, forKey: trimmed as NSString)
         }
         return outcome.segments
     }
@@ -281,7 +293,9 @@ final class ReadingAnnotator: @unchecked Sendable {
     // MARK: - Transcription
 
     private func transcribe(_ text: String) -> (segments: [ReadingSegment], gateDegraded: Bool) {
-        guard let raw = tokenize(text) else { return ([], false) }
+        // No tokenizer is a degraded pass: caching the empty render would pin
+        // it past the runtime becoming available.
+        guard let raw = tokenize(text) else { return ([], true) }
         let scalars = Array(text.unicodeScalars)
         // A run the tokenizer collapsed into one unknown node hides real word
         // boundaries; re-decoding it in short windows recovers them. Runs ahead

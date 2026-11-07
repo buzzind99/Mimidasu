@@ -7,10 +7,11 @@ import SwiftUI
 /// Every property is a plain value snapshot rather than a settings wrapper:
 /// `@AppStorage`-backed wrappers read the *live* stored value, so a row would
 /// render the previous annotation mode or scale unless its parent handed it a
-/// fresh value. The row carries no `Equatable` witness, so a parent
-/// invalidation re-renders it outright; the nested `RubyTextView` keeps its
-/// own value diff and repaints through its body's own reads of the matcher and
-/// popover closures.
+/// fresh value. The row has no `Equatable` witness itself; the nested
+/// `RubyTextView` applies `.equatable()`, whose witness compares values plus
+/// handler presence, the anchor token, and the annotation epoch, so a moved
+/// anchor or a newly ready dictionary still reaches the body. The body's own
+/// reads still observe favorites and popover presentation directly.
 struct TranscriptRow: View {
     /// Shared label for the one retry affordance: the row's named
     /// accessibility action and the hover button's help tag must not drift.
@@ -39,6 +40,9 @@ struct TranscriptRow: View {
     /// anchor for this sentence, so only that word receives the host's
     /// popover binding. The reader's own body carries the presentation read.
     var lookupAnchorToken: () -> Int?
+    /// The annotation epoch the row renders with; a change forces the
+    /// equatable `RubyTextView` body to re-run after dictionary readiness.
+    let annotationEpoch: Int
     var isFavorite: ((ReadingSegment) -> Bool)?
     /// Invoked with the row's sentence when the hover retry button fires.
     var onRetry: ((Sentence) -> Void)?
@@ -150,6 +154,7 @@ struct TranscriptRow: View {
             onLookup: onLookup,
             lookupPopover: lookupPopover,
             popoverAnchorToken: popoverAnchorToken,
+            annotationEpoch: annotationEpoch,
             isFavoriteSegment: isFavorite
         )
         .equatable()
@@ -253,8 +258,10 @@ struct TranscriptRow: View {
 }
 
 /// Per-row reader for the transcript's word-popover anchor: the presentation
-/// read lands in this view's body, so a tap invalidates the row's reader
-/// instead of the row or every word unit.
+/// read lands in this view's body, so every row's reader observes the live
+/// presentation and a tap re-evaluates all readers. Only the affected rows'
+/// tokens change, and only the anchor word resolves the host's binding and
+/// content.
 private struct TranscriptRowLookupAnchor<Content: View>: View {
     let token: () -> Int?
     let content: (Int?) -> Content

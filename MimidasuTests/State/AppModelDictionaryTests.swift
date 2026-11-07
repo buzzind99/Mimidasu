@@ -141,4 +141,52 @@ struct AppModelDictionaryTests {
 
         #expect(!model.isPreparingDictionary)
     }
+
+    // MARK: - Annotation refresh
+
+    @Test("each artifact bumps on its first readiness and never again")
+    func artifactReadinessBumpsOncePerArtifact() {
+        let model = makeModel()
+        let before = model.dictionaryRevision
+
+        model.dictionaryArtifactDidBecomeReady(.tokenizer)
+        model.dictionaryArtifactDidBecomeReady(.tokenizer)
+        #expect(model.dictionaryRevision == before + 1)
+
+        model.dictionaryArtifactDidBecomeReady(.jmDict)
+        model.dictionaryArtifactDidBecomeReady(.jmDict)
+        #expect(model.dictionaryRevision == before + 2)
+    }
+
+    @Test("a repeated session-start gate does not re-bump already-ready artifacts")
+    func repeatedGateDoesNotRebump() async throws {
+        let model = makeModel()
+        try await model.ensureDictionaryReady(
+            prepare: { Self.ipadic },
+            prepareJMDict: { Self.jmDict }
+        )
+        let afterFirst = model.dictionaryRevision
+
+        try await model.ensureDictionaryReady(
+            prepare: { Self.ipadic },
+            prepareJMDict: { Self.jmDict }
+        )
+
+        #expect(model.dictionaryRevision == afterFirst)
+    }
+
+    @Test("a successful launch preparation bumps the revision after the artifact completes")
+    func successfulPreparationBumpsRevision() async {
+        let model = makeModel()
+        let before = model.dictionaryRevision
+
+        model.prepareDictionaries(
+            prepare: { Self.ipadic },
+            prepareJMDict: { Self.jmDict }
+        )
+
+        // The model's own launch preparation may land concurrently, so this
+        // asserts progress rather than an exact delta.
+        #expect(await pollUntil { model.dictionaryRevision > before })
+    }
 }
