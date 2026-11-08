@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Synchronization
 
@@ -6,9 +7,9 @@ import Synchronization
 /// runtime is installed).
 ///
 /// Runs the CrispASR backend detected from the GGUF's architecture header
-/// (`crispasr_detect_backend_from_gguf` — `sensevoice` for Lite, `funasr`
-/// for Full; neither has cache-aware streaming) — the sliding window lives
-/// here instead of in the C library:
+/// (`crispasr_detect_backend_from_gguf` — `sensevoice` for Lite, `parakeet`
+/// for Balanced's Haas GGUF, `funasr` for Full; none has cache-aware
+/// streaming) — the sliding window lives here instead of in the C library:
 ///
 ///   - `push` appends 160 ms chunks to a rolling utterance buffer (bounded by
 ///     a forced-final cap) plus a 10 s window used for partial decodes.
@@ -116,6 +117,32 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
     static func fallbackBackend(modelPath: String) -> String {
         let name = URL(fileURLWithPath: modelPath).lastPathComponent.lowercased()
         return name.contains("funasr") ? "funasr" : "sensevoice"
+    }
+
+    /// Whether a session for this model must disable FunASR's encoder graph
+    /// cache. CrispASR 0.8.50 and later cache the encoder graph by exact
+    /// `T_lfr`; replaying an equal-length buffer returns a corrupted decode
+    /// (the second one is garbage). The app's partial window is capped at
+    /// 10 s, so once the cap is reached every partial has the same length —
+    /// this would break Full about 11 s into continuous speech.
+    ///
+    /// Detection is authoritative; the file-name fallback keeps the guard
+    /// working when the GGUF header cannot be read.
+    static func disablesFunASRCache(backend: String, modelPath: String) -> Bool {
+        if backend.lowercased() == "funasr" {
+            return true
+        }
+        return URL(fileURLWithPath: modelPath).lastPathComponent
+            .lowercased()
+            .contains("funasr")
+    }
+
+    /// Applies the cache rule above before the model loads. Process-wide,
+    /// but `prepare` is the app's only session opener, so one set is enough
+    /// for every later FunASR session in this process.
+    private static func applyFunASRCacheWorkaround(backend: String, modelPath: String) {
+        guard disablesFunASRCache(backend: backend, modelPath: modelPath) else { return }
+        setenv("CRISPASR_FUNASR_ENC_CACHE", "0", 1)
     }
 
     /// FunASR-family models tag non-speech audio in their decode output
@@ -314,6 +341,7 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
             #if DEBUG
                 print("[asr] prepare: opening C session (\(backend)/metal)")
             #endif
+            Self.applyFunASRCacheWorkaround(backend: backend, modelPath: modelPath)
             lib.setGpuBackend("metal")
             guard let handle = lib.openSession(modelPath: modelPath, backend: backend) else {
                 return ASREngineError.createFailed(
