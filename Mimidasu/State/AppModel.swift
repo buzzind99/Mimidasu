@@ -494,6 +494,12 @@ final class AppModel {
     /// Internal: driven from the pause path.
     func performCaptureRestart() {
         guard reducePhase(.captureRestartRequested).isLegal else { return }
+        // The phase parks in `.starting` while the device reopens and the
+        // lane treats that as not-live. A per-row retry parked in an Apple
+        // probe or engine wait would otherwise sit out its whole bound with
+        // the row dimmed; cancel the waits so their tasks retire the markers
+        // now and report nothing.
+        retranslate.cancelLaneWaits()
         Task { @MainActor in
             do {
                 try await sessionController.restartCapture()

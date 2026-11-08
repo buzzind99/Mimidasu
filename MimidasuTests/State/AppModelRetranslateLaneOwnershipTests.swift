@@ -155,6 +155,50 @@ struct AppModelRetranslateLaneOwnershipTests {
         )
     }
 
+    @Test("a capture restart retires a walk that is parked in the Apple arm wait")
+    func captureRestartCancelsParkedArmWait() async {
+        let model = await harness.makeModel()
+        model.translationSettings.selectRetranslate(.appleFast)
+        model.appleHighFidelityProbe = (false, model.translationSettings.targetLanguage.code)
+        // An external live session makes Apple-fast a genuine alternate lane.
+        model.translationSession.activeTranslationEngine = .external
+        model.translationSession.activeExternalProvider = .google
+        model.phase = .running
+        let sentence = makeSentence(index: 7)
+        model.sessionController.onSentence?(sentence)
+        model.applyTranslation(
+            index: 7, translation: SentenceTranslation(lang: "en", text: "Original")
+        )
+        // Long enough that only the restart's cancellation can retire it.
+        model.retranslate.laneArmTimeout = .seconds(30)
+
+        model.retranslate.retranslateSentence(sentence)
+        #expect(
+            model.retranslate.pendingRetranslations == [7],
+            "the click parks in the arm wait"
+        )
+        #expect(
+            await pollUntil(timeout: resultTimeout) { model.retranslate.fastSessionConfig != nil },
+            "the click armed the fast session"
+        )
+        // Let the lane task enter its continuation before the phase parks.
+        try? await Task.sleep(for: .milliseconds(100))
+
+        model.phase = .sourceLost
+        model.performCaptureRestart()
+
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                model.retranslate.pendingRetranslations.isEmpty
+            },
+            "the capture restart retires the parked retry promptly"
+        )
+        #expect(
+            model.toasts.toasts.allSatisfy { toast in toast.key != ToastKey.retranslate },
+            "a cancelled arm wait is not a timeout"
+        )
+    }
+
     // MARK: - Backlog ownership
 
     @Test("a queue unavailable mid-lane keeps the lane marker")

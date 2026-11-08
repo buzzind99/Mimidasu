@@ -87,7 +87,7 @@ enum ProductionSiteTable {
         ),
         // 5
         Site(
-            number: 5, file: "Mimidasu/State/AppModel.swift", line: 503, value: ".running",
+            number: 5, file: "Mimidasu/State/AppModel.swift", line: 509, value: ".running",
             guardDescription: "the machine's `.starting` legal-from set (was: `guard phase == .starting`)",
             from: .starting,
             action: .captureRestartSucceeded,
@@ -96,7 +96,7 @@ enum ProductionSiteTable {
         ),
         // 6
         Site(
-            number: 6, file: "Mimidasu/State/AppModel.swift", line: 512, value: ".sourceLost",
+            number: 6, file: "Mimidasu/State/AppModel.swift", line: 518, value: ".sourceLost",
             guardDescription: "the machine's `.starting` legal-from set (was: `guard phase == .starting`)",
             from: .starting,
             action: .captureRestartFailed("boom"),
