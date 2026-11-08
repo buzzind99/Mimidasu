@@ -134,6 +134,7 @@ struct HUDView: View {
                     // Growing partial revisions never repeat — don't churn
                     // the annotator cache with them.
                     cachesSegments: false,
+                    annotationEpoch: model.dictionaryRevision,
                     isFavoriteSegment: model.favoriteSegmentMatcher
                 )
                 .foregroundStyle(.white)
@@ -223,6 +224,7 @@ struct HUDView: View {
             annotationColor: Theme.hudAnnotation,
             cursorMode: cursorMode,
             onCopy: { text in model.copySnippet(text) },
+            annotationEpoch: model.dictionaryRevision,
             isFavoriteSegment: model.favoriteSegmentMatcher
         )
         .foregroundStyle(.white)
