@@ -4,7 +4,7 @@ import Foundation
 ///   1. Bundled: `Bundle.main` → `models/` (downloader skipped)
 ///   2. Downloaded: `~/Library/Application Support/Mimidasu/models/`
 ///   3. Dev checkout: `<repo>/models/` (DEBUG only)
-/// Both choices live side-by-side in the shared models directory.
+/// All choices live side-by-side in the shared models directory.
 enum ModelLocator {
     static var modelsDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]

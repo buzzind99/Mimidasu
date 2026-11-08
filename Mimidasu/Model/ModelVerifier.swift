@@ -7,7 +7,7 @@ import Synchronization
 /// changes (first resolve, re-download, or a dropped-in replacement): an
 /// in-process hot set, and a store persisted to disk (`VerdictStore`) so
 /// relaunches skip re-hashing too. Both key on (path, size, modification
-/// date), so both choices coexist and any size or mtime change invalidates
+/// date), so all choices coexist and any size or mtime change invalidates
 /// the verdict and forces a re-hash.
 ///
 /// Residual risk (accepted; same trust model as `ModelDownloader`, which

@@ -24,15 +24,22 @@ struct AppModelModelSelectionTests {
 
     // MARK: - Defaults / availability
 
-    @Test("model discovery caches availability for both choices")
+    @Test("model discovery caches availability for every choice")
     func refreshCachesAvailabilityPerChoice() async {
         let model = await makeSUT()
         let liteURL = URL(fileURLWithPath: "/tmp/lite.gguf")
+        let haasURL = URL(fileURLWithPath: "/tmp/haas.gguf")
         let fullURL = URL(fileURLWithPath: "/tmp/full.gguf")
 
-        await model.refreshModelAvailability(resolve: { choice in choice == .full ? fullURL : liteURL })
+        await model.refreshModelAvailability(resolve: { choice in
+            switch choice {
+            case .lite: liteURL
+            case .haas: haasURL
+            case .full: fullURL
+            }
+        })
 
-        #expect(model.modelAvailability == [.lite: liteURL, .full: fullURL])
+        #expect(model.modelAvailability == [.lite: liteURL, .haas: haasURL, .full: fullURL])
         #expect(model.modelURL == liteURL, "the active choice's URL becomes modelURL")
     }
 

@@ -5,7 +5,11 @@ import Foundation
 enum ASRModelChoice: String, CaseIterable, Identifiable {
     /// SenseVoice-Small q8_0 — the default: small download, fast start.
     case lite
-    /// FunASR-Nano 2512 q8_0 — opt-in full model.
+    /// Haas-ja-v1.0 q8_0 — mid-size model: Full's accuracy at a fraction of
+    /// the decode cost, so it sits between Lite and Full.
+    case haas
+    /// FunASR-Nano 2512 q8_0 — the original full model, kept for existing
+    /// installs and as the largest accuracy reference.
     case full
 
     var id: String {
@@ -16,6 +20,7 @@ enum ASRModelChoice: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .lite: "Lite"
+        case .haas: "Balanced"
         case .full: "Full"
         }
     }
@@ -24,15 +29,17 @@ enum ASRModelChoice: String, CaseIterable, Identifiable {
     var modelName: String {
         switch self {
         case .lite: "SenseVoice-Small"
+        case .haas: "Haas-ja-v1.0"
         case .full: "FunASR-Nano-2512"
         }
     }
 
-    /// GGUF file name inside the shared models directory (both choices live
+    /// GGUF file name inside the shared models directory (every choice lives
     /// side-by-side, so switching never re-downloads).
     var ggufFileName: String {
         switch self {
         case .lite: "sensevoice-small-q8_0.gguf"
+        case .haas: "haas-ja-v1.0-q8_0.gguf"
         case .full: "funasr-nano-2512-q8_0.gguf"
         }
     }
@@ -41,6 +48,7 @@ enum ASRModelChoice: String, CaseIterable, Identifiable {
     var modelID: String {
         switch self {
         case .lite: "sensevoice-small-GGUF"
+        case .haas: "Haas-ja-v1.0-GGUF"
         case .full: "funasr-nano-GGUF"
         }
     }
@@ -51,6 +59,7 @@ enum ASRModelChoice: String, CaseIterable, Identifiable {
     var revision: String {
         switch self {
         case .lite: "e1ad67de9d05137a6a0b02beba1fd66e28df6ae4"
+        case .haas: "607fa1450398d589643fbb0e8bb1d0424af68d11"
         case .full: "5d4346e47c268ba91a332a148a1fd39b766408ac"
         }
     }
@@ -66,6 +75,8 @@ enum ASRModelChoice: String, CaseIterable, Identifiable {
         switch self {
         case .lite:
             "6b84003db9da214c129bcdbb1c471d25b211775a905aecb253dd23aebf18b7f4"
+        case .haas:
+            "630fb47ac99d5111b0f99a7488857405611f05d7acae0fb2ceba4847ae1f9a2c"
         case .full:
             "dac5e1b95659c0a95b2a1dc60083eb17740454a921ec39f9c24e50b930ca31ab"
         }
@@ -75,6 +86,7 @@ enum ASRModelChoice: String, CaseIterable, Identifiable {
     var approximateSize: String {
         switch self {
         case .lite: "~250 MB"
+        case .haas: "~650 MB"
         case .full: "~1.2 GB"
         }
     }
@@ -84,8 +96,10 @@ enum ASRModelChoice: String, CaseIterable, Identifiable {
         switch self {
         case .lite:
             "Smaller download & memory usage, faster inference — great default for everyday transcription. (Recommended)"
+        case .haas:
+            "Medium download & memory usage, about 3.5× faster than Full at the same accuracy — the best balance for most Macs."
         case .full:
-            "Larger download & memory usage, slower inference — for potentially more accurate transcription."
+            "Largest download & memory usage, slowest inference — kept for compatibility with existing installs."
         }
     }
 }
