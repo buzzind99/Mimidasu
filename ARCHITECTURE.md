@@ -238,10 +238,10 @@ packaged apps in `Contents/Frameworks/`.
   route, engine identity, settings icon/short name, and the chat-model facts
   (endpoint, wire API, default model, fast-mode dialect, client-error
   posture). `TranslationProvider`, `RetranslateEngine`, and
-  `TranslationEngineKind` derive their identity from those rows (the three
-  vocabularies share one persisted raw value), so a new chat-model provider
-  is one catalog row. `LLMReasoningPolicy` is the pure fast-mode resolver
-  over the row's dialect; `TranslationEngineFactory` is the single
+  `TranslationEngineKind` derive their identity from those rows (the external
+  vocabularies share one persisted raw value), so a new chat-model provider is
+  one catalog row plus a case in each identity enum. `LLMReasoningPolicy` is
+  the pure fast-mode resolver over the row's dialect; `TranslationEngineFactory` is the single
   construction path (live queue, re-translate lane, connection tester) and
   constructs from the row's route. Fast mode —
   disable thinking where the model supports it, else the lowest reasoning
@@ -351,11 +351,13 @@ packaged apps in `Contents/Frameworks/`.
   the activation probe's landing, or the lane chain going idle through
   continuations, and cancellation (a stopped lane, a torn-down generation,
   a cancelled bulk run) resolves them as cancelled. Lane waits are
-  generation-scoped: a stop or archive boundary cancels the per-row retry
-  waits it makes stale while leaving the bulk run's resolution parked, and
-  only a teardown cancels both. The marker sets, the epoch clock, and the
-  lane chain are private; the host seam (`applyTranslation`, queue status,
-  session/archive boundaries) mutates them, and the bulk job cancels its own
+  generation-scoped: a session begin or archive boundary cancels the per-row
+  retry waits it makes stale while leaving the bulk run's resolution parked;
+  a capture restart cancels the lane waits too (the phase parks in
+  `.starting`), and a teardown (stop, Apple activation) cancels both. The
+  marker sets, the epoch clock, and the lane chain are coordinator-owned with
+  only the visible cue exposed; the host seam (`applyTranslation`, queue
+  status, session/archive boundaries) mutates them, and the bulk job cancels its own
   engine-resolution task instead of polling an abort flag. Arming and
   teardown invalidate the stored config in place before reassigning a fresh
   one, the same re-fire shape the live session's refresh uses.
@@ -755,8 +757,8 @@ packaged apps in `Contents/Frameworks/`.
 - `AppModel` (@MainActor `@Observable`): session phase (including
   `.paused` and `.sourceLost`), the transcript pane module
   (`pane: TranscriptPane` — rows, sentence→position map, character total,
-  viewed archive language, the open record, and the live/archive swap), the
-  live translation runtime (one read-only `translationRuntime` value
+  viewed archive language, the open-record join, and the live/archive swap),
+  the live translation runtime (one read-only `translationRuntime` value
   forwarded from the live-session coordinator — engine, attached provider,
   worker attachment, status, fallback latch), archive state (`archive` /
   `archiveProjection`, `recordingSessionID`, `archiveWriteFailed`,
@@ -874,9 +876,10 @@ packaged apps in `Contents/Frameworks/`.
   terminal open failure degrades every operation; per-operation read
   failures keep the prior rows and expose the typed state. `TranscriptPane`
   joins the projection's open summary with its rows for `openArchive`; the
-  pane owns the entries, the sentence→position map, the character total, the
-  viewed language, and the open record. `AppModel` still owns the archive
-  store/projection references and the write-back seam.
+  pane owns the entries, the sentence→position map, the character total, and
+  the viewed language. `ArchiveProjection` keeps the one stored open
+  summary. `AppModel` still owns the archive store/projection references and
+  the write-back seam.
 - **Language set:** `ArchiveLanguageSet` is the one pure value for a
   summary's ordered counts, sentence total, stored target, and the runtime
   OS target catalog. Count, completeness, send count, and addability all
@@ -923,9 +926,10 @@ packaged apps in `Contents/Frameworks/`.
   clears the live-session clock anchors, and turns over the re-translate lane
   epoch; a bulk translation run already in flight keeps running (its airborne
   results still persist under their own session id). Closing clears the pane
-  without restoring it. The rows, viewing language, and open record live in
-  `TranscriptPane`; opening from the archive window and closing from the
-  sidebar or the stop confirmation make the swap.
+  without restoring it. The rows and viewing language live in
+  `TranscriptPane`; the open summary stays in `ArchiveProjection` and the
+  pane joins it for display. Opening from the archive window and closing from
+  the sidebar or the close-and-start confirmation make the swap.
 - **Interactions:** an open Archived session blocks starting a new Session
   until it is closed (the UI offers to close it); pause updates the live
   row's `paused_ms` but never finalizes; stop from paused closes the pause
