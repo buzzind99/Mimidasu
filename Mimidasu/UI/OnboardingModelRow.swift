@@ -41,7 +41,8 @@ struct OnboardingModelRow: View {
             showsSelectionBadge: Self.showsSelectionBadge,
             showsDownloadControls: showsDownloadControls,
             statusOnlyWhenSelected: Self.statusOnlyWhenSelected,
-            footerStyle: Self.footerStyle
+            footerStyle: Self.footerStyle,
+            density: Self.density
         )
     }
 }
@@ -50,10 +51,13 @@ extension OnboardingModelRow {
     /// The onboarding card shows no badge.
     static let showsSelectionBadge = false
     /// The onboarding card shows the download status on the picked card
-    /// only: both cards observe the same shared downloader.
+    /// only: the three cards observe the same shared downloader.
     static let statusOnlyWhenSelected = true
     /// The onboarding card's resting footer line is the size alone.
     static let footerStyle: ModelChoiceCard.FooterStyle = .sizeOnly
+    /// Three cards share one row here; the roomy card gives the picker more
+    /// vertical breathing room than the Settings carousel.
+    static let density: ModelChoiceCard.Density = .roomy
 
     /// The download overlay renders on the picked card only.
     var showsDownloadControls: Bool {

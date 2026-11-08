@@ -23,6 +23,33 @@ struct ModelChoiceCard: View {
         case sizeOnly
     }
 
+    /// Vertical density. Onboarding fits three cards in one row but gives
+    /// them a taller, roomier card; Settings keeps the regular card.
+    enum Density: Equatable {
+        case regular
+        case roomy
+
+        /// Inner padding of the card surface.
+        var padding: CGFloat {
+            self == .regular ? 14 : 16
+        }
+
+        /// Floor height of the padded card body.
+        var minHeight: CGFloat {
+            self == .regular ? 148 : 200
+        }
+
+        /// Vertical gap between the card's text lines.
+        var contentSpacing: CGFloat {
+            self == .regular ? 6 : 8
+        }
+
+        /// Minimum gap before the footer.
+        var spacerMinLength: CGFloat {
+            self == .regular ? 8 : 12
+        }
+    }
+
     /// The footer's content, as data.
     enum Footer: Equatable {
         /// A download in flight.
@@ -63,7 +90,7 @@ struct ModelChoiceCard: View {
     let resolvedURL: URL?
     /// The downloader this card reports on. Injected, never created here:
     /// the Settings row owns one per choice, the onboarding row shares one
-    /// across both cards.
+    /// across all three cards.
     let downloader: ModelDownloader
     /// Whether this choice is the selected one.
     ///
@@ -85,6 +112,8 @@ struct ModelChoiceCard: View {
     let statusOnlyWhenSelected: Bool
     /// How the footer's resting line reads.
     let footerStyle: FooterStyle
+    /// How tightly the card packs its content.
+    var density: Density = .regular
 
     // MARK: - Body
 
@@ -92,7 +121,7 @@ struct ModelChoiceCard: View {
         card
             .overlay(alignment: .topTrailing) {
                 if chrome.showsDownloadOverlay {
-                    downloadControls.padding(12)
+                    downloadControls.padding(density.padding)
                 }
             }
     }
@@ -233,7 +262,7 @@ struct ModelChoiceCard: View {
         Button {
             select()
         } label: {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: density.contentSpacing) {
                 title
                 Text(choice.modelName)
                     .font(.system(size: 12.5, weight: .medium))
@@ -242,11 +271,11 @@ struct ModelChoiceCard: View {
                     .font(.system(size: 11))
                     .foregroundStyle(Palette.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
+                Spacer(minLength: density.spacerMinLength)
                 footer
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, minHeight: 148, alignment: .topLeading)
+            .padding(density.padding)
+            .frame(maxWidth: .infinity, minHeight: density.minHeight, alignment: .topLeading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

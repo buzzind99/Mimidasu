@@ -41,6 +41,9 @@ struct SettingsView: View {
     /// two probes for the same provider apart (A → B → A), so every new
     /// verification and every cancellation bumps this and stale tasks bail.
     @State private var verificationSerial = 0
+    /// Leftmost model card in the two-up Settings carousel; `nil` until the
+    /// first layout. Drives the chevrons and the scroll-to-in-use on open.
+    @State private var modelScrollPosition: String?
 
     /// The provider whose card (key entry + privacy notice) is displayed:
     /// the pending one while it's being configured, otherwise the selection.
@@ -312,15 +315,22 @@ struct SettingsView: View {
     // MARK: - Model / session diagnostics
 
     /// A card per ASR model choice (select / download), the models folder,
-    /// and a re-check action.
+    /// and a re-check action. Two cards are visible at a time; the chevrons
+    /// move one card, and opening the window scrolls the in-use model to the
+    /// leading edge.
     private var modelCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            KickerLabel("SPEECH MODEL", color: Palette.label)
-            HStack(alignment: .top, spacing: 12) {
-                ForEach(ASRModelChoice.allCases) { choice in
-                    SettingsModelRow(choice: choice, model: model)
+            HStack(spacing: 4) {
+                KickerLabel("SPEECH MODEL", color: Palette.label)
+                Spacer()
+                carouselChevron(systemName: "chevron.left", disabled: !canScrollCarouselBackward) {
+                    scrollCarousel(by: -1)
+                }
+                carouselChevron(systemName: "chevron.right", disabled: !canScrollCarouselForward) {
+                    scrollCarousel(by: 1)
                 }
             }
+            modelCarousel
             HStack {
                 Spacer()
                 SettingsPill(label: "Re-check model") {
@@ -331,6 +341,84 @@ struct SettingsView: View {
         }
         .padding(16)
         .cardSurface(shadow: Palette.cardShadow)
+    }
+
+    /// Two model cards visible at once, snapping to card boundaries. Full is
+    /// the card initially off-screen; the chevrons and the trailing edge of
+    /// the snap list are what reveal it.
+    private var modelCarousel: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 12) {
+                ForEach(modelChoices) { choice in
+                    SettingsModelRow(choice: choice, model: model)
+                        .containerRelativeFrame(.horizontal, count: 2, spacing: 12)
+                }
+            }
+            .scrollTargetLayout()
+        }
+        .scrollTargetBehavior(.viewAligned)
+        .scrollPosition(id: $modelScrollPosition, anchor: .leading)
+        .onAppear {
+            modelScrollPosition = initialCarouselPosition
+        }
+    }
+
+    private var modelChoices: [ASRModelChoice] {
+        ASRModelChoice.allCases
+    }
+
+    /// The last card that can sit at the leading edge: two cards share the
+    /// viewport.
+    private var lastCarouselStartIndex: Int {
+        max(0, modelChoices.count - 2)
+    }
+
+    private var carouselIndex: Int? {
+        guard let modelScrollPosition else { return nil }
+        return modelChoices.firstIndex { choice in choice.id == modelScrollPosition }
+    }
+
+    private var initialCarouselPosition: String {
+        let selected = model.asrModelSettings.selected
+        let selectedIndex = modelChoices.firstIndex(of: selected) ?? 0
+        return modelChoices[min(selectedIndex, lastCarouselStartIndex)].id
+    }
+
+    private var canScrollCarouselBackward: Bool {
+        guard let carouselIndex else { return false }
+        return carouselIndex > 0
+    }
+
+    private var canScrollCarouselForward: Bool {
+        guard let carouselIndex else { return false }
+        return carouselIndex < lastCarouselStartIndex
+    }
+
+    private func scrollCarousel(by delta: Int) {
+        guard let carouselIndex else { return }
+        let target = min(max(carouselIndex + delta, 0), lastCarouselStartIndex)
+        withAnimation(.easeInOut(duration: 0.2)) {
+            modelScrollPosition = modelChoices[target].id
+        }
+    }
+
+    private func carouselChevron(
+        systemName: String,
+        disabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(disabled ? Palette.mutedText.opacity(0.4) : Palette.secondaryText)
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .hoverHighlight(Circle(), isEnabled: !disabled, tint: Palette.accent, opacity: 0.12)
+        .help(systemName == "chevron.left" ? "Previous model" : "Next model")
+        .accessibilityLabel(systemName == "chevron.left" ? "Previous model" : "Next model")
     }
 
     private var sessionCard: some View {

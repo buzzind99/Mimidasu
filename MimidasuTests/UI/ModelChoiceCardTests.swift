@@ -44,7 +44,8 @@ struct ModelChoiceCardTests {
         showsSelectionBadge: Bool = true,
         showsDownloadControls: Bool = true,
         statusOnlyWhenSelected: Bool = false,
-        footerStyle: ModelChoiceCard.FooterStyle = .sizeAndStatus
+        footerStyle: ModelChoiceCard.FooterStyle = .sizeAndStatus,
+        density: ModelChoiceCard.Density = .regular
     ) -> ModelChoiceCard {
         ModelChoiceCard(
             choice: choice,
@@ -56,7 +57,8 @@ struct ModelChoiceCardTests {
             showsSelectionBadge: showsSelectionBadge,
             showsDownloadControls: showsDownloadControls,
             statusOnlyWhenSelected: statusOnlyWhenSelected,
-            footerStyle: footerStyle
+            footerStyle: footerStyle,
+            density: density
         )
     }
 
@@ -315,6 +317,25 @@ struct ModelChoiceCardTests {
 
             #expect(row.selectionDisabled, "a selection change waits for the next session start")
         }
+    }
+
+    @Test("the onboarding card is the roomy density; Settings keeps the regular one")
+    func surfaceDensity() async {
+        let model = await makeSUT()
+        let onboarding = OnboardingModelRow(choice: .lite, model: model, downloader: makeDownloader())
+        let settings = SettingsModelRow(choice: .lite, model: model)
+
+        let roomy = ModelChoiceCard.Density.roomy
+        let regular = ModelChoiceCard.Density.regular
+
+        #expect(onboarding.makeCard().density == .roomy)
+        #expect(settings.makeCard().density == .regular)
+        #expect(roomy.minHeight > regular.minHeight)
+        #expect(roomy.padding > regular.padding)
+        #expect(
+            roomy.minHeight == 200,
+            "the onboarding cards are pinned to a 200pt total height"
+        )
     }
 
     @Test("the onboarding card's download overlay follows the picked card")

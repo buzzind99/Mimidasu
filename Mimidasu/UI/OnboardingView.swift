@@ -104,7 +104,7 @@ struct OnboardingView: View {
         .font(.system(size: 12))
         .foregroundStyle(Theme.secondaryText)
         .padding(16)
-        .frame(maxWidth: 520, alignment: .leading)
+        .frame(maxWidth: 696, alignment: .leading)
         .cardSurface()
     }
 
@@ -123,7 +123,8 @@ struct OnboardingView: View {
             }
         }
         .padding(16)
-        .frame(width: 520)
+        .frame(maxWidth: 696)
+        .fixedSize(horizontal: false, vertical: true)
         .cardSurface(shadow: Palette.cardShadow)
     }
 
