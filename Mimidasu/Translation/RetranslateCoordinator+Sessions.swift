@@ -12,11 +12,15 @@ extension RetranslateCoordinator {
 
     /// Stores the session handed over by a `.translationTask` host. The
     /// kind selects the arm; the arm refuses a hand-over while its config is
-    /// unarmed, so a session for a torn-down lane is never stored.
+    /// unarmed or built for another target, so a session for a torn-down or
+    /// superseded lane is never stored.
     func retranslateSessionArrived(
-        _ kind: TranslationEngineKind, engine: any TranslationEngine
+        _ kind: TranslationEngineKind, engine: any TranslationEngine,
+        targetLanguage: Locale.Language? = nil
     ) {
-        appleSessions.retranslateSessionArrived(kind: kind, engine: engine)
+        appleSessions.retranslateSessionArrived(
+            kind: kind, engine: engine, targetLanguage: targetLanguage
+        )
     }
 
     // MARK: - Bulk job engine resolution

@@ -38,7 +38,8 @@ struct RetranslateSessionHost: View {
             .frame(width: 0, height: 0)
             .translationTask(model.retranslate.fastSessionConfig) { session in
                 model.retranslate.retranslateSessionArrived(
-                    .appleFast, engine: AppleSessionEngine(session)
+                    .appleFast, engine: AppleSessionEngine(session),
+                    targetLanguage: session.targetLanguage
                 )
             }
     }
@@ -56,7 +57,8 @@ struct RetranslateHiFiSessionHost: View {
             .frame(width: 0, height: 0)
             .translationTask(model.retranslate.hifiSessionConfig) { session in
                 model.retranslate.retranslateSessionArrived(
-                    .appleHighFidelity, engine: AppleSessionEngine(session)
+                    .appleHighFidelity, engine: AppleSessionEngine(session),
+                    targetLanguage: session.targetLanguage
                 )
             }
     }

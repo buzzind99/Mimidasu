@@ -69,6 +69,27 @@ struct RetranslateAppleSessionsTests {
         #expect(sut.engine(for: .appleFast, target: "fr") == nil)
     }
 
+    @Test("a hand-over built for a superseded target is refused")
+    func foreignTargetHandoverRefused() {
+        let sut = makeSUT()
+        sut.arm(kind: .appleFast, target: "fr")
+
+        sut.retranslateSessionArrived(
+            kind: .appleFast, engine: LaneEchoEngine(),
+            targetLanguage: Locale.Language(identifier: "de")
+        )
+        #expect(
+            sut.engine(for: .appleFast, target: "fr") == nil,
+            "a session pinned to another target must not serve the armed arm"
+        )
+
+        sut.retranslateSessionArrived(
+            kind: .appleFast, engine: LaneEchoEngine(),
+            targetLanguage: Locale.Language(identifier: "fr")
+        )
+        #expect(sut.engine(for: .appleFast, target: "fr") != nil)
+    }
+
     @Test("a hand-over for an unarmed session is refused")
     func unarmedHandoverRefused() {
         let sut = makeSUT()

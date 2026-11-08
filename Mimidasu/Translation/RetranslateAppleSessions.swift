@@ -114,13 +114,20 @@ final class RetranslateAppleSessions {
     /// Stores the session handed over by a `.translationTask` host and
     /// resumes the waits it answers. Gated on the kind having been armed at
     /// least once: a session for a lane that never armed must not be stored
-    /// for the next lane to acquire instantly. An armed config rebuilt by a
-    /// teardown accepts the late hand-over, but target-gated reads keep it
-    /// from serving a wait registered for a different target.
+    /// for the next lane to acquire instantly. `targetLanguage` is the
+    /// session's own target: a late hand-over from a config superseded by a
+    /// target rebuild is refused so a session pinned to another language can
+    /// never serve this arm.
     func retranslateSessionArrived(
-        kind: TranslationEngineKind, engine: any TranslationEngine
+        kind: TranslationEngineKind, engine: any TranslationEngine,
+        targetLanguage: Locale.Language? = nil
     ) {
         guard var arm = arm(for: kind), arm.config != nil, let target = arm.target else {
+            return
+        }
+        if let targetLanguage,
+           !Locale.Language(identifier: target).isEquivalent(to: targetLanguage)
+        {
             return
         }
         arm.engine = engine
