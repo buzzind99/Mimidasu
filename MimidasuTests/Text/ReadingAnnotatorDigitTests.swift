@@ -63,6 +63,30 @@ struct ReadingAnnotatorDigitTests {
         #expect(ReadingAnnotator.isNumeralRun(surface) == expected)
     }
 
+    @Test("a reading-less compat ideograph numeral takes the fallback reading")
+    func compatNumeralUsesFallbackReading() throws {
+        let annotator = makeAnnotator(
+            tokens(["\u{F9D1}"], readings: [nil]),
+            readingFallback: { surface in surface == "\u{F9D1}" ? "ろく" : nil }
+        )
+
+        let segments = try #require(annotator.segments(for: "\u{F9D1}"))
+
+        #expect(describe(segments) == [["\u{F9D1}", "roku", "ろく"]])
+    }
+
+    @Test("a spaced compat ideograph numeral fuses and geminates with its counter")
+    func compatNumeralFusesWithCounter() throws {
+        let annotator = makeAnnotator(
+            spacedTokens(["\u{F9D1}", "回"], readings: [nil, "かい"]),
+            readingFallback: { surface in surface == "\u{F9D1}" ? "ろく" : nil }
+        )
+
+        let segments = try #require(annotator.segments(for: "\u{F9D1} 回"))
+
+        #expect(describe(segments) == [["\u{F9D1} 回", "rokkai", "ろっかい"]])
+    }
+
     @Test("fuses the split kanji date 二十+四+日 with its irregular reading (にじゅうよっか)")
     func kanjiSplitNijuuyokka() throws {
         let annotator = makeAnnotator(tokens(

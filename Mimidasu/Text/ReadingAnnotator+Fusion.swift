@@ -97,8 +97,12 @@ extension ReadingAnnotator {
 
     /// Extends a held-back numeral run: digit tokens accumulate their
     /// normalized glyphs, kanji numerals contribute their dictionary kana
-    /// (三→さん, 万→まん). Any unreadable part marks the run unannotatable.
-    static func accumulate(
+    /// (三→さん, 万→まん). A kanji numeral the tokenizer left reading-less —
+    /// a compatibility ideograph such as U+F9D1 六 — consults the reading
+    /// fallback before the run is declared unannotatable, because the fusion
+    /// path does not pass the surface through `appendToken`. Any still
+    /// unreadable part marks the run unannotatable.
+    func accumulate(
         _ token: DictionaryToken, surface: String, into pending: inout PendingNumber?
     ) {
         let ascii = surface.applyingTransform(.fullwidthToHalfwidth, reverse: false) ?? surface
@@ -114,12 +118,12 @@ extension ReadingAnnotator {
             }
             return
         }
-        let kana = token.reading
+        let kana = token.reading ?? readingFallback(surface)
         if var held = pending {
             held.surface += held.gap
             held.gap = ""
             held.surface += surface
-            resolveDigits(into: &held)
+            Self.resolveDigits(into: &held)
             if let kana {
                 held.kana += kana
             } else {

@@ -332,7 +332,7 @@ final class ReadingAnnotator: @unchecked Sendable {
             cursor = token.end
 
             if Self.isNumeralRun(surface) {
-                Self.accumulate(token, surface: surface, into: &pending)
+                accumulate(token, surface: surface, into: &pending)
                 i += 1
             } else if !fuse(&pending, with: token, surface: surface, into: &segments) {
                 if let merged = sokuonMergedSpan(
