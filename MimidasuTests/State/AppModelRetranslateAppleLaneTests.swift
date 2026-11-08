@@ -335,8 +335,8 @@ struct AppModelRetranslateAppleLaneTests {
         )
     }
 
-    @Test("a timed-out wait that outlives the session posts nothing")
-    func timedOutWaitOutlivingStopPostsNothing() async throws {
+    @Test("a stop cancels a parked arm wait without reporting")
+    func stopCancelsParkedArmWaitSilently() async throws {
         guard #available(macOS 26.4, *) else {
             try Test.cancel("the armed fast lane requires macOS 26.4")
         }
@@ -363,23 +363,18 @@ struct AppModelRetranslateAppleLaneTests {
             "the initial translations are delivered before the retries"
         )
 
-        // Two chained waits: the stop cancels only the newest link, so the
-        // first task is still parked in its bounded wait when the session
-        // dies. Its expiry is the `.timedOut` outcome most likely to cross a
-        // stop — it must pass the delivery guard instead of reposting a
-        // "still starting" toast over the cleared stack.
+        // Two chained waits: the stop's teardown resolves both as cancelled,
+        // so neither reaches its timeout. Waiting for the chain to idle
+        // proves the cancellation propagated and nothing reposted over the
+        // cleared stack.
         model.retranslate.laneArmTimeout = .milliseconds(500)
         model.retranslate.retranslateSentence(first)
         model.retranslate.retranslateSentence(second)
         await model.performStop()
-        // Waiting for the chain to idle covers both links: the second was
-        // cancelled with the stop, and the first is still parked in its
-        // bounded wait behind it. Its expiry lands in `.idle`, stale epoch,
-        // where refusing the toast is the delivery guard's doing.
         _ = await model.retranslate.waitForLaneChainIdle()
         #expect(
             !model.toasts.toasts.contains(where: { toast in toast.key == ToastKey.retranslate }),
-            "a timed-out wait whose session is gone posts nothing"
+            "a cancelled wait whose session is gone posts nothing"
         )
         #expect(model.retranslate.pendingRetranslations.isEmpty)
         #expect(

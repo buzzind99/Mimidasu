@@ -273,12 +273,12 @@ struct AppModelRetranslateLaneTests {
         model.retranslate.retranslateSentence(sentence)
         #expect(model.retranslate.fastSessionConfig != nil, "the fast lane arms on the click")
         #expect(model.retranslate.pendingRetranslations.contains(5), "the click marked the row")
-        // Let the lane task clear its entry guard and settle into the bounded
-        // wait (one 50 ms poll interval), so the arrival below resolves the
-        // wait rather than being caught by the entry guard instead. The
-        // interleaving is load-precision only: if the task were slower, the
-        // entry guard would catch the arrival instead and reach the same
-        // final state, so the assertions stay valid either way.
+        // Let the lane task clear its entry guard and settle into the awaited
+        // hand-over, so the arrival below resolves the wait rather than being
+        // caught by the entry guard instead. The interleaving is
+        // load-precision only: if the task were slower, the entry guard would
+        // catch the arrival instead and reach the same final state, so the
+        // assertions stay valid either way.
         try? await Task.sleep(for: .milliseconds(150))
 
         // The session arrives as the session goes away — the ordering a
