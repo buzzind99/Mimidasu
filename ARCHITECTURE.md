@@ -3,11 +3,12 @@
 **Mimidasu** — a real-time Japanese livestream transcriber/translator for
 macOS (Apple Silicon, 15.5+). Captures system audio via a Core Audio process
 tap, streams it through a selectable ASR GGUF — **Lite** (SenseVoice-Small,
-default) or **Full** (FunASR-Nano) — via the CrispASR runtime with
-FireRedVAD endpointing, and translates finalized sentences to a selectable
-target language (English by default) with Apple's on-device Translation
-framework — or Apple Intelligence where installed — or an optional cloud
-provider (Google Translate, DeepL, or a first-class LLM provider) behind the
+default), **Balanced** (Haas-ja-v1.0) or **Full** (FunASR-Nano) — via the
+CrispASR 0.8.51 runtime with FireRedVAD endpointing, and translates
+finalized sentences to a selectable target language (English by default)
+with Apple's on-device Translation framework — or Apple Intelligence where
+installed — or an optional cloud provider (Google Translate, DeepL, or a
+first-class LLM provider) behind the
 same provider seam (`TranslationEngine`). Ruby
 annotations (romaji/furigana) and tap-to-lookup dictionary entries come
 from a bundled IPADIC tokenizer plus a pinned JMDict/JMnedict SQLite DB,
@@ -82,7 +83,11 @@ Native runtime: `crispasr/` (`libcrispasr.dylib` + ggml companions +
 `firered-vad.gguf`) and `libdictionary.dylib` — dlopen'd, so the app builds
 and launches before they exist (ASR then runs as a clearly-labeled mock
 driven by real audio). Dev checkouts keep them in `local/frameworks/`;
-packaged apps in `Contents/Frameworks/`.
+packaged apps in `Contents/Frameworks/`. The shipped `libcrispasr.dylib` is
+an app-sized relink of the full runtime: its export list is generated from
+the `dlsym` calls in `CrispASRLibrary`, so `-dead_strip` drops every unused
+ASR/TTS backend while the full dylib stays in `local/frameworks/crispasr`
+for the CLI and dev builds.
 
 ## Components
 
@@ -115,12 +120,18 @@ packaged apps in `Contents/Frameworks/`.
 ### CrispASREngine (`ASR/`)
 - Swift wrapper over dlopen'd `libcrispasr.dylib` (stable C session ABI;
   vendored headers in `native/include/crispasr/`). The backend
-  (`sensevoice` / `funasr`) is detected from the GGUF header — a property
-  of the chosen model, not the build — with a filename fallback when the
-  detection symbol is missing or unparsable.
+  (`sensevoice` / `parakeet` / `funasr`) is detected from the GGUF header —
+  a property of the chosen model, not the build — with a filename fallback
+  when the detection symbol is missing or unparsable.
 - The backends have no cache-aware streaming, so the sliding window lives
   in Swift: a rolling utterance buffer (12 s forced-final cap) plus a 10 s
   window for partial decodes.
+- **FunASR cache workaround**: CrispASR 0.8.50+ caches the FunASR encoder
+  graph by exact `T_lfr`; an equal-length replay returns a corrupted
+  decode after the first one. The 10 s partial window reaches that state
+  about 11 s into continuous speech, so `prepare` sets
+  `CRISPASR_FUNASR_ENC_CACHE=0` before opening a `funasr` session. The
+  runtime stays stock; the upstream defect is still open.
 - **FireRedVAD** is dispatched on its own queue every 500 ms of *new*
   audio (push-gated, not timer-driven) and is the authoritative speech
   signal. Each pass re-analyzes the whole utterance and its latest span end
@@ -722,13 +733,16 @@ packaged apps in `Contents/Frameworks/`.
   re-select. The dictionary engine itself never learns Favorites exist.
 
 ### Model choice (`Model/`)
-- `ASRModelChoice` — `.lite` / `.full`, each carrying its metadata (GGUF
-  name, HF repo + pinned revision, pinned SHA-256, size, tradeoff copy):
-  Lite = `sensevoice-small-q8_0.gguf` (~250 MB, default), Full =
-  `funasr-nano-2512-q8_0.gguf` (~1.2 GB). Selection persists to
-  UserDefaults key `"asr.model"`; both GGUFs live side-by-side in the
-  shared models directory, and the choice's repo id doubles as the session
-  file's `model` metadata.
+- `ASRModelChoice` — `.lite` / `.haas` / `.full`, each carrying its
+  metadata (GGUF name, HF repo + pinned revision, pinned SHA-256, size,
+  tradeoff copy): Lite = `sensevoice-small-q8_0.gguf` (~250 MB, default),
+  Balanced = `haas-ja-v1.0-q8_0.gguf` (~650 MB), Full =
+  `funasr-nano-2512-q8_0.gguf` (~1.2 GB, kept for compatibility).
+  Selection persists to UserDefaults key `"asr.model"`; all GGUFs live
+  side-by-side in the shared models directory, and the choice's repo id
+  doubles as the session file's `model` metadata. The three cases are
+  ordered Lite, Balanced, Full everywhere; Settings shows two cards at a
+  time and scrolls to the in-use one.
 - Resolution per choice: `Bundle.main` →
   `~/Library/Application Support/Mimidasu/models/` → dev checkout
   (DEBUG builds only) — every candidate, bundled included, must pass
@@ -749,9 +763,10 @@ packaged apps in `Contents/Frameworks/`.
 - First launch with no verified model swaps the main shell for
   `OnboardingView` (compact window footprint, restored on completion): a
   permission/privacy explainer (system-audio TCC, local processing) and a
-  SPEECH MODEL card with one row per choice — pick + download with
-  progress / retry / cancel; completion auto-advances into the main UI.
-  The model can be swapped later in Settings.
+  SPEECH MODEL card with one roomy 200pt row per choice (Settings keeps the
+  regular card) — pick + download with progress / retry / cancel;
+  completion auto-advances into the main UI. The model can be swapped later
+  in Settings.
 
 ### AppModel + SessionController (`State/`, `Session/`)
 - `AppModel` (@MainActor `@Observable`): session phase (including
@@ -1124,7 +1139,8 @@ Mimidasu.app/
   Contents/
     MacOS/Mimidasu                      # Swift binary
     Frameworks/
-      crispasr/                         # libcrispasr.dylib + ggml companions
+      crispasr/                         # app-sized libcrispasr.dylib (dlsym
+                                        # export whitelist) + ggml companions
                                         # + firered-vad.gguf, @loader_path rpath
       libdictionary.dylib               # dictionary tokenizer (C FFI)
     Resources/
@@ -1149,10 +1165,11 @@ dylib, or bundled dictionary data is missing.
 
 | Component | License | Notes |
 |---|---|---|
-| CrispASR runtime (+ ggml) | MIT | Embedded dylib set; dlopen'd, Metal backend |
+| CrispASR runtime (+ ggml) | MIT | Embedded dylib set (0.8.51); dlopen'd, Metal backend |
 | FireRedVAD (GGUF) | Apache-2.0 | Bundled beside the dylibs, endpointing |
 | SenseVoice-Small GGUF (Q8_0) — Lite | Apache-2.0 | First-launch download, SHA-256 pinned, default choice |
-| FunASR-Nano GGUF (Q8_0) — Full | Apache-2.0 | First-launch download, SHA-256 pinned (HF LFS oid), opt-in choice |
+| Haas-ja-v1.0 GGUF (Q8_0) — Balanced | Apache-2.0 | First-launch download, SHA-256 pinned, mid-tier choice |
+| FunASR-Nano GGUF (Q8_0) — Full | Apache-2.0 | First-launch download, SHA-256 pinned (HF LFS oid), compatibility choice |
 | Dictionary tokenizer (vendored vibrato runtime) | Apache-2.0 OR MIT | Embedded as `libdictionary.dylib`; crate tracked under `ffi/vibrato-ffi/` |
 | IPADIC v2.7.0 dictionary model | Custom permissive (NAIST et al.) | Bundled as `system.dic.zst`; decompressed on first launch |
 | JMdict (EDRDG, via JMDict_Extended) | CC BY-SA 4.0 (data); MIT (compile) | Pinned lookup DB; full terms in THIRD_PARTY_NOTICES |
@@ -1167,6 +1184,6 @@ Compatibility: Apple Silicon, macOS 15.5+.
 | Stage | Cost |
 |---|---|
 | ASR chunk (algorithmic) | 160 ms fixed |
-| Partial decode | step-spaced (1 s) window decodes; fast on the non-AR backends (Lite's SenseVoice: hundreds of ms; Full's FunASR ~4–5× slower but still real-time) |
+| Partial decode | step-spaced (1 s) window decodes; fast on the non-AR backends (Lite's SenseVoice and Balanced's Haas: hundreds of ms; Full's FunASR ~3–4× slower but still real-time) |
 | Sentence close + translation | ~2–4 s after sentence end |
 | **End-to-end vs. live** | **multi-second** (dominated by decode latency + sentence completion) |
