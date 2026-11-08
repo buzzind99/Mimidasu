@@ -34,7 +34,7 @@ struct TranslationEngineFactoryTests {
 
             #expect(results == ["hello"])
             let request = try #require(recorder.requests.first)
-            let spec = try #require(LLMProviderCatalog.spec(for: provider))
+            let spec = try #require(ProviderCatalog.spec(for: provider).llm)
             #expect(request.url == spec.endpoint)
             #expect(engine.transientBadResponse)
             Self.expectAuthHeaders(for: provider, in: request)

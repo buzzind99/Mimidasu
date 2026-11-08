@@ -111,7 +111,7 @@ struct LLMTranslationEngineTests {
         target: TargetLanguage = .english,
         compatibleMode: Bool = false
     ) throws -> LLMTranslationEngine {
-        let spec = try #require(LLMProviderCatalog.spec(for: provider))
+        let spec = try #require(ProviderCatalog.spec(for: provider).llm)
         let effectiveModel = model ?? spec.defaultModel
         let client = ChatCompletionsClient(
             config: ChatCompletionsClient.Config(
@@ -163,7 +163,7 @@ struct LLMTranslationEngineTests {
         let request = try #require(script.requests.first)
         #expect(request.httpMethod == "POST")
         #expect(request.url == Self.endpoint)
-        #expect(request.url == LLMProviderCatalog.spec(for: .openrouter)?.endpoint)
+        #expect(request.url == ProviderCatalog.spec(for: .openrouter).llm?.endpoint)
         #expect(
             request.value(forHTTPHeaderField: "Authorization")
                 == "Bearer \(Self.apiKey)"
@@ -184,7 +184,7 @@ struct LLMTranslationEngineTests {
         _ = try await engine.translate(["こんにちは"])
 
         let defaultModel = try #require(
-            LLMProviderCatalog.spec(for: .openrouter)?.defaultModel
+            ProviderCatalog.spec(for: .openrouter).llm?.defaultModel
         )
         let body = try Self.decodedBody(script.bodies.first)
         #expect(body.model == defaultModel)

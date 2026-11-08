@@ -472,7 +472,7 @@ extension TranslationSettingsTests {
         let (settings, _) = makeSUT()
         #expect(settings.model(for: .openai).isEmpty)
         #expect(settings.effectiveModel(for: .openai) == TranslationProvider.openai.defaultModel)
-        #expect(settings.effectiveModel(for: .openai) == LLMProviderCatalog.spec(for: .openai)?.defaultModel)
+        #expect(settings.effectiveModel(for: .openai) == ProviderCatalog.spec(for: .openai).llm?.defaultModel)
     }
 
     @Test("a legacy OpenRouter model migrates to the per-provider key once")
