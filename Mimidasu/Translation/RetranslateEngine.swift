@@ -22,18 +22,23 @@ enum RetranslateEngine: String, Codable, CaseIterable, Sendable, Equatable, Hash
     }
 
     /// The engine identity this selection names; nil for `.session`, which
-    /// names no engine of its own. External selections read the kind from
-    /// their provider's catalog row; the two Apple selections name their
-    /// engine tiers directly because Apple's provider row follows the OS
-    /// strategy probe.
+    /// names no engine of its own. The switch is exhaustive so a new
+    /// selection must decide its kind; external selections share their
+    /// kind's raw value.
     var kind: TranslationEngineKind? {
-        if let external = TranslationProvider(rawValue: rawValue), external.isExternal {
-            return TranslationEngineKind(provider: external)
-        }
         switch self {
-        case .appleFast: return .appleFast
-        case .appleHighFidelity: return .appleHighFidelity
-        default: return nil
+        case .session:
+            return nil
+        case .appleFast:
+            return .appleFast
+        case .appleHighFidelity:
+            return .appleHighFidelity
+        case .google, .deepl, .openrouter, .openai, .anthropic, .moonshot, .zai, .deepseek, .xai:
+            guard let kind = TranslationEngineKind(rawValue: rawValue) else {
+                assertionFailure("external selection \(rawValue) has no engine kind")
+                return nil
+            }
+            return kind
         }
     }
 
@@ -91,21 +96,33 @@ enum TranslationEngineKind: String, Codable, Sendable, Equatable {
         self = kind
     }
 
-    /// The tier this kind names — the one vocabulary of engine names.
-    /// External kinds take their tier from their provider's catalog row;
-    /// the two Apple engine identities are engine-only (the Apple row's
-    /// tier follows the OS probe), so they name their tier directly.
+    /// The tier this kind names — the one vocabulary of engine names. The
+    /// mapping is total so a stamped row can always render its label; the
+    /// catalog's tier shapes are pinned against it by the identity tests.
     var tier: TranslationTier {
         switch self {
         case .appleFast:
-            return .appleOnDevice
+            .appleOnDevice
         case .appleHighFidelity:
-            return .appleHighFidelity
-        case .google, .deepl, .openrouter, .openai, .anthropic, .moonshot, .zai, .deepseek, .xai:
-            guard let provider else {
-                preconditionFailure("External engine kind \(rawValue) has no provider row")
-            }
-            return provider.tier()
+            .appleHighFidelity
+        case .google:
+            .google
+        case .deepl:
+            .deepL(.unknown)
+        case .openrouter:
+            .openRouter
+        case .openai:
+            .openAI
+        case .anthropic:
+            .anthropic
+        case .moonshot:
+            .moonshot
+        case .zai:
+            .zai
+        case .deepseek:
+            .deepSeek
+        case .xai:
+            .xAI
         }
     }
 

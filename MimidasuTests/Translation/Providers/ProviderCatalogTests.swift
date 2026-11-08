@@ -171,13 +171,11 @@ struct ProviderCatalogTests {
             #expect(entry.provider.shortName == entry.shortName)
             #expect(entry.provider.spec.engineKind == entry.kind)
             #expect(TranslationEngineKind(provider: entry.provider) == entry.kind)
-            let isOnDevice = entry.provider.spec.route == .onDevice
             #expect(
-                isOnDevice == (entry.provider == .apple),
+                entry.provider.isExternal == (entry.provider != .apple),
                 "only Apple is on-device for \(entry.provider.rawValue)"
             )
-            #expect(entry.provider.isExternal == !isOnDevice)
-            #expect(entry.provider.spec.isExternal == !isOnDevice)
+            #expect(entry.provider.spec.isExternal == entry.provider.isExternal)
         }
     }
 
@@ -230,6 +228,12 @@ struct ProviderCatalogTests {
 
         #expect(kinds.count == 11, "the selection names 11 engine kinds")
         #expect(
+            RetranslateEngine.allCases
+                .filter { selection in selection != .session }
+                .allSatisfy { selection in selection.kind != nil },
+            "every non-session selection must name an engine kind"
+        )
+        #expect(
             Set(kinds.map(\.rawValue)).count == kinds.count,
             "two selections must not name the same engine kind"
         )
@@ -250,6 +254,17 @@ struct ProviderCatalogTests {
                     "\(kind.rawValue) must round-trip through its provider"
                 )
             }
+        }
+    }
+
+    @Test("every external engine kind's tier matches its provider row")
+    func engineKindTierMatchesProviderRow() {
+        for kind in RetranslateEngine.allCases.compactMap(\.kind) {
+            guard let provider = kind.provider else { continue }
+            #expect(
+                kind.tier == provider.tier(),
+                "unexpected tier for \(kind.rawValue)"
+            )
         }
     }
 

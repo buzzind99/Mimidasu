@@ -121,7 +121,7 @@ struct LLMTranslationEngineTests {
                 options: LLMReasoningPolicy.options(
                     for: provider, model: effectiveModel
                 ),
-                treatClientErrorsAsConfiguration: provider != .openrouter
+                treatClientErrorsAsConfiguration: spec.treatsClientErrorsAsConfiguration
             ),
             transport: makeTransport(script: script),
             ladder: TransientRetryLadder(retriesBadResponse: true, sleep: { _ in })
