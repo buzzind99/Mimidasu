@@ -1,5 +1,6 @@
 import Foundation
 @testable import Mimidasu
+import Synchronization
 import Testing
 
 /// Tests the bulk archive-translation job: scope computation, ordered
@@ -211,6 +212,39 @@ struct ArchiveTranslationJobTests {
 
         #expect(resolutionCalls == 0, "a pre-run cancel starts no engine resolution")
         #expect(recorder.events.isEmpty, "the cancelled run reports nothing")
+        #expect(job.activity == .idle)
+    }
+
+    @Test("cancelling while the resolution is parked ends the run without an event")
+    func cancelDuringResolutionEndsWithoutEvent() async {
+        let job = makeJob()
+        let entered = Mutex(false)
+        job.resolveEngine = { _, _ in
+            entered.withLock { flag in flag = true }
+            // Cancellation-aware: the job's own resolution task cancel is
+            // what ends this wait promptly, not a gate opening.
+            try? await Task.sleep(for: .seconds(5))
+            return .unavailable(reason: "resolution cancelled")
+        }
+        let recorder = Recorder()
+        job.onEvent = recorder.recordEvent
+
+        #expect(job.claim(ArchiveTranslationJobFixtures.makeRequest()))
+        let run = Task { await job.run() }
+        #expect(
+            await pollUntil { entered.withLock { flag in flag } },
+            "the resolution starts"
+        )
+
+        let start = ContinuousClock.now
+        job.cancel()
+        await run.value
+
+        #expect(
+            ContinuousClock.now - start < .seconds(2),
+            "the cancel must end the parked resolution instead of waiting out the sleep"
+        )
+        #expect(recorder.events.isEmpty, "a cancelled resolution reports nothing")
         #expect(job.activity == .idle)
     }
 
