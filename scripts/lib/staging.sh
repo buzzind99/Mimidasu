@@ -48,6 +48,9 @@ require_runtime_artifacts() {
   if [[ ! -d "${REPO_ROOT}/local/frameworks/crispasr" ]]; then
     echo "ERROR: ASR runtime not built. Run scripts/build_runtime.sh first." >&2
     ok=0
+  elif [[ ! -f "${REPO_ROOT}/local/frameworks/crispasr/libcrispasr-app.dylib" ]]; then
+    echo "ERROR: app-sized ASR runtime missing. Re-run scripts/build_runtime.sh." >&2
+    ok=0
   fi
   (( ok )) || exit 1
 }
@@ -87,8 +90,10 @@ stage_runtime() {
   mkdir -p "${fwdir}" "${resdir}"
 
   # Dictionary tokenizer dylib — independent of the ASR runtime. Without it
-  # the bundled dictionary model can never be decompressed.
+  # the bundled dictionary model can never be decompressed. The local build
+  # keeps its symbols; the shipped copy does not need them.
   cp -f "${REPO_ROOT}/local/frameworks/libdictionary.dylib" "${fwdir}/libdictionary.dylib"
+  strip -x "${fwdir}/libdictionary.dylib"
   codesign --force --sign "${SIGN_IDENTITY}" ${CS_HARDEN[@]+"${CS_HARDEN[@]}"} "${fwdir}/libdictionary.dylib"
 
   # Bundled dictionary model — decompressed once on first launch (never
@@ -111,8 +116,8 @@ stage_runtime() {
   # `@executable_path/../Frameworks/crispasr` rpath (project.yml). Ship only
   # what the load commands name: the app dlopens `libcrispasr.dylib` and the
   # set loads the `.0` ggml names — the dev prefix additionally carries
-  # versioned alias copies (`.1`, `.0.17.0`, `.0.8.30`, unversioned) and an
-  # unused `libwhisper.dylib`/CLI that would double the bundle for no benefit.
+  # versioned alias copies and an unused `libwhisper.dylib`/CLI that would
+  # double the bundle for no benefit.
   local crispasr_dir="${fwdir}/crispasr"
   mkdir -p "${crispasr_dir}"
   local shipped
@@ -126,7 +131,18 @@ stage_runtime() {
       fi
       exit 1
     fi
-    cp -f "${REPO_ROOT}/local/frameworks/crispasr/${shipped}" "${crispasr_dir}/${shipped}"
+    # The shipped libcrispasr is the app-sized relink: the full dylib stays in
+    # local/frameworks/crispasr for the CLI/dev runtime. Both resolve their
+    # ggml companions from their own directory.
+    local source="${REPO_ROOT}/local/frameworks/crispasr/${shipped}"
+    if [[ "${shipped}" == libcrispasr.dylib ]]; then
+      source="${REPO_ROOT}/local/frameworks/crispasr/libcrispasr-app.dylib"
+    fi
+    cp -f "${source}" "${crispasr_dir}/${shipped}"
+    # The VAD model is data; only the Mach-O dylibs carry a symbol table.
+    if [[ "${shipped}" == *.dylib ]]; then
+      strip -x "${crispasr_dir}/${shipped}"
+    fi
   done
 
   # Sign nested code with SIGN_IDENTITY. Everything under Contents/Frameworks
@@ -139,6 +155,14 @@ stage_runtime() {
   while IFS= read -r -d '' f; do
     codesign --force --sign "${SIGN_IDENTITY}" ${CS_HARDEN[@]+"${CS_HARDEN[@]}"} "${f}"
   done < <(find "${fwdir}/crispasr" -type f \( -name "*.dylib" -o -name "*.gguf" \) -print0)
+}
+
+# Strip local symbols from the main executable before the bundle is sealed.
+# Xcode leaves the Release product unstripped by default here, which roughly
+# triples the executable's size; the separate dSYM still symbolicate crashes.
+strip_app_binary() {
+  local app="$1"
+  strip -x "${app}/Contents/MacOS/Mimidasu"
 }
 
 # Ship the third-party license notices next to the bundled data, plus the

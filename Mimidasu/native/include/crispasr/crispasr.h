@@ -560,6 +560,12 @@ struct whisper_full_params {
     // step. 0 (default) = off. Beam-search siblings are not captured —
     // they're conditional on the beam, not greedy alternatives.
     int alt_n;
+
+    // With a grammar: forbid end-of-text until the grammar can be complete.
+    // Upstream whisper.cpp ships this check commented out, so a constrained
+    // decode may stop mid-phrase ("knight to f" for "knight to f3"). Off by
+    // default: existing grammar users see no change.
+    bool grammar_strict;
 };
 
 // NOTE: this function allocates memory, and it is the responsibility of the caller to free the pointer - see whisper_free_context_params & whisper_free_params()
@@ -576,6 +582,29 @@ CRISPASR_API struct whisper_context* whisper_init_from_file_with_params_by_ref(c
                                                                                struct whisper_context_params* params);
 CRISPASR_API struct whisper_context* whisper_init_from_file_with_params_no_state_by_ref(
     const char* path_model, struct whisper_context_params* params);
+// Scores candidate transcripts of one piece of audio: for each of `texts`,
+// log P(text | audio) summed over the text's tokens and end-of-text, with the
+// decoder teacher-forced (no sampling). The audio is encoded once. Picking the
+// best-scoring candidate avoids the greedy commitment of grammar-constrained
+// decoding, which must choose a token before seeing the rest of the phrase.
+// `language` may be null (English). Returns 0 on success; out_logprobs gets
+// one value per text (-INFINITY for a text that does not fit the context) and
+// out_n_tokens (nullable) the number of tokens each sum covers, text tokens
+// plus end-of-text: divide by it to compare texts of different length, since
+// a sum of log-probabilities favours shorter texts. The shared prompt is
+// decoded once; each candidate costs only its own tokens.
+// `initial_prompt` (nullable) is previous text that primes the vocabulary,
+// e.g. a few example phrases in the expected style.
+// Each candidate token is one small decoder step, so on a busy CPU fewer
+// threads are faster: ggml's workers stall on every per-op barrier (measured
+// on a loaded 4-core box, whisper tiny: 345 ms/step at 4 threads, 18 ms at 2).
+// All candidates are decoded in one batch as a prefix tree when they fit the
+// context (CRISPASR_WHISPER_SCORE_SEQUENTIAL=1: one token per decoder call).
+// Set CRISPASR_WHISPER_SCORE_PROFILE=1 to print where the time goes.
+CRISPASR_API int whisper_score_texts(struct whisper_context* ctx, const float* samples, int n_samples,
+                                     const char* language, const char* initial_prompt, const char** texts, int n_texts,
+                                     float* out_logprobs, int* out_n_tokens, int n_threads);
+
 CRISPASR_API int whisper_full_by_ref(struct whisper_context* ctx, struct whisper_full_params* params,
                                      const float* samples, int n_samples);
 CRISPASR_API void crispasr_params_set_max_tokens(struct whisper_full_params* p, int n);
@@ -590,6 +619,15 @@ CRISPASR_API int crispasr_session_set_tts_seed(struct crispasr_session* s, uint6
 CRISPASR_API int crispasr_session_set_tts_steps(struct crispasr_session* s, int steps);
 CRISPASR_API int crispasr_session_set_tts_cfg_scale(struct crispasr_session* s, float scale);
 CRISPASR_API int crispasr_session_set_max_new_tokens(struct crispasr_session* s, int n);
+// Auto-chunking controls for long audio (issue #574).
+// enabled: 1 = enable, 0 = disable, < 0 = reset to default / env var.
+// chunk_seconds: > 0 sets chunk window in seconds; <= 0 resets to default (30 s).
+CRISPASR_API int crispasr_session_set_autochunk(struct crispasr_session* s, int enabled, int chunk_seconds);
+// Piece-proportional token budget for chunked audio (issue #574).
+// rate > 0: each piece gets max(minimum, round(rate * piece_duration_seconds)).
+// If an explicit flat cap was set via crispasr_session_set_max_new_tokens, it acts as an upper ceiling.
+// rate <= 0 disables dynamic token budgets.
+CRISPASR_API int crispasr_session_set_max_new_tokens_per_second(struct crispasr_session* s, float rate, int minimum);
 CRISPASR_API int crispasr_session_set_frequency_penalty(struct crispasr_session* s, float penalty);
 CRISPASR_API int crispasr_session_set_top_p(struct crispasr_session* s, float top_p);
 CRISPASR_API int crispasr_session_set_min_p(struct crispasr_session* s, float min_p);
@@ -617,6 +655,12 @@ CRISPASR_API int crispasr_session_set_beam_size(struct crispasr_session* s, int 
 CRISPASR_API int crispasr_session_set_return_logits(struct crispasr_session* s, int enable);
 CRISPASR_API int crispasr_session_set_grammar_text(struct crispasr_session* s, const char* gbnf_text,
                                                    const char* root_rule, float penalty);
+// No end-of-text until the grammar is complete (whisper; off by default).
+CRISPASR_API int crispasr_session_set_grammar_strict(struct crispasr_session* s, int strict);
+// log P(text | audio) for each candidate text, teacher-forced (whisper only; -10 otherwise).
+CRISPASR_API int crispasr_session_score_texts(struct crispasr_session* s, const float* pcm, int n_samples,
+                                              const char* language, const char* initial_prompt, const char** texts,
+                                              int n_texts, float* out_logprobs, int* out_n_tokens);
 CRISPASR_API int crispasr_session_set_fallback_thresholds(struct crispasr_session* s, float entropy_thold,
                                                           float logprob_thold, float no_speech_thold,
                                                           float temperature_inc);
@@ -748,6 +792,16 @@ CRISPASR_API int whisper_full_with_state(struct whisper_context* ctx, struct whi
 // Not thread safe if executed in parallel on the same context.
 // It seems this approach can offer some speedup in some cases.
 // However, the transcription accuracy can be worse at the beginning and end of each chunk.
+// For multiple processors, duration_ms bounds one interval before splitting;
+// each worker decodes its slice without reapplying the global duration. Zero
+// duration uses the remaining audio. With VAD, interval selection retains its
+// existing processed-audio units. Negative offset/duration is invalid.
+// Available token/DTW times receive the same chunk offset as segment times;
+// negative unavailable-time sentinels and token alternatives are preserved.
+// Worker errors are propagated after all started workers are joined. Failed
+// parallel decoding discards partial results; callbacks already delivered by
+// the first chunk cannot be retracted. Invalid inputs and null worker-state
+// allocations return -1.
 CRISPASR_API int whisper_full_parallel(struct whisper_context* ctx, struct whisper_full_params params,
                                        const float* samples, int n_samples, int n_processors);
 
@@ -792,7 +846,10 @@ CRISPASR_API whisper_token whisper_full_get_token_id_from_state(struct whisper_s
                                                                 int i_token);
 
 // Get token data for the specified token in the specified segment
-// This contains probabilities, timestamps, etc.
+// This contains probabilities, timestamps, etc. Times are in centiseconds.
+// With VAD, available t0/t1/t_dtw values are mapped to the original audio
+// timeline, like segment getters. Negative unavailable values are preserved.
+// Mapping applies only to the returned copy; repeated reads do not alter state.
 CRISPASR_API whisper_token_data whisper_full_get_token_data(struct whisper_context* ctx, int i_segment, int i_token);
 CRISPASR_API whisper_token_data whisper_full_get_token_data_from_state(struct whisper_state* state, int i_segment,
                                                                        int i_token);
@@ -836,6 +893,14 @@ CRISPASR_API struct whisper_vad_context* whisper_vad_init_with_params(struct whi
                                                                       struct whisper_vad_context_params params);
 
 CRISPASR_API bool whisper_vad_detect_speech(struct whisper_vad_context* vctx, const float* samples, int n_samples);
+// Like whisper_vad_detect_speech, but keeps the recurrent state and the
+// waveform context from the previous call, so a stream can be scored one
+// chunk at a time. The probabilities cover only the samples of THIS call.
+CRISPASR_API bool whisper_vad_detect_speech_continue(struct whisper_vad_context* vctx, const float* samples,
+                                                     int n_samples);
+// Replaces the context's per-frame probabilities, for
+// whisper_vad_segments_from_probs over probabilities kept by the caller.
+CRISPASR_API void whisper_vad_set_probs(struct whisper_vad_context* vctx, const float* probs, int n_probs);
 
 CRISPASR_API int whisper_vad_n_probs(struct whisper_vad_context* vctx);
 CRISPASR_API float* whisper_vad_probs(struct whisper_vad_context* vctx);
@@ -988,6 +1053,15 @@ CRISPASR_API int crispasr_audio_load(const char* path, float** out_pcm, int* out
 CRISPASR_API int crispasr_audio_load_at_rate(const char* path, int target_rate, float** out_pcm, int* out_samples,
                                              int* out_sample_rate);
 
+// Resample mono float PCM in memory with the CLI's Kaiser polyphase
+// filter. Rates must be positive and <= 384000 Hz; maximum expansion is 64x.
+// Returns 0, -1 for invalid input/size, or -2 for allocation failure. Success
+// returns ceil(n_samples * target_rate / source_rate) samples, malloc-owned
+// (free with crispasr_audio_free). Empty input succeeds with NULL/0. Errors
+// reset non-NULL output arguments to NULL/0. Input is never modified.
+CRISPASR_API int crispasr_audio_resample(const float* pcm, int n_samples, int source_rate, int target_rate,
+                                         float** out_pcm, int* out_samples);
+
 CRISPASR_API void crispasr_audio_free(float* pcm);
 
 // ─── Stereo audio decode ─────────────────────────────────────────────
@@ -1004,10 +1078,18 @@ CRISPASR_API int crispasr_audio_load_stereo(const char* path, float** out_left, 
 CRISPASR_API int crispasr_transcribe_parallel(struct whisper_context* ctx, struct whisper_full_params params,
                                               const float* samples, int n_samples, int n_processors);
 
+// Pointer form for bindings that cannot safely pass whisper_full_params by value.
+// Uses the same progress-tracking path; rejects null params/context and bad counts.
+CRISPASR_API int crispasr_transcribe_parallel_by_ref(struct whisper_context* ctx,
+                                                     const struct whisper_full_params* params, const float* samples,
+                                                     int n_samples, int n_processors);
+
 // ─── DTW timestamp helpers ──────────────────────────────────────────
 //
 // crispasr_ctx_params_set_dtw: configure DTW token-level timestamps
 // on a whisper_context_params before context init.
+// Enabling DTW disables incompatible flash attention. Disabling DTW leaves
+// the current flash-attention setting unchanged.
 // crispasr_token_dtw_t: retrieve the DTW timestamp for a given token.
 CRISPASR_API void crispasr_ctx_params_set_dtw(struct whisper_context_params* p, bool enable, int aheads_preset,
                                               int n_top);

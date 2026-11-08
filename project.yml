@@ -19,6 +19,14 @@ settings:
     # value on the xcodebuild command line.
     MARKETING_VERSION: "1.4.0"
     ARCHS: arm64
+  configs:
+    Release:
+      # Ship a lean binary. Debug symbols and coverage instrumentation are
+      # development-only; Release still writes a dSYM for crash symbolication.
+      COPY_PHASE_STRIP: YES
+      DEAD_CODE_STRIPPING: YES
+      ENABLE_CODE_COVERAGE: NO
+      CLANG_COVERAGE_MAPPING: NO
 
 # Signing identity comes from local/signing.xcconfig (gitignored), written by
 # scripts/bootstrap.sh: "Mimidasu Dev" when that certificate exists, ad-hoc (-)

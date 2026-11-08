@@ -24,7 +24,7 @@ VENDOR_DIR="${REPO_ROOT}/vendor/CrispASR"
 SDK_DIR="${REPO_ROOT}/local/install/crispasr"
 FRAMEWORKS_DIR="${REPO_ROOT}/local/frameworks/crispasr"
 UPSTREAM="https://github.com/CrispStrobe/CrispASR.git"
-CRISPASR_REF="${CRISPASR_REF:-5a37b5e107aa0f243e6c3567fce2985befdb9eb0}"
+CRISPASR_REF="${CRISPASR_REF:-008a771c57fe285e86727c80e155d5376a9ee44b}"
 BUILD_DIR="build"
 
 GGML_METAL=ON
@@ -67,6 +67,11 @@ EXTRA_CMAKE_ARGS=(
   -DBUILD_SHARED_LIBS=ON
   -DCRISPASR_BUILD_TESTS=OFF
   -DCRISPASR_BUILD_SERVER=OFF
+  # Size: LTO lets the compiler fold cross-translation-unit code, dedupe
+  # template instantiations and drop code the link can prove unused. The
+  # shipped copies are stripped in scripts/lib/staging.sh as well.
+  -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
+  -DGGML_LTO=ON
 )
 cmake -B "${BUILD_DIR}" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
@@ -108,10 +113,64 @@ for dylib in "${SDK_DIR}"/lib/*.dylib; do
   cp -f "${dylib}" "${FRAMEWORKS_DIR}/${name}"
   install_name_tool -id "@rpath/${name}" "${FRAMEWORKS_DIR}/${name}"
   strip_rpaths "${FRAMEWORKS_DIR}/${name}"
+  # The SDK copy above keeps its symbols for local debugging; the copy the
+  # app loads is stripped so the dev bundle matches the shipped footprint.
+  strip -x "${FRAMEWORKS_DIR}/${name}"
 done
 # A copy of the CLI next to the dylibs is handy for manual debugging.
 cp -f "${SDK_DIR}/bin/crispasr" "${FRAMEWORKS_DIR}/crispasr"
 strip_rpaths "${FRAMEWORKS_DIR}/crispasr"
+
+# 4b. Build the app-sized libcrispasr for the shipped bundle.
+#
+# The runtime exports the whole CLI/binding surface (every ASR, TTS, diarization
+# and music backend) but the app only resolves a small set of symbols with
+# dlsym (Mimidasu/ASR/CrispASRLibrary.swift). Relink the same objects with a
+# dead-strip and an export whitelist derived from that file: only those symbols
+# stay visible, so the linker drops every unreferenced backend. The full
+# libcrispasr.dylib stays in place for the CLI/dev runtime; staging swaps this
+# trimmed copy in for the app bundle.
+echo "==> Relinking app-sized libcrispasr"
+FULL_REL="$(cd "${VENDOR_DIR}/${BUILD_DIR}" && find src -maxdepth 1 -type f -name 'libcrispasr.*.dylib' | sort -V | tail -1)"
+if [[ -z "${FULL_REL}" ]]; then
+  echo "ERROR: no libcrispasr dylib found in ${VENDOR_DIR}/${BUILD_DIR}/src" >&2
+  exit 1
+fi
+EXPORTS_FILE="${VENDOR_DIR}/${BUILD_DIR}/crispasr-app-exports.txt"
+: > "${EXPORTS_FILE}"
+AVAILABLE_SYMBOLS="$(nm -gU "${VENDOR_DIR}/${BUILD_DIR}/${FULL_REL}" | awk '{print $3}' | sort -u)"
+while IFS= read -r symbol; do
+  [[ -n "${symbol}" ]] || continue
+  macho_symbol="_${symbol}"
+  # Optional symbols (VAD dispatcher, backend detection, shutdown) may be
+  # absent on older runtimes; every required session symbol must be there.
+  if grep -qx "${macho_symbol}" <<<"${AVAILABLE_SYMBOLS}"; then
+    printf '%s\n' "${macho_symbol}" >> "${EXPORTS_FILE}"
+  fi
+done < <(sed -n 's/.*fn("\([A-Za-z0-9_]*\)".*/\1/p' \
+  "${REPO_ROOT}/Mimidasu/ASR/CrispASRLibrary.swift" | sort -u)
+for required in crispasr_set_gpu_backend crispasr_session_open_explicit \
+  crispasr_session_close crispasr_session_transcribe_lang \
+  crispasr_session_result_n_segments crispasr_session_result_segment_text \
+  crispasr_session_result_free; do
+  if ! grep -qx "_${required}" "${EXPORTS_FILE}"; then
+    echo "ERROR: required symbol ${required} is missing from ${FULL_REL}" >&2
+    exit 1
+  fi
+done
+
+LINK_CMD="$(cd "${VENDOR_DIR}/${BUILD_DIR}" && ninja -t commands "${FULL_REL}" | tail -1)"
+LINK_CMD="${LINK_CMD#: && }"
+LINK_CMD="${LINK_CMD% && :}"
+LINK_CMD="${LINK_CMD/ -o ${FULL_REL}/ -o src/libcrispasr-app.dylib}"
+rm -f "${VENDOR_DIR}/${BUILD_DIR}/src/libcrispasr-app.dylib"
+(cd "${VENDOR_DIR}/${BUILD_DIR}" && eval "${LINK_CMD} -Wl,-dead_strip -Wl,-x -Wl,-exported_symbols_list,${EXPORTS_FILE}")
+TRIMMED="${VENDOR_DIR}/${BUILD_DIR}/src/libcrispasr-app.dylib"
+install_name_tool -id "@rpath/libcrispasr.dylib" "${TRIMMED}"
+strip_rpaths "${TRIMMED}"
+strip -x "${TRIMMED}"
+cp -f "${TRIMMED}" "${FRAMEWORKS_DIR}/libcrispasr-app.dylib"
+echo "    $(basename "${TRIMMED}"): $(stat -f%z "${TRIMMED}") bytes, $(wc -l < "${EXPORTS_FILE}" | tr -d ' ') exported symbols"
 
 # 5. Refresh the vendored stable headers used by the engine.
 mkdir -p "${REPO_ROOT}/Mimidasu/native/include/crispasr"
