@@ -234,10 +234,16 @@ packaged apps in `Contents/Frameworks/`.
   seen by a live, lane, or archive engine is persisted for later engines,
   and a probe that succeeds in fast mode clears a stale entry. Six speak
   OpenAI-compatible chat completions; Anthropic uses its native Messages API.
-  `LLMProviderCatalog` is the source
-  of truth for endpoints and default models; `LLMReasoningPolicy` is the pure
-  fast-mode resolver; `TranslationEngineFactory` is the single construction
-  path (live queue, re-translate lane, connection tester). Fast mode —
+  `ProviderCatalog` holds one row per provider — tier resolution, transport
+  route, engine identity, settings icon/short name, and the chat-model facts
+  (endpoint, wire API, default model, fast-mode dialect, client-error
+  posture). `TranslationProvider`, `RetranslateEngine`, and
+  `TranslationEngineKind` derive their identity from those rows (the three
+  vocabularies share one persisted raw value), so a new chat-model provider
+  is one catalog row. `LLMReasoningPolicy` is the pure fast-mode resolver
+  over the row's dialect; `TranslationEngineFactory` is the single
+  construction path (live queue, re-translate lane, connection tester) and
+  constructs from the row's route. Fast mode —
   disable thinking where the model supports it, else the lowest reasoning
   effort — is the default; an unknown model sends no reasoning fields, and
   OpenRouter's request body is unchanged. A model override wins over the
