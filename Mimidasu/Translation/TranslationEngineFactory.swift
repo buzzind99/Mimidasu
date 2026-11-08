@@ -1,8 +1,9 @@
 import Foundation
 
 /// The single engine-construction path. The live coordinator, the re-translate
-/// lane, and the connection tester all build through here, so a new provider
-/// only needs a catalog entry and a policy case.
+/// lane, and the connection tester all build through here. Construction
+/// switches on the provider's catalog route, so a new provider needs only a
+/// catalog row; a new engine is needed only for a new transport family.
 enum TranslationEngineFactory {
     /// - Parameters:
     ///   - model: the user's override; empty resolves to the catalog default.
@@ -11,8 +12,8 @@ enum TranslationEngineFactory {
     ///   - onCompatibleModeLearned: called once when an LLM engine first
     ///     discovers the reasoning-free shape is required; the owner persists
     ///     it for future engines.
-    /// - Returns: nil for Apple (served by the `.translationTask` host) and
-    ///   for a provider that has no catalog entry.
+    /// - Returns: nil for the on-device route (Apple is served by the
+    ///   `.translationTask` host).
     static func make(
         provider: TranslationProvider,
         key: String,
@@ -23,25 +24,24 @@ enum TranslationEngineFactory {
         compatibleMode: Bool = false,
         onCompatibleModeLearned: (@Sendable () async -> Void)? = nil
     ) -> (any TranslationEngine)? {
-        switch provider {
-        case .apple:
+        switch provider.spec.route {
+        case .onDevice:
             return nil
-        case .google:
+        case .machineTranslation(.googleTranslate):
             return GoogleTranslateEngine(
                 apiKey: key,
                 target: target,
                 transport: transport,
                 ladder: ladder ?? TransientRetryLadder()
             )
-        case .deepl:
+        case .machineTranslation(.deepL):
             return DeepLEngine(
                 apiKey: key,
                 target: target,
                 transport: transport,
                 ladder: ladder ?? TransientRetryLadder()
             )
-        case .openrouter, .openai, .anthropic, .moonshot, .zai, .deepseek, .xai:
-            guard let spec = LLMProviderCatalog.spec(for: provider) else { return nil }
+        case let .chatModel(spec):
             let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
             let resolvedModel = trimmedModel.isEmpty ? spec.defaultModel : trimmedModel
             let options = LLMReasoningPolicy.options(for: provider, model: resolvedModel)
@@ -54,7 +54,7 @@ enum TranslationEngineFactory {
                         headers: ["Authorization": "Bearer \(key)"],
                         model: resolvedModel,
                         options: options,
-                        treatClientErrorsAsConfiguration: provider != .openrouter
+                        treatClientErrorsAsConfiguration: spec.treatsClientErrorsAsConfiguration
                     ),
                     transport: transport,
                     ladder: effectiveLadder

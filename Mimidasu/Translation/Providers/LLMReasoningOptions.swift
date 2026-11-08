@@ -39,17 +39,21 @@ struct LLMRequestOptions: Sendable, Equatable {
 }
 
 /// Compiles the fast-mode posture for a provider and model. Pure and static:
-/// known IDs and curated families get a verified field, unknown models get
-/// none. Never guesses a provider's dialect for an unknown model.
+/// the provider's catalog row names the reasoning dialect, and within it
+/// known IDs and curated families get a verified field while unknown models
+/// get none. Never guesses a provider's dialect for an unknown model.
 enum LLMReasoningPolicy {
     static func options(
         for provider: TranslationProvider, model: String
     ) -> LLMRequestOptions {
+        guard let dialect = provider.spec.llm?.reasoning else {
+            return LLMRequestOptions()
+        }
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return switch provider {
-        case .apple, .google, .deepl, .openrouter:
+        return switch dialect {
+        case .none:
             LLMRequestOptions()
-        case .openai:
+        case .openAI:
             openAIOptions(model)
         case .anthropic:
             anthropicOptions(model)
@@ -57,9 +61,9 @@ enum LLMReasoningPolicy {
             moonshotOptions(model)
         case .zai:
             zaiOptions(model)
-        case .deepseek:
+        case .deepSeek:
             deepSeekOptions(model)
-        case .xai:
+        case .xAI:
             xAIOptions(model)
         }
     }

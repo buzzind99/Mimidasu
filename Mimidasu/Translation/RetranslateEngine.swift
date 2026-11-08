@@ -14,39 +14,26 @@ enum RetranslateEngine: String, Codable, CaseIterable, Sendable, Equatable, Hash
     case deepseek
     case xai
 
-    /// The external provider this selection routes through (nil for the
-    /// on-device selections, which need no key).
+    /// The external provider this selection routes through; nil for the
+    /// on-device selections, which need no key. The engine kind resolves the
+    /// provider through its catalog row.
     var provider: TranslationProvider? {
-        switch self {
-        case .session, .appleFast, .appleHighFidelity: nil
-        case .google: .google
-        case .deepl: .deepl
-        case .openrouter: .openrouter
-        case .openai: .openai
-        case .anthropic: .anthropic
-        case .moonshot: .moonshot
-        case .zai: .zai
-        case .deepseek: .deepseek
-        case .xai: .xai
-        }
+        kind?.provider
     }
 
     /// The engine identity this selection names; nil for `.session`, which
-    /// names no engine of its own.
+    /// names no engine of its own. External selections read the kind from
+    /// their provider's catalog row; the two Apple selections name their
+    /// engine tiers directly because Apple's provider row follows the OS
+    /// strategy probe.
     var kind: TranslationEngineKind? {
+        if let external = TranslationProvider(rawValue: rawValue), external.isExternal {
+            return TranslationEngineKind(provider: external)
+        }
         switch self {
-        case .session: nil
-        case .appleFast: .appleFast
-        case .appleHighFidelity: .appleHighFidelity
-        case .google: .google
-        case .deepl: .deepl
-        case .openrouter: .openrouter
-        case .openai: .openai
-        case .anthropic: .anthropic
-        case .moonshot: .moonshot
-        case .zai: .zai
-        case .deepseek: .deepseek
-        case .xai: .xai
+        case .appleFast: return .appleFast
+        case .appleHighFidelity: return .appleHighFidelity
+        default: return nil
         }
     }
 
@@ -59,20 +46,12 @@ enum RetranslateEngine: String, Codable, CaseIterable, Sendable, Equatable, Hash
     }
 
     /// The selection behind a Settings provider row; nil for Apple, which
-    /// has no lane of its own.
+    /// has no lane of its own. External selections share their kind's raw
+    /// value — the persisted selection identity — so the selection is the
+    /// kind's raw value.
     init?(provider: TranslationProvider) {
-        switch provider {
-        case .apple: return nil
-        case .google: self = .google
-        case .deepl: self = .deepl
-        case .openrouter: self = .openrouter
-        case .openai: self = .openai
-        case .anthropic: self = .anthropic
-        case .moonshot: self = .moonshot
-        case .zai: self = .zai
-        case .deepseek: self = .deepseek
-        case .xai: self = .xai
-        }
+        guard let kind = TranslationEngineKind(provider: provider) else { return nil }
+        self.init(rawValue: kind.rawValue)
     }
 }
 
@@ -93,37 +72,40 @@ enum TranslationEngineKind: String, Codable, Sendable, Equatable {
     case deepseek
     case xai
 
+    /// The external provider this identity names; nil for the two Apple
+    /// engine identities, which have no provider row of their own. The
+    /// provider's catalog row names the kind, so the reverse lookup is
+    /// verified against that row rather than trusting the shared raw value
+    /// alone.
+    var provider: TranslationProvider? {
+        guard let provider = TranslationProvider(rawValue: rawValue),
+              ProviderCatalog.spec(for: provider).engineKind == self
+        else { return nil }
+        return provider
+    }
+
     /// nil for Apple: the live Apple identity depends on the OS's strategy
     /// probe (high fidelity vs fast), never on the picker selection.
     init?(provider: TranslationProvider) {
-        switch provider {
-        case .apple: return nil
-        case .google: self = .google
-        case .deepl: self = .deepl
-        case .openrouter: self = .openrouter
-        case .openai: self = .openai
-        case .anthropic: self = .anthropic
-        case .moonshot: self = .moonshot
-        case .zai: self = .zai
-        case .deepseek: self = .deepseek
-        case .xai: self = .xai
-        }
+        guard let kind = ProviderCatalog.spec(for: provider).engineKind else { return nil }
+        self = kind
     }
 
     /// The tier this kind names — the one vocabulary of engine names.
+    /// External kinds take their tier from their provider's catalog row;
+    /// the two Apple engine identities are engine-only (the Apple row's
+    /// tier follows the OS probe), so they name their tier directly.
     var tier: TranslationTier {
         switch self {
-        case .appleFast: .appleOnDevice
-        case .appleHighFidelity: .appleHighFidelity
-        case .google: .google
-        case .deepl: .deepL(.unknown)
-        case .openrouter: .openRouter
-        case .openai: .openAI
-        case .anthropic: .anthropic
-        case .moonshot: .moonshot
-        case .zai: .zai
-        case .deepseek: .deepSeek
-        case .xai: .xAI
+        case .appleFast:
+            return .appleOnDevice
+        case .appleHighFidelity:
+            return .appleHighFidelity
+        case .google, .deepl, .openrouter, .openai, .anthropic, .moonshot, .zai, .deepseek, .xai:
+            guard let provider else {
+                preconditionFailure("External engine kind \(rawValue) has no provider row")
+            }
+            return provider.tier()
         }
     }
 

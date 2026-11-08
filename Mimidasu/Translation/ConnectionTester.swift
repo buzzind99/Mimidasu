@@ -24,9 +24,9 @@ enum TranslationConnectionTester {
         transport: HTTPTranslationTransport? = nil
     ) async throws(TranslationEngineError) -> Bool {
         guard provider.isExternal else { return false }
-        // Apple is the only provider the factory serves nil for today, but a
-        // future external without a catalog entry must fail the probe, not
-        // crash Settings.
+        // The factory nil-routes only the on-device row, which the guard
+        // above already filtered; keep the guard so an unexpected nil fails
+        // the probe rather than crashing Settings.
         guard let engine = TranslationEngineFactory.make(
             provider: provider,
             key: key,

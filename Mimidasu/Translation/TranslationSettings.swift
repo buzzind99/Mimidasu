@@ -1,139 +1,5 @@
 import Foundation
 
-/// Translation providers selectable behind the `TranslationQueue` seam.
-/// Raw values are the Keychain account names and UserDefaults keys, so they
-/// must stay stable.
-enum TranslationProvider: String, CaseIterable, Codable, Identifiable {
-    case apple
-    case google
-    case deepl
-    case openrouter
-    case openai
-    case anthropic
-    case moonshot
-    case zai
-    case deepseek
-    case xai
-
-    var id: String {
-        rawValue
-    }
-
-    /// The provider's canonical name at the default tier facts: Apple's
-    /// on-device model, DeepL at an unknown tier (the tier is only known
-    /// once a key is stored). Every provider or tier name in the app comes
-    /// from `TranslationTier`.
-    var displayName: String {
-        tier().name
-    }
-
-    /// Cloud providers send transcript sentences off the machine.
-    var isExternal: Bool {
-        self != .apple
-    }
-
-    /// Providers that translate through a chat model rather than a
-    /// fixed-contract machine-translation API.
-    var isLLM: Bool {
-        switch self {
-        case .apple, .google, .deepl:
-            false
-        case .openrouter, .openai, .anthropic, .moonshot, .zai, .deepseek, .xai:
-            true
-        }
-    }
-
-    /// The provider's default model; empty for the non-LLM providers.
-    /// Delegates to the catalog so the values live in one place.
-    var defaultModel: String {
-        LLMProviderCatalog.spec(for: self)?.defaultModel ?? ""
-    }
-}
-
-extension TranslationProvider {
-    /// SF Symbol shown in the settings provider row.
-    var settingsIcon: String {
-        switch self {
-        case .apple: "apple.logo"
-        case .google: "g.circle.fill"
-        case .deepl: "d.circle.fill"
-        case .openrouter: "o.circle.fill"
-        case .openai: "o.circle.fill"
-        case .anthropic: "a.circle.fill"
-        case .moonshot: "m.circle.fill"
-        case .zai: "z.circle.fill"
-        case .deepseek: "d.circle.fill"
-        case .xai: "x.circle.fill"
-        }
-    }
-
-    /// Supporting detail line under the provider name. Verified external
-    /// providers append a "Configured" marker.
-    func settingsDetail(configured: Bool) -> String {
-        switch self {
-        case .apple:
-            "On-device"
-        case .google, .deepl:
-            configured ? "External · API key · Configured" : "External · API key"
-        case .openrouter, .openai, .anthropic, .moonshot, .zai, .deepseek, .xai:
-            configured ? "External · API key + model · Configured" : "External · API key + model"
-        }
-    }
-
-    /// The tier this provider sits at, given the tier facts the app knows.
-    /// Apple has two tiers — the on-device NMT model and the high-fidelity
-    /// one — and DeepL's tier is the subscription behind the stored key.
-    func tier(
-        appleHighFidelity: Bool = false,
-        deepLTier: TranslationTier.DeepLTier = .unknown
-    ) -> TranslationTier {
-        switch self {
-        case .apple: appleHighFidelity ? .appleHighFidelity : .appleOnDevice
-        case .google: .google
-        case .deepl: .deepL(deepLTier)
-        case .openrouter: .openRouter
-        case .openai: .openAI
-        case .anthropic: .anthropic
-        case .moonshot: .moonshot
-        case .zai: .zai
-        case .deepseek: .deepSeek
-        case .xai: .xAI
-        }
-    }
-
-    /// Provider picker row label. Apple names the capability tier only when
-    /// the OS reported the high-fidelity strategy installed for the current
-    /// pair (`appleHighFidelity`), matching the sidebar and status rows;
-    /// DeepL names its subscription tier, which stays unknown while no key
-    /// is stored.
-    func settingsName(
-        deepLTier: TranslationTier.DeepLTier,
-        appleHighFidelity: Bool = false
-    ) -> String {
-        tier(appleHighFidelity: appleHighFidelity, deepLTier: deepLTier).name
-    }
-
-    /// Compact engine label for the sidebar ENGINES card and the cloud
-    /// disclosure sheet. Deliberately shorter than the canonical tier name
-    /// — only the external providers reach it (the sidebar's Apple row is
-    /// spelled by `SidebarStatus.translationEngineName`, which knows the
-    /// Apple tier), so the Apple case is never rendered.
-    var shortName: String {
-        switch self {
-        case .apple: "Apple"
-        case .google: "Google"
-        case .deepl: "DeepL"
-        case .openrouter: "OpenRouter"
-        case .openai: "OpenAI"
-        case .anthropic: "Anthropic"
-        case .moonshot: "Moonshot"
-        case .zai: "Z.ai"
-        case .deepseek: "DeepSeek"
-        case .xai: "xAI"
-        }
-    }
-}
-
 /// Outcome of the Settings "Test" button, surfaced inline and persisted so
 /// the row survives relaunch. Failure detail strings are provider-agnostic
 /// status copy — never key material or raw response bodies.
@@ -509,22 +375,13 @@ final class TranslationSettings {
         appleHighFidelity: Bool = false
     ) -> String {
         let provider = attachedProvider ?? selectedProvider
-        var label: String = switch provider {
-        case .apple:
-            appleHighFidelity
-                ? TranslationTier.appleHighFidelity.name
-                : TranslationTier.appleOnDevice.name
-        case .google:
-            TranslationTier.google.name
-        case .deepl:
-            // The subscription tier is a **provider** fact, and it stays
-            // unknown while no key is stored — the row must never claim a
-            // tier the app cannot know. (`deeplIsFreeTier` alone cannot
-            // tell "no key" from "a pro key": both are false.)
-            TranslationTier.deepL(deepLTier).name
-        case .openrouter, .openai, .anthropic, .moonshot, .zai, .deepseek, .xai:
-            provider.tier().name
-        }
+        // The subscription tier is a **provider** fact, and it stays
+        // unknown while no key is stored — the row must never claim a
+        // tier the app cannot know. (`deeplIsFreeTier` alone cannot
+        // tell "no key" from "a pro key": both are false.)
+        var label = provider.tier(
+            appleHighFidelity: appleHighFidelity, deepLTier: deepLTier
+        ).name
         if provider.isLLM {
             label += " · \(effectiveModel(for: provider))"
         }
