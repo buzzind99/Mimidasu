@@ -4,10 +4,10 @@ import Testing
 
 /// Tests `SessionController.restartCapture()`: the `capture.lost` toast's fix
 /// path rebuilds only the capture stream — the engine (with its loaded
-/// model), timers, sentence buffer, and metadata are untouched, the factory
-/// does not re-fire, and `onSessionBegin` does not re-fire (no transcript
-/// reset). A no-op without a session; a rebuild failure rethrows after the
-/// dead stream was fenced.
+/// model), poll timer, sentence buffer, and metadata are untouched, the
+/// factory does not re-fire, and `onSessionBegin` does not re-fire (no
+/// transcript reset). A no-op without a session; a rebuild failure rethrows
+/// after the dead stream was fenced.
 @MainActor
 @Suite("SessionController restartCapture")
 struct SessionControllerRestartTests {

@@ -1,39 +1,28 @@
 @testable import Mimidasu
 import Testing
 
-/// Tests the 3-tier sentence boundary policy through the public
-/// `append` / `tick` / `flush` API, capturing emitted `Sentence` values.
-@Suite("SentenceBuffer boundary policy")
+/// Pins the one-final-one-sentence contract: every ASR final becomes exactly
+/// one sentence with the final's own audio span, and no text shape can split
+/// or merge it.
+@Suite("SentenceBuffer finalization")
 struct SentenceBufferTests {
 
     // MARK: - Fixtures
 
-    private let punctuatedSentence = "今日はいい天気ですね。"
-    private let unpunctuatedSentence = "今日はいい天気ですね"
+    private let unpunctuatedFinal = "今日はいい天気ですね"
+    private let punctuatedFinal = "今日はいい天気ですね。"
+    private let shortFinal = "はい"
     private let symbolOnlyFinal = "..."
-    private let contentFinal = "今日は"
-    /// 44 chars, no terminal punctuation; clause boundary `、` at index 23
-    /// (past `minSplitChars` = 18), so the length cap splits there.
-    private let longClauseSentence =
-        "今日はとても良い天気なので散歩に行きました、そのあとに買い物に出かけて晩ご飯を食べました"
-    private let expectedSplitHead = "今日はとても良い天気なので散歩に行きました、"
-    private let expectedSplitTail = "そのあとに買い物に出かけて晩ご飯を食べました"
+    /// 46 chars with a `けど` and a `、` inside; the removed length cap cut
+    /// this at the clause boundary.
+    private let clauseRichFinal =
+        "今日はとても良い天気なので散歩に行きましたけど、そのあとに買い物に出かけて晩ご飯を食べました"
+    /// Two inner sentence ends; the old buffer emitted this as one row and the
+    /// reworked policy must not split it either.
+    private let multiSentenceFinal = "はい。そうですね。また明日。"
     private let oneSecondInSamples = 16000
     private let twoSecondsInSamples = 32000
     private let fourSecondsInSamples = 64000
-    /// 50 chars, no clause boundary anywhere; the length cap cannot split.
-    private let boundarylessOverCapText = String(repeating: "あ", count: 50)
-    /// 43 chars; ASCII `,` at index 40 (past `minSplitChars` = 18).
-    private let asciiCommaSplitText = String(repeating: "あ", count: 40) + ",です"
-    private let expectedAsciiCommaSplitHead = String(repeating: "あ", count: 40) + ","
-    /// 42 chars; the split tail is the single symbol `、` (no content), which
-    /// close() must drop silently.
-    private let symbolOnlyTailSplitText = String(repeating: "あ", count: 40) + "、、"
-    private let expectedSymbolOnlyTailHead = String(repeating: "あ", count: 40) + "、"
-    /// 45 chars ending in a terminal `。`: tier 1 closes the whole buffer, so
-    /// the length-cap split never runs on terminal-tailed input.
-    private let terminalTailedOverCapText =
-        "今日はとても良い天気なので散歩に行きました、そのあとは買い物に出かけて晩ご飯を食べました。"
 
     // MARK: - Helpers
 
@@ -53,32 +42,109 @@ struct SentenceBufferTests {
         return (buffer, sink)
     }
 
-    // MARK: - Tier 1: terminal punctuation
+    // MARK: - One final, one sentence
 
-    @Test("terminal punctuation emits the sentence immediately", arguments: [
-        "今日はいい天気ですね。",
-        "Is this new?",
-        "Nice!"
-    ])
-    func terminalPunctuationEmitsImmediately(finalText: String) {
+    @Test("emits one sentence immediately with the final's audio span")
+    func emitsOneSentenceWithFinalSpan() {
         let (buffer, sink) = makeSUT()
 
         buffer.append(
-            finalText: finalText, startSample: oneSecondInSamples,
-            endSample: twoSecondsInSamples
+            finalText: punctuatedFinal, startSample: twoSecondsInSamples,
+            endSample: fourSecondsInSamples
         )
 
         #expect(
             sink.sentences == [
-                Sentence(index: 0, startS: 1.0, endS: 2.0, lang: "ja", text: finalText)
+                Sentence(index: 0, startS: 2.0, endS: 4.0, lang: "ja", text: punctuatedFinal)
             ]
         )
     }
 
-    // MARK: - Symbol-only finals
+    @Test("emits an unpunctuated final without waiting")
+    func unpunctuatedFinalEmittedImmediately() {
+        let (buffer, sink) = makeSUT()
 
-    @Test("a symbol-only final with an empty buffer is not emitted")
-    func symbolOnlyFinalWithEmptyBufferNotEmitted() {
+        buffer.append(finalText: shortFinal, startSample: 0, endSample: oneSecondInSamples)
+
+        #expect(sink.sentences.map(\.text) == [shortFinal])
+    }
+
+    @Test("emits each final as its own sentence with its own span")
+    func eachFinalGetsItsOwnSentenceAndSpan() {
+        let (buffer, sink) = makeSUT()
+
+        buffer.append(finalText: shortFinal, startSample: 0, endSample: oneSecondInSamples)
+        buffer.append(
+            finalText: unpunctuatedFinal, startSample: oneSecondInSamples,
+            endSample: twoSecondsInSamples
+        )
+
+        #expect(sink.sentences.map(\.index) == [0, 1])
+        #expect(sink.sentences.map(\.startS) == [0.0, 1.0])
+        #expect(sink.sentences.map(\.endS) == [1.0, 2.0])
+    }
+
+    @Test("does not merge two finals that arrive back to back")
+    func backToBackFinalsStaySeparate() {
+        let (buffer, sink) = makeSUT()
+
+        buffer.append(finalText: shortFinal, startSample: 0, endSample: oneSecondInSamples)
+        buffer.append(
+            finalText: unpunctuatedFinal, startSample: oneSecondInSamples,
+            endSample: twoSecondsInSamples
+        )
+
+        #expect(sink.sentences.map(\.text) == [shortFinal, unpunctuatedFinal])
+    }
+
+    // MARK: - No text-side splits
+
+    @Test("never splits a long clause-rich final")
+    func clauseRichFinalNotSplit() {
+        let (buffer, sink) = makeSUT()
+
+        buffer.append(
+            finalText: clauseRichFinal, startSample: 0, endSample: fourSecondsInSamples
+        )
+
+        #expect(sink.sentences.map(\.text) == [clauseRichFinal])
+    }
+
+    @Test("never splits a final at an inner sentence end")
+    func innerSentenceEndNotSplit() {
+        let (buffer, sink) = makeSUT()
+
+        buffer.append(
+            finalText: multiSentenceFinal, startSample: 0, endSample: fourSecondsInSamples
+        )
+
+        #expect(sink.sentences.map(\.text) == [multiSentenceFinal])
+    }
+
+    // MARK: - Content gate
+
+    @Test("trims surrounding whitespace from the final text")
+    func trimsSurroundingWhitespace() {
+        let (buffer, sink) = makeSUT()
+
+        buffer.append(
+            finalText: "  \(shortFinal)\n", startSample: 0, endSample: oneSecondInSamples
+        )
+
+        #expect(sink.sentences.map(\.text) == [shortFinal])
+    }
+
+    @Test("emits nothing for an empty final", arguments: ["", " ", " \n\t"])
+    func emptyFinalNotEmitted(finalText: String) {
+        let (buffer, sink) = makeSUT()
+
+        buffer.append(finalText: finalText, startSample: 0, endSample: oneSecondInSamples)
+
+        #expect(sink.sentences.isEmpty)
+    }
+
+    @Test("emits nothing for a symbol-only final")
+    func symbolOnlyFinalNotEmitted() {
         let (buffer, sink) = makeSUT()
 
         buffer.append(finalText: symbolOnlyFinal, startSample: 0, endSample: oneSecondInSamples)
@@ -86,221 +152,76 @@ struct SentenceBufferTests {
         #expect(sink.sentences.isEmpty)
     }
 
-    @Test("a symbol-only final after content stays as trailing punctuation")
-    func symbolOnlyFinalAfterContentStaysTrailing() {
-        let (buffer, sink) = makeSUT()
-        buffer.append(finalText: contentFinal, startSample: 0, endSample: oneSecondInSamples)
-        buffer.append(finalText: symbolOnlyFinal, startSample: oneSecondInSamples, endSample: oneSecondInSamples)
-
-        buffer.flush()
-
-        #expect(sink.sentences.first?.text == contentFinal + symbolOnlyFinal)
-    }
-
-    // MARK: - Tier 2: silence timeout
-
-    @Test("tick before the silence timeout keeps the buffer open")
-    func tickBeforeSilenceTimeoutKeepsOpen() {
-        let (buffer, sink) = makeSUT()
-        buffer.append(finalText: unpunctuatedSentence, startSample: 0, endSample: oneSecondInSamples)
-
-        buffer.tick(now: .now)
-
-        #expect(sink.sentences.isEmpty)
-    }
-
-    @Test("tick with an empty buffer emits nothing")
-    func tickWithEmptyBufferNotEmitted() {
-        let (buffer, sink) = makeSUT()
-
-        buffer.tick(now: .now.advanced(by: .seconds(60)))
-
-        #expect(sink.sentences.isEmpty)
-    }
-
-    // MARK: - Dropped finals
-
-    /// A final dropped for carrying no Japanese script is still speech: it
-    /// must push the silence timeout and the open sentence's end span forward.
-    @Test("a dropped final keeps the silence timer and end span fresh")
-    func droppedFinalKeepsTimerAndEndSpanFresh() {
-        let (buffer, sink) = makeSUT()
-        let start = ContinuousClock.Instant.now
-        buffer.append(finalText: unpunctuatedSentence, startSample: 0, endSample: oneSecondInSamples)
-
-        buffer.noteTrailing(endSample: twoSecondsInSamples, now: start.advanced(by: .seconds(0.9)))
-
-        buffer.tick(now: start.advanced(by: .seconds(1.8)))
-        #expect(sink.sentences.isEmpty)
-
-        buffer.tick(now: start.advanced(by: .seconds(2.0)))
-        #expect(sink.sentences.first?.text == unpunctuatedSentence)
-        #expect(sink.sentences.first?.endS == 2.0)
-    }
-
-    @Test("a dropped final with an empty buffer records nothing")
-    func droppedFinalWithEmptyBufferRecordsNothing() {
-        let (buffer, sink) = makeSUT()
-
-        buffer.noteTrailing(endSample: oneSecondInSamples)
-        buffer.flush()
-
-        #expect(sink.sentences.isEmpty)
-    }
-
-    /// The controller gate admits any Japanese-script final; the buffer's
-    /// content check must agree, or an admitted final could be dropped
-    /// silently without keeping the silence timer honest.
-    @Test("astral kanji, iteration marks, and compat ideographs count as content", arguments: [
-        "𠀋。", // extension B
-        "々々。", // iteration marks
-        "髙。" // BMP compat ideograph
+    @Test("emits nothing for a final made only of kana-block marks", arguments: [
+        "・・・", // middle dots
+        "ーー", // long-vowel marks
+        "・ー・" // mixed
     ])
-    func japaneseScriptFinalsAreContent(finalText: String) {
+    func kanaMarkOnlyFinalNotEmitted(finalText: String) {
         let (buffer, sink) = makeSUT()
 
         buffer.append(finalText: finalText, startSample: 0, endSample: oneSecondInSamples)
 
-        #expect(sink.sentences.first?.text == finalText)
-    }
-
-    // MARK: - Tier 3: length cap
-
-    @Test("beyond the length cap the buffer splits at the clause boundary and flushes the tail")
-    func overCapSplitsAtClauseBoundaryAndFlushesTail() {
-        let (buffer, sink) = makeSUT()
-
-        buffer.append(
-            finalText: longClauseSentence, startSample: twoSecondsInSamples,
-            endSample: fourSecondsInSamples
-        )
-
-        #expect(
-            sink.sentences == [
-                Sentence(index: 0, startS: 2.0, endS: 4.0, lang: "ja", text: expectedSplitHead)
-            ]
-        )
-
-        buffer.flush()
-
-        #expect(
-            sink.sentences == [
-                Sentence(index: 0, startS: 2.0, endS: 4.0, lang: "ja", text: expectedSplitHead),
-                Sentence(index: 1, startS: 4.0, endS: 4.0, lang: "ja", text: expectedSplitTail)
-            ]
-        )
-    }
-
-    @Test("beyond the length cap with no clause boundary the buffer keeps growing")
-    func overCapWithoutBoundaryKeepsGrowing() {
-        let (buffer, sink) = makeSUT()
-
-        buffer.append(
-            finalText: boundarylessOverCapText, startSample: 0, endSample: oneSecondInSamples
-        )
-        buffer.append(
-            finalText: "いいね", startSample: oneSecondInSamples, endSample: twoSecondsInSamples
-        )
-
         #expect(sink.sentences.isEmpty)
-
-        buffer.flush()
-
-        #expect(sink.sentences.count == 1)
-        #expect(sink.sentences.first?.text == boundarylessOverCapText + "いいね")
     }
 
-    @Test("terminal punctuation beyond the length cap closes the whole buffer without splitting")
-    func terminalTailedOverCapClosesWholeBuffer() {
+    @Test("does not consume an index for an empty final")
+    func emptyFinalDoesNotConsumeIndex() {
         let (buffer, sink) = makeSUT()
 
+        buffer.append(finalText: "", startSample: 0, endSample: oneSecondInSamples)
         buffer.append(
-            finalText: terminalTailedOverCapText, startSample: 0, endSample: oneSecondInSamples
+            finalText: shortFinal, startSample: oneSecondInSamples, endSample: twoSecondsInSamples
         )
 
-        #expect(sink.sentences.count == 1)
-        #expect(sink.sentences.first?.text == terminalTailedOverCapText)
+        #expect(sink.sentences.map(\.index) == [0])
     }
 
-    @Test("beyond the length cap the buffer splits at an ASCII comma boundary")
-    func overCapSplitsAtAsciiComma() {
+    @Test("advances the index only for emitted sentences")
+    func indexAdvancesOnlyForEmittedSentences() {
         let (buffer, sink) = makeSUT()
 
+        buffer.append(finalText: symbolOnlyFinal, startSample: 0, endSample: oneSecondInSamples)
         buffer.append(
-            finalText: asciiCommaSplitText, startSample: twoSecondsInSamples,
+            finalText: shortFinal, startSample: oneSecondInSamples, endSample: twoSecondsInSamples
+        )
+        buffer.append(
+            finalText: symbolOnlyFinal, startSample: twoSecondsInSamples,
             endSample: fourSecondsInSamples
         )
+        buffer.append(
+            finalText: unpunctuatedFinal, startSample: fourSecondsInSamples,
+            endSample: 4 * oneSecondInSamples
+        )
 
-        #expect(sink.sentences.count == 1)
-        #expect(sink.sentences.first?.text == expectedAsciiCommaSplitHead)
+        #expect(sink.sentences.map(\.index) == [0, 1])
     }
 
-    @Test("a symbol-only split tail is dropped silently on flush")
-    func symbolOnlyTailDroppedOnFlush() {
+    // MARK: - Span
+
+    @Test("clamps an end sample that precedes the start")
+    func endBeforeStartClampedToStart() {
         let (buffer, sink) = makeSUT()
 
         buffer.append(
-            finalText: symbolOnlyTailSplitText, startSample: twoSecondsInSamples,
-            endSample: fourSecondsInSamples
-        )
-        #expect(sink.sentences.count == 1)
-        #expect(sink.sentences.first?.text == expectedSymbolOnlyTailHead)
-
-        buffer.flush()
-
-        #expect(sink.sentences.count == 1)
-        #expect(buffer.nextIndex == 1)
-    }
-
-    @Test("terminal punctuation after a clause split closes the reinstated tail")
-    func terminalAfterClauseSplitClosesTail() {
-        let (buffer, sink) = makeSUT()
-        buffer.append(
-            finalText: asciiCommaSplitText, startSample: twoSecondsInSamples,
-            endSample: fourSecondsInSamples
-        )
-
-        buffer.append(
-            finalText: "。", startSample: fourSecondsInSamples, endSample: fourSecondsInSamples
-        )
-
-        #expect(sink.sentences.map(\.text) == [expectedAsciiCommaSplitHead, "です。"])
-    }
-
-    @Test("indices stay continuous across clause splits, flushes, and appends")
-    func indicesContinuousAcrossSplitsFlushesAndAppends() {
-        let (buffer, sink) = makeSUT()
-
-        buffer.append(
-            finalText: longClauseSentence, startSample: 0, endSample: oneSecondInSamples
-        )
-        buffer.flush()
-        buffer.append(
-            finalText: punctuatedSentence, startSample: oneSecondInSamples,
+            finalText: shortFinal, startSample: fourSecondsInSamples,
             endSample: twoSecondsInSamples
         )
 
-        #expect(sink.sentences.map(\.index) == [0, 1, 2])
+        #expect(sink.sentences.first?.endS == 4.0)
     }
 
-    // MARK: - Flush
-
-    @Test("flush emits a partial buffer")
-    func flushEmitsPartialBuffer() {
-        let (buffer, sink) = makeSUT()
-        buffer.append(finalText: unpunctuatedSentence, startSample: 0, endSample: oneSecondInSamples)
-
-        buffer.flush()
-
-        #expect(sink.sentences.first?.text == unpunctuatedSentence)
-    }
-
-    @Test("flush with an empty buffer emits nothing")
-    func flushWithEmptyBufferNotEmitted() {
+    @Test("japanese-script finals count as content", arguments: [
+        "𠀋。", // extension B
+        "々々。", // iteration marks
+        "髙。", // BMP compat ideograph
+        "コーヒー。" // long-vowel mark beside real kana
+    ])
+    func japaneseScriptFinalsEmitted(finalText: String) {
         let (buffer, sink) = makeSUT()
 
-        buffer.flush()
+        buffer.append(finalText: finalText, startSample: 0, endSample: oneSecondInSamples)
 
-        #expect(sink.sentences.isEmpty)
+        #expect(sink.sentences.map(\.text) == [finalText])
     }
 }

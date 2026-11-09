@@ -15,9 +15,9 @@ enum SessionPhase: Equatable {
     case failed(String)
 }
 
-/// Orchestrates capture → ASR → sentence buffering → translation, and owns
-/// the published UI state. All public state is @MainActor. The mechanics of
-/// a live session (engine, capture, buffering, timers) live in
+/// Orchestrates capture → ASR → sentence → translation, and owns the
+/// published UI state. All public state is @MainActor. The mechanics of a
+/// live session (engine, capture, sentence emission, poll timer) live in
 /// `SessionController`; the transcript's rows and swaps live in the
 /// composed `TranscriptPane`.
 @Observable
@@ -150,8 +150,8 @@ final class AppModel {
     /// probe), refreshed by Settings on open; the TARGET LANGUAGE picker
     /// reads it.
     let appleTranslationAvailability = AppleTranslationAvailability()
-    /// Non-secret ASR model selection (Lite default, Full opt-in); persisted
-    /// across launches. Switching applies at the next session start.
+    /// Non-secret ASR model selection (Lite default; Balanced/Full opt-in);
+    /// persisted across launches. Switching applies at the next session start.
     let asrModelSettings: ASRModelSettings
     /// The user's starred words, persisted in their own SQLite file and
     /// outliving sessions (unlike the tap-lookup presentation, which

@@ -2,8 +2,8 @@ import Foundation
 import Synchronization
 
 /// Owns the mechanics of a live capture → ASR session: engine lifecycle and
-/// warm-up scheduling, system-audio capture wiring, sentence buffering, and
-/// the poll/tick timers. Published UI state, translation configuration, and
+/// warm-up scheduling, system-audio capture wiring, sentence emission, and
+/// the 60 ms poll timer. Published UI state, translation configuration, and
 /// export delegation stay in `AppModel`, which plugs in via the callbacks.
 @MainActor
 final class SessionController {
@@ -57,7 +57,6 @@ final class SessionController {
     private var capture: (any AudioCapturing)?
     private var sentenceBuffer: SentenceBuffer?
     private var pollTimer: Timer?
-    private var tickTimer: Timer?
     /// One-shot silence watchdog for the current capture; cancelled on stop
     /// and re-armed by every `startCapture`.
     private var noAudioWatchdog: Task<Void, Never>?
@@ -314,8 +313,8 @@ final class SessionController {
 
     /// The queued body of `restartCapture()`: rebuilds the capture stream
     /// mid-session after the source died — the `capture.lost` toast's Restart
-    /// action. The engine, timers, sentence buffer, and translation queue are
-    /// untouched: no model reload, and `onSessionBegin` does not re-fire.
+    /// action. The engine, poll timer, sentence buffer, and translation queue
+    /// are untouched: no model reload, and `onSessionBegin` does not re-fire.
     /// Timestamp continuity is free — sentence timestamps derive from the
     /// engine's sample counters, not the capture's. A no-op without a live
     /// engine (the session is already down) or once a stop owns the teardown.
@@ -335,9 +334,9 @@ final class SessionController {
     /// ending it — the capture stops at the IOProc (no callbacks while
     /// paused), the in-flight utterance is flushed through the engine so
     /// speech spoken just before pausing still lands as a sentence, and the
-    /// live surfaces clear. Timers keep running so the flush final and the
-    /// buffer tick close what the flush emits. The translation queue is
-    /// deliberately left alone — enqueued sentences finish normally.
+    /// live surfaces clear. The poll timer keeps running so any final still
+    /// in flight drains. The translation queue is deliberately left alone —
+    /// enqueued sentences finish normally.
     func performPause() async {
         guard !stopRequested else { return }
         await capture?.pause()
@@ -355,7 +354,6 @@ final class SessionController {
         for event in flushed {
             handleASREvent(event)
         }
-        sentenceBuffer?.flush()
         live.partial = ""
         latency.reset()
         audioLevel.reset()
@@ -415,9 +413,8 @@ final class SessionController {
         capture = nil
         stopTimers()
 
-        // Flush a partially-formed sentence (its translation is awaited
-        // below), then let the translation worker finish its tail.
-        sentenceBuffer?.flush()
+        // Every final already landed as a sentence above; only the
+        // translation worker's tail remains.
         sentenceBuffer = nil
         _ = await translationQueue.drain(timeout: translationDrainTimeout)
         live.partial = ""
@@ -462,10 +459,6 @@ final class SessionController {
         pollTimer = makeCommonModeTimer(interval: 0.06) { [weak self] in
             self?.pollASR()
         }
-        tickTimer?.invalidate()
-        tickTimer = makeCommonModeTimer(interval: 0.2) { [weak self] in
-            self?.sentenceBuffer?.tick()
-        }
     }
 
     /// Timers must fire while a mouse press/drag tracks (`eventTracking`
@@ -483,7 +476,6 @@ final class SessionController {
 
     private func stopTimers() {
         pollTimer?.invalidate(); pollTimer = nil
-        tickTimer?.invalidate(); tickTimer = nil
     }
 
     private func pollASR() {
@@ -519,12 +511,7 @@ final class SessionController {
             // kana counts: the final re-decode often renders kanji words
             // as kana even when the partial showed kanji. Latin- or
             // symbol-only finals are dropped at the door.
-            guard KanaClassification.containsJapanese(text) else {
-                // A dropped final is still speech: keep the open sentence's
-                // silence timer and end span honest without appending it.
-                sentenceBuffer?.noteTrailing(endSample: endSample)
-                return
-            }
+            guard KanaClassification.containsJapanese(text) else { return }
             sentenceBuffer?.append(
                 finalText: text, startSample: startSample, endSample: endSample
             )

@@ -101,7 +101,7 @@ final class TranslationQueue {
     /// App-run-scoped cache: repeated sentences ("よろしくお願いします"…) skip
     /// the session round-trip entirely — the result posts at `enqueue` time.
     /// NSCache's default is UNLIMITED, so `countLimit` is what bounds long
-    /// sessions; entries are ≤42-char sentences (`SentenceBuffer.maxChars`).
+    /// sessions; entries are whole ASR finals (one sentence each).
     private let cache: NSCache<NSString, TranslationBox> = {
         let cache = NSCache<NSString, TranslationBox>()
         cache.countLimit = 200

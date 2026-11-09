@@ -10,10 +10,9 @@ extension SessionController {
     /// Suspends the live session without ending it: the capture stops at the
     /// IOProc (no callbacks while paused), the in-flight utterance is flushed
     /// through the engine so speech spoken just before pausing still lands as
-    /// a sentence, and the live surfaces clear. Timers keep running so the
-    /// flush final and the buffer tick close what the flush emits. The
-    /// translation queue is deliberately left alone — enqueued sentences
-    /// finish normally.
+    /// a sentence, and the live surfaces clear. The poll timer keeps running
+    /// so a final still in flight drains. The translation queue is deliberately
+    /// left alone — enqueued sentences finish normally.
     func pause() async {
         let task = enqueue { controller in
             await controller.performPause()
@@ -42,9 +41,9 @@ extension SessionController {
     }
 
     /// Rebuilds the capture stream mid-session after the source died — the
-    /// `capture.lost` toast's Restart action. The engine, timers, sentence
-    /// buffer, and translation queue are untouched (no model reload, and
-    /// `onSessionBegin` does not re-fire). A no-op without a live engine
+    /// `capture.lost` toast's Restart action. The engine, poll timer,
+    /// sentence buffer, and translation queue are untouched (no model reload,
+    /// and `onSessionBegin` does not re-fire). A no-op without a live engine
     /// (the session is already down) or once a stop owns the teardown.
     func restartCapture() async throws {
         let outcome = TransitionOutcome()

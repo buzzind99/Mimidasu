@@ -1,170 +1,61 @@
 import Foundation
 
-/// Groups ASR finals into translatable sentences and applies the 3-tier
-/// boundary policy:
-///   1. Terminal punctuation (`。！？` plus ASCII `!`/`?`) closes immediately.
-///   2. Silence timeout: no new finals for ~1 s finalizes the buffer.
-///   3. Length cap (`maxChars`, 42 chars): split at the nearest clause
-///      boundary at/after `minSplitChars`.
+/// Finalizes each ASR final as exactly one sentence.
+///
+/// Boundaries are decided above the text: the engine ends an utterance at the
+/// VAD-confirmed silence endpoint, at the forced-final cap, or on a pause/stop
+/// flush, so a final already covers the utterance it belongs to. The buffer
+/// therefore never holds text open, never merges finals, and never re-splits a
+/// final by punctuation, clause word, or length — one final in, one sentence
+/// out.
 ///
 /// All calls must happen on one actor/queue (driven on the MainActor by
 /// `SessionController`).
 final class SentenceBuffer {
-    struct Config {
-        var silenceTimeout: TimeInterval = 1.0
-        var maxChars = 42
-        var minSplitChars = 18
-    }
-
-    /// Terminal punctuation closes the sentence immediately.
-    private static let terminal: Set<Character> = ["。", "！", "？", "?", "!"]
-    /// Clause-boundary candidates for tier-3 splits, longest match first.
-    private static let clauseBoundaries = ["けど", "から", "ので", "って", "、", ","]
-
-    /// True if the string contains at least one "content" character
-    /// (Japanese script via `KanaClassification`, Latin letter, or digit).
-    /// Punctuation/symbols only (e.g. "...", "...?") return false. Delegates
-    /// the Japanese-script half so the buffer's definition can never diverge
-    /// from the controller's final gate: every admitted final counts as
-    /// content here.
-    private static func hasContent(_ s: String) -> Bool {
-        KanaClassification.containsJapanese(s)
-            || s.unicodeScalars.contains { scalar in
-                switch scalar.value {
-                case 0x30 ... 0x39, // ASCII digits
-                     0x41 ... 0x5A, 0x61 ... 0x7A: // Latin letters
-                    true
-                default:
-                    false
-                }
-            }
-    }
-
-    let config = Config()
-
+    /// Next sentence index; advances only for emitted sentences.
     private(set) var nextIndex = 0
-    private var text = ""
-    private var startSample: Int = 0
-    private var lastEndSample: Int = 0
-    /// Monotonic instant of the last append (wall-clock `Date` would skew on
-    /// NTP/timezone/manual clock changes).
-    private var lastAppendAt = ContinuousClock.Instant.now
-    private var isEmpty = true
 
     var onSentence: ((Sentence) -> Void)?
 
-    /// Append a final ASR piece with its sample span.
+    /// Emits `piece` as the next sentence, stamped with the final's audio span.
     func append(finalText piece: String, startSample: Int, endSample: Int) {
         let trimmed = piece.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        // Drop symbol-only finals (e.g. "...", "...?") when they would
-        // start a new sentence; keep them as trailing punctuation when
-        // the buffer already has content.
-        if isEmpty, !Self.hasContent(trimmed) {
-            return
-        }
-        if isEmpty {
-            self.startSample = startSample
-            isEmpty = false
-        }
-        text += trimmed
-        lastEndSample = endSample
-        lastAppendAt = ContinuousClock.now
-
-        if tier1ShouldClose() {
-            close()
-        } else if text.count >= config.maxChars {
-            splitAtClauseBoundary()
-        }
-    }
-
-    /// Records a final that carries no transcript text (a Latin- or
-    /// symbol-only final dropped by the controller gate): speech continued,
-    /// so the open sentence's silence timer and end span stay honest
-    /// without appending anything.
-    func noteTrailing(endSample: Int, now: ContinuousClock.Instant = .now) {
-        guard !isEmpty else { return }
-        lastEndSample = endSample
-        lastAppendAt = now
-    }
-
-    /// Tier 2: called on a timer; closes the buffer after the silence timeout.
-    func tick(now: ContinuousClock.Instant = .now) {
-        guard !isEmpty else { return }
-        if lastAppendAt.duration(to: now) >= .seconds(config.silenceTimeout) {
-            close()
-        }
-    }
-
-    /// Flush any partial buffer (e.g. on session stop).
-    func flush() {
-        guard !isEmpty else { return }
-        close()
-    }
-
-    // MARK: - Tiers
-
-    private func tier1ShouldClose() -> Bool {
-        guard let last = text.last else { return false }
-        return Self.terminal.contains(last)
-    }
-
-    /// Tier 3: split at the nearest clause boundary at/after `minSplitChars`.
-    private func splitAtClauseBoundary() {
-        let chars = Array(text)
-        var cut: Int?
-        for boundary in Self.clauseBoundaries {
-            let boundaryChars = Array(boundary)
-            if boundaryChars.count <= chars.count {
-                var i = config.minSplitChars
-                while i <= chars.count - boundaryChars.count {
-                    if Array(chars[i ..< (i + boundaryChars.count)]) == boundaryChars {
-                        cut = i + boundaryChars.count
-                        break
-                    }
-                    i += 1
-                }
-            }
-            if cut != nil {
-                break
-            }
-        }
-        guard let cut, cut > 0, cut < chars.count else { return }
-
-        let head = String(chars[0 ..< cut])
-        let tail = String(chars[cut...])
-        text = head
-        emit()
-        // emit() reset the buffer; reinstate the tail as live content so a
-        // session stop before the next final still flushes it.
-        text = tail
-        isEmpty = false
-        startSample = lastEndSample
-    }
-
-    private func close() {
-        guard !isEmpty else { return }
-        // Never emit a symbol-only sentence (e.g. a split tail that is
-        // just punctuation).
-        guard Self.hasContent(text) else {
-            text = ""
-            isEmpty = true
-            return
-        }
-        emit()
-    }
-
-    private func emit() {
+        guard !trimmed.isEmpty, Self.hasContent(trimmed) else { return }
         let sentence = Sentence(
             index: nextIndex,
             startS: SessionClock.seconds(startSample),
-            endS: SessionClock.seconds(max(lastEndSample, startSample)),
+            endS: SessionClock.seconds(max(endSample, startSample)),
             lang: "ja",
-            text: text
+            text: trimmed
         )
         nextIndex += 1
-        text = ""
-        isEmpty = true
         onSentence?(sentence)
+    }
+
+    /// Scalars inside the kana blocks that carry no word content on their
+    /// own: the voicing marks, the middle dot ・, and the long-vowel mark ー.
+    /// A final made only of these (e.g. "・・・") is a symbol row, not speech.
+    private static let standaloneMarks: Set<UInt32> = [0x3099, 0x309A, 0x30FB, 0x30FC]
+
+    /// True if the string contains at least one "content" character (Japanese
+    /// script via `KanaClassification`, Latin letter, or digit).
+    /// Punctuation/symbol-only strings (e.g. "...", "・・・") are not worth a
+    /// row or a translation.
+    private static func hasContent(_ s: String) -> Bool {
+        s.unicodeScalars.contains { scalar in
+            if Self.standaloneMarks.contains(scalar.value) {
+                return false
+            }
+            if KanaClassification.isKana(scalar) || KanaClassification.isKanji(scalar) {
+                return true
+            }
+            switch scalar.value {
+            case 0x30 ... 0x39, // ASCII digits
+                 0x41 ... 0x5A, 0x61 ... 0x7A: // Latin letters
+                return true
+            default:
+                return false
+            }
+        }
     }
 }

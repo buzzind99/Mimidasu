@@ -254,10 +254,10 @@ extension AppModel {
         return SessionPhaseMachine.isLive(phase)
     }
 
-    /// Teardown via `SessionController` (capture, ASR, buffering, timers),
-    /// after which the translation queue has drained and the session winds
-    /// down. That keeps the tail of the session exportable with translations
-    /// intact.
+    /// Teardown via `SessionController` (capture, ASR, sentence emission,
+    /// poll timer), after which the translation queue has drained and the
+    /// session winds down. That keeps the tail of the session exportable with
+    /// translations intact.
     ///
     /// The translation config is deliberately left alive: once drained, the
     /// worker is suspended harmlessly, and keeping the config non-nil lets
@@ -307,7 +307,7 @@ extension AppModel {
 
     // MARK: - Availability
 
-    /// Re-checks both model choices and moves `idle`↔`needsModel` by the
+    /// Re-checks every model choice and moves `idle`↔`needsModel` by the
     /// active choice's result. The resolve (existence + SHA-256 verify,
     /// hashing up to ~1.2 GB) runs off-main and the result is hopped back
     /// here; `isCheckingModel` gates Start while the check is in flight.
@@ -322,7 +322,7 @@ extension AppModel {
         isCheckingModel = true
         let selected = asrModelSettings.selected
         let resolved = await Task.detached(priority: .userInitiated) { () -> [ASRModelChoice: URL] in
-            // Both choices resolve concurrently: each verify hashes up to
+            // All choices resolve concurrently: each verify hashes up to
             // ~1.2 GB, and parallel keeps the wall time at the slower one
             // instead of the sum.
             await withTaskGroup(of: (ASRModelChoice, URL?).self) { group in

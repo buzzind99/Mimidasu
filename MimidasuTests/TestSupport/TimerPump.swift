@@ -32,8 +32,8 @@ enum TimerPump {
     }
 
     /// Sync wrapper around the noasync-annotated `RunLoop.run(until:)`:
-    /// `Task.sleep` does not spin the main run loop, so the poll/tick timers
-    /// never fire without this deliberate pump.
+    /// `Task.sleep` does not spin the main run loop, so the poll timer never
+    /// fires without this deliberate pump.
     private nonisolated static func pumpRunLoop(seconds: TimeInterval) {
         RunLoop.main.run(until: Date().addingTimeInterval(seconds))
     }

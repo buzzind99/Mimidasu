@@ -26,12 +26,14 @@ struct SessionControllerPauseTests {
 
         private let log: CallLog
         private let flushScript: [ASREvent]
+        private var pollScript: [ASREvent]
         /// Set by a race test: `flushUtterance` parks until `open()`.
         var flushPark: FlushPark?
 
-        init(log: CallLog, flush: [ASREvent] = []) {
+        init(log: CallLog, flush: [ASREvent] = [], poll: [ASREvent] = []) {
             self.log = log
             flushScript = flush
+            pollScript = poll
         }
 
         func prepare() {
@@ -45,7 +47,8 @@ struct SessionControllerPauseTests {
         func push(_ samples: [Float]) {}
 
         func poll() -> ASREvent? {
-            nil
+            guard !pollScript.isEmpty else { return nil }
+            return pollScript.removeFirst()
         }
 
         func finish() -> [ASREvent] {
@@ -105,6 +108,7 @@ struct SessionControllerPauseTests {
 
     private func makeSUT(
         flush: [ASREvent] = [],
+        poll: [ASREvent] = [],
         resumeError: (any Error)? = nil,
         silenceGracePeriod: Duration = SessionController.noAudioWarningDelay
     ) -> SUT {
@@ -112,7 +116,7 @@ struct SessionControllerPauseTests {
         let live = LivePartialState()
         let latency = LatencyState()
         let audioLevel = AudioLevelState()
-        let engine = ScriptedASREngine(log: log, flush: flush)
+        let engine = ScriptedASREngine(log: log, flush: flush, poll: poll)
         let capture = ScriptedCapture(log: log, resumeError: resumeError)
         let sentences = SentenceSink()
         let controller = SessionController(
@@ -143,7 +147,7 @@ struct SessionControllerPauseTests {
         #expect(sut.log.contains(inOrder: ["capture.start", "capture.pause", "engine.flushUtterance"]))
     }
 
-    @Test("the flushed final lands as a sentence through the buffer flush")
+    @Test("the flushed final lands as a sentence")
     func pauseFlushesOpenUtteranceIntoSentence() async throws {
         let sut = makeSUT(flush: [
             .final(text: flushTailSentence, startSample: 0, endSample: 16000, lang: "ja")
@@ -153,6 +157,29 @@ struct SessionControllerPauseTests {
         await sut.controller.pause()
 
         #expect(sut.sentences().map { sentence in sentence.text } == [flushTailSentence])
+    }
+
+    @Test("sentence indexes keep counting across a pause flush")
+    func pauseFlushKeepsIndexesContinuous() async throws {
+        let sut = makeSUT(
+            flush: [
+                .final(text: flushTailSentence, startSample: 16000, endSample: 32000, lang: "ja")
+            ],
+            poll: [
+                .final(text: "最初です", startSample: 0, endSample: 16000, lang: "ja")
+            ]
+        )
+        _ = try await sut.controller.begin(modelURL: nil, modelID: "test-model")
+        sut.controller.startTimers()
+        let surfaced = await TimerPump.pumpTimers(until: sut.sentences().count == 1)
+        #expect(surfaced)
+
+        await sut.controller.pause()
+
+        // Same buffer across the pause: the flush final takes the next index
+        // and keeps its own span instead of restarting the count.
+        #expect(sut.sentences().map(\.index) == [0, 1])
+        #expect(sut.sentences().map(\.startS) == [0.0, 1.0])
     }
 
     @Test("pause clears the live partial, latency, and audio staging")

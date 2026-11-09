@@ -363,7 +363,7 @@ struct SessionControllerTests {
 
     // MARK: - stop() teardown ordering
 
-    @Test("stop stops capture, drains the engine, then flushes the buffer")
+    @Test("stop stops capture, drains the engine, then lands the flushed final")
     func stopOrderingAndFlush() async throws {
         let sut = makeSUT(finish: [
             .final(
