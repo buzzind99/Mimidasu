@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 @testable import Mimidasu
 import Synchronization
@@ -144,12 +143,14 @@ struct CrispASREngineLifecycleTests {
             "nil detection falls back to the name guessed from the file name"
         )
 
-        library.detectBackendResult = "funasr"
+        // A non-FunASR name keeps this test out of the process-wide cache
+        // workaround that the FunASR-cache suite below owns.
+        library.detectBackendResult = "parakeet"
         let detectedEngine = try CrispASREngine(modelPath: modelURL, library: library)
         try detectedEngine.prepare()
 
         #expect(
-            library.openSessionBackends == ["sensevoice", "funasr"],
+            library.openSessionBackends == ["sensevoice", "parakeet"],
             "a detected backend is passed through to openSession"
         )
     }
@@ -499,18 +500,16 @@ extension CrispASREngineLifecycleTests {
     }
 }
 
-/// The FunASR cache workaround touches process-wide environment state, so it
-/// lives in its own suite instead of growing the lifecycle type's body.
+/// The FunASR cache workaround writes process-wide environment state in
+/// production, so it lives in its own suite instead of growing the lifecycle
+/// type's body. The engine's environment setter is injected here, so the
+/// tests never touch the real environment.
 @Suite("CrispASREngine (FunASR cache)")
 struct CrispASREngineFunASRCacheTests {
     private let tmp: TemporaryDirectory
 
     init() throws {
         tmp = try TemporaryDirectory(prefix: "mimidasu-funasr-cache")
-    }
-
-    private func envValue(_ key: String) -> String? {
-        getenv(key).map { pointer in String(cString: pointer) }
     }
 
     @Test("FunASR's encoder cache is disabled by backend or by the file-name fallback")
@@ -527,27 +526,43 @@ struct CrispASREngineFunASRCacheTests {
         #expect(!CrispASREngine.disablesFunASRCache(backend: "parakeet", modelPath: "/tmp/haas-ja.gguf"))
     }
 
-    @Test("prepare disables FunASR's encoder cache before opening the session")
+    @Test("prepare disables FunASR's encoder cache for the session")
     func prepareDisablesFunASRCache() throws {
-        let key = "CRISPASR_FUNASR_ENC_CACHE"
-        let original = envValue(key)
-        defer {
-            if let original {
-                setenv(key, original, 1)
-            } else {
-                unsetenv(key)
-            }
-        }
-        unsetenv(key)
-
         let library = FakeCrispASRLibrary()
         library.detectBackendResult = "funasr"
         let modelURL = try tmp.write(Data("gguf".utf8), named: "funasr-model.gguf")
-        let engine = try CrispASREngine(modelPath: modelURL, library: library)
+        let applied = Mutex<[String]>([])
+        let engine = try CrispASREngine(
+            modelPath: modelURL,
+            library: library,
+            setEnvironment: { name, value in
+                applied.withLock { entries in entries.append("\(name)=\(value)") }
+            }
+        )
 
         try engine.prepare()
 
-        #expect(envValue(key) == "0")
+        #expect(applied.withLock { entries in entries } == ["CRISPASR_FUNASR_ENC_CACHE=0"])
         #expect(library.openSessionBackends == ["funasr"])
+    }
+
+    @Test("prepare leaves the cache environment alone for non-FunASR models")
+    func prepareLeavesCacheEnvironmentAlone() throws {
+        let library = FakeCrispASRLibrary()
+        library.detectBackendResult = "parakeet"
+        let modelURL = try tmp.write(Data("gguf".utf8), named: "haas-ja-v1.0-q8_0.gguf")
+        let applied = Mutex<[String]>([])
+        let engine = try CrispASREngine(
+            modelPath: modelURL,
+            library: library,
+            setEnvironment: { name, value in
+                applied.withLock { entries in entries.append("\(name)=\(value)") }
+            }
+        )
+
+        try engine.prepare()
+
+        #expect(applied.withLock { entries in entries }.isEmpty)
+        #expect(library.openSessionBackends == ["parakeet"])
     }
 }

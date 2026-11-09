@@ -97,7 +97,7 @@ enum ASRModelChoice: String, CaseIterable, Identifiable {
         case .lite:
             "Smaller download & memory usage, faster inference — great default for everyday transcription. (Recommended)"
         case .haas:
-            "Medium download & memory usage, about 3.5× faster than Full at the same accuracy — the best balance for most Macs."
+            "Medium download & memory usage, near-Full accuracy with about 3.5× faster decoding — a strong balance for most Macs."
         case .full:
             "Largest download & memory usage, slowest inference — kept for compatibility with existing installs."
         }

@@ -10,6 +10,12 @@
   — format conversion only, no modification of weights or architecture)
 - License: Apache-2.0
 
+## Haas-ja-v1.0 (GGUF Q8_0)
+- Source: https://huggingface.co/cstr/Haas-ja-v1.0-GGUF
+  (GGUF quantization of https://huggingface.co/third-intelligence/Haas-ja-v1.0
+  — format conversion only, no modification of weights or architecture)
+- License: Apache-2.0
+
 ## FunASR-Nano (GGUF Q8_0)
 - Source: https://huggingface.co/cstr/funasr-nano-GGUF
   (GGUF quantization of the FunASR Nano model from the FunASR project,

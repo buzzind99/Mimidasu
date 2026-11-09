@@ -35,12 +35,12 @@ struct ModelLocatorTests {
             #expect(
                 ModelLocator.downloadedURL(for: choice).deletingLastPathComponent()
                     == ModelLocator.modelsDirectory,
-                "both choices live in the shared models directory"
+                "every choice lives in the shared models directory"
             )
         }
         #expect(
             ModelLocator.downloadedURL(for: .lite) != ModelLocator.downloadedURL(for: .full),
-            "the two choices resolve to distinct side-by-side files"
+            "each choice resolves to a distinct side-by-side file"
         )
     }
 

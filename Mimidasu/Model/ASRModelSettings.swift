@@ -3,7 +3,7 @@ import Observation
 
 /// Non-secret ASR model selection: which `ASRModelChoice` the app resolves,
 /// downloads, and runs. Persisted to UserDefaults (`"asr.model"`, raw value)
-/// and defaulted to `.lite` so a fresh install never needs the full model.
+/// and defaulted to `.lite` so a fresh install never needs the largest model.
 /// Mirrors `TranslationSettings`' pattern: @Observable, @MainActor,
 /// injectable `UserDefaults` for tests.
 @Observable

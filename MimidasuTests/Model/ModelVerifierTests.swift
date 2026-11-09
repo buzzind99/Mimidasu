@@ -66,10 +66,16 @@ struct ModelVerifierTests {
             ModelVerifier.expectedSHA256(for: .lite) == ASRModelChoice.lite.pinnedSHA256
         )
         #expect(
+            ModelVerifier.expectedSHA256(for: .haas) == ASRModelChoice.haas.pinnedSHA256
+        )
+        #expect(
             ModelVerifier.expectedSHA256(for: .full) == ASRModelChoice.full.pinnedSHA256
         )
         #expect(
             ModelVerifier.expectedSHA256(for: .lite) != ModelVerifier.expectedSHA256(for: .full)
+        )
+        #expect(
+            ModelVerifier.expectedSHA256(for: .haas) != ModelVerifier.expectedSHA256(for: .full)
         )
         #expect(
             ASRModelChoice.full.pinnedSHA256.allSatisfy { char in

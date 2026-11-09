@@ -48,15 +48,15 @@ struct AppModelModelSelectionTests {
     @Test("selectModel persists the choice and re-resolves into modelURL")
     func selectModelPersistsAndReresolves() async {
         let liteURL = URL(fileURLWithPath: "/tmp/lite.gguf")
-        let fullURL = URL(fileURLWithPath: "/tmp/full.gguf")
-        let model = await makeSUT(resolve: { choice in choice == .full ? fullURL : liteURL })
+        let haasURL = URL(fileURLWithPath: "/tmp/haas.gguf")
+        let model = await makeSUT(resolve: { choice in choice == .haas ? haasURL : liteURL })
         model.phase = .idle
 
-        model.selectModel(.full)
-        await pollUntil { model.asrModelSettings.selected == .full && model.modelURL == fullURL }
+        model.selectModel(.haas)
+        await pollUntil { model.asrModelSettings.selected == .haas && model.modelURL == haasURL }
 
-        #expect(model.asrModelSettings.selected == .full)
-        #expect(model.modelURL == fullURL)
+        #expect(model.asrModelSettings.selected == .haas)
+        #expect(model.modelURL == haasURL)
         #expect(model.phase == .idle)
     }
 

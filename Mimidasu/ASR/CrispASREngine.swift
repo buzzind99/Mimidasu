@@ -49,9 +49,14 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
     /// and then once every 32 consecutive ones.
     var onEngineError: ((String) -> Void)?
 
+    /// Writes a process environment variable. Injectable so tests can observe
+    /// the FunASR cache workaround without mutating the real environment.
+    typealias EnvironmentSetter = @Sendable (String, String) -> Void
+
     private let modelPath: String
     let languageCode: String
     let lib: any CrispASRLibraryAPI
+    private let setEnvironment: EnvironmentSetter
 
     // Window/endpointing knobs (mirrors the CLI defaults where sensible).
     static let sampleRate = 16000
@@ -110,13 +115,19 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
 
     /// Backend name used when `crispasr_detect_backend_from_gguf` can't name
     /// one (runtime without the symbol, unparsable GGUF): the model family
-    /// guessed from the GGUF's file name — both shipped GGUFs are named
-    /// after their architecture (`funasr-nano-2512-q8_0.gguf`,
-    /// `sensevoice-small-q8_0.gguf`), so the guess follows the same naming
-    /// the detector would resolve.
+    /// guessed from the GGUF's file name — every shipped GGUF is named after
+    /// its architecture (`sensevoice-small-q8_0.gguf`,
+    /// `haas-ja-v1.0-q8_0.gguf`, `funasr-nano-2512-q8_0.gguf`), so the guess
+    /// follows the same naming the detector would resolve.
     static func fallbackBackend(modelPath: String) -> String {
         let name = URL(fileURLWithPath: modelPath).lastPathComponent.lowercased()
-        return name.contains("funasr") ? "funasr" : "sensevoice"
+        if name.contains("funasr") {
+            return "funasr"
+        }
+        if name.contains("haas") || name.contains("parakeet") {
+            return "parakeet"
+        }
+        return "sensevoice"
     }
 
     /// Whether a session for this model must disable FunASR's encoder graph
@@ -126,8 +137,8 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
     /// 10 s, so once the cap is reached every partial has the same length —
     /// this would break Full about 11 s into continuous speech.
     ///
-    /// Detection is authoritative; the file-name fallback keeps the guard
-    /// working when the GGUF header cannot be read.
+    /// Detection is authoritative; the file-name check also catches a FunASR
+    /// GGUF whose detector returned another name (e.g. a legacy runtime).
     static func disablesFunASRCache(backend: String, modelPath: String) -> Bool {
         if backend.lowercased() == "funasr" {
             return true
@@ -140,9 +151,9 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
     /// Applies the cache rule above before the model loads. Process-wide,
     /// but `prepare` is the app's only session opener, so one set is enough
     /// for every later FunASR session in this process.
-    private static func applyFunASRCacheWorkaround(backend: String, modelPath: String) {
-        guard disablesFunASRCache(backend: backend, modelPath: modelPath) else { return }
-        setenv("CRISPASR_FUNASR_ENC_CACHE", "0", 1)
+    private func applyFunASRCacheWorkaround(backend: String, modelPath: String) {
+        guard Self.disablesFunASRCache(backend: backend, modelPath: modelPath) else { return }
+        setEnvironment("CRISPASR_FUNASR_ENC_CACHE", "0")
     }
 
     /// FunASR-family models tag non-speech audio in their decode output
@@ -210,13 +221,19 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
 
     /// `library` is injectable so tests can drive the full state machine over
     /// a scripted fake without dlopen; nil (the default) binds the real dylib.
+    /// `setEnvironment` is likewise injectable; its default writes the real
+    /// process environment for the FunASR cache workaround.
     init(
         modelPath: URL,
         languageCode: String = "ja",
-        library: (any CrispASRLibraryAPI)? = nil
+        library: (any CrispASRLibraryAPI)? = nil,
+        setEnvironment: @escaping EnvironmentSetter = { name, value in
+            _ = setenv(name, value, 1)
+        }
     ) throws {
         self.modelPath = modelPath.path
         self.languageCode = languageCode
+        self.setEnvironment = setEnvironment
         lib = try library ?? CrispASRLibrary.open()
         let vadModelPath = lib.vadModelPath
         vadUnavailableReason = if vadModelPath == nil {
@@ -341,7 +358,7 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
             #if DEBUG
                 print("[asr] prepare: opening C session (\(backend)/metal)")
             #endif
-            Self.applyFunASRCacheWorkaround(backend: backend, modelPath: modelPath)
+            applyFunASRCacheWorkaround(backend: backend, modelPath: modelPath)
             lib.setGpuBackend("metal")
             guard let handle = lib.openSession(modelPath: modelPath, backend: backend) else {
                 return ASREngineError.createFailed(

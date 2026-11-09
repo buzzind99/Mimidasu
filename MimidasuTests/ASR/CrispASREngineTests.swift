@@ -184,6 +184,13 @@ struct CrispASREngineTests {
             CrispASREngine.fallbackBackend(modelPath: "/models/sensevoice-small-q8_0.gguf") == "sensevoice"
         )
         #expect(
+            CrispASREngine.fallbackBackend(modelPath: "/models/haas-ja-v1.0-q8_0.gguf") == "parakeet",
+            "the Balanced GGUF opens through the parakeet backend"
+        )
+        #expect(
+            CrispASREngine.fallbackBackend(modelPath: "/models/PARAKEET-ja.gguf") == "parakeet"
+        )
+        #expect(
             CrispASREngine.fallbackBackend(modelPath: "/models/FUNASR-Nano.Q8_0.GGUF") == "funasr",
             "the guess is case-insensitive"
         )
