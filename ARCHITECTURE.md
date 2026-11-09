@@ -38,7 +38,7 @@ rig.
              └──────────────┬──────────────┘
                             ▼
              ┌─────────────────────────────┐
-             │        SentenceBuffer       │ 3-tier boundaries; session
+             │        SentenceBuffer       │ one final = one sentence; session
              │                             │ sample-clock timestamps
              └──────────────┬──────────────┘
                             ▼
@@ -157,7 +157,8 @@ for the CLI and dev builds.
   swap or quit), never on session stop. Decodes run on a dedicated serial
   queue so `poll` never blocks behind a multi-second decode; session
   teardown is capture stop → channel finish/drain (consuming any airborne
-  pause flush) → timers → buffer flush → translation drain.
+  pause flush — the flush final lands through the normal final path) →
+  poll timer → translation drain.
 - `ASREngine` protocol + factory: CrispASR when the runtime and model
   resolve, otherwise the labeled mock transcriber (finals only, RMS-gated,
   randomized speech cadence). The factory holds a path-keyed warm-engine
@@ -165,20 +166,22 @@ for the CLI and dev builds.
   `close()`; a quit-time shutdown frees the VAD cache.
 
 ### SentenceBuffer (`Session/`)
-- Streaming ja ASR routinely drops punctuation, so boundaries are 3-tier:
-  1. Terminal punctuation (`。！？` plus ASCII `!`/`?`) closes immediately.
-  2. No new finals for ~1 s finalizes the buffer.
-  3. 42-char split trigger, split at the first clause boundary found
-     at/after 18 chars, scanning the fixed priority `けど` / `から` / `ので` /
-     `って` / `、` / `,`. Without a clause boundary the buffer keeps growing,
-     so this is not a hard cap.
-  Symbol-only finals (e.g. `...`) never start a sentence.
+- One final = one sentence: each ASR final is emitted immediately as exactly
+  one transcript sentence, never held open, merged, or re-split. Boundaries
+  are audio-only — the FireRedVAD silence endpoint (~1 s of confirmed
+  silence), the 12 s forced-final cap, and the pause/stop flush — so there
+  is no terminal-punctuation close, no ~1 s silence timer, no 42-char cap,
+  no clause-word (`けど` / `から` / `ので` / `って` / `、` / `,`) or
+  inner-punctuation split, and no `flush()`, `tick()`, or `noteTrailing()`.
+  A sentence's span is the final's own audio span: `startS`/`endS` from
+  `startSample`/`endSample`, with the end clamped up to the start so a span
+  never runs backwards; a final that reports no span still yields a
+  zero-length row. Symbol-only finals (e.g. `...` or `・`/`ー`-only) are
+  dropped.
 - **Final gate:** only Japanese-script finals become sentences —
   `KanaClassification.containsJapanese`, kana included, because the final
   re-decode often renders kanji words as kana even when the partial showed
-  kanji. Latin/symbol-only finals are dropped at the door and recorded via
-  `noteTrailing`: speech continued, so the open sentence's silence timer
-  and end span stay honest without appending anything.
+  kanji. Latin/symbol-only finals are dropped at the door.
 - Timestamps from the session sample clock (chunk offsets ÷ 16 kHz): each
   sentence records `start_s`/`end_s`, ±160 ms granularity. Partials are
   never stamped.
@@ -749,7 +752,7 @@ for the CLI and dev builds.
   SHA-256 verification. `ModelVerifier` checks the pinned SHA-256 behind a
   two-tier positive-verdict cache keyed (path, size, mtime) — an in-process
   hot set plus a persisted `verification-cache.json`, so switching never
-  re-hashes the other model; `ModelDownloader` handles resume / cancel /
+  re-hashes any other model; `ModelDownloader` handles resume / cancel /
   verify-and-replace, verifying at the temp location so a bad download
   never reaches the model path.
 - A model must be downloaded **and verified** before selection. Selection
@@ -763,7 +766,7 @@ for the CLI and dev builds.
 - First launch with no verified model swaps the main shell for
   `OnboardingView` (compact window footprint, restored on completion): a
   permission/privacy explainer (system-audio TCC, local processing) and a
-  SPEECH MODEL card with one roomy 200pt row per choice (Settings keeps the
+  SPEECH MODEL card with one roomy 200pt card per choice (Settings keeps the
   regular card) — pick + download with progress / retry / cancel;
   completion auto-advances into the main UI. The model can be swapped later
   in Settings.
@@ -819,11 +822,11 @@ for the CLI and dev builds.
   store/read model, the Favorites store, and the dictionary engines.
 - `SessionController`: engine creation via `ASREngineFactory` + background
   warm-up (path-keyed; a model switch re-arms it), capture wiring, the
-  sentence buffer, the 60 ms poll / 200 ms tick timers, ASR event →
-  sentence handling, mid-session capture restart (no model reload), and
-  pause/resume. `pause()` freezes only capture: the in-flight utterance is
-  flushed through the engine exactly once, the sentence buffer closes, and
-  live surfaces clear, while timers and translation keep running;
+  sentence buffer, the 60 ms poll timer, ASR event → sentence handling,
+  mid-session capture restart (no model reload), and pause/resume.
+  `pause()` freezes only capture: the in-flight utterance is flushed
+  through the engine exactly once, the flush final lands as a sentence,
+  and live surfaces clear, while the poll timer and translation keep running;
   `resume()` restarts the IOProc, re-arms a fresh watchdog grace, and
   resets the presence latch. Pause/resume/restart/stop are serialized on a
   main-actor transition tail; `stop` latches `stopRequested` synchronously
@@ -831,11 +834,12 @@ for the CLI and dev builds.
   capture start, engine `prepare` (off-main), and `openStream` run inside one
   do/catch with a stop-latch check after every await. A throw or a stop
   latched mid-begin rolls the acquisition back — the capture is stopped, the
-  engine / capture / buffer / metadata references drop, and timers and live
-  surfaces clear — without closing, finishing, or retiring the process-warm
-  engine and without resetting an engine channel a queued stop may own; a
-  cancelled begin throws `CancellationError`, which the phase machine refuses
-  from the stop phases, so a handled stop never surfaces a failure card.
+  engine / capture / buffer / metadata references drop, the poll timer stops,
+  and live surfaces clear — without closing, finishing, or retiring the
+  process-warm engine and without resetting an engine channel a queued stop
+  may own; a cancelled begin throws `CancellationError`, which the phase
+  machine refuses from the stop phases, so a handled stop never surfaces a
+  failure card.
 - The phase machine returns phase + category (`legal` / `refused` /
   `compensating`) plus, only for a capture loss while paused, the parked
   capture-error message. It carries no effect list; the ordered stop seam
@@ -849,8 +853,8 @@ for the CLI and dev builds.
   than in the coordinator files.
 - Teardown order: capture stop → watchdog disarm → `SessionEngineChannel`
   finish (consuming any airborne pause flush) off-main with drained events
-  replayed → timers → buffer flush → bounded translation drain. The 60 ms
-  poll tick also publishes latency (pushed − processed samples) and drains
+  replayed → poll timer → bounded translation drain. The 60 ms poll tick
+  also publishes latency (pushed − processed samples) and drains
   chunk RMS into the audio meter plus a one-shot audio-detected flag
   through `Mutex`-guarded handoffs. A one-shot silence watchdog surfaces a
   no-audio warning when a fresh capture stays below the silence floor (8 s
@@ -860,8 +864,8 @@ for the CLI and dev builds.
   `.sourceLost`, latches the loss anchor, and posts the Restart capture
   card; while
   paused the error is deferred to the resume path, where a failed rebuild
-  enters `.sourceLost`. Restart rebuilds only the capture — engine, timers,
-  buffer, session clock, and the fallback latch all survive.
+  enters `.sourceLost`. Restart rebuilds only the capture — engine, poll
+  timer, buffer, session clock, and the fallback latch all survive.
 
 ### Session archive (`Archive/`)
 - **Store:** `ArchiveStore` is a synchronous façade over `ArchiveDatabase`
@@ -1064,17 +1068,18 @@ opaque C handles stay inside the engine and HAL ownership types.
    and emits it; `SessionController` forwards it to `ASREngine.push` and
    stages RMS/presence on the capture thread.
 2. Polling yields partials (HUD draft; transcript untouched) or finals.
-3. Finals append to `SentenceBuffer` with sample-accurate offsets.
-4. A tier-1/2/3 boundary closes the Sentence → immutable `Sentence`
-   appended to the transcript pane (JP SessionEntry), enqueued for
-   translation, and persisted (the first Sentence creates the archive's
-   `recording` row).
+3. Each final immediately emits exactly one `Sentence`, stamped with the
+   final's own sample span (end clamped to the start); no text-side
+   boundary rule applies.
+4. The immutable `Sentence` is appended to the transcript pane (JP
+   SessionEntry), enqueued for translation, and persisted (the first
+   Sentence creates the archive's `recording` row).
 5. `TranslationQueue` resolves → translation published (translated
    SessionEntry), landed on the pane's row, and upserted into the
    archive.
 6. On Pause: the IOProc stops, the in-flight utterance flushes through the
-   engine channel as a final, timers and translation keep running, and the
-   pause span is excluded from duration. Resume restarts the IOProc.
+   engine channel as a final, the poll timer and translation keep running,
+   and the pause span is excluded from duration. Resume restarts the IOProc.
 7. On Stop: capture stops, engine finish/drain, translation queue drains
    (bounded), and the archive row is finalized as a Recent; the session
    becomes exportable.
@@ -1091,7 +1096,8 @@ opaque C handles stay inside the engine and HAL ownership types.
     "target_lang": "en",           // the session's selected target (BCP-47;
                                    // English is the default)
     "model": "sensevoice-small-GGUF",   // the active choice's modelID
-                                        // ("funasr-nano-GGUF" for full;
+                                        // ("Haas-ja-v1.0-GGUF" for Balanced;
+                                        // "funasr-nano-GGUF" for Full;
                                         // "mock" for the mock transcriber)
     "chunk_ms": 160
   },
