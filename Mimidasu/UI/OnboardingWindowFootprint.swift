@@ -1,6 +1,20 @@
 import AppKit
 import SwiftUI
 
+/// Onboarding layout constants shared by the window footprint and the root
+/// content's minimum frame: the hosted content must not demand more width than
+/// the window this modifier applies.
+enum OnboardingWindowMetrics {
+    static let contentWidth: CGFloat = 760
+    static let contentHeight: CGFloat = 800
+    /// Outer content inset around the onboarding column.
+    static let contentInset: CGFloat = 32
+    /// The permission and picker cards' cap; three cards share it.
+    static var cardMaxWidth: CGFloat {
+        contentWidth - 2 * contentInset
+    }
+}
+
 extension View {
     /// Shrinks the hosting window to the compact onboarding footprint while
     /// `isOnboarding` holds, and restores the pre-onboarding size afterwards.
@@ -30,7 +44,10 @@ private struct WindowFootprintHost: NSViewRepresentable {
 /// updates.
 private final class WindowFootprintView: NSView {
     /// Compact footprint while onboarding owns the window.
-    private static let onboardingContentSize = NSSize(width: 760, height: 800)
+    private static let onboardingContentSize = NSSize(
+        width: OnboardingWindowMetrics.contentWidth,
+        height: OnboardingWindowMetrics.contentHeight
+    )
 
     private var desiredOnboarding = false
     private var appliedOnboarding: Bool?

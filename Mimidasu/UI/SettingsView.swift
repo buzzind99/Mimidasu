@@ -134,6 +134,10 @@ struct SettingsView: View {
             keyDraft = ""
             keySaveFailed = false
             modelDraft = settings.model(for: settings.selectedProvider)
+            // The cached window keeps `modelScrollPosition` from the last
+            // visit too; bring the in-use model back into view on reopen.
+            // No-op on the first open, where `.onAppear` already set it.
+            modelScrollPosition = initialCarouselPosition
             // The cached window doesn't re-run `.task` on reopen; the
             // availability probe is a no-op once loaded anyway.
             Task { await model.appleTranslationAvailability.refreshIfNeeded() }
@@ -316,11 +320,11 @@ struct SettingsView: View {
 
     /// A card per ASR model choice (select / download), the models folder,
     /// and a re-check action. Two cards are visible at a time; the chevrons
-    /// move one card, and opening the window scrolls the in-use model to the
-    /// leading edge.
+    /// move one card, and opening the window brings the in-use model into
+    /// view (at the leading edge when two cards allow it).
     private var modelCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 4) {
+            HStack(spacing: 8) {
                 KickerLabel("SPEECH MODEL", color: Palette.label)
                 Spacer()
                 carouselChevron(systemName: "chevron.left", disabled: !canScrollCarouselBackward) {
@@ -343,9 +347,9 @@ struct SettingsView: View {
         .cardSurface(shadow: Palette.cardShadow)
     }
 
-    /// Two model cards visible at once, snapping to card boundaries. Full is
-    /// the card initially off-screen; the chevrons and the trailing edge of
-    /// the snap list are what reveal it.
+    /// Two model cards visible at once, snapping to card boundaries. The
+    /// trailing card is initially off-screen unless it is the selected one;
+    /// the chevrons and the trailing edge of the snap list reveal it.
     private var modelCarousel: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: 12) {
@@ -411,7 +415,8 @@ struct SettingsView: View {
             Image(systemName: systemName)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(disabled ? Palette.mutedText.opacity(0.4) : Palette.secondaryText)
-                .frame(width: 20, height: 20)
+                // HIG's default macOS control target; the glyph stays small.
+                .frame(width: 28, height: 28)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

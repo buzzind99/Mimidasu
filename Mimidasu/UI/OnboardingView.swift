@@ -40,7 +40,7 @@ struct OnboardingView: View {
 
             Spacer(minLength: 0)
         }
-        .padding(32)
+        .padding(OnboardingWindowMetrics.contentInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.window)
         .onAppear {
@@ -104,13 +104,13 @@ struct OnboardingView: View {
         .font(.system(size: 12))
         .foregroundStyle(Theme.secondaryText)
         .padding(16)
-        .frame(maxWidth: 696, alignment: .leading)
+        .frame(maxWidth: OnboardingWindowMetrics.cardMaxWidth, alignment: .leading)
         .cardSurface()
     }
 
     /// The onboarding model card: one card per choice sharing the selection-
-    /// following `downloader` (see `OnboardingModelRow`), in the same
-    /// container as `SettingsView.modelCard`. Fixed at the permission card's
+    /// following `downloader` (see `OnboardingModelRow`), in the same card
+    /// surface as `SettingsView.modelCard`. Capped at the permission card's
     /// width so a wider window stretches the surrounding layout, not the
     /// picker.
     private var modelCard: some View {
@@ -123,7 +123,7 @@ struct OnboardingView: View {
             }
         }
         .padding(16)
-        .frame(maxWidth: 696)
+        .frame(maxWidth: OnboardingWindowMetrics.cardMaxWidth)
         .fixedSize(horizontal: false, vertical: true)
         .cardSurface(shadow: Palette.cardShadow)
     }

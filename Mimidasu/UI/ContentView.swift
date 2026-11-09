@@ -137,7 +137,12 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme($appearance.resolvedColorScheme)
-        .frame(minWidth: isOnboarding ? 800 : 1080, minHeight: isOnboarding ? 720 : 800)
+        // Match the onboarding window footprint: a wider minimum would lay the
+        // content out past the window and clip it on the trailing edge.
+        .frame(
+            minWidth: isOnboarding ? OnboardingWindowMetrics.contentWidth : 1080,
+            minHeight: isOnboarding ? 720 : 800
+        )
         .onboardingWindowFootprint(isOnboarding)
         .favoriteRemovalConfirmation(model, pendingRemoval: $pendingFavoriteRemoval)
         .stopConfirmation(model, isPresented: $pendingStop)

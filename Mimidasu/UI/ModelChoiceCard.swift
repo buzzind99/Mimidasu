@@ -279,6 +279,9 @@ struct ModelChoiceCard: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Onboarding marks the pick by surface colour alone; the trait keeps
+        // the selection audible to VoiceOver on both surfaces.
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     /// The title, with the selection badge on the surfaces that show one.
