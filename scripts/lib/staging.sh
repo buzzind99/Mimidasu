@@ -26,6 +26,28 @@ jmdict_artifact_tag() {
   printf '%s.%s\n' "${tag}" "${rev}"
 }
 
+# The app-sized runtime is relinked from the dlsym manifest in
+# CrispASRLibrary; a stale copy from an older build can exist at the expected
+# path and still package. Check the required exports rather than existence
+# alone. (Detection is included: a runtime without it falls back to the
+# filename guess, which now matters for the Balanced model.)
+app_runtime_has_symbols() {
+  local dylib="$1" exported symbol
+  exported="$(nm -gU "${dylib}" 2>/dev/null | awk '{print $3}')" || return 1
+  [[ -n "${exported}" ]] || return 1
+  for symbol in \
+    _crispasr_set_gpu_backend \
+    _crispasr_session_open_explicit \
+    _crispasr_session_close \
+    _crispasr_session_transcribe_lang \
+    _crispasr_session_result_n_segments \
+    _crispasr_session_result_segment_text \
+    _crispasr_session_result_free \
+    _crispasr_detect_backend_from_gguf; do
+    grep -qx "${symbol}" <<<"${exported}" || return 1
+  done
+}
+
 # Fail before spending build time when any runtime artifact is absent. A
 # package without the ASR runtime runs as the labeled mock (Guideline 2.1, app
 # completeness) and one without the dictionary can never start a session, so
@@ -50,6 +72,9 @@ require_runtime_artifacts() {
     ok=0
   elif [[ ! -f "${REPO_ROOT}/local/frameworks/crispasr/libcrispasr-app.dylib" ]]; then
     echo "ERROR: app-sized ASR runtime missing. Re-run scripts/build_runtime.sh." >&2
+    ok=0
+  elif ! app_runtime_has_symbols "${REPO_ROOT}/local/frameworks/crispasr/libcrispasr-app.dylib"; then
+    echo "ERROR: app-sized ASR runtime is stale or incomplete. Re-run scripts/build_runtime.sh." >&2
     ok=0
   fi
   (( ok )) || exit 1
@@ -159,7 +184,7 @@ stage_runtime() {
 
 # Strip local symbols from the main executable before the bundle is sealed.
 # Xcode leaves the Release product unstripped by default here, which roughly
-# triples the executable's size; the separate dSYM still symbolicate crashes.
+# triples the executable's size; the separate dSYM still symbolicates crashes.
 strip_app_binary() {
   local app="$1"
   strip -x "${app}/Contents/MacOS/Mimidasu"

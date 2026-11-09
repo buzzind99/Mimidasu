@@ -64,6 +64,10 @@ source "${REPO_ROOT}/scripts/dmg/style_dmg.sh"
 
 cd "${REPO_ROOT}"
 
+# Fail before the Xcode build when a runtime artifact is missing; staging
+# would otherwise discover it only after the build.
+require_runtime_artifacts
+
 command -v xcodegen >/dev/null || { echo "xcodegen required (brew install xcodegen)"; exit 1; }
 # Dev hygiene, not a packaging gate (the build below passes its own
 # CURRENT_PROJECT_VERSION): a pre-commit-count xcconfig leaves bare Xcode

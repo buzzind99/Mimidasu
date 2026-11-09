@@ -9,6 +9,7 @@
 # Outputs:
 #   local/install/crispasr/                          SDK prefix (libs, headers, CLI)
 #   local/frameworks/crispasr/libcrispasr.dylib + ggml companions
+#   local/frameworks/crispasr/libcrispasr-app.dylib  app-sized relink
 #   Mimidasu/native/include/crispasr/crispasr_session.h  refreshed stable header
 #
 # The dylib set is isolated in a `crispasr/` subdirectory (ids and load
@@ -86,10 +87,19 @@ popd >/dev/null
 echo "==> Installing to ${SDK_DIR}"
 BUILD_BIN="${VENDOR_DIR}/${BUILD_DIR}/bin"
 mkdir -p "${SDK_DIR}/bin" "${SDK_DIR}/lib" "${SDK_DIR}/include/crispasr"
+# Drop the previous build's dylibs so a --cpu rebuild cannot inherit a stale
+# Metal library from the SDK prefix.
+rm -f "${SDK_DIR}/lib"/*.dylib
 cp -f "${BUILD_BIN}/crispasr" "${SDK_DIR}/bin/crispasr"
 find "${VENDOR_DIR}/${BUILD_DIR}/src" "${VENDOR_DIR}/${BUILD_DIR}/ggml/src" -name "*.dylib" | while read -r dylib; do
   cp -f "${dylib}" "${SDK_DIR}/lib/"
 done
+# The build tree itself may retain a Metal dylib from an earlier build; a
+# CPU-only runtime must not ship it (staging fails loudly instead of picking
+# up an unused copy).
+if [[ "${GGML_METAL}" == "OFF" ]]; then
+  rm -f "${SDK_DIR}/lib"/libggml-metal*.dylib
+fi
 cp -f "${VENDOR_DIR}/include/crispasr.h" \
       "${VENDOR_DIR}/include/crispasr_session.h" \
       "${SDK_DIR}/include/crispasr/"
@@ -108,13 +118,17 @@ strip_rpaths() {
   install_name_tool -add_rpath "@loader_path" "$f" 2>/dev/null || true
 }
 mkdir -p "${FRAMEWORKS_DIR}"
+# Drop stale copies first: a --cpu rebuild must not leave a Metal dylib
+# behind for staging to ship, and old versioned aliases confuse the loader.
+# The VAD model is data and stays.
+rm -f "${FRAMEWORKS_DIR}"/*.dylib "${FRAMEWORKS_DIR}/crispasr"
 for dylib in "${SDK_DIR}"/lib/*.dylib; do
   name="$(basename "${dylib}")"
   cp -f "${dylib}" "${FRAMEWORKS_DIR}/${name}"
   install_name_tool -id "@rpath/${name}" "${FRAMEWORKS_DIR}/${name}"
   strip_rpaths "${FRAMEWORKS_DIR}/${name}"
-  # The SDK copy above keeps its symbols for local debugging; the copy the
-  # app loads is stripped so the dev bundle matches the shipped footprint.
+  # The SDK copy above stays unstripped for manual debugging; the copy the
+  # dev app loads is stripped so the dev bundle matches the shipped footprint.
   strip -x "${FRAMEWORKS_DIR}/${name}"
 done
 # A copy of the CLI next to the dylibs is handy for manual debugging.
@@ -162,9 +176,16 @@ done
 LINK_CMD="$(cd "${VENDOR_DIR}/${BUILD_DIR}" && ninja -t commands "${FULL_REL}" | tail -1)"
 LINK_CMD="${LINK_CMD#: && }"
 LINK_CMD="${LINK_CMD% && :}"
-LINK_CMD="${LINK_CMD/ -o ${FULL_REL}/ -o src/libcrispasr-app.dylib}"
+RELINK_CMD="${LINK_CMD/ -o ${FULL_REL}/ -o src/libcrispasr-app.dylib}"
+if [[ "${RELINK_CMD}" == "${LINK_CMD}" ]]; then
+  # Never fall through: running the unmodified command would relink the full
+  # runtime with the trimmed export list and overwrite it.
+  echo "ERROR: could not retarget the link command for ${FULL_REL}" >&2
+  echo "       expected an '-o ${FULL_REL}' argument; refusing to overwrite the full runtime." >&2
+  exit 1
+fi
 rm -f "${VENDOR_DIR}/${BUILD_DIR}/src/libcrispasr-app.dylib"
-(cd "${VENDOR_DIR}/${BUILD_DIR}" && eval "${LINK_CMD} -Wl,-dead_strip -Wl,-x -Wl,-exported_symbols_list,${EXPORTS_FILE}")
+(cd "${VENDOR_DIR}/${BUILD_DIR}" && eval "${RELINK_CMD} -Wl,-dead_strip -Wl,-x -Wl,-exported_symbols_list,${EXPORTS_FILE}")
 TRIMMED="${VENDOR_DIR}/${BUILD_DIR}/src/libcrispasr-app.dylib"
 install_name_tool -id "@rpath/libcrispasr.dylib" "${TRIMMED}"
 strip_rpaths "${TRIMMED}"
