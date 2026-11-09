@@ -20,9 +20,10 @@ extension EnvironmentValues {
 }
 
 /// Button style with zero pressed-state feedback: the label renders
-/// identically idle, hovered, and pressed. The floating openers manage their
-/// own ghost opacity, so `.plain`'s mouse-down dimming would fight it.
-private struct StaticButtonStyle: ButtonStyle {
+/// identically idle, hovered, and pressed. The floating openers and the
+/// transcript jump buttons manage their own ghost opacity, so `.plain`'s
+/// mouse-down dimming would fight it.
+struct StaticButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
     }

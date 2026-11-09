@@ -777,20 +777,38 @@ struct ScrollJumpButtons: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            jumpButton("chevron.up", visible: scroll.showUpButton) {
+            ScrollJumpButton(
+                systemImage: "chevron.up",
+                visible: scroll.showUpButton,
+                glyphColor: glyphColor
+            ) {
                 scroll.unpinAndScrollToTop(proxy)
             }
-            jumpButton("chevron.down", visible: scroll.showDownButton) {
+            ScrollJumpButton(
+                systemImage: "chevron.down",
+                visible: scroll.showDownButton,
+                glyphColor: glyphColor
+            ) {
                 scroll.repinAndChase(proxy)
             }
         }
     }
+}
 
-    private func jumpButton(
-        _ systemImage: String,
-        visible: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
+/// One circular jump button, ghosted until hovered like the floating
+/// dictionary/favorites openers, so the corner's controls read as one family.
+/// Each holds its own hover flag: brightening the stacked pair together would
+/// make the pointer crossing the gap between them flicker. The static button
+/// style keeps a press from dimming it, as on those openers.
+private struct ScrollJumpButton: View {
+    let systemImage: String
+    let visible: Bool
+    let glyphColor: Color
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 13, weight: .semibold))
@@ -804,10 +822,18 @@ struct ScrollJumpButtons: View {
                 )
                 .contentShape(Circle())
         }
-        .buttonStyle(.plain)
-        .opacity(visible ? 1 : 0)
+        .buttonStyle(StaticButtonStyle())
+        .opacity(visible ? (isHovering ? 1 : 0.4) : 0)
         .allowsHitTesting(visible)
         .animation(.easeOut(duration: 0.18), value: visible)
         .pointerStyle(visible ? .link : nil)
+        .onHover { hovering in isHovering = hovering }
+        // A button that hides under the pointer must not come back bright
+        // when it reappears elsewhere.
+        .onChange(of: visible) { _, isVisible in
+            if !isVisible {
+                isHovering = false
+            }
+        }
     }
 }
