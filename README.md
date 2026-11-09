@@ -36,8 +36,8 @@ a verb, because every definition popup is a little *mimidasu*.
 ## Level-up your Japanese listening
 
 - **Understand while it happens** — sentences appear as they're spoken, using
-  the on-device Lite or Full speech model, with the translation right under
-  the Japanese
+  one of three on-device speech models (Lite, Balanced or Full), with the
+  translation right under the Japanese
 - **Pick your translation language** — English by default, with 18 more
   targets (Chinese, Korean, Spanish, French, …) available in Settings —
   on-device via Apple's Translation framework, with Apple Intelligence high
@@ -77,8 +77,9 @@ scripts/build_all.sh                          # ASR runtime, tokenizer, dictiona
 open Mimidasu.xcodeproj                       # then ⌘R
 ```
 
-On first launch you pick a speech model — Lite or Full — and it downloads
-automatically; press **Start** and grant system-audio access when prompted.
+On first launch you pick a speech model — Lite, Balanced or Full — and it
+downloads automatically; press **Start** and grant system-audio access when
+prompted.
 
 ## Development
 
