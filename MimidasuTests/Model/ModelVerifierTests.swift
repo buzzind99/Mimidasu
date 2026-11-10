@@ -71,11 +71,12 @@ struct ModelVerifierTests {
         #expect(
             ModelVerifier.expectedSHA256(for: .full) == ASRModelChoice.full.pinnedSHA256
         )
-        #expect(
-            ModelVerifier.expectedSHA256(for: .lite) != ModelVerifier.expectedSHA256(for: .full)
+        let pins = Set(
+            ASRModelChoice.allCases.map { choice in ModelVerifier.expectedSHA256(for: choice) }
         )
         #expect(
-            ModelVerifier.expectedSHA256(for: .haas) != ModelVerifier.expectedSHA256(for: .full)
+            pins.count == ASRModelChoice.allCases.count,
+            "every choice pins a distinct digest"
         )
         #expect(
             ASRModelChoice.full.pinnedSHA256.allSatisfy { char in

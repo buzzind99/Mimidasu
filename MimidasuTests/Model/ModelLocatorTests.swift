@@ -38,8 +38,11 @@ struct ModelLocatorTests {
                 "every choice lives in the shared models directory"
             )
         }
+        let downloadedURLs = Set(
+            ASRModelChoice.allCases.map { choice in ModelLocator.downloadedURL(for: choice) }
+        )
         #expect(
-            ModelLocator.downloadedURL(for: .lite) != ModelLocator.downloadedURL(for: .full),
+            downloadedURLs.count == ASRModelChoice.allCases.count,
             "each choice resolves to a distinct side-by-side file"
         )
     }
