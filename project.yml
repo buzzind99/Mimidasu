@@ -64,8 +64,9 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: mimidasu.app
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # Bundle paths first so a packaged app resolves its staged (trimmed)
-        # runtime even on a machine that still has the dev checkout; the
-        # SRCROOT paths are the Debug fallback when nothing is staged.
+        # runtime even on a machine that still has the dev checkout. The
+        # SRCROOT paths keep Xcode Run builds working; they come last so the
+        # packaged app never loads the checkout's copy.
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks @executable_path/../Frameworks/crispasr $(SRCROOT)/local/frameworks $(SRCROOT)/local/frameworks/crispasr"
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.utilities"
       configs:

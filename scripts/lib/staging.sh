@@ -26,11 +26,25 @@ jmdict_artifact_tag() {
   printf '%s.%s\n' "${tag}" "${rev}"
 }
 
+# Every file stage_runtime copies out of local/frameworks/crispasr. The
+# pre-build gate and the staging loop share this list so the gate can never
+# pass something staging will later reject.
+staged_crispasr_files() {
+  printf '%s\n' \
+    libcrispasr.dylib \
+    libggml.0.dylib \
+    libggml-base.0.dylib \
+    libggml-cpu.0.dylib \
+    libggml-metal.0.dylib \
+    libggml-blas.0.dylib \
+    firered-vad.gguf
+}
+
 # The app-sized runtime is relinked from the dlsym manifest in
 # CrispASRLibrary; a stale copy from an older build can exist at the expected
-# path and still package. Check the required exports rather than existence
-# alone. (Detection is included: a runtime without it falls back to the
-# filename guess, which now matters for the Balanced model.)
+# path and still package. Check the required session exports rather than
+# existence alone. Backend detection is deliberately not required: the engine
+# falls back to the GGUF file name, so a pre-detection runtime still runs.
 app_runtime_has_symbols() {
   local dylib="$1" exported symbol
   exported="$(nm -gU "${dylib}" 2>/dev/null | awk '{print $3}')" || return 1
@@ -42,8 +56,7 @@ app_runtime_has_symbols() {
     _crispasr_session_transcribe_lang \
     _crispasr_session_result_n_segments \
     _crispasr_session_result_segment_text \
-    _crispasr_session_result_free \
-    _crispasr_detect_backend_from_gguf; do
+    _crispasr_session_result_free; do
     grep -qx "${symbol}" <<<"${exported}" || return 1
   done
 }
@@ -54,6 +67,8 @@ app_runtime_has_symbols() {
 # neither should ever be produced by a packaging step.
 require_runtime_artifacts() {
   local ok=1 artifact_tag
+  local crispasr_dir="${REPO_ROOT}/local/frameworks/crispasr"
+  local shipped source
   if [[ ! -f "${REPO_ROOT}/local/frameworks/libdictionary.dylib" ]]; then
     echo "ERROR: dictionary runtime not built. Run scripts/build_tokenizer.sh first." >&2
     ok=0
@@ -67,15 +82,33 @@ require_runtime_artifacts() {
     echo "ERROR: jmdict-${artifact_tag}.sqlite.zst not built. Run scripts/build_dictionary.sh first." >&2
     ok=0
   fi
-  if [[ ! -d "${REPO_ROOT}/local/frameworks/crispasr" ]]; then
+  if [[ ! -d "${crispasr_dir}" ]]; then
     echo "ERROR: ASR runtime not built. Run scripts/build_runtime.sh first." >&2
     ok=0
-  elif [[ ! -f "${REPO_ROOT}/local/frameworks/crispasr/libcrispasr-app.dylib" ]]; then
-    echo "ERROR: app-sized ASR runtime missing. Re-run scripts/build_runtime.sh." >&2
-    ok=0
-  elif ! app_runtime_has_symbols "${REPO_ROOT}/local/frameworks/crispasr/libcrispasr-app.dylib"; then
-    echo "ERROR: app-sized ASR runtime is stale or incomplete. Re-run scripts/build_runtime.sh." >&2
-    ok=0
+  else
+    while IFS= read -r shipped; do
+      source="${crispasr_dir}/${shipped}"
+      if [[ "${shipped}" == libcrispasr.dylib ]]; then
+        source="${crispasr_dir}/libcrispasr-app.dylib"
+        if [[ ! -f "${source}" ]]; then
+          echo "ERROR: app-sized ASR runtime missing. Re-run scripts/build_runtime.sh." >&2
+          ok=0
+          continue
+        fi
+      fi
+      if [[ ! -f "${source}" ]]; then
+        echo "ERROR: ${shipped} missing from ${crispasr_dir}. Run scripts/build_runtime.sh first." >&2
+        if [[ "${shipped}" == libggml-metal.0.dylib ]]; then
+          echo "       (--cpu runtime builds don't produce it — package with the default Metal build)" >&2
+        fi
+        ok=0
+      fi
+    done < <(staged_crispasr_files)
+    if [[ -f "${crispasr_dir}/libcrispasr-app.dylib" ]] \
+      && ! app_runtime_has_symbols "${crispasr_dir}/libcrispasr-app.dylib"; then
+      echo "ERROR: app-sized ASR runtime is stale or incomplete. Re-run scripts/build_runtime.sh." >&2
+      ok=0
+    fi
   fi
   (( ok )) || exit 1
 }
@@ -145,30 +178,28 @@ stage_runtime() {
   # double the bundle for no benefit.
   local crispasr_dir="${fwdir}/crispasr"
   mkdir -p "${crispasr_dir}"
-  local shipped
-  for shipped in libcrispasr.dylib libggml.0.dylib libggml-base.0.dylib \
-    libggml-cpu.0.dylib libggml-metal.0.dylib libggml-blas.0.dylib \
-    firered-vad.gguf; do
-    if [[ ! -f "${REPO_ROOT}/local/frameworks/crispasr/${shipped}" ]]; then
+  local shipped source
+  while IFS= read -r shipped; do
+    # The shipped libcrispasr is the app-sized relink: the full dylib stays in
+    # local/frameworks/crispasr for the CLI/dev runtime. Both resolve their
+    # ggml companions from their own directory.
+    source="${REPO_ROOT}/local/frameworks/crispasr/${shipped}"
+    if [[ "${shipped}" == libcrispasr.dylib ]]; then
+      source="${REPO_ROOT}/local/frameworks/crispasr/libcrispasr-app.dylib"
+    fi
+    if [[ ! -f "${source}" ]]; then
       echo "ERROR: ${shipped} missing from local/frameworks/crispasr. Run scripts/build_runtime.sh first." >&2
       if [[ "${shipped}" == libggml-metal.0.dylib ]]; then
         echo "       (--cpu runtime builds don't produce it — package with the default Metal build)" >&2
       fi
       exit 1
     fi
-    # The shipped libcrispasr is the app-sized relink: the full dylib stays in
-    # local/frameworks/crispasr for the CLI/dev runtime. Both resolve their
-    # ggml companions from their own directory.
-    local source="${REPO_ROOT}/local/frameworks/crispasr/${shipped}"
-    if [[ "${shipped}" == libcrispasr.dylib ]]; then
-      source="${REPO_ROOT}/local/frameworks/crispasr/libcrispasr-app.dylib"
-    fi
     cp -f "${source}" "${crispasr_dir}/${shipped}"
     # The VAD model is data; only the Mach-O dylibs carry a symbol table.
     if [[ "${shipped}" == *.dylib ]]; then
       strip -x "${crispasr_dir}/${shipped}"
     fi
-  done
+  done < <(staged_crispasr_files)
 
   # Sign nested code with SIGN_IDENTITY. Everything under Contents/Frameworks
   # is a code location, so `codesign --deep`/App Store validation treats even

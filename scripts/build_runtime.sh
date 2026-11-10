@@ -91,7 +91,11 @@ mkdir -p "${SDK_DIR}/bin" "${SDK_DIR}/lib" "${SDK_DIR}/include/crispasr"
 # Metal library from the SDK prefix.
 rm -f "${SDK_DIR}/lib"/*.dylib
 cp -f "${BUILD_BIN}/crispasr" "${SDK_DIR}/bin/crispasr"
-find "${VENDOR_DIR}/${BUILD_DIR}/src" "${VENDOR_DIR}/${BUILD_DIR}/ggml/src" -name "*.dylib" | while read -r dylib; do
+# The previous run's app-sized dylib also lives in the build tree, but it is
+# not an SDK output (section 4b rebuilds it). Excluding it keeps a failed
+# relink from leaving an older app runtime for staging to ship.
+find "${VENDOR_DIR}/${BUILD_DIR}/src" "${VENDOR_DIR}/${BUILD_DIR}/ggml/src" \
+  -name "*.dylib" ! -name "libcrispasr-app.dylib" | while read -r dylib; do
   cp -f "${dylib}" "${SDK_DIR}/lib/"
 done
 # The build tree itself may retain a Metal dylib from an earlier build; a
@@ -118,9 +122,10 @@ strip_rpaths() {
   install_name_tool -add_rpath "@loader_path" "$f" 2>/dev/null || true
 }
 mkdir -p "${FRAMEWORKS_DIR}"
-# Drop stale copies first: a --cpu rebuild must not leave a Metal dylib
-# behind for staging to ship, and old versioned aliases confuse the loader.
-# The VAD model is data and stays.
+# Drop the previous build's staged copies first: a --cpu rebuild must not
+# leave a Metal dylib behind for staging to ship. The build tree's own alias
+# copies are re-copied below; staging ships only the named `.0`/unversioned
+# files. The VAD model is data and stays.
 rm -f "${FRAMEWORKS_DIR}"/*.dylib "${FRAMEWORKS_DIR}/crispasr"
 for dylib in "${SDK_DIR}"/lib/*.dylib; do
   name="$(basename "${dylib}")"
@@ -185,6 +190,9 @@ if [[ "${RELINK_CMD}" == "${LINK_CMD}" ]]; then
   exit 1
 fi
 rm -f "${VENDOR_DIR}/${BUILD_DIR}/src/libcrispasr-app.dylib"
+# A failed relink must leave the app runtime missing, never a previous copy
+# that staging would accept.
+rm -f "${FRAMEWORKS_DIR}/libcrispasr-app.dylib"
 (cd "${VENDOR_DIR}/${BUILD_DIR}" && eval "${RELINK_CMD} -Wl,-dead_strip -Wl,-x -Wl,-exported_symbols_list,${EXPORTS_FILE}")
 TRIMMED="${VENDOR_DIR}/${BUILD_DIR}/src/libcrispasr-app.dylib"
 install_name_tool -id "@rpath/libcrispasr.dylib" "${TRIMMED}"
