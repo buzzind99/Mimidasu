@@ -808,6 +808,10 @@ private struct ScrollJumpButton: View {
 
     @State private var isHovering = false
 
+    private var jumpLabel: String {
+        systemImage == "chevron.up" ? "Jump to oldest" : "Jump to newest"
+    }
+
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
@@ -827,6 +831,12 @@ private struct ScrollJumpButton: View {
         .allowsHitTesting(visible)
         .animation(.easeOut(duration: 0.18), value: visible)
         .pointerStyle(visible ? .link : nil)
+        // Ghosting does not remove a button from the accessibility tree or
+        // Tab focus; a hidden control must not be announced or activatable.
+        .disabled(!visible)
+        .accessibilityHidden(!visible)
+        .help(jumpLabel)
+        .accessibilityLabel(jumpLabel)
         .onHover { hovering in isHovering = hovering }
         // A button that hides under the pointer must not come back bright
         // when it reappears elsewhere.
