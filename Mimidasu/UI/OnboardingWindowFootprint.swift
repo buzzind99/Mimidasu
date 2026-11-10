@@ -9,7 +9,8 @@ enum OnboardingWindowMetrics {
     static let contentHeight: CGFloat = 800
     /// Outer content inset around the onboarding column.
     static let contentInset: CGFloat = 32
-    /// The permission and picker cards' cap; three cards share it.
+    /// The permission and picker cards' cap; the picker's three cards split
+    /// its width after the card's own padding.
     static var cardMaxWidth: CGFloat {
         contentWidth - 2 * contentInset
     }
