@@ -115,10 +115,10 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
 
     /// Backend name used when `crispasr_detect_backend_from_gguf` can't name
     /// one (runtime without the symbol, unparsable GGUF): the model family
-    /// guessed from the GGUF's file name — every shipped GGUF is named after
-    /// its architecture (`sensevoice-small-q8_0.gguf`,
-    /// `haas-ja-v1.0-q8_0.gguf`, `funasr-nano-2512-q8_0.gguf`), so the guess
-    /// follows the same naming the detector would resolve.
+    /// guessed from the GGUF's file name. Every shipped GGUF names its
+    /// family (`sensevoice-small-q8_0.gguf`, `haas-ja-v1.0-q8_0.gguf`,
+    /// `funasr-nano-2512-q8_0.gguf`). Haas and parakeet files both open
+    /// through the runtime's `parakeet` backend.
     static func fallbackBackend(modelPath: String) -> String {
         let name = URL(fileURLWithPath: modelPath).lastPathComponent.lowercased()
         if name.contains("funasr") {
@@ -137,8 +137,8 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
     /// 10 s, so once the cap is reached every partial has the same length —
     /// this would break Full about 11 s into continuous speech.
     ///
-    /// Detection is authoritative; the file-name check also catches a FunASR
-    /// GGUF whose detector returned another name (e.g. a legacy runtime).
+    /// A FunASR backend or a FunASR-named file disables it; the file-name
+    /// check also catches a runtime that mislabels the model.
     static func disablesFunASRCache(backend: String, modelPath: String) -> Bool {
         if backend.lowercased() == "funasr" {
             return true

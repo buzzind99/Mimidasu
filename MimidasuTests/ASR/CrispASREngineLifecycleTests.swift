@@ -155,6 +155,29 @@ struct CrispASREngineLifecycleTests {
         )
     }
 
+    @Test("prepare falls back to parakeet for the Balanced GGUF without detection")
+    func prepareFallsBackToParakeetForBalanced() throws {
+        let library = FakeCrispASRLibrary()
+        library.detectBackendResult = nil
+        let modelURL = try tmp.write(Data("gguf".utf8), named: "haas-ja-v1.0-q8_0.gguf")
+        let applied = Mutex<[String]>([])
+        let engine = try CrispASREngine(
+            modelPath: modelURL,
+            library: library,
+            setEnvironment: { name, value in
+                applied.withLock { entries in entries.append("\(name)=\(value)") }
+            }
+        )
+
+        try engine.prepare()
+
+        #expect(
+            library.openSessionBackends == ["parakeet"],
+            "the Haas file name selects the parakeet backend on a pre-detection runtime"
+        )
+        #expect(applied.withLock { entries in entries }.isEmpty, "parakeet is not a FunASR model")
+    }
+
     @Test("close releases an open C session exactly once and silences the stream")
     func closeReleasesSessionOnceAndSilencesStream() throws {
         let library = FakeCrispASRLibrary()
@@ -536,6 +559,7 @@ struct CrispASREngineFunASRCacheTests {
             modelPath: modelURL,
             library: library,
             setEnvironment: { name, value in
+                #expect(library.openSessionCount == 0, "the cache env is set before the session opens")
                 applied.withLock { entries in entries.append("\(name)=\(value)") }
             }
         )

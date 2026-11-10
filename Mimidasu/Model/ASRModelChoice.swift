@@ -5,8 +5,8 @@ import Foundation
 enum ASRModelChoice: String, CaseIterable, Identifiable {
     /// SenseVoice-Small q8_0 — the default: small download, fast start.
     case lite
-    /// Haas-ja-v1.0 q8_0 — mid-size model: Full's accuracy at a fraction of
-    /// the decode cost, so it sits between Lite and Full.
+    /// Haas-ja-v1.0 q8_0 — mid-size model: near-Full accuracy at a fraction
+    /// of the decode cost, so it sits between Lite and Full.
     case haas
     /// FunASR-Nano 2512 q8_0 — the original full model, kept for existing
     /// installs and as the largest accuracy reference.
