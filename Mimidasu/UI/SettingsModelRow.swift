@@ -25,10 +25,11 @@ struct SettingsModelRow: View {
         model.asrModelSettings.selected == choice
     }
 
-    /// A selection change applies at the next session start; mid-session
-    /// (.running/.starting) it is disabled.
+    /// A selection change applies at the next session start; while a session
+    /// exists (including a lost source and a stop in flight) the warm engine
+    /// belongs to it and must not be replaced.
     var selectionDisabled: Bool {
-        resolvedURL == nil || model.phase == .running || model.phase == .paused || model.phase == .starting
+        resolvedURL == nil || SessionPhaseMachine.isLiveOrStopping(model.phase)
     }
 
     var body: some View {

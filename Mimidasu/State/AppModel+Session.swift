@@ -349,14 +349,16 @@ extension AppModel {
     // MARK: - Selection
 
     /// Switches the active ASR model. Only a downloaded + verified model can
-    /// be selected (its resolve result must be cached), and a running or
-    /// starting session must never be re-modelled mid-flight — the change
-    /// applies at the next session start, like the translation provider.
+    /// be selected (its resolve result must be cached), and a session that
+    /// exists must never be re-modelled mid-flight — the change applies at
+    /// the next session start, like the translation provider. A lost capture
+    /// and a stop in flight still own the session's engine, so re-resolving
+    /// would close it under the live session.
     /// Persisting re-resolves (updating `modelURL` and `phase`) and re-warms
     /// the new engine in the background (`warmUpIfNeeded` re-arms on the new
     /// path).
     func selectModel(_ choice: ASRModelChoice) {
-        guard phase != .running, phase != .paused, phase != .starting else { return }
+        guard !SessionPhaseMachine.isLiveOrStopping(phase) else { return }
         guard modelAvailability[choice] != nil else { return }
         asrModelSettings.select(choice)
         modelSelectionRefresh = Task { await refreshModelAvailability() }

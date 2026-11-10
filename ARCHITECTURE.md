@@ -756,11 +756,12 @@ for the CLI and dev builds.
   verify-and-replace, verifying at the temp location so a bad download
   never reaches the model path.
 - A model must be downloaded **and verified** before selection. Selection
-  is refused while `.starting` / `.running` / `.paused` (Settings disables
-  the rows); there is no queued mid-session switch. Completing a Settings
-  download auto-selects (engines are built per session; the path-keyed
-  warm-up re-arms on the new model so the next start loads it hot). No
-  resolvable model → the labeled mock transcriber.
+  is refused while a session exists — `.starting` / `.running` /
+  `.sourceLost` / `.paused` / `.stopping` (Settings disables the rows);
+  there is no queued mid-session switch. Completing a Settings download
+  auto-selects (engines are built per session; the path-keyed warm-up
+  re-arms on the new model so the next start loads it hot). No resolvable
+  model → the labeled mock transcriber.
 
 ### Onboarding
 - First launch with no verified model swaps the main shell for

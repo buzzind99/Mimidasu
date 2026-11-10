@@ -72,13 +72,15 @@ struct AppModelModelSelectionTests {
         #expect(model.asrModelSettings.selected == .lite, "an unverified model cannot be selected")
     }
 
-    @Test("selectModel is disabled while a session is running or starting")
+    @Test("selectModel is disabled while a session is live or stopping")
     func selectModelDisabledMidSession() async {
         let model = await makeSUT()
         let fullURL = URL(fileURLWithPath: "/tmp/full.gguf")
         await model.refreshModelAvailability(resolve: { _ in fullURL })
 
-        for phase in [SessionPhase.running, .starting] {
+        for phase in [
+            SessionPhase.starting, .running, .sourceLost, .paused, .stopping
+        ] {
             model.phase = phase
 
             model.selectModel(.full)

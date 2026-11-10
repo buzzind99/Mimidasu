@@ -302,7 +302,7 @@ struct ModelChoiceCardTests {
         #expect(row.isInUse == false)
     }
 
-    @Test("the Settings selection is disabled while the model is missing or the session runs")
+    @Test("the Settings selection is disabled while the model is missing or a session exists")
     func settingsSelectionDisabled() async {
         let model = await makeSUT()
         let row = SettingsModelRow(choice: .lite, model: model)
@@ -312,7 +312,9 @@ struct ModelChoiceCardTests {
         await model.refreshModelAvailability(resolve: { _ in URL(fileURLWithPath: "/tmp/lite.gguf") })
         #expect(row.selectionDisabled == false, "a downloaded model can be selected")
 
-        for phase in [SessionPhase.running, .paused, .starting] {
+        for phase in [
+            SessionPhase.starting, .running, .sourceLost, .paused, .stopping
+        ] {
             model.phase = phase
 
             #expect(row.selectionDisabled, "a selection change waits for the next session start")
