@@ -44,6 +44,11 @@ struct SettingsView: View {
     /// Leftmost model card in the two-up Settings carousel; `nil` until the
     /// first layout. Drives the chevrons and the scroll-to-in-use on open.
     @State private var modelScrollPosition: String?
+    /// Whether the next key on the cached Settings window is a reopen. A
+    /// sheet present/dismiss cycle also re-keys the window without closing
+    /// it; only a real reopen should snap the carousel back to the model in
+    /// use. Set when the window closes, consumed when it becomes key.
+    @State private var carouselResetPending = true
 
     /// The provider whose card (key entry + privacy notice) is displayed:
     /// the pending one while it's being configured, otherwise the selection.
@@ -135,9 +140,13 @@ struct SettingsView: View {
             keySaveFailed = false
             modelDraft = settings.model(for: settings.selectedProvider)
             // The cached window keeps `modelScrollPosition` from the last
-            // visit too; bring the in-use model back into view on reopen.
-            // No-op on the first open, where `.onAppear` already set it.
-            modelScrollPosition = initialCarouselPosition
+            // visit too; bring the in-use model back into view on a real
+            // reopen. A sheet present/dismiss also re-keys the window, so
+            // only spend the reset when the window was actually closed.
+            if carouselResetPending {
+                modelScrollPosition = initialCarouselPosition
+                carouselResetPending = false
+            }
             // The cached window doesn't re-run `.task` on reopen; the
             // availability probe is a no-op once loaded anyway.
             Task { await model.appleTranslationAvailability.refreshIfNeeded() }
@@ -151,6 +160,7 @@ struct SettingsView: View {
             guard let window = note.object as? NSWindow,
                   SettingsWindowController.isSettingsWindow(window)
             else { return }
+            carouselResetPending = true
             model.declineCloudDisclosure()
         }
     }
