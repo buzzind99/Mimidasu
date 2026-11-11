@@ -348,8 +348,10 @@ extension ReadingAnnotator {
     /// Voicing across a number's moraic ん (さん/よん/せん/まん): a following
     /// は行 counter voices — to the p-series for the assimilating counters
     /// (ふん 分, ほ 歩, はつ 発: さんぷん, さんぽ, さんぱつ) and to the rendaku
-    /// b-series for the rest (ほん 本, ひき 匹, はこ 箱: よんほん, さんびき,
-    /// さんばん). Any other counter passes through unchanged.
+    /// b-series for the rest (ほん 本, ひき 匹, はこ 箱: さんぼん, さんびき,
+    /// さんばこ). よん takes the p-series (よんぷん, よんぽ, よんぱつ) but not
+    /// the b-series (よんほん, よんひき, よんはこ). Any other counter passes
+    /// through unchanged.
     private static func voiceAcrossN(numberKana: String, counterKana: String) -> String {
         guard numberKana.hasSuffix("ん"),
               let first = counterKana.first,
@@ -359,6 +361,11 @@ extension ReadingAnnotator {
         // the p-voiced 歩 from the rendaku 本.
         let toP = counterKana == "ほ"
             || counterKana.hasPrefix("ふ") || counterKana.hasPrefix("はつ")
+        // よん is the one ん-ender that does not rendaku the は行 to the
+        // b-series: it assimilates to the p-series only.
+        if numberKana == "よん", !toP {
+            return numberKana + counterKana
+        }
         return numberKana + (toP ? onset.p : onset.b) + counterKana.dropFirst()
     }
 

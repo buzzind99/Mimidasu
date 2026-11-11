@@ -407,11 +407,12 @@ struct ReadingAnnotatorFusionTests {
         #expect(describe(segments) == [[text, romaji, furigana]])
     }
 
-    @Test("voices a は行 counter across a moraic ん (3分/4分/3匹/2分)",
+    @Test("voices a は行 counter across a moraic ん (3分/4分/3匹/4匹/2分)",
           arguments: [
               (["3", "分"], "3分", "sanpun", "さんぷん"),
               (["4", "分"], "4分", "yonpun", "よんぷん"),
               (["3", "匹"], "3匹", "sanbiki", "さんびき"),
+              (["4", "匹"], "4匹", "yonhiki", "よんひき"),
               (["2", "分"], "2分", "nifun", "にふん")
           ])
     func voicedCounterAcrossN(
