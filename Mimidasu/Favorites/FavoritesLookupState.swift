@@ -46,7 +46,8 @@ final class FavoritesLookupState {
 
     /// Open rows, newest first; each row toggles only its own key.
     private(set) var expanded: [String] = []
-    /// Per-row phase. Absent means never expanded this session.
+    /// Per-row phase. Absent means no live phase (never expanded, collapsed,
+    /// or removed).
     private(set) var phases: [String: Phase] = [:]
 
     /// Monotonic per row: each expand bumps its token, so a result that

@@ -4,7 +4,7 @@ import Synchronization
 /// One SQLite file holding the user's starred words.
 ///
 /// Sendable by construction, mirroring `JMDictLookup`: the only mutable state
-/// is the lazily opened handle, held in a `Mutex`-guarded `State`, and every
+/// is the eagerly opened handle, held in a `Mutex`-guarded `State`, and every
 /// query runs inside its `withLock` scope. Failing to open or to create the
 /// schema is terminal for the instance — `degraded` — so a corrupt or
 /// unwritable file degrades the feature instead of taking the app down. A
