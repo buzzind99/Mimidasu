@@ -1,3 +1,5 @@
+import Synchronization
+
 /// Pure-Swift stand-in used when the native runtime is unavailable. Emits
 /// canned transcripts in rotation, gated by the audio energy (simple RMS
 /// threshold) so the
@@ -5,9 +7,10 @@
 /// Only the texts are deterministic: the sentence cadence is randomized
 /// (5–12 speech chunks). The UI labels mock sessions clearly.
 ///
-/// `@unchecked Sendable`: state is only ever touched from the single capture
-/// queue thread (`push`) or the main actor (`poll`/`finish`), which the
-/// compiler cannot see — the pipeline contract fences chunks before teardown.
+/// `@unchecked Sendable`: the mutable engine state lives in `state`, guarded
+/// by a `Mutex`. `push` runs on the capture queue, `poll` on the main actor's
+/// poll timer, and `finish` in a detached teardown task — poll and finish can
+/// overlap, so the mutex is the confinement the compiler cannot infer.
 final class MockASREngine: ASREngine, @unchecked Sendable {
     let isMock = true
     var onEngineError: ((String) -> Void)?
@@ -20,43 +23,52 @@ final class MockASREngine: ASREngine, @unchecked Sendable {
         "次の話題に移ります、面白いですよ。"
     ]
 
-    private var speechChunksSeen = 0
-    private var nextSentenceAt = 6
-    private var pendingFinal: String?
-    private var cannedIndex = 0
-    private var totalSamples = 0
-    private var lastFinalEnd = 0
+    private struct State {
+        var speechChunksSeen = 0
+        var nextSentenceAt = 6
+        var pendingFinal: String?
+        var cannedIndex = 0
+        var totalSamples = 0
+        var lastFinalEnd = 0
+    }
+
+    private let state = Mutex(State())
 
     var processedSamples: Int {
-        totalSamples
+        state.withLock { current in current.totalSamples }
     }
 
     var pushedSamples: Int {
-        totalSamples
+        state.withLock { current in current.totalSamples }
     }
 
     func prepare() throws(ASREngineError) {}
     func openStream() throws(ASREngineError) {}
 
     func push(_ samples: [Float]) {
-        totalSamples += samples.count
-        if AudioLevels.rms(of: samples) > AudioLevels.silenceFloorRMS {
-            speechChunksSeen += 1
-        }
-        if pendingFinal == nil, speechChunksSeen >= nextSentenceAt {
-            pendingFinal = Self.canned[cannedIndex % Self.canned.count]
-            cannedIndex += 1
-            nextSentenceAt = speechChunksSeen + Int.random(in: 5 ... 12)
+        let isSpeech = AudioLevels.rms(of: samples) > AudioLevels.silenceFloorRMS
+        state.withLock { current in
+            current.totalSamples += samples.count
+            if isSpeech {
+                current.speechChunksSeen += 1
+            }
+            if current.pendingFinal == nil, current.speechChunksSeen >= current.nextSentenceAt {
+                current.pendingFinal = Self.canned[current.cannedIndex % Self.canned.count]
+                current.cannedIndex += 1
+                current.nextSentenceAt = current.speechChunksSeen + Int.random(in: 5 ... 12)
+            }
         }
     }
 
     func poll() -> ASREvent? {
-        guard let text = pendingFinal else { return nil }
-        pendingFinal = nil
-        let end = totalSamples
-        let start = lastFinalEnd
-        lastFinalEnd = end
-        return .final(text: text, startSample: start, endSample: end, lang: "ja")
+        state.withLock { current in
+            guard let text = current.pendingFinal else { return nil }
+            current.pendingFinal = nil
+            let end = current.totalSamples
+            let start = current.lastFinalEnd
+            current.lastFinalEnd = end
+            return .final(text: text, startSample: start, endSample: end, lang: "ja")
+        }
     }
 
     func finish() -> [ASREvent] {
