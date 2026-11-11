@@ -82,7 +82,7 @@ extension JMDictFixtureDatabase {
     /// having been skipped (the reported `ま` case: a truncated total read as
     /// the whole answer).
     ///
-    /// Both suites that need the shape take it from here, because the defect
+    /// Every suite that needs the shape takes it from here, because the defect
     /// this replaced was one of them drifting: the paging suite moved its start
     /// below the name boundary and the state suite kept the old one, which
     /// straddled `JMDictNameEntries.ingestOffset` — 8,001 entries from

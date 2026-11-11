@@ -203,8 +203,8 @@ final class DictionarySearchEngineTests {
     @Test("grades a sense column per gloss, not per column")
     func glossGradedPerGloss() throws {
         // `candy` is a whole word in "(hard) candy" even though the stored
-        // column goes on with "; toffee", so grading the column as a string
-        // would bury it.
+        // column carries `toffee` as a separate gloss (U+001F joins them), so
+        // grading the column as a string would bury it.
         let candy = try #require(try search("candy").hits.first)
 
         #expect(candy.entSeq == 1_153_520)
@@ -281,7 +281,7 @@ final class DictionarySearchEngineTests {
         // answers a shorter phrase with no rows and no error, so anything below
         // this would return a silent, total loss of recall rather than a
         // degraded answer. Measured on the real prepared database, `Ma` matches
-        // 78,143 senses through the old `LIKE` scan and zero through the index.
+        // 79,312 senses through the old `LIKE` scan and zero through the index.
         #expect(DictionarySearchEngine.glossMinLatinLength == 3)
     }
 

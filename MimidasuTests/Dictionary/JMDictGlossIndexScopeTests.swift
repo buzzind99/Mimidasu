@@ -19,8 +19,9 @@ import Testing
 /// with zero rows and no error, on every scope. Measured here it returns 0 for
 /// `.all`, `.words` and `.names` alike, which is indistinguishable from "no
 /// names at all" and would have made this gate pass while asserting nothing.
-/// The probe is `ion` instead: 36,218 word entries and 11,691 name entries,
-/// the densest three-character crossing of the offset in the corpus.
+/// The probe is `ion` instead: 34,703 word entries (36,218 word-range sense
+/// rows) and 11,691 name entries, the densest three-character crossing of the
+/// offset in the corpus.
 @Suite("JMDict gloss index uncapped scope", .enabled(if: InstalledJMDict.url != nil))
 struct JMDictGlossIndexScopeTests {
     private func database() throws -> SQLiteDatabase {

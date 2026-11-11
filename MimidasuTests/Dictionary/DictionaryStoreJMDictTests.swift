@@ -402,11 +402,10 @@ extension DictionaryStoreTests {
 
     @Test("accepts an entry carrying the most senses the rowid pack can address")
     func jmDictAcceptsTheSenseCountLimit() async throws {
-        // One below the refusal: the boundary is inclusive, so 127 senses still
-        // encodes and the prepare completes normally. Without this, "the
-        // builder refuses" would be satisfied by a threshold that is simply
-        // too low.
-        let atLimit = try makeJMDictSmokeDatabase(sensesPerEntry: 127)
+        // At the refusal's edge: 128 senses (ord 0…127) still encode and the
+        // prepare completes normally. Without this, "the builder refuses" would
+        // be satisfied by a threshold that is simply too low.
+        let atLimit = try makeJMDictSmokeDatabase(sensesPerEntry: 128)
         defer { try? FileManager.default.removeItem(at: atLimit.deletingLastPathComponent()) }
         fakePrepareCopySource = atLimit
         let store = makeStore()

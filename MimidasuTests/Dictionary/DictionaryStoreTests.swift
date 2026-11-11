@@ -112,7 +112,7 @@ private enum SmokeDatabaseError: Error {
 /// is exactly what the store's JMDict smoke query requires; without it the
 /// database is well-formed but the smoke word misses.
 ///
-/// `sensesPerEntry` sets how many sense rows one entry carries. 128 or more is
+/// `sensesPerEntry` sets how many sense rows one entry carries. 129 or more is
 /// the shape the index builder must refuse: the `rowid` pack spends seven bits
 /// on `ord`, and an entry that overruns them would alias onto other entries'
 /// rows and return another entry's gloss with no error raised anywhere.
@@ -120,13 +120,13 @@ private enum SmokeDatabaseError: Error {
 /// text, which the lookup accepts but the gloss index cannot answer — the
 /// silent-empty failure the promote-time smoke check exists to catch.
 /// `leadingShortGloss` (only meaningful with `includeSmokeWord`) prepends a
-/// sense whose gloss is a single scalar — the shape a corpus does carry plenty
-/// of (1,252 of the pinned build's 656,706 `senses` gloss columns) and what
-/// the answer probe has to walk past: `firstTrigram` cannot build a
-/// three-scalar phrase from such a row, so the probe would refuse a perfectly
-/// healthy index over it. FTS5 answers a shorter-than-three-character phrase
-/// with zero rows and no error, which is why nothing shorter can stand in
-/// either.
+/// sense whose gloss is one or two scalars — the short shape a corpus does
+/// carry plenty of (1,252 of the pinned build's 656,706 `senses` gloss columns
+/// are one or two scalars long) and what the answer probe has to walk past:
+/// `firstTrigram` cannot build a three-scalar phrase from such a row, so the
+/// probe would refuse a perfectly healthy index over it. FTS5 answers a
+/// shorter-than-three-character phrase with zero rows and no error, which is
+/// why nothing shorter can stand in either.
 func makeJMDictSmokeDatabase(
     includeSmokeWord: Bool = true, sensesPerEntry: Int = 1, emptyGloss: Bool = false,
     leadingShortGloss: Bool = false
