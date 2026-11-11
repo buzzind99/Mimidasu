@@ -8,11 +8,11 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// the app that imports SQLite3. Engines drive it through `statement(_:)`
 /// and the row accessors on `Statement`, so the raw C handle never escapes.
 ///
-/// Thread-safety is the caller's concern: `JMDictLookup` and
-/// `FavoritesDatabase` each serialize access under their own mutex, matching
-/// the single-handle lifetime they manage. The `@unchecked Sendable` records
-/// exactly that contract — the handle and the statement cache may only be
-/// touched from the caller's locked scope.
+/// Thread-safety is the caller's concern: `JMDictLookup`, `FavoritesDatabase`,
+/// `DictionarySearchEngine`, and `ArchiveDatabase` each serialize access under
+/// their own mutex, matching the single-handle lifetime they manage. The
+/// `@unchecked Sendable` records exactly that contract — the handle and the
+/// statement cache may only be touched from the caller's locked scope.
 final class SQLiteDatabase: @unchecked Sendable {
     enum Error: Swift.Error, Equatable {
         /// No handle could be created (an unopenable path).

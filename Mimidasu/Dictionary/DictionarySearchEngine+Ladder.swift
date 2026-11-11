@@ -88,13 +88,15 @@ extension DictionarySearchEngine {
 
     /// Runs every applicable stage and returns the ranked outcome for the window.
     ///
-    /// The only early exit is **window saturation**: once the ranked list already
-    /// holds `limit` rows whose worst tier outranks the best tier any remaining
-    /// stage could produce, nothing left can change what is on screen. It fires
-    /// immediately for a 1-mora query that saturates on exact hits — which is the
-    /// rule *working*, skipping exactly the expensive single-mora prefix scan. It
-    /// deliberately never fires on "found something": ambiguous inputs (`sake`,
-    /// `gate`) would silently lose results that only a later stage finds.
+    /// The only stage-skipping exit is **window saturation**: once the ranked list
+    /// already holds `limit` rows whose worst tier outranks the best tier any
+    /// remaining stage could produce, nothing left can change what is on screen.
+    /// It fires immediately for a 1-mora query that saturates on exact hits —
+    /// which is the rule *working*, skipping exactly the expensive single-mora
+    /// prefix scan. It deliberately never fires on "found something": ambiguous
+    /// inputs (`sake`, `gate`) would silently lose results that only a later
+    /// stage finds. Cancellation is the other early exit, but it ends the search
+    /// rather than skipping stages.
     ///
     /// Saturation is measured against the *window*, which is what keeps it
     /// honest once the window grows: the rows a wider window would reveal are

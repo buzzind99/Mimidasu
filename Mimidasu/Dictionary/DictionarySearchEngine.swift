@@ -227,9 +227,9 @@ final class DictionarySearchEngine: Sendable {
 // MARK: - Cancellation
 
 extension DictionarySearchEngine {
-    /// The ladder's only early exit is cancellation. Every stage boundary and
-    /// every drain loop checks it, because the scan that must die is the one
-    /// the user already typed past.
+    /// The ladder exits early on cancellation or window saturation. Every stage
+    /// boundary and every drain loop checks cancellation, because the scan that
+    /// must die is the one the user already typed past.
     static func checkCancellation() throws {
         if Task.isCancelled {
             throw CancellationError()
