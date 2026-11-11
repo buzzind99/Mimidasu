@@ -1,7 +1,7 @@
 import Foundation
 
 /// One rendered run of text plus its optional romaji/kana annotations. The
-/// `surface` strings concatenate back to the original text (uncovered spans
+/// `surface` strings concatenate back to the trimmed input text (uncovered spans
 /// and runtime failures become plain runs). A run whose romaji equals its
 /// surface (Latin, digits, punctuation, kanji without a dictionary reading)
 /// is self-transcribed; renderers skip annotating those. `furigana` is only
@@ -199,9 +199,10 @@ final class ReadingAnnotator: @unchecked Sendable {
         }
     }
 
-    /// Per-surface memo in front of the headword gate. Larger than the
-    /// reading fallback's cache: dictionary-guided prefix cuts multiply the
-    /// distinct probe keys a single garbled surface produces. `NSCache` is
+    /// Per-surface memo in front of the headword gate. Smaller than the
+    /// reading fallback's cache (1024 entries vs 2048); dictionary-guided
+    /// prefix cuts multiply the distinct probe keys a single garbled surface
+    /// produces. `NSCache` is
     /// internally thread-safe but not marked `Sendable`, so it hides behind
     /// this box.
     private final class HeadwordGateMemo: @unchecked Sendable {
