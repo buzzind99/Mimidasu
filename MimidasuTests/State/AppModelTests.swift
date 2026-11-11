@@ -6,8 +6,8 @@ import Testing
 /// Tests `AppModel` session-control guards, translation wiring, and the
 /// session-controller callbacks on the main actor. The `start()`/`begin()`
 /// flow itself is covered over injected factories in `AppModelSessionTests`;
-/// the default factories (real TCC preflight + live capture) stay
-/// production-only here. Export delegation lives in `AppModelExportTests`.
+/// the default factories (real live capture) stay production-only here.
+/// Export delegation lives in `AppModelExportTests`.
 @MainActor
 @Suite("AppModel session control")
 struct AppModelTests {

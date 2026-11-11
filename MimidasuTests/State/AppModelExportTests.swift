@@ -3,9 +3,9 @@ import Foundation
 @testable import Mimidasu
 import Testing
 
-/// Tests the `AppModel` export surface (`AppModelExport`): exportability,
-/// the copy commands, and delegation to `SessionExporter` for all four
-/// formats. Split from `AppModelTests` alongside the production extension.
+/// Tests the `AppModel` export surface in `AppModel+Presentation.swift`:
+/// exportability, the copy commands, and delegation to `SessionExporter` for
+/// all four formats. Split from `AppModelTests` alongside that extension.
 /// The JSON metadata-passthrough test begins a session over injected
 /// engine/capture/permission doubles; everything else runs against default
 /// factories with a stubbed model check.

@@ -14,8 +14,8 @@ import Testing
 /// unreachable through the default `ensureDictionaryReady` on a machine with
 /// a dictionary (covered via injected closures in `AppModelDictionaryTests`);
 /// `start()`'s catch → `.failed` is exercised through the capture-start
-/// throw, which lands in the same catch. The real factories (TCC preflight,
-/// live capture stream) stay production-only.
+/// throw, which lands in the same catch. The real factories (live capture
+/// stream) stay production-only.
 @MainActor
 @Suite(
     "AppModel session flow",

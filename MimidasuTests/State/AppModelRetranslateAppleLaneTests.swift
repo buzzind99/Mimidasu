@@ -3,7 +3,7 @@ import Foundation
 import Testing
 
 /// Tests the dedicated Apple sessions behind the re-translate lane's
-/// on-device selections: the fast (MTL) and Apple Intelligence arrival
+/// on-device selections: the fast (NMT) and Apple Intelligence arrival
 /// hooks, arming, engine-stamped delivery through each armed session, and
 /// the per-kind still-arming toasts.
 @MainActor

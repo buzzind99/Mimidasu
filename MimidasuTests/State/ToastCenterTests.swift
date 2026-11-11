@@ -3,9 +3,9 @@ import Foundation
 import Testing
 
 /// Tests `ToastCenter`: post/dedup-by-key semantics (replace in place +
-/// auto-dismiss timer reset), the injectable scheduler driving the 3 s
-/// auto-dismiss (yellow cards only), the ~3-card stack cap (oldest dropped),
-/// and dismissal/clearing.
+/// auto-dismiss timer reset), the injectable scheduler driving the 6 s
+/// auto-dismiss (transient yellow and plain info), the ~3-card stack cap
+/// (oldest dropped), and dismissal/clearing.
 ///
 /// The manual scheduler records every scheduled firing with a cancellable
 /// token; tests fire pending timers deterministically instead of sleeping.

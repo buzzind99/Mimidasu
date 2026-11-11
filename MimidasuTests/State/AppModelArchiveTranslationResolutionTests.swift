@@ -25,7 +25,8 @@ private final class ResolutionSignal {
 /// job's claim over airborne lane work, its release when the surface goes
 /// away, and the target-gated adoption of dedicated-session engines by the
 /// per-row lane, the bulk run, and the factory) lives in the sibling
-/// `ArchiveTranslationAdoption` suite in this file, split to keep both type
+/// `AppModelArchiveTranslationAdoption` suite (type
+/// `ArchiveTranslationAdoptionTests`) in this file, split to keep both type
 /// bodies under the lint gate. Shares the harness (seeded store, scripted
 /// engine, permit gate) with the `AppModelArchiveTranslation` suite.
 @MainActor
