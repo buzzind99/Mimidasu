@@ -761,7 +761,8 @@ for the CLI and dev builds.
   there is no queued mid-session switch. Completing a Settings download
   auto-selects (engines are built per session; the path-keyed warm-up
   re-arms on the new model so the next start loads it hot). No resolvable
-  model → the labeled mock transcriber.
+  model → `.needsModel` and onboarding; no usable native runtime → the
+  labeled mock transcriber.
 
 ### Onboarding
 - First launch with no verified model swaps the main shell for
@@ -1006,14 +1007,14 @@ for the CLI and dev builds.
 - **Settings:** its own window that auto-closes on resign-key (click
   outside) and hides its title chrome; card stack: privacy/external-
   processing notice, provider card (probe-then-select key verification),
-  conditional key card, a "Currently using" row naming the attached
-  provider, RE-TRANSLATE card (provider picker in a custom popover listing
-  only non-duplicate, available options — `.session` always, Apple (NMT)
-  unless provably already live, Apple Intelligence only when offered — plus
-  the provenance-marker toggle), TARGET LANGUAGE card (runtime-discovered
-  catalog, disabled while a session is live or paused), appearance card,
-  SPEECH MODEL card with a Re-check action, SESSION diagnostics (Entries /
-  Engine / Translation), and an App Store write-review link in the footer.
+  conditional key card, RE-TRANSLATE card (provider picker in a custom
+  popover listing only non-duplicate, available options — `.session`
+  always, Apple (NMT) unless provably already live, Apple Intelligence
+  only when offered — plus the provenance-marker toggle), TARGET LANGUAGE
+  card (runtime-discovered catalog, disabled while a session is live or
+  paused), appearance card, SPEECH MODEL card with a Re-check action,
+  SESSION diagnostics (Entries / Engine / a Translation row naming the
+  attached provider), and an App Store write-review link in the footer.
 - **Onboarding:** the main shell's pre-model state (see Onboarding above).
 - **Toasts & notices:** `ToastCenter` — deduped, capped (3 visible) stack
   in four styles: auto-dismissing yellow, persistent yellow, persistent
@@ -1069,9 +1070,9 @@ opaque C handles stay inside the engine and HAL ownership types.
    and emits it; `SessionController` forwards it to `ASREngine.push` and
    stages RMS/presence on the capture thread.
 2. Polling yields partials (HUD draft; transcript untouched) or finals.
-3. Each final immediately emits exactly one `Sentence`, stamped with the
-   final's own sample span (end clamped to the start); no text-side
-   boundary rule applies.
+3. Each final carrying Japanese script immediately emits exactly one
+   `Sentence`, stamped with the final's own sample span (end clamped to the
+   start); a final with no Japanese script is dropped.
 4. The immutable `Sentence` is appended to the transcript pane (JP
    SessionEntry), enqueued for translation, and persisted (the first
    Sentence creates the archive's `recording` row).
@@ -1091,7 +1092,7 @@ opaque C handles stay inside the engine and HAL ownership types.
 {
   "schema_version": 1,
   "session": {
-    "started_at": "2026-08-27T14:32:05+09:00",
+    "started_at": "2026-08-27T05:32:05Z",
     "source_lang": "ja",           // fixed ja today (nullable in the schema
                                    // for a future ASR auto-detect)
     "target_lang": "en",           // the session's selected target (BCP-47;
@@ -1157,7 +1158,8 @@ Mimidasu.app/
                                         # versioned by pin tag + build revision
       (Assets.car, PrivacyInfo.xcprivacy, README.txt,
        THIRD_PARTY_NOTICES.txt, LICENSE.txt)
-      # MAS adds LICENSE-MAS.txt + embedded.provisionprofile
+      # MAS swaps LICENSE.txt for LICENSE-MAS.txt, omits README.txt, and
+      # places the profile at Contents/embedded.provisionprofile
 ```
 
 Distribution: `scripts/package.sh` builds the release DMG (ULMO-compressed;
