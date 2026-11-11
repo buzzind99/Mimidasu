@@ -1,9 +1,10 @@
 @testable import Mimidasu
 import Testing
 
-/// Pins the one-final-one-sentence contract: every ASR final becomes exactly
-/// one sentence with the final's own audio span, and no text shape can split
-/// or merge it.
+/// Pins the one-final-one-sentence contract: every content-bearing ASR final
+/// becomes exactly one sentence with the final's own audio span; finals with
+/// no content (empty or symbol-only) emit nothing, and no text shape can split
+/// or merge an emitted sentence.
 @Suite("SentenceBuffer finalization")
 struct SentenceBufferTests {
 

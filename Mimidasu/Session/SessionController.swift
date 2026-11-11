@@ -13,7 +13,7 @@ final class SessionController {
     /// in `AppDelegate`.
     static let translationDrainTimeout: TimeInterval = 5
 
-    /// Grace window after capture start before the no-audio warning fires:
+    /// Grace window after the session reaches `.running` before the no-audio warning fires:
     /// the tap needs a beat to spin up, and a couple of seconds of silence is
     /// otherwise indistinguishable from denied system-audio permission.
     static let noAudioWarningDelay: Duration = .seconds(8)
@@ -197,7 +197,7 @@ final class SessionController {
             try throwIfStopRequested()
             // `prepare` may wait out a multi-second GGUF load + Metal compile
             // (when the background warm-up hasn't finished) — keep it off the
-            // main actor. `prepareLock` still serializes it against the warm-up.
+            // main actor. `prepareMutex` still serializes it against the warm-up.
             try await Task.detached(priority: .userInitiated) { try engine.prepare() }.value
             try throwIfStopRequested()
             try engine.openStream()
@@ -231,8 +231,8 @@ final class SessionController {
     /// Undoes the visible pieces of a half-built session after a failed
     /// acquisition: the capture is stopped and every owned surface cleared so
     /// a failed start cannot leak a live rig or export stale metadata. The
-    /// engine is dropped without `finish`/`flush` — its stream never opened,
-    /// and a queued stop may already own the channel. `stopRequested` /
+    /// engine is dropped without `finish`/`flush` — the stream may already be
+    /// open, and a queued stop may already own the channel. `stopRequested` /
     /// `hasStopped` are left for that queued stop to consume.
     private func rollbackFailedBegin() {
         capture?.stop()
