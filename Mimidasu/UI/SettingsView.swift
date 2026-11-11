@@ -14,9 +14,9 @@ private enum ProviderListMetrics {
 }
 
 /// App settings — "stacked cards" design: a single scrollable column of cards
-/// (notice, provider, API key, appearance, ASR model, session) with no
-/// navigation chrome. Buttons highlight pink on hover; appearance segments use
-/// a neutral wash.
+/// (notice, provider, API key, re-translate, target language, appearance,
+/// ASR model, session) with no navigation chrome. Buttons highlight pink on
+/// hover; appearance segments use a neutral wash.
 struct SettingsView: View {
     private static let writeReviewURLString = "https://apps.apple.com/app/id6813053867?action=write-review"
 

@@ -241,9 +241,9 @@ struct ReferenceWindowView: View {
     /// One flip button rather than a two-button switcher: the mark and the
     /// title already name the active mode, so a selected switcher glyph
     /// repeated it — two identical pink circles on either side of the title.
-    /// The double arrow reads as "swap", wears the same 24pt tile-filled
-    /// circle as the entry pager's buttons, and the help text names where a
-    /// press lands.
+    /// The double arrow reads as "swap", wears a 24pt tile-filled circle
+    /// (the entry pager's buttons are 18pt), and the help text names where
+    /// a press lands.
     private var modeFlipButton: some View {
         Button {
             modeRaw = mode.other.rawValue

@@ -101,7 +101,7 @@ struct DictionaryDefinitionPlan: Sendable {
     let glossLimit: Int?
     /// True when a sense carrying more than one POS tag falls back to a
     /// stacked tag line the moment the inline row would overflow — the
-    /// sidebar card's one divergence, whose 254pt content is the narrowest
+    /// sidebar card's one divergence, whose ~214pt content is the narrowest
     /// a sense row is ever drawn. The other hosts keep senses inline.
     let wrapsSensePOS: Bool
 

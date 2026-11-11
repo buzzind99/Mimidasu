@@ -50,8 +50,8 @@ enum MatchHighlight {
     /// this — it grades in its own `glossMatch`/`glossMatchByFragment`, which
     /// derive the column's (or each gloss's) scalars themselves — and the
     /// corpus carries no such row;
-    /// `DictionarySearchEngine+Ladder`'s note on the fragment path states the
-    /// same caveat where the production code lives.
+    /// `DictionarySearchEngine+GlossMatch`'s note on the fragment path states
+    /// the same caveat where the production code lives.
     ///
     /// It survives as an **oracle** in the tests, not a stage dependency:
     /// `JMDictGlossIndexRecallTests.everyIndexedRowGradesASpan` checks every
