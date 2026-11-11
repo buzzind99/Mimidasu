@@ -123,12 +123,13 @@ struct SessionPhaseMachineTests {
 /// `.failed`.
 ///
 /// The enum lives in the app target and is internal, so the test target
-/// spells the case list out here. The list is checked against the canonical
-/// order the transition table is written in.
+/// spells the case list out here. The list is checked against
+/// `SessionPhaseMachineTransitionTable.canonicalPhases` in
+/// `fixturesCoverCanonicalOrder`.
 enum SessionPhaseFixtures {
     static let all: [SessionPhase] = [
-        .needsModel,
         .idle,
+        .needsModel,
         .starting,
         .running,
         .paused,
@@ -136,4 +137,12 @@ enum SessionPhaseFixtures {
         .stopping,
         .failed("boom")
     ]
+}
+
+@Suite("Session phase fixtures")
+struct SessionPhaseFixturesTests {
+    @Test("the fixture list matches the canonical phase order")
+    func fixturesCoverCanonicalOrder() {
+        #expect(SessionPhaseFixtures.all == SessionPhaseMachineTransitionTable.canonicalPhases)
+    }
 }
