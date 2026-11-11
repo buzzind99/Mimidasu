@@ -6,7 +6,7 @@ import Testing
 /// bundled → downloaded → dev ordering — the order pinned over injected
 /// candidates, so no real model location is touched. The end-to-end check
 /// against the real downloaded model is environment-gated. The dev fallback
-/// (`models/` relative to the working directory, DEBUG-only) and
+/// (`models/` at the checkout root via `#filePath`, DEBUG-only) and
 /// `resolve(for:)`'s final `nil` return sit behind the downloaded-model
 /// branch in production and are unreachable via the default locators in the
 /// test host whenever an installed model exists; the nil return itself is

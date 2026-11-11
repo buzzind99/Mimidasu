@@ -370,7 +370,7 @@ struct SystemAudioCaptureTests {
     func bufferGrowthAcrossCallbacks() {
         let capture = makeCapture(running: true)
 
-        // 320 frames seed the input/output PCM buffers; the 60× larger
+        // 320 frames seed the input/output PCM buffers; the 72× larger
         // callback must grow both instead of clipping or failing.
         let small = AudioBufferListSynthesis.make(frames: 320, sampleRate: 48000)
         capture.handleAudioBufferList(small.pointer, format: small.asbd)

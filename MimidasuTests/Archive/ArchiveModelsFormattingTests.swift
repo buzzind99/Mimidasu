@@ -295,8 +295,8 @@ struct ArchiveModelsFormattingTests {
         return Calendar.current.date(from: components)
     }
 
-    /// The same month and day one year earlier — the Oct 14 2026 vs Oct 14
-    /// 2025 collision the year suffix exists to disambiguate.
+    /// The same month and day one year earlier — the collision the year
+    /// suffix exists to disambiguate.
     private func priorYearDate() -> Date? {
         guard let base = sameYearDate() else { return nil }
         return Calendar.current.date(byAdding: .year, value: -1, to: base)
