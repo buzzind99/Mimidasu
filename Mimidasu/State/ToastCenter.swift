@@ -31,7 +31,7 @@ enum ToastKey {
 @Observable
 @MainActor
 final class ToastCenter {
-    /// The toast classes: transient warnings auto-dismiss after 3 s (delay
+    /// The toast classes: transient warnings auto-dismiss after 6 s (delay
     /// is per-center); persistent cards stay until dismissed — by their
     /// condition clearing, a fix action, or session teardown. `.info` is the
     /// neutral card (bulk-job progress and its summary): no severity tint,
@@ -97,8 +97,8 @@ final class ToastCenter {
 
     private(set) var toasts: [Toast] = []
 
-    /// Auto-dismiss delay for `.yellowAuto` cards (timer resets when the
-    /// same key re-fires).
+    /// Auto-dismiss delay for auto-dismissing cards — yellow-auto and plain
+    /// info summaries (timer resets when the same key re-fires).
     static let autoDismissDelay: Duration = .seconds(6)
     /// Stack cap; the oldest card is dropped beyond this.
     static let maxVisible = 3

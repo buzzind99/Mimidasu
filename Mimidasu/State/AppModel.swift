@@ -183,7 +183,7 @@ final class AppModel {
     /// The stored row of the live recording, created lazily with the first
     /// finalized sentence. Nil before that (and when the archive is
     /// unavailable). Mutated from the persistence path in the archive
-    /// surface; reset at session begin.
+    /// surface; reset at finalize (session end).
     var recordingSessionID: Int64?
 
     /// Latched by the first failed archive write of a session: writes stop
@@ -206,14 +206,16 @@ final class AppModel {
     /// The live translation session — engine attach, manual retry, the
     /// one-way Apple fallback latch, the high-fidelity probe, and the
     /// provider-selection machinery — behind the forwarding façade in the
-    /// translation surface. Test seam: UI must use the facades, never reach
-    /// through to the coordinator.
+    /// translation surface. Test seam: session control goes through that
+    /// façade, while the Apple session panel hands sessions to the
+    /// coordinator directly.
     let translationSession: TranslationSessionCoordinator
 
     /// The re-translate lane — route resolution, dedicated Apple sessions,
     /// marker sets, and the serialized runner — behind the forwarding
-    /// façade in the translation surface. Test seam: UI must use the
-    /// facades, never reach through to the coordinator.
+    /// façade in the translation surface. Test seam: session control goes
+    /// through that façade, while the settings card and the Apple session
+    /// panel call the coordinator directly.
     let retranslate: RetranslateCoordinator
 
     /// The refresh spawned by the most recent `selectModel` (tracked so
@@ -231,8 +233,8 @@ final class AppModel {
     /// window would race the engine retirement that follows the drain.
     /// The latch lives in the phase machine (`phaseMachine.isTerminating`),
     /// which owns it with the rest of the session phase.
-    /// SESSION-card duration anchors: set when a session's chunks start
-    /// flowing (`onSessionBegin`) and when teardown completes
+    /// SESSION-card duration anchors: set when a session begins
+    /// (`onSessionBegin`), before capture, and when teardown completes
     /// (`performStop`); both nil before the first session and while an
     /// archived session is open (its stats live in the banner). Duration
     /// reads now − startedAt while running, endedAt − startedAt after stop.

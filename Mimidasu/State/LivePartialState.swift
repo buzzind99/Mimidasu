@@ -1,8 +1,8 @@
 import Foundation
 
-/// High-frequency live subtitle state (partials arrive at 6–10 Hz). Observed
-/// only by the live subtitle row and the HUD — partial updates never re-render
-/// the transcript history.
+/// High-frequency live subtitle state (partials arrive step-spaced, roughly
+/// 1 Hz). Observed only by the live subtitle row and the HUD — partial updates
+/// never re-render the transcript history.
 @Observable
 @MainActor
 final class LivePartialState {
