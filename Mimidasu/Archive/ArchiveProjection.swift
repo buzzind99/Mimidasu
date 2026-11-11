@@ -4,8 +4,9 @@ import Observation
 /// current summary list, the one opened session's summary, and a typed
 /// availability for the window's unavailable state. SwiftUI bodies read
 /// cached rows instead of re-running SQL per evaluation, and every landed
-/// write that affects a listed or opened session refreshes both copies from
-/// one summary read.
+/// write that affects a listed or opened session refreshes the cache:
+/// ordinary updates take one summary read, `finalize` reloads the list, and
+/// `delete` prunes it without a read.
 @MainActor
 @Observable
 final class ArchiveProjection {

@@ -5,7 +5,7 @@ import Synchronization
 /// finalized sentences, and its translations.
 ///
 /// Sendable by construction, mirroring `FavoritesDatabase`: the only mutable
-/// state is the lazily opened handle, held in a `Mutex`-guarded `State`, and
+/// state is the eagerly opened handle, held in a `Mutex`-guarded `State`, and
 /// every query runs inside its `withLock` scope. Failing to open or to create
 /// the schema is terminal for the instance — `degraded` — so a corrupt or
 /// unwritable file degrades the feature instead of taking the app down. A
@@ -66,7 +66,7 @@ final class ArchiveDatabase: Sendable {
         )
         """,
         // Membership, so an added language persists before any translation
-        // lands (unused until multi-language archive translation).
+        // lands.
         """
         CREATE TABLE IF NOT EXISTS session_languages (
             session_id   INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
