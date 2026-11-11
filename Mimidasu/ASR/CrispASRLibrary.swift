@@ -74,13 +74,14 @@ final class CrispASRLibrary {
         UnsafeMutablePointer<UnsafeMutablePointer<Float>?>?
     ) -> Int32
     private typealias FnVadFree = @convention(c) (UnsafeMutablePointer<Float>?) -> Void
-    /// Frees the runtime's process-cached models — the FireRedVAD GGUF is
-    /// loaded once per process and kept resident across sessions, which is
-    /// the second Metal residency set alive at quit. Bound from two optional
-    /// names: `crispasr_shutdown` (the C ABI a future runtime may export) or,
-    /// on the pinned runtime, the C++-mangled `crispasr_vad_free_cache()`
-    /// (`void()`, defined without `extern "C"`). Absent → the OS reclaims
-    /// the cache at exit; never bind a mismatching signature.
+    /// Frees the runtime's process-cached VAD models — Silero, MarbleNet, and
+    /// EncDec. FireRedVAD is not covered: its cache stays resident until the
+    /// process exits, and its GPU backend is released when its model loads.
+    /// Bound from two optional names: `crispasr_shutdown` (the C ABI a future
+    /// runtime may export) or, on the pinned runtime, the C++-mangled
+    /// `crispasr_vad_free_cache()` (`void()`, defined without `extern "C"`).
+    /// Absent → the OS reclaims the cache at exit; never bind a mismatching
+    /// signature.
     private typealias FnShutdown = @convention(c) () -> Void
     /// `crispasr_detect_backend_from_gguf`: >0 with the backend name written
     /// into `out_name`, negative on bad args / unparsable GGUF / missing key.
@@ -145,16 +146,17 @@ final class CrispASRLibrary {
     }
 
     /// True when the runtime exposes a cached-model free (quit-time
-    /// `shutdown()` actually frees the VAD cache; otherwise OS reclaim).
+    /// `shutdown()` frees the cached VAD models it owns; otherwise OS reclaim).
     var hasShutdownSymbol: Bool {
         fnShutdown != nil
     }
 
     /// Absolute path of the bundled FireRedVAD model, or nil. Resolution
-    /// order: env override, next to libcrispasr.dylib (covers both the dev
-    /// checkout — where RPATH resolves the dylib but cwd/Bundle.main don't
-    /// locate the model — and the bundled app), bundle Frameworks, cwd
-    /// fallback.
+    /// order: the DEBUG-only `MIMIDASU_VAD_MODEL` env override; next to
+    /// libcrispasr.dylib (covers both the dev checkout — where RPATH resolves
+    /// the dylib but cwd/Bundle.main don't locate the model — and the bundled
+    /// app); bundle Frameworks; then, DEBUG only, the `local/frameworks`
+    /// fallback under the working directory.
     var vadModelPath: String? {
         guard hasVADSymbols else { return nil }
         let vadModelFile = "firered-vad.gguf"

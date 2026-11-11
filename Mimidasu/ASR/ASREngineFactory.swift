@@ -77,11 +77,11 @@ enum ASREngineFactory {
     /// Metal device teardown. No-op when nothing is cached; closing an engine
     /// that never prepared only flips its finishing flag (no open session).
     ///
-    /// The runtime also keeps a process-cached FireRedVAD model resident
-    /// across sessions — the second Metal residency set alive at quit — so
-    /// the cache is freed too. Only when a native engine existed: never
-    /// dlopen the runtime just to shut it down. No-op when the runtime lacks
-    /// the symbol. Retirement latches for the rest of the process: a warm-up
+    /// The runtime's optional shutdown is called as well, freeing whichever
+    /// process-cached VAD models it exposes — not the FireRedVAD model, whose
+    /// cache stays resident. Only when a native engine existed: never dlopen
+    /// the runtime just to shut it down. No-op when the runtime lacks the
+    /// symbol. Retirement latches for the rest of the process: a warm-up
     /// that was in flight when the quit began cannot re-cache an engine
     /// behind it.
     ///

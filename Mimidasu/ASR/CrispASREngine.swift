@@ -17,7 +17,7 @@ import Synchronization
 ///     every 500 ms and is the authoritative speech signal: it separates
 ///     speech from BGM, gates partial decodes, and finalizes an utterance
 ///     once it has confirmed `endpointSamples` of silence after the last
-///     speech span. Buffers the VAD finds speechless are discarded without
+///     speech span. Speechless buffers of at least 2 s are discarded without
 ///     decoding.
 ///   - A cheap per-chunk RMS check (`utteranceHasLoudAudio`) is only a
 ///     backstop so truly silent audio is never decoded — including in
@@ -45,8 +45,10 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
     let isMock = false
 
     /// Called on an arbitrary thread when a decode fails or the VAD degrades
-    /// to cap-only finalization. Throttled by the engine to the first failure
-    /// and then once every 32 consecutive ones.
+    /// to cap-only finalization. Decode failures are throttled to the first
+    /// failure and then once every 32 consecutive ones; the VAD reports its
+    /// degrade on the third consecutive failure (or immediately when the
+    /// model cannot load).
     var onEngineError: ((String) -> Void)?
 
     /// Writes a process environment variable. Injectable so tests can observe
@@ -131,7 +133,7 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
     }
 
     /// Whether a session for this model must disable FunASR's encoder graph
-    /// cache. CrispASR 0.8.50 and later cache the encoder graph by exact
+    /// cache. CrispASR 0.8.32 and later cache the encoder graph by exact
     /// `T_lfr`; replaying an equal-length buffer returns a corrupted decode
     /// (the second one is garbage). The app's partial window is capped at
     /// 10 s, so once the cap is reached every partial has the same length —
