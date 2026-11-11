@@ -37,16 +37,18 @@ extension ReadingAnnotator {
         "ぁ", "ぃ", "ぅ", "ぇ", "ぉ", "ゃ", "ゅ", "ょ", "ゎ", "ゕ", "ゖ", "っ",
         // Katakana equivalents, plus ヵ/ヶ, which are also unstartable.
         "ァ", "ィ", "ゥ", "ェ", "ォ", "ャ", "ュ", "ョ", "ヮ", "ヵ", "ヶ", "ッ",
-        // The halfwidth spellings of the same set, spelled as escapes: the
+        // The halfwidth spellings of the small kana, spelled as escapes: the
         // small tsu and the small ke are visually identical, so a literal row
         // would silently carry one of them twice. `KanaClassification` counts
         // `0xFF66...0xFF9F` as kana, so the left-context walk accepts these and
         // the peel has to recognize them too, or it declines for ever on a
         // transcript the walk was willing to reach. Listed rather than reached
         // through an NFKC fold, because folding `ｶﾞ` to `ガ` would change the
-        // run's scalar count and every offset derived from it.
+        // run's scalar count and every offset derived from it. `ヮ` has no
+        // halfwidth form; `0xFF9C` is full-size `ﾜ`, which can open a word, so
+        // it is not listed.
         "\u{ff67}", "\u{ff68}", "\u{ff69}", "\u{ff6a}", "\u{ff6b}", "\u{ff6c}",
-        "\u{ff6d}", "\u{ff6e}", "\u{ff6f}", "\u{ff9c}"
+        "\u{ff6d}", "\u{ff6e}", "\u{ff6f}"
     ]
 
     /// Most scalars one peel may set aside. A longer unstartable run is garble

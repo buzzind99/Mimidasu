@@ -76,9 +76,14 @@ struct ReadingAnnotatorTokenRepairGateTests {
         ]
         let halfwidth: Set<Unicode.Scalar> = [
             "\u{ff67}", "\u{ff68}", "\u{ff69}", "\u{ff6a}", "\u{ff6b}",
-            "\u{ff6c}", "\u{ff6d}", "\u{ff6e}", "\u{ff6f}", "\u{ff9c}"
+            "\u{ff6c}", "\u{ff6d}", "\u{ff6e}", "\u{ff6f}"
         ]
         #expect(ReadingAnnotator.unstartableScalars == hiragana.union(katakana).union(halfwidth))
+
+        // `0xFF9C` is full-size ワ (`ﾜ`), not a halfwidth ヮ — Unicode has no
+        // halfwidth small wa — so it can open a word and must stay out of the
+        // set.
+        #expect(!ReadingAnnotator.unstartableScalars.contains("\u{ff9c}"))
 
         // And it holds nothing that can open a word. The two that used to be in
         // it are out, and `KanaRomaji` is the evidence: both are the *first*
