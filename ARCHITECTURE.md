@@ -224,9 +224,9 @@ for the CLI and dev builds.
   external engine, and it awaits `queue.run` inline, keeping the
   `TranslationSession` alive for the run's life and Apple runs parked across
   a stop; no view runs the queue itself; the default;
-  OS prompts a one-time language pack), and nine external providers: Google
-  Translate, DeepL, and seven LLM providers — OpenRouter, OpenAI, Anthropic,
-  Moonshot, Z.ai (GLM), DeepSeek, and xAI. On macOS 26.4+ the live
+  OS prompts a one-time language pack), and ten external providers: Google
+  Translate, DeepL, and eight LLM providers — OpenRouter, OpenAI, Anthropic,
+  Moonshot, Z.ai (GLM), DeepSeek, xAI, and OpenCode Go. On macOS 26.4+ the live
   session config requests the Apple Intelligence strategy, with silent
   framework fallback to Apple (NMT).
   `AppleTierAvailability` records pair-scoped evidence
@@ -239,14 +239,14 @@ for the CLI and dev builds.
   the re-translate lane (Apple (NMT) and Apple Intelligence), stacked in
   one view tree because multiple modifiers on one view are unreliable.
 - **Cloud adapters:** Google Translate (batch REST), DeepL (batch REST,
-  `:fx` free-tier host), and seven LLM providers on one generic engine —
+  `:fx` free-tier host), and eight LLM providers on one generic engine —
   OpenRouter, OpenAI, Anthropic, Moonshot (Kimi model IDs), Z.ai (GLM),
-  DeepSeek, and xAI — **one sentence per request** with a plain-text prompt
+  DeepSeek, xAI, and OpenCode Go — **one sentence per request** with a plain-text prompt
   parsed leniently (no JSON contract). Both clients decode and parse inside
   the retry ladder, so malformed output shares the transient budget; the
   engine owns ordering and the compatible-mode memory. A downgrade first
   seen by a live, lane, or archive engine is persisted for later engines,
-  and a probe that succeeds in fast mode clears a stale entry. Six speak
+  and a probe that succeeds in fast mode clears a stale entry. Seven speak
   OpenAI-compatible chat completions; Anthropic uses its native Messages API.
   `ProviderCatalog` holds one row per provider — tier resolution, transport
   route, engine identity, settings icon/short name, and the chat-model facts
