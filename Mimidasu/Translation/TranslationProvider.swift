@@ -12,6 +12,7 @@ enum TranslationProvider: String, CaseIterable, Codable, Identifiable {
     case zai
     case deepseek
     case xai
+    case opencodeGo
 
     var id: String {
         rawValue

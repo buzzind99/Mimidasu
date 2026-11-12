@@ -18,6 +18,9 @@ struct LLMProviderSpec: Sendable, Equatable {
     /// consults it; the Messages client always applies the compatible
     /// fallback for reasoning fields.
     let treatsClientErrorsAsConfiguration: Bool
+    /// Extra request headers the provider's gateway requires, merged over the
+    /// auth header. Empty for providers that need none.
+    var extraHeaders: [String: String] = [:]
 }
 
 /// The reasoning request-field family a chat-model provider accepts.
@@ -30,6 +33,7 @@ enum LLMReasoningDialect: Sendable, Equatable {
     case zai
     case deepSeek
     case xAI
+    case opencodeGo
 }
 
 /// One provider's fixed identity: how its tier resolves, how requests reach
@@ -114,7 +118,7 @@ struct ProviderSpec: Sendable, Equatable {
 }
 
 /// The single provider table: every fixed fact about a provider is one row.
-/// The switch is exhaustive, so a new provider case cannot ship without a
+/// The switches are exhaustive, so a new provider case cannot ship without a
 /// row, and every row is built once.
 enum ProviderCatalog {
     static func spec(for provider: TranslationProvider) -> ProviderSpec {
@@ -122,6 +126,13 @@ enum ProviderCatalog {
         case .apple: appleRow
         case .google: googleRow
         case .deepl: deepLRow
+        case .openrouter, .openai, .anthropic, .moonshot, .zai, .deepseek, .xai, .opencodeGo:
+            chatModelSpec(for: provider)
+        }
+    }
+
+    private static func chatModelSpec(for provider: TranslationProvider) -> ProviderSpec {
+        switch provider {
         case .openrouter: openRouterRow
         case .openai: openAIRow
         case .anthropic: anthropicRow
@@ -129,6 +140,9 @@ enum ProviderCatalog {
         case .zai: zaiRow
         case .deepseek: deepSeekRow
         case .xai: xAIRow
+        case .opencodeGo: opencodeGoRow
+        case .apple, .google, .deepl:
+            preconditionFailure("\(provider.rawValue) has no chat-model row")
         }
     }
 
@@ -257,6 +271,31 @@ enum ProviderCatalog {
         settingsIcon: "x.circle.fill",
         shortName: "xAI"
     )
+
+    /// OpenCode's subscription gateway. Chat completions is the projection
+    /// every Go model supports; the key is the Console API key.
+    private static let opencodeGoRow = chatModelRow(
+        tier: .opencodeGo,
+        llm: LLMProviderSpec(
+            endpoint: URL(string: "https://opencode.ai/inference/go/openai/v1/chat/completions")!,
+            api: .chatCompletions,
+            defaultModel: "deepseek-v4.1-flash",
+            reasoning: .opencodeGo,
+            treatsClientErrorsAsConfiguration: true,
+            extraHeaders: [GatewaySession.header: GatewaySession.id]
+        ),
+        engineKind: .opencodeGo,
+        settingsIcon: "chevron.left.forwardslash.chevron.right",
+        shortName: "OpenCode Go"
+    )
+
+    /// Console rejects sessionless Go traffic, so every request carries one
+    /// stable id per app run. Translation requests share no conversation
+    /// context, so a per-run id is enough.
+    private enum GatewaySession {
+        static let header = "x-opencode-session"
+        static let id = "ses_\(UUID().uuidString)"
+    }
 
     private static func chatModelRow(
         tier: TranslationTier,

@@ -414,17 +414,17 @@ struct RetranslatePlanTests {
         #expect(
             plan.options.map(\.engine) == [
                 .appleHighFidelity, .appleFast, .google, .deepl, .openrouter,
-                .openai, .anthropic, .moonshot, .zai, .deepseek, .xai
+                .openai, .anthropic, .moonshot, .zai, .deepseek, .xai, .opencodeGo
             ]
         )
         #expect(
             plan.options.map(\.isSelectable) == [
-                true, true, true, true, false, false, false, false, false, false, false
+                true, true, true, true, false, false, false, false, false, false, false, false
             ]
         )
         #expect(
             plan.options.map(\.isConfigured) == [
-                true, true, true, true, false, false, false, false, false, false, false
+                true, true, true, true, false, false, false, false, false, false, false, false
             ]
         )
     }
@@ -439,7 +439,7 @@ struct RetranslatePlanTests {
         #expect(
             plan.options.map(\.engine) == [
                 .appleFast, .google, .deepl, .openrouter, .openai,
-                .anthropic, .moonshot, .zai, .deepseek, .xai
+                .anthropic, .moonshot, .zai, .deepseek, .xai, .opencodeGo
             ]
         )
     }

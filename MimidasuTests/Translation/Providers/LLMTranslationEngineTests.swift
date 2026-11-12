@@ -135,11 +135,12 @@ struct LLMTranslationEngineTests {
     /// fallback and catalog facts come from the production path.
     private func makeFactoryEngine(
         script: Script,
-        model: String
+        model: String,
+        provider: TranslationProvider = .openrouter
     ) throws -> any TranslationEngine {
         try #require(
             TranslationEngineFactory.make(
-                provider: .openrouter,
+                provider: provider,
                 key: Self.apiKey,
                 model: model,
                 target: .english,
@@ -188,6 +189,29 @@ struct LLMTranslationEngineTests {
         )
         let body = try Self.decodedBody(script.bodies.first)
         #expect(body.model == defaultModel)
+    }
+
+    @Test("the Go gateway request carries the required session header")
+    func gatewaySessionHeader() async throws {
+        let script = Script(handler: Self.okContent("hello"))
+        let engine = try makeFactoryEngine(
+            script: script, model: "", provider: .opencodeGo
+        )
+
+        _ = try await engine.translate(["こんにちは"])
+
+        let request = try #require(script.requests.first)
+        #expect(
+            request.value(forHTTPHeaderField: "x-opencode-session")?
+                .hasPrefix("ses_") == true
+        )
+        #expect(
+            request.value(forHTTPHeaderField: "Authorization")
+                == "Bearer \(Self.apiKey)"
+        )
+        #expect(
+            request.url == ProviderCatalog.spec(for: .opencodeGo).llm?.endpoint
+        )
     }
 
     @Test("the system prompt names the selected target and keeps the ASR caveat")

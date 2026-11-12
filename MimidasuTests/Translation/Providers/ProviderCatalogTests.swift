@@ -56,6 +56,11 @@ struct ProviderCatalogTests {
             provider: .xai,
             endpoint: "https://api.x.ai/v1/chat/completions",
             defaultModel: "grok-4.7"
+        ),
+        ExpectedEndpoint(
+            provider: .opencodeGo,
+            endpoint: "https://opencode.ai/inference/go/openai/v1/chat/completions",
+            defaultModel: "deepseek-v4.1-flash"
         )
     ]
 
@@ -160,7 +165,13 @@ struct ProviderCatalogTests {
             ExpectedPresentation(
                 provider: .deepseek, kind: .deepseek, icon: "d.circle.fill", shortName: "DeepSeek"
             ),
-            ExpectedPresentation(provider: .xai, kind: .xai, icon: "x.circle.fill", shortName: "xAI")
+            ExpectedPresentation(provider: .xai, kind: .xai, icon: "x.circle.fill", shortName: "xAI"),
+            ExpectedPresentation(
+                provider: .opencodeGo,
+                kind: .opencodeGo,
+                icon: "chevron.left.forwardslash.chevron.right",
+                shortName: "OpenCode Go"
+            )
         ]
 
         #expect(expected.count == TranslationProvider.allCases.count)
@@ -226,7 +237,7 @@ struct ProviderCatalogTests {
     func everyEngineKindNamesItsProvider() {
         let kinds = RetranslateEngine.allCases.compactMap(\.kind)
 
-        #expect(kinds.count == 11, "the selection names 11 engine kinds")
+        #expect(kinds.count == 12, "the selection names 12 engine kinds")
         #expect(
             RetranslateEngine.allCases
                 .filter { selection in selection != .session }
@@ -279,7 +290,8 @@ struct ProviderCatalogTests {
             (.moonshot, .moonshot),
             (.zai, .zai),
             (.deepseek, .deepSeek),
-            (.xai, .xAI)
+            (.xai, .xAI),
+            (.opencodeGo, .opencodeGo)
         ]
 
         for entry in expected {
@@ -307,6 +319,21 @@ struct ProviderCatalogTests {
 
         for provider in [TranslationProvider.apple, .google, .deepl] {
             #expect(ProviderCatalog.spec(for: provider).llm == nil)
+        }
+    }
+
+    @Test("only the Go gateway declares a required session header")
+    func gatewaySessionHeader() throws {
+        let go = try #require(ProviderCatalog.spec(for: .opencodeGo).llm)
+        let session = try #require(go.extraHeaders["x-opencode-session"])
+        #expect(session.hasPrefix("ses_"))
+        #expect(go.extraHeaders.count == 1)
+
+        for provider in TranslationProvider.allCases where provider.isLLM && provider != .opencodeGo {
+            #expect(
+                ProviderCatalog.spec(for: provider).llm?.extraHeaders.isEmpty == true,
+                "unexpected extra headers for \(provider.rawValue)"
+            )
         }
     }
 

@@ -46,12 +46,14 @@ enum TranslationEngineFactory {
             let resolvedModel = trimmedModel.isEmpty ? spec.defaultModel : trimmedModel
             let options = LLMReasoningPolicy.options(for: provider, model: resolvedModel)
             let effectiveLadder = ladder ?? TransientRetryLadder(retriesBadResponse: true)
+            var headers = ["Authorization": "Bearer \(key)"]
+            headers.merge(spec.extraHeaders) { _, extra in extra }
             let client: any LLMChatClient = switch spec.api {
             case .chatCompletions:
                 ChatCompletionsClient(
                     config: ChatCompletionsClient.Config(
                         endpoint: spec.endpoint,
-                        headers: ["Authorization": "Bearer \(key)"],
+                        headers: headers,
                         model: resolvedModel,
                         options: options,
                         treatClientErrorsAsConfiguration: spec.treatsClientErrorsAsConfiguration

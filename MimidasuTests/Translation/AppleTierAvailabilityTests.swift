@@ -142,7 +142,7 @@ struct AppleTierAvailabilityTests {
         "non-Apple tiers pass through unchanged",
         arguments: [
             RetranslateEngine.session, .appleFast, .google, .deepl, .openrouter,
-            .openai, .anthropic, .moonshot, .zai, .deepseek, .xai
+            .openai, .anthropic, .moonshot, .zai, .deepseek, .xai, .opencodeGo
         ]
     )
     func nonAppleTiersPassThrough(tier: RetranslateEngine) {
@@ -157,7 +157,7 @@ struct AppleTierAvailabilityTests {
         "non-Apple kinds pass through unchanged",
         arguments: [
             TranslationEngineKind.appleFast, .google, .deepl, .openrouter,
-            .openai, .anthropic, .moonshot, .zai, .deepseek, .xai
+            .openai, .anthropic, .moonshot, .zai, .deepseek, .xai, .opencodeGo
         ]
     )
     func nonAppleKindsPassThrough(kind: TranslationEngineKind) {

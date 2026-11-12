@@ -361,7 +361,7 @@ struct TranslationSettingsTests {
     func providerIdentityAndDisplayNames() {
         let expectedIDs = [
             "apple", "google", "deepl", "openrouter", "openai",
-            "anthropic", "moonshot", "zai", "deepseek", "xai"
+            "anthropic", "moonshot", "zai", "deepseek", "xai", "opencodeGo"
         ]
         #expect(TranslationProvider.allCases.map(\.id) == expectedIDs)
         #expect(TranslationProvider.apple.displayName == "Apple (NMT)")
@@ -379,6 +379,10 @@ struct TranslationSettingsTests {
         for provider in [TranslationProvider.openai, .anthropic, .moonshot, .zai, .deepseek, .xai] {
             #expect(provider.settingsIcon == "\(provider.rawValue.prefix(1)).circle.fill")
         }
+        #expect(
+            TranslationProvider.opencodeGo.settingsIcon
+                == "chevron.left.forwardslash.chevron.right"
+        )
         #expect(TranslationProvider.apple.settingsDetail(configured: false) == "On-device")
         #expect(TranslationProvider.google.settingsDetail(configured: false) == "External · API key")
         #expect(TranslationProvider.google.settingsDetail(configured: true) == "External · API key · Configured")
@@ -392,6 +396,7 @@ struct TranslationSettingsTests {
         #expect(TranslationProvider.google.shortName == "Google")
         #expect(TranslationProvider.deepl.shortName == "DeepL")
         #expect(TranslationProvider.openrouter.shortName == "OpenRouter")
+        #expect(TranslationProvider.opencodeGo.shortName == "OpenCode Go")
     }
 
     // MARK: - Short keys

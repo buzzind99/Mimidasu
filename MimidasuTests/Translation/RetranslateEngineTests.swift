@@ -22,6 +22,7 @@ struct RetranslateEngineTests {
         #expect(RetranslateEngine.zai.rawValue == "zai")
         #expect(RetranslateEngine.deepseek.rawValue == "deepseek")
         #expect(RetranslateEngine.xai.rawValue == "xai")
+        #expect(RetranslateEngine.opencodeGo.rawValue == "opencodeGo")
 
         #expect(TranslationEngineKind.appleHighFidelity.rawValue == "appleHighFidelity")
         #expect(TranslationEngineKind.appleFast.rawValue == "appleFast")
@@ -34,6 +35,7 @@ struct RetranslateEngineTests {
         #expect(TranslationEngineKind.zai.rawValue == "zai")
         #expect(TranslationEngineKind.deepseek.rawValue == "deepseek")
         #expect(TranslationEngineKind.xai.rawValue == "xai")
+        #expect(TranslationEngineKind.opencodeGo.rawValue == "opencodeGo")
     }
 
     @Test("the on-device selections name no provider")
@@ -54,6 +56,7 @@ struct RetranslateEngineTests {
         #expect(RetranslateEngine.zai.provider == .zai)
         #expect(RetranslateEngine.deepseek.provider == .deepseek)
         #expect(RetranslateEngine.xai.provider == .xai)
+        #expect(RetranslateEngine.opencodeGo.provider == .opencodeGo)
 
         #expect(RetranslateEngine(provider: .apple) == nil)
         #expect(RetranslateEngine(provider: .google) == .google)
@@ -65,6 +68,7 @@ struct RetranslateEngineTests {
         #expect(RetranslateEngine(provider: .zai) == .zai)
         #expect(RetranslateEngine(provider: .deepseek) == .deepseek)
         #expect(RetranslateEngine(provider: .xai) == .xai)
+        #expect(RetranslateEngine(provider: .opencodeGo) == .opencodeGo)
     }
 
     @Test("kind mapping names no kind for Apple — the live Apple identity is probed")
@@ -79,6 +83,7 @@ struct RetranslateEngineTests {
         #expect(TranslationEngineKind(provider: .zai) == .zai)
         #expect(TranslationEngineKind(provider: .deepseek) == .deepseek)
         #expect(TranslationEngineKind(provider: .xai) == .xai)
+        #expect(TranslationEngineKind(provider: .opencodeGo) == .opencodeGo)
     }
 
     @Test("marker names match the labels shown on retried rows")
@@ -94,6 +99,7 @@ struct RetranslateEngineTests {
         #expect(TranslationEngineKind.zai.markerName == "Z.ai")
         #expect(TranslationEngineKind.deepseek.markerName == "DeepSeek")
         #expect(TranslationEngineKind.xai.markerName == "xAI")
+        #expect(TranslationEngineKind.opencodeGo.markerName == "OpenCode Go")
     }
 
     @Test("engine display names match the picker labels")
@@ -110,6 +116,7 @@ struct RetranslateEngineTests {
         #expect(RetranslateEngine.zai.displayName == "Z.ai")
         #expect(RetranslateEngine.deepseek.displayName == "DeepSeek")
         #expect(RetranslateEngine.xai.displayName == "xAI")
+        #expect(RetranslateEngine.opencodeGo.displayName == "OpenCode Go")
     }
 
     @Test("the new re-translate selections name their engine kinds")
@@ -120,6 +127,7 @@ struct RetranslateEngineTests {
         #expect(RetranslateEngine.zai.kind == .zai)
         #expect(RetranslateEngine.deepseek.kind == .deepseek)
         #expect(RetranslateEngine.xai.kind == .xai)
+        #expect(RetranslateEngine.opencodeGo.kind == .opencodeGo)
     }
 
     @Test("disclosure intents identify themselves for the sheet and name their provider")

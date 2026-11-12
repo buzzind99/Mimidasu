@@ -65,6 +65,8 @@ enum LLMReasoningPolicy {
             deepSeekOptions(model)
         case .xAI:
             xAIOptions(model)
+        case .opencodeGo:
+            opencodeGoOptions(model)
         }
     }
 
@@ -203,6 +205,19 @@ enum LLMReasoningPolicy {
             ("grok-4.7", LLMRequestOptions(reasoningEffort: "low")),
             ("grok-4.6", LLMRequestOptions(reasoningEffort: "low")),
             ("grok-4.5", LLMRequestOptions(reasoningEffort: "low"))
+        ]
+        return longestRule(for: model, rules: rules)
+    }
+
+    // MARK: - OpenCode Go
+
+    /// The gateway forwards to each model's native API, so only the model IDs
+    /// with a known thinking switch get one. Every other ID sends no reasoning
+    /// fields; a rejection falls back once and is remembered.
+    private static func opencodeGoOptions(_ model: String) -> LLMRequestOptions {
+        let rules: [(prefix: String, options: LLMRequestOptions)] = [
+            ("deepseek-v4.1-flash", LLMRequestOptions(thinking: .init(type: "disabled"))),
+            ("deepseek-v4-pro", LLMRequestOptions(thinking: .init(type: "disabled")))
         ]
         return longestRule(for: model, rules: rules)
     }
