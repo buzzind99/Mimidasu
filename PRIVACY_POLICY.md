@@ -1,6 +1,6 @@
 # Mimidasu Privacy Policy
 
-**Effective date: October 23, 2026**
+**Effective date: November 12, 2026**
 
 Mimidasu is a macOS application that transcribes Japanese system audio in real
 time and translates it to English. It is designed so that your data stays
@@ -43,8 +43,8 @@ The download is verified against a pinned checksum before use.
   under Apple's privacy policy.
 - Optionally, you can connect a cloud translation provider — Google
   Translate, DeepL, OpenRouter, OpenAI, Anthropic, Moonshot, Z.ai
-  (GLM), DeepSeek, or xAI — using **your own API key**. When you do,
-  finalized transcript **text sentences only** (no audio) are sent over
+  (GLM), DeepSeek, xAI, or OpenCode Go — using **your own API key**. When you
+  do, finalized transcript **text sentences only** (no audio) are sent over
   HTTPS **directly from your device to that provider** to be translated.
   The developer receives none of it. The app asks for your explicit
   confirmation each time you switch to a cloud provider. Before enabling
@@ -58,6 +58,7 @@ The download is verified against a pinned checksum before use.
   - Z.ai Privacy Policy: https://docs.z.ai/legal-agreement/privacy-policy
   - DeepSeek Privacy Policy: https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html
   - xAI Privacy Policy: https://x.ai/legal/privacy-policy
+  - OpenCode Go Privacy Policy: https://opencode.ai/legal/privacy-policy
 - Your provider API key is stored in your Mac's **Keychain** on your
   device. It is shared only with the provider you chose, as
   authentication, and is never transmitted to the developer or to any
