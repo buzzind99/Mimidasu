@@ -1,3 +1,4 @@
+import Foundation
 @testable import Mimidasu
 import Testing
 
@@ -36,6 +37,25 @@ struct RetranslateEngineTests {
         #expect(TranslationEngineKind.deepseek.rawValue == "deepseek")
         #expect(TranslationEngineKind.xai.rawValue == "xai")
         #expect(TranslationEngineKind.opencodeGo.rawValue == "opencodeGo")
+    }
+
+    @Test("the new raw values round-trip through Codable")
+    func opencodeGoCodableRoundTrip() throws {
+        let decodedSelection = try JSONDecoder().decode(
+            RetranslateEngine.self, from: Data(#""opencodeGo""#.utf8)
+        )
+        #expect(decodedSelection == .opencodeGo)
+        let decodedKind = try JSONDecoder().decode(
+            TranslationEngineKind.self, from: Data(#""opencodeGo""#.utf8)
+        )
+        #expect(decodedKind == .opencodeGo)
+        let encoded = try #require(
+            try String(
+                bytes: JSONEncoder().encode(decodedSelection),
+                encoding: .utf8
+            )
+        )
+        #expect(encoded == #""opencodeGo""#)
     }
 
     @Test("the on-device selections name no provider")

@@ -113,10 +113,12 @@ struct LLMTranslationEngineTests {
     ) throws -> LLMTranslationEngine {
         let spec = try #require(ProviderCatalog.spec(for: provider).llm)
         let effectiveModel = model ?? spec.defaultModel
+        var headers = ["Authorization": "Bearer \(Self.apiKey)"]
+        headers.merge(spec.extraHeaders) { _, extra in extra }
         let client = ChatCompletionsClient(
             config: ChatCompletionsClient.Config(
                 endpoint: spec.endpoint,
-                headers: ["Authorization": "Bearer \(Self.apiKey)"],
+                headers: headers,
                 model: effectiveModel,
                 options: LLMReasoningPolicy.options(
                     for: provider, model: effectiveModel
@@ -131,8 +133,8 @@ struct LLMTranslationEngineTests {
         )
     }
 
-    /// Builds OpenRouter's engine through the factory so the empty-model
-    /// fallback and catalog facts come from the production path.
+    /// Builds an engine through the factory so the empty-model fallback,
+    /// catalog facts, and provider headers come from the production path.
     private func makeFactoryEngine(
         script: Script,
         model: String,
@@ -169,6 +171,10 @@ struct LLMTranslationEngineTests {
             request.value(forHTTPHeaderField: "Authorization")
                 == "Bearer \(Self.apiKey)"
         )
+        #expect(
+            request.value(forHTTPHeaderField: "x-opencode-session") == nil,
+            "only the Go gateway declares a session header"
+        )
         let body = try Self.decodedBody(script.bodies.first)
         #expect(body.model == "test/custom-model")
         #expect(
@@ -199,12 +205,19 @@ struct LLMTranslationEngineTests {
         )
 
         _ = try await engine.translate(["こんにちは"])
+        _ = try await engine.translate(["おはよう"])
 
         let request = try #require(script.requests.first)
+        let sessions = script.requests.map { issued in
+            issued.value(forHTTPHeaderField: "x-opencode-session")
+        }
+        #expect(sessions.count == 2)
         #expect(
-            request.value(forHTTPHeaderField: "x-opencode-session")?
-                .hasPrefix("ses_") == true
+            Set(sessions).count == 1,
+            "the session id must stay stable across requests in one app run"
         )
+        let session = try #require(sessions.first ?? nil)
+        #expect(session.hasPrefix("ses_"))
         #expect(
             request.value(forHTTPHeaderField: "Authorization")
                 == "Bearer \(Self.apiKey)"
@@ -468,6 +481,37 @@ extension LLMTranslationEngineTests {
         #expect(script.requestCount == 3)
         let laterBody = try Self.decodedBody(script.bodies.last)
         #expect(laterBody.reasoningEffort == nil)
+    }
+
+    @Test("the Go gateway keeps its session header on the compatible-mode retry")
+    func gatewaySessionHeaderSurvivesDowngrade() async throws {
+        let script = Script(handler: { index in
+            if index == 0 {
+                return try Self.status(400)(index)
+            }
+            return try Self.okContent("hello")(index)
+        })
+        let engine = try makeEngine(
+            script: script, provider: .opencodeGo
+        )
+
+        let translations = try await engine.translate(["こんにちは"])
+
+        #expect(translations == ["hello"])
+        #expect(engine.usedCompatibleMode)
+        #expect(script.requestCount == 2)
+        let firstBody = try Self.decodedBody(script.bodies.first)
+        #expect(firstBody.thinking?.type == "disabled")
+        let retryBody = try Self.decodedBody(script.bodies.last)
+        #expect(retryBody.thinking == nil)
+        let sessions = script.requests.map { request in
+            request.value(forHTTPHeaderField: "x-opencode-session")
+        }
+        #expect(Set(sessions).count == 1)
+        #expect(
+            sessions.allSatisfy { value in value?.hasPrefix("ses_") == true },
+            "every attempt must carry the same session id"
+        )
     }
 
     @Test("a second configuration rejection surfaces the fixed copy after exactly two requests")

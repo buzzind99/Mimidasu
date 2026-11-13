@@ -66,7 +66,7 @@ struct ProviderCatalogTests {
 
     // MARK: - Catalog membership
 
-    @Test("non-LLM providers have no catalog entry")
+    @Test("non-LLM providers have no chat-model spec")
     func nonLLMProvidersHaveNoEntry() {
         for provider in [TranslationProvider.apple, .google, .deepl] {
             #expect(ProviderCatalog.spec(for: provider).llm == nil)
@@ -174,7 +174,11 @@ struct ProviderCatalogTests {
             )
         ]
 
-        #expect(expected.count == TranslationProvider.allCases.count)
+        #expect(
+            Set(expected.map(\.provider.rawValue))
+                == Set(TranslationProvider.allCases.map(\.rawValue)),
+            "the table must cover every provider exactly once"
+        )
         for entry in expected {
             #expect(entry.provider.spec.settingsIcon == entry.icon)
             #expect(entry.provider.settingsIcon == entry.icon)
@@ -300,6 +304,11 @@ struct ProviderCatalogTests {
                 "unexpected fast-mode dialect for \(entry.provider.rawValue)"
             )
         }
+        #expect(
+            Set(expected.map(\.provider.rawValue))
+                == Set(TranslationProvider.allCases.filter(\.isLLM).map(\.rawValue)),
+            "the dialect table must cover every chat-model provider"
+        )
 
         for provider in [TranslationProvider.apple, .google, .deepl] {
             #expect(ProviderCatalog.spec(for: provider).llm == nil)
@@ -307,7 +316,7 @@ struct ProviderCatalogTests {
         }
     }
 
-    @Test("only OpenRouter retries client errors")
+    @Test("only OpenRouter treats client errors as transient")
     func clientErrorPosture() {
         for provider in TranslationProvider.allCases where provider.isLLM {
             #expect(
@@ -322,7 +331,7 @@ struct ProviderCatalogTests {
         }
     }
 
-    @Test("only the Go gateway declares a required session header")
+    @Test("only the Go gateway declares a session header")
     func gatewaySessionHeader() throws {
         let go = try #require(ProviderCatalog.spec(for: .opencodeGo).llm)
         let session = try #require(go.extraHeaders["x-opencode-session"])

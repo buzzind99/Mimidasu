@@ -165,6 +165,33 @@ struct TranslationConnectionTesterTests {
         #expect(script.requestCount == 1)
     }
 
+    @Test("OpenCode Go probes with the session header and its catalog default model")
+    func opencodeGoProbe() async throws {
+        let endpoint = try #require(
+            ProviderCatalog.spec(for: .opencodeGo).llm?.endpoint
+        )
+        let script = Script(handler: { _ in
+            (Self.chatReply, Self.httpResponse(endpoint, 200))
+        })
+        let transport = makeTransport(script)
+
+        let compatibleMode = try await TranslationConnectionTester.test(
+            provider: .opencodeGo, key: "go-key", transport: transport
+        )
+
+        #expect(compatibleMode == false)
+        let request = try #require(script.requests.first)
+        #expect(request.url == endpoint)
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer go-key")
+        #expect(
+            request.value(forHTTPHeaderField: "x-opencode-session")?
+                .hasPrefix("ses_") == true
+        )
+        let body = try JSONDecoder().decode(ChatProbeBody.self, from: #require(script.bodies.first))
+        #expect(body.model == "deepseek-v4.1-flash")
+        #expect(script.requestCount == 1)
+    }
+
     @Test("Anthropic probes the Messages endpoint with its native headers and the explicit model")
     func anthropicProbe() async throws {
         let reply = Data(#"{"content":[{"type":"text","text":"hello"}]}"#.utf8)

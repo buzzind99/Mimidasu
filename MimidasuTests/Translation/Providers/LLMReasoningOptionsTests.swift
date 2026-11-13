@@ -200,7 +200,7 @@ struct LLMReasoningOptionsTests {
             )
         }
         #expect(options(for: .opencodeGo, model: "glm-5.3-flash") == LLMRequestOptions())
-        #expect(options(for: .opencodeGo, model: "deepseek-chat") == LLMRequestOptions())
+        #expect(options(for: .opencodeGo, model: "kimi-k3") == LLMRequestOptions())
         #expect(options(for: .opencodeGo, model: "unlisted-model") == LLMRequestOptions())
     }
 
