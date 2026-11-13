@@ -18,10 +18,10 @@ import Testing
 @Suite("DictionarySearch assemble reorder")
 struct DictionarySearchAssembleDiffTests {
     /// Survivors in excess of `maxRows`, a third of them common, with gloss
-    /// text that varies in length — so the four ranking keys this fixture can
-    /// discriminate (tier, commonness, matched length, `ent_seq`) actually
-    /// discriminate and a bug that swapped two keys would show up as a
-    /// different order rather than as no order at all.
+    /// text that varies in length — so the three keys that can vary in this
+    /// fixture (commonness, matched length, `ent_seq`) actually discriminate;
+    /// tier is constant across these gloss matches, so only a swap among
+    /// those three would show up as a different order.
     private static let survivors = DictionarySearchEngine.maxRows + 200
 
     /// The candidate rows the gloss stage produces, plus a handle over the

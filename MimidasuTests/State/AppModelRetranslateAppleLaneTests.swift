@@ -124,7 +124,7 @@ struct AppModelRetranslateAppleLaneTests {
         )
     }
 
-    // MARK: - Fast (MTL) lane
+    // MARK: - Fast (NMT) lane
 
     @Test("apple fast stamps via the armed session and seeds the cache unstamped")
     func appleFastStampsViaArmedSession() async throws {

@@ -7,8 +7,8 @@ import Testing
 /// exportability, the copy commands, and delegation to `SessionExporter` for
 /// all four formats. Split from `AppModelTests` alongside that extension.
 /// The JSON metadata-passthrough test begins a session over injected
-/// engine/capture/permission doubles; everything else runs against default
-/// factories with a stubbed model check.
+/// engine/capture doubles; everything else runs against default factories
+/// with a stubbed model check.
 @MainActor
 @Suite("AppModel export")
 struct AppModelExportTests {

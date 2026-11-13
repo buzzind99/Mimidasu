@@ -120,9 +120,9 @@ private enum SmokeDatabaseError: Error {
 /// text, which the lookup accepts but the gloss index cannot answer — the
 /// silent-empty failure the promote-time smoke check exists to catch.
 /// `leadingShortGloss` (only meaningful with `includeSmokeWord`) prepends a
-/// sense whose gloss is one or two scalars — the short shape a corpus does
-/// carry plenty of (1,252 of the pinned build's 656,706 `senses` gloss columns
-/// are one or two scalars long) and what the answer probe has to walk past:
+/// one-scalar sense — the short shape the corpus carries (1,252 of the pinned
+/// build's 656,706 `senses` gloss columns are one or two scalars long) and
+/// what the answer probe has to walk past:
 /// `firstTrigram` cannot build a three-scalar phrase from such a row, so the
 /// probe would refuse a perfectly healthy index over it. FTS5 answers a
 /// shorter-than-three-character phrase with zero rows and no error, which is
