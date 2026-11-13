@@ -67,7 +67,8 @@ enum TranslationEngineFactory {
                         endpoint: spec.endpoint,
                         apiKey: key,
                         model: resolvedModel,
-                        options: options
+                        options: options,
+                        headers: spec.extraHeaders
                     ),
                     transport: transport,
                     ladder: effectiveLadder

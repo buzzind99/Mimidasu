@@ -11,6 +11,9 @@ struct AnthropicMessagesClient: LLMChatClient {
         let apiKey: String
         let model: String
         let options: LLMRequestOptions
+        /// Extra request headers the provider's gateway expects, applied after
+        /// the standard Messages headers. Empty when the gateway asks for none.
+        var headers: [String: String] = [:]
     }
 
     static let rejectedConfigurationMessage =
@@ -102,6 +105,9 @@ struct AnthropicMessagesClient: LLMChatClient {
         request.setValue(config.apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue(Self.apiVersion, forHTTPHeaderField: "anthropic-version")
         request.setValue("application/json", forHTTPHeaderField: "content-type")
+        for (name, value) in config.headers {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
         request.httpBody = try JSONEncoder().encode(
             MessagesRequestBody(model: config.model, messages: messages, options: options)
         )

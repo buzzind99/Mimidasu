@@ -112,6 +112,7 @@ struct AnthropicMessagesClientTests {
         script: Script,
         model: String? = nil,
         options: LLMRequestOptions? = nil,
+        headers: [String: String] = [:],
         ladder: TransientRetryLadder? = nil
     ) -> AnthropicMessagesClient {
         let effectiveModel = model ?? Self.defaultModel
@@ -126,7 +127,8 @@ struct AnthropicMessagesClientTests {
                 apiKey: Self.apiKey,
                 model: effectiveModel,
                 options: options
-                    ?? LLMReasoningPolicy.options(for: .anthropic, model: effectiveModel)
+                    ?? LLMReasoningPolicy.options(for: .anthropic, model: effectiveModel),
+                headers: headers
             ),
             transport: transport,
             ladder: ladder ?? TransientRetryLadder(retriesBadResponse: true, sleep: { _ in })
@@ -163,6 +165,22 @@ struct AnthropicMessagesClientTests {
         #expect(request.value(forHTTPHeaderField: "x-api-key") == Self.apiKey)
         #expect(request.value(forHTTPHeaderField: "anthropic-version") == "2023-06-01")
         #expect(request.value(forHTTPHeaderField: "content-type") == "application/json")
+    }
+
+    @Test("applies provider extra headers after the standard Messages headers")
+    func extraHeaders() async throws {
+        let script = Script(handler: Self.textContent("hello"))
+        let client = makeClient(
+            script: script, headers: ["x-opencode-session": "ses_test"]
+        )
+
+        _ = try await client.complete(Self.messages, compatibleMode: false, onRetry: nil)
+
+        let request = try #require(script.requests.first)
+        #expect(
+            request.value(forHTTPHeaderField: "x-opencode-session") == "ses_test"
+        )
+        #expect(request.value(forHTTPHeaderField: "x-api-key") == Self.apiKey)
     }
 
     @Test("Haiku 5.5 sends max_tokens, a top-level system, one user message, disabled thinking, and low effort")

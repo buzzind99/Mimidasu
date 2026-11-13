@@ -38,6 +38,12 @@ struct TranslationEngineFactoryTests {
             #expect(request.url == spec.endpoint)
             #expect(engine.transientBadResponse)
             Self.expectAuthHeaders(for: provider, in: request)
+            for (name, value) in spec.extraHeaders {
+                #expect(
+                    request.value(forHTTPHeaderField: name) == value,
+                    "\(provider.rawValue) must send \(name)"
+                )
+            }
 
             let body = try #require(
                 try JSONSerialization.jsonObject(
