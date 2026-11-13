@@ -3,8 +3,8 @@ import Observation
 import Translation
 
 /// Which translation engine is currently attached to the queue. Derived
-/// state (status pill, Settings "Currently using" row) reads this, never the
-/// provider picker — a provider change re-attaches the engine via
+/// state (status pill, the SESSION card's Translation row) reads this, never
+/// the provider picker — a provider change re-attaches the engine via
 /// `activate()` before the labels could disagree.
 enum ActiveTranslationEngine: Equatable {
     case apple
@@ -107,8 +107,8 @@ final class TranslationSessionCoordinator {
 
     /// Which external provider is attached while `activeTranslationEngine`
     /// is `.external` (nil on the Apple paths). Labels read this, never the
-    /// picker, so the ENGINES card and "Currently using" row can't describe
-    /// a provider that isn't actually attached.
+    /// picker, so the ENGINES card and the SESSION card's Translation row
+    /// can't describe a provider that isn't actually attached.
     var activeExternalProvider: TranslationProvider? {
         get { runtime.externalProvider }
         set { runtime.externalProvider = newValue }
@@ -122,7 +122,7 @@ final class TranslationSessionCoordinator {
     }
 
     /// True once this session has latched onto Apple on-device after an
-    /// external engine failed (the Settings "Currently using" row surfaces
+    /// external engine failed (the SESSION card's Translation row surfaces
     /// it). Reset by every manual retry and every session begin.
     var translationFallbackActive: Bool {
         get { runtime.fallbackLatched }

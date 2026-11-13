@@ -354,7 +354,7 @@ final class TranslationSettings {
         }
     }
 
-    // MARK: - "Currently using" row
+    // MARK: - Active-engine description
 
     /// Truthful description of the engine currently in use, including the
     /// Apple-fallback latch ("DeepL (Free) — fallback active") and the

@@ -356,7 +356,7 @@ struct AppModelRetranslationTests {
 
     /// The latch is per session: a fresh session re-attempts the configured
     /// provider from scratch, so last session's fallback must not keep the
-    /// "Currently using" row on Apple.
+    /// SESSION card's Translation row on Apple.
     @Test("a new session resets the Apple fallback latch")
     func sessionBeginResetsFallbackLatch() async {
         let model = await harness.makeModel()

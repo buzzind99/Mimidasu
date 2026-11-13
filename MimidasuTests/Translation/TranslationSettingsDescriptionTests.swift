@@ -2,8 +2,8 @@ import Foundation
 @testable import Mimidasu
 import Testing
 
-/// The Settings "Currently using" row's description: which engine the app
-/// names, and — for the cloud providers — which subscription tier it is
+/// The Settings SESSION card's Translation row description: which engine the
+/// app names, and — for the cloud providers — which subscription tier it is
 /// standing on.
 ///
 /// The DeepL tier is a **provider** fact: it is unknown while no key is
