@@ -1,8 +1,8 @@
 import Foundation
 
 /// OpenAI-compatible chat-completions core shared by OpenRouter, OpenAI,
-/// Moonshot, Z.ai, DeepSeek, and xAI. The provider supplies an endpoint, auth
-/// headers, a model, and the reasoning options; this client owns the request
+/// Moonshot, Z.ai, DeepSeek, xAI, and OpenCode Go. The provider supplies an
+/// endpoint, headers, a model, and the reasoning options; this client owns the request
 /// envelope, error mapping, retry ladder, and the one-shot compatible
 /// fallback when a provider rejects the fast-mode fields.
 struct ChatCompletionsClient: LLMChatClient {

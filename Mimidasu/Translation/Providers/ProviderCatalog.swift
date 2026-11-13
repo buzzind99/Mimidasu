@@ -18,7 +18,7 @@ struct LLMProviderSpec: Sendable, Equatable {
     /// consults it; the Messages client always applies the compatible
     /// fallback for reasoning fields.
     let treatsClientErrorsAsConfiguration: Bool
-    /// Extra request headers the provider's gateway requires, merged over the
+    /// Extra request headers the provider's gateway expects, merged over the
     /// auth header. Empty for providers that need none.
     var extraHeaders: [String: String] = [:]
 }
@@ -272,8 +272,8 @@ enum ProviderCatalog {
         shortName: "xAI"
     )
 
-    /// OpenCode's subscription gateway. Chat completions is the projection
-    /// every Go model supports; the key is the Console API key.
+    /// OpenCode's subscription gateway. Chat completions is available for
+    /// every Go text model; the key is the Console API key.
     private static let opencodeGoRow = chatModelRow(
         tier: .opencodeGo,
         llm: LLMProviderSpec(
@@ -289,8 +289,9 @@ enum ProviderCatalog {
         shortName: "OpenCode Go"
     )
 
-    /// Console rejects sessionless Go traffic, so every request carries one
-    /// stable id per app run. Translation requests share no conversation
+    /// Console asks every client to send a stable session id with its
+    /// requests so it can optimize routing and prompt caching, so every Go
+    /// request carries one id per app run. Translations share no conversation
     /// context, so a per-run id is enough.
     private enum GatewaySession {
         static let header = "x-opencode-session"
