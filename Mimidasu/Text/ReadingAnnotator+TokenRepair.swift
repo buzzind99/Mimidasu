@@ -45,8 +45,8 @@ extension ReadingAnnotator {
         // transcript the walk was willing to reach. Listed rather than reached
         // through an NFKC fold, because folding `ｶﾞ` to `ガ` would change the
         // run's scalar count and every offset derived from it. `ヮ` has no
-        // halfwidth form; `0xFF9C` is full-size `ﾜ`, which can open a word, so
-        // it is not listed.
+        // halfwidth form; `0xFF9C` is halfwidth `ﾜ` (NFKC → ワ), the non-small
+        // wa, which can open a word, so it is not listed.
         "\u{ff67}", "\u{ff68}", "\u{ff69}", "\u{ff6a}", "\u{ff6b}", "\u{ff6c}",
         "\u{ff6d}", "\u{ff6e}", "\u{ff6f}"
     ]

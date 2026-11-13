@@ -160,8 +160,9 @@ enum ReadingAlignment {
     /// (ゲーム版) match hiragana readings (げーむばん). Inputs arrive
     /// compatibility-normalized — halfwidth katakana (ｱ, ｶﾞ, ｰ) composed
     /// onto its fullwidth mora before folding — so the block arithmetic
-    /// covers every paired katakana scalar (0x30A1…0x30F6); ヷ–ヾ have no
-    /// hiragana counterpart and pass through unchanged.
+    /// covers every paired katakana scalar (0x30A1…0x30F6); the VA series
+    /// ヷ–ヺ and the marks ・ーヽヾ fall outside that block and pass through
+    /// unchanged.
     private static func fold(_ scalar: Unicode.Scalar) -> Unicode.Scalar {
         guard (0x30A1 ... 0x30F6).contains(scalar.value) else { return scalar }
         return Unicode.Scalar(scalar.value - 0x60)!

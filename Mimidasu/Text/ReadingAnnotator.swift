@@ -179,9 +179,9 @@ final class ReadingAnnotator: @unchecked Sendable {
     /// Memoizing wrapper around a raw headword probe. Both real answers
     /// cache — a `false` IS the cached miss, so `NSNumber` needs no
     /// empty-string marker — because garble recurs across the live
-    /// partials' 6–10 Hz revisions of the same sentence. A throw answers
-    /// `nil` (degraded: callers treat it as "has entry" and must not cache
-    /// the render) and is not cached, so a still-preparing database
+    /// partials' step-spaced (~1 Hz) revisions of the same sentence. A throw
+    /// answers `nil` (degraded: callers treat it as "has entry" and must not
+    /// cache the render) and is not cached, so a still-preparing database
     /// re-probes once it is up.
     static func memoizedHeadwordGate(
         _ probe: @escaping @Sendable (String) throws -> Bool
@@ -200,11 +200,10 @@ final class ReadingAnnotator: @unchecked Sendable {
     }
 
     /// Per-surface memo in front of the headword gate. Smaller than the
-    /// reading fallback's cache (1024 entries vs 2048); dictionary-guided
-    /// prefix cuts multiply the distinct probe keys a single garbled surface
-    /// produces. `NSCache` is
-    /// internally thread-safe but not marked `Sendable`, so it hides behind
-    /// this box.
+    /// reading fallback's cache (1024 entries vs 2048); it only dedupes
+    /// repeated probes of the same garbled surface, so a session-sized memo
+    /// is enough. `NSCache` is internally thread-safe but not marked
+    /// `Sendable`, so it hides behind this box.
     private final class HeadwordGateMemo: @unchecked Sendable {
         private let cache = NSCache<NSString, NSNumber>()
 
@@ -265,8 +264,8 @@ final class ReadingAnnotator: @unchecked Sendable {
         shared.segments(for: text)
     }
 
-    /// Cache-controllable variant. Live partials — growing 6–10 Hz revisions
-    /// of the in-flight sentence — pass `caching: false`: every revision is a
+    /// Cache-controllable variant. Live partials — growing, step-spaced
+    /// (~1 Hz) revisions of the in-flight sentence — pass `caching: false`: every revision is a
     /// distinct string that will never be queried again, so caching them only
     /// churns the store and evicts finalized sentences' entries.
     static func segments(for text: String, caching: Bool) -> [ReadingSegment]? {

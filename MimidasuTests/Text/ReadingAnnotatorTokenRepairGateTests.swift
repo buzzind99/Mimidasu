@@ -80,9 +80,9 @@ struct ReadingAnnotatorTokenRepairGateTests {
         ]
         #expect(ReadingAnnotator.unstartableScalars == hiragana.union(katakana).union(halfwidth))
 
-        // `0xFF9C` is full-size ワ (`ﾜ`), not a halfwidth ヮ — Unicode has no
-        // halfwidth small wa — so it can open a word and must stay out of the
-        // set.
+        // `0xFF9C` is halfwidth `ﾜ` (NFKC → ワ), the non-small wa, not the
+        // small ヮ — Unicode has no halfwidth small wa — so it can open a
+        // word and must stay out of the set.
         #expect(!ReadingAnnotator.unstartableScalars.contains("\u{ff9c}"))
 
         // And it holds nothing that can open a word. The two that used to be in
