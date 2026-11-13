@@ -7,10 +7,11 @@ import Synchronization
 /// Only the texts are deterministic: the sentence cadence is randomized
 /// (5–12 speech chunks). The UI labels mock sessions clearly.
 ///
-/// `@unchecked Sendable`: the mutable engine state lives in `state`, guarded
-/// by a `Mutex`. `push` runs on the capture queue, `poll` on the main actor's
-/// poll timer, and `finish` in a detached teardown task — poll and finish can
-/// overlap, so the mutex is the confinement the compiler cannot infer.
+/// `@unchecked Sendable`: the mutable transcript state lives in `state`,
+/// guarded by a `Mutex`; `onEngineError` is set once before capture starts.
+/// `push` runs on the capture queue, `poll` on the main actor's poll timer,
+/// and `finish` in a detached teardown task — poll and finish can overlap, so
+/// the mutex is the confinement the compiler cannot infer.
 final class MockASREngine: ASREngine, @unchecked Sendable {
     let isMock = true
     var onEngineError: ((String) -> Void)?
