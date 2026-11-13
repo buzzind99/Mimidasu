@@ -126,7 +126,7 @@ for the CLI and dev builds.
 - The backends have no cache-aware streaming, so the sliding window lives
   in Swift: a rolling utterance buffer (12 s forced-final cap) plus a 10 s
   window for partial decodes.
-- **FunASR cache workaround**: CrispASR 0.8.50+ caches the FunASR encoder
+- **FunASR cache workaround**: CrispASR 0.8.32+ caches the FunASR encoder
   graph by exact `T_lfr`; an equal-length replay returns a corrupted
   decode after the first one. The 10 s partial window reaches that state
   about 11 s into continuous speech, so `prepare` sets
@@ -251,7 +251,8 @@ for the CLI and dev builds.
   `ProviderCatalog` holds one row per provider — tier resolution, transport
   route, engine identity, settings icon/short name, and the chat-model facts
   (endpoint, wire API, default model, fast-mode dialect, client-error
-  posture). `TranslationProvider`, `RetranslateEngine`, and
+  posture, gateway headers such as OpenCode Go's per-run
+  `x-opencode-session`). `TranslationProvider`, `RetranslateEngine`, and
   `TranslationEngineKind` derive their identity from those rows (the external
   vocabularies share one persisted raw value), so a new chat-model provider is
   one catalog row plus a case in each identity enum. `LLMReasoningPolicy` is
@@ -303,7 +304,7 @@ for the CLI and dev builds.
   latch). Apple itself failing publishes `.unavailable` with **no** provider
   swap — Reconnect is the only way back. A selected-but-unconfigured
   provider (key deleted) degrades to Apple at activation — no toast; the
-  sidebar ENGINES card and Settings' "Currently using" row surface the
+  sidebar ENGINES card and the SESSION card's Translation row surface the
   state.
 - **Keys:** `KeychainStore` (`Security/`, device-only accessibility);
   key material never reaches UserDefaults, logs, error strings, or export
@@ -324,7 +325,7 @@ for the CLI and dev builds.
 - **Re-translate lane:** a finalized Sentence can be re-translated through
   a selected provider (`session` / `appleFast` / `appleHighFidelity` /
   `google` / `deepl` / `openrouter` / `openai` / `anthropic` / `moonshot` /
-  `zai` / `deepseek` / `xai`, persisted as
+  `zai` / `deepseek` / `xai` / `opencodeGo`, persisted as
   `translation.retranslateEngine`). Routes resolve at click time against
   the *lane target*: Settings' target for a live session, the open
   archive's viewing language for an archived Sentence.
@@ -382,7 +383,7 @@ for the CLI and dev builds.
   (`SidebarStatus.translationEngineName` — "Apple Intelligence" when the
   Apple Intelligence pair is installed, else "Apple", or the provider) over a
   detail line mirroring state ("On-device (fallback)", "Unavailable",
-  "External"); Settings repeats it in its "Currently using" row.
+  "External"); Settings repeats it in its SESSION card's Translation row.
   Both mappers are fed from `model.translationRuntime` — one snapshot of
   engine, attached provider, status, worker attachment, and latch — so no
   surface assembles the picture from separate app-model fields, and the
@@ -1070,9 +1071,10 @@ opaque C handles stay inside the engine and HAL ownership types.
    and emits it; `SessionController` forwards it to `ASREngine.push` and
    stages RMS/presence on the capture thread.
 2. Polling yields partials (HUD draft; transcript untouched) or finals.
-3. Each final carrying Japanese script immediately emits exactly one
+3. Each final carrying Japanese word content immediately emits exactly one
    `Sentence`, stamped with the final's own sample span (end clamped to the
-   start); a final with no Japanese script is dropped.
+   start); finals with no Japanese script, or only standalone kana marks,
+   are dropped.
 4. The immutable `Sentence` is appended to the transcript pane (JP
    SessionEntry), enqueued for translation, and persisted (the first
    Sentence creates the archive's `recording` row).
@@ -1129,10 +1131,10 @@ evolution; sentence `index` is stable and keys JP↔translation alignment.
 A translation entry may carry an optional `engine` field — the provider
 that produced it through the re-translate lane or an archive bulk run
 (`appleFast` / `appleHighFidelity` / `google` / `deepl` / `openrouter` /
-`openai` / `anthropic` / `moonshot` / `zai` / `deepseek` / `xai`;
-only Apple Intelligence is gated to macOS 26.4+ — the Apple (NMT) lane
-exists on every supported OS, and is a genuine alternate while an external
-provider is live). Live queue results never carry the field (absent = the
+`openai` / `anthropic` / `moonshot` / `zai` / `deepseek` / `xai` /
+`opencodeGo`; only Apple Intelligence is gated to macOS 26.4+ — the Apple
+(NMT) lane exists on every supported OS, and is a genuine alternate while an
+external provider is live). Live queue results never carry the field (absent = the
 Session engine), so old documents and fresh live-captions-only sessions are
 byte-identical; archive runs stamp every result, including an archive
 `.session` re-translate that maps to Apple (NMT). The field is additive
