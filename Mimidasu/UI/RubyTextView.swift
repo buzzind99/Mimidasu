@@ -168,10 +168,10 @@ struct RubyTextView: View, Equatable {
     }
 
     private struct SurfaceText: View {
-        let text: String
+        let text: AttributedString
         let font: Font
-        var italic = false
-        var hoverColor = Theme.accentPink
+        var italic: Bool
+        var hoverColor: Color
         /// Overrides the inherited foreground — the favorite color. nil must
         /// stay a *shape-style* nil, not `Color.primary`: with
         /// `baseColor: Color?` the ternary's contextual type is `Color?`, so
@@ -189,11 +189,24 @@ struct RubyTextView: View, Equatable {
         /// the cursor is on a button above it. Nil where no button exists.
         @Environment(\.referenceButtonHover) private var referenceButtonHover
 
+        init(
+            text: String, font: Font, italic: Bool = false,
+            hoverColor: Color = Theme.accentPink, baseColor: Color? = nil,
+            action: (() -> Void)? = nil
+        ) {
+            self.text = RubyTextView.surfaceAttributedText(text)
+            self.font = font
+            self.italic = italic
+            self.hoverColor = hoverColor
+            self.baseColor = baseColor
+            self.action = action
+        }
+
         var body: some View {
             let suppressed = referenceButtonHover?.isHovering == true
             let base: AnyShapeStyle = baseColor.map(AnyShapeStyle.init)
                 ?? AnyShapeStyle(.primary)
-            Text(verbatim: text)
+            Text(text)
                 .font(font)
                 .italic(italic)
                 // Hover stays authoritative over the favorite color: it is the
@@ -568,6 +581,20 @@ struct RubyTextView: View, Equatable {
         } else {
             hoverableSurface(surface, isFavorite: isFavorite, action: action)
         }
+    }
+}
+
+extension RubyTextView {
+    /// The surface text as a Japanese-tagged attributed string. The language
+    /// identifier pins CJK glyph resolution to the Japanese forms: untagged
+    /// text follows the ambient text language, so when that flips mid-session
+    /// a re-rendered word (hover) would draw the Chinese form of the same
+    /// character while the rows around it keep the Japanese one. Pure for
+    /// tests.
+    static func surfaceAttributedText(_ text: String) -> AttributedString {
+        var attributed = AttributedString(text)
+        attributed.languageIdentifier = "ja"
+        return attributed
     }
 }
 

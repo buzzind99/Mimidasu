@@ -352,4 +352,21 @@ struct RubyTextViewTests {
         #expect(RubyTextView.lookupRequest(at: 1, text: "今日", segments: segments) == nil)
         #expect(RubyTextView.lookupRequest(at: -1, text: "今日", segments: segments) == nil)
     }
+
+    // MARK: - Surface text
+
+    @Test("the surface text carries the Japanese tag on every run so no word follows the ambient language")
+    func surfaceTextPinsJapanese() {
+        let attributed = RubyTextView.surfaceAttributedText("正直なabc")
+
+        #expect(String(attributed.characters) == "正直なabc")
+        #expect(attributed.runs.allSatisfy { run in run.languageIdentifier == "ja" })
+    }
+
+    @Test("an empty surface stays an empty string rather than a tag-only run")
+    func emptySurfaceStaysEmpty() {
+        let attributed = RubyTextView.surfaceAttributedText("")
+
+        #expect(attributed.characters.isEmpty)
+    }
 }
