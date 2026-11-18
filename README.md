@@ -42,8 +42,8 @@ a verb, because every definition popup is a little *mimidasu*.
   targets (Chinese, Korean, Spanish, French, …) available in Settings —
   on-device via Apple's Translation framework, with Apple Intelligence high
   fidelity where available, or through an optional cloud provider (Google,
-  DeepL, OpenRouter, OpenAI, Anthropic, Moonshot, Z.ai, DeepSeek, xAI, and
-  OpenCode Go) using your own API key
+  DeepL, OpenRouter, OpenAI, Anthropic, Moonshot, Z.ai, DeepSeek, xAI,
+  OpenCode Go, and OpenCode Console) using your own API key
 - **Private by design** — audio and transcription never leave your Mac, and
   translation runs on-device unless you opt into a cloud translation provider
 - **Learn as you watch** — toggle furigana or romaji over the transcript, and

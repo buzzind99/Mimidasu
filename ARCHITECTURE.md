@@ -224,11 +224,11 @@ for the CLI and dev builds.
   external engine, and it awaits `queue.run` inline, keeping the
   `TranslationSession` alive for the run's life and Apple runs parked across
   a stop; no view runs the queue itself; the default;
-  OS prompts a one-time language pack), and ten external providers: Google
-  Translate, DeepL, and eight LLM providers — OpenRouter, OpenAI, Anthropic,
-  Moonshot, Z.ai (GLM), DeepSeek, xAI, and OpenCode Go. On macOS 26.4+ the live
-  session config requests the Apple Intelligence strategy, with silent
-  framework fallback to Apple (NMT).
+  OS prompts a one-time language pack), and eleven external providers: Google
+  Translate, DeepL, and nine LLM providers — OpenRouter, OpenAI, Anthropic,
+  Moonshot, Z.ai (GLM), DeepSeek, xAI, OpenCode Go, and OpenCode Console.
+  On macOS 26.4+ the live session config requests the Apple Intelligence
+  strategy, with silent framework fallback to Apple (NMT).
   `AppleTierAvailability` records pair-scoped evidence
   `(installed, targetCode)` behind a sequence token; the probe
   fires on Apple and external activation and on fallback, and a session end
@@ -239,20 +239,21 @@ for the CLI and dev builds.
   the re-translate lane (Apple (NMT) and Apple Intelligence), stacked in
   one view tree because multiple modifiers on one view are unreliable.
 - **Cloud adapters:** Google Translate (batch REST), DeepL (batch REST,
-  `:fx` free-tier host), and eight LLM providers on one generic engine —
+  `:fx` free-tier host), and nine LLM providers on one generic engine —
   OpenRouter, OpenAI, Anthropic, Moonshot (Kimi model IDs), Z.ai (GLM),
-  DeepSeek, xAI, and OpenCode Go — **one sentence per request** with a plain-text prompt
-  parsed leniently (no JSON contract). Both clients decode and parse inside
-  the retry ladder, so malformed output shares the transient budget; the
-  engine owns ordering and the compatible-mode memory. A downgrade first
-  seen by a live, lane, or archive engine is persisted for later engines,
-  and a probe that succeeds in fast mode clears a stale entry. Seven speak
-  OpenAI-compatible chat completions; Anthropic uses its native Messages API.
-  `ProviderCatalog` holds one row per provider — tier resolution, transport
-  route, engine identity, settings icon/short name, and the chat-model facts
-  (endpoint, wire API, default model, fast-mode dialect, client-error
-  posture, gateway headers such as OpenCode Go's per-run
-  `x-opencode-session`). `TranslationProvider`, `RetranslateEngine`, and
+  DeepSeek, xAI, OpenCode Go, and OpenCode Console — **one sentence per
+  request** with a plain-text prompt parsed leniently (no JSON contract).
+  Both clients decode and parse inside the retry ladder, so malformed output
+  shares the transient budget; the engine owns ordering and the
+  compatible-mode memory. A downgrade first seen by a live, lane, or archive
+  engine is persisted for later engines, and a probe that succeeds in fast
+  mode clears a stale entry. Eight speak OpenAI-compatible chat completions;
+  Anthropic uses its native Messages API. `ProviderCatalog` holds one row per
+  provider — tier resolution, transport route, engine identity, settings
+  icon/short name, and the chat-model facts (endpoint, wire API, default
+  model, fast-mode dialect, client-error posture, gateway headers such as
+  OpenCode Go's per-run `x-opencode-session` — OpenCode Console's gateway
+  needs none). `TranslationProvider`, `RetranslateEngine`, and
   `TranslationEngineKind` derive their identity from those rows (the external
   vocabularies share one persisted raw value), so a new chat-model provider is
   one catalog row plus a case in each identity enum. `LLMReasoningPolicy` is
@@ -325,7 +326,7 @@ for the CLI and dev builds.
 - **Re-translate lane:** a finalized Sentence can be re-translated through
   a selected provider (`session` / `appleFast` / `appleHighFidelity` /
   `google` / `deepl` / `openrouter` / `openai` / `anthropic` / `moonshot` /
-  `zai` / `deepseek` / `xai` / `opencodeGo`, persisted as
+  `zai` / `deepseek` / `xai` / `opencodeGo` / `opencodeConsole`, persisted as
   `translation.retranslateEngine`). Routes resolve at click time against
   the *lane target*: Settings' target for a live session, the open
   archive's viewing language for an archived Sentence.
@@ -1132,14 +1133,14 @@ A translation entry may carry an optional `engine` field — the provider
 that produced it through the re-translate lane or an archive bulk run
 (`appleFast` / `appleHighFidelity` / `google` / `deepl` / `openrouter` /
 `openai` / `anthropic` / `moonshot` / `zai` / `deepseek` / `xai` /
-`opencodeGo`; only Apple Intelligence is gated to macOS 26.4+ — the Apple
-(NMT) lane exists on every supported OS, and is a genuine alternate while an
-external provider is live). Live queue results never carry the field (absent = the
-Session engine), so old documents and fresh live-captions-only sessions are
-byte-identical; archive runs stamp every result, including an archive
-`.session` re-translate that maps to Apple (NMT). The field is additive
-under schema v1. Whether re-translated SessionEntries also show the
-provider inline in the UI is a Settings toggle
+`opencodeGo` / `opencodeConsole`; only Apple Intelligence is gated to
+macOS 26.4+ — the Apple (NMT) lane exists on every supported OS, and is a
+genuine alternate while an external provider is live). Live queue results
+never carry the field (absent = the Session engine), so old documents and
+fresh live-captions-only sessions are byte-identical; archive runs stamp
+every result, including an archive `.session` re-translate that maps to
+Apple (NMT). The field is additive under schema v1. Whether re-translated
+SessionEntries also show the provider inline in the UI is a Settings toggle
 (`translation.retranslateMarker`, default on).
 
 ## App bundle layout
