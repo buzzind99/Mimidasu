@@ -266,6 +266,13 @@ private let liveOptionsCases: [RetranslateOptionsCase] = [
         configured: [.deepl, .google, .openai],
         attachedProvider: .deepl,
         expected: [.session, .appleFast, .appleHighFidelity, .google, .openai]
+    ),
+    RetranslateOptionsCase(
+        name: "both OpenCode gateways as independent live targets",
+        configured: [.opencodeGo, .opencodeConsole],
+        expected: [
+            .session, .appleFast, .appleHighFidelity, .opencodeGo, .opencodeConsole
+        ]
     )
 ]
 
@@ -414,17 +421,18 @@ struct RetranslatePlanTests {
         #expect(
             plan.options.map(\.engine) == [
                 .appleHighFidelity, .appleFast, .google, .deepl, .openrouter,
-                .openai, .anthropic, .moonshot, .zai, .deepseek, .xai, .opencodeGo
+                .openai, .anthropic, .moonshot, .zai, .deepseek, .xai, .opencodeGo,
+                .opencodeConsole
             ]
         )
         #expect(
             plan.options.map(\.isSelectable) == [
-                true, true, true, true, false, false, false, false, false, false, false, false
+                true, true, true, true, false, false, false, false, false, false, false, false, false
             ]
         )
         #expect(
             plan.options.map(\.isConfigured) == [
-                true, true, true, true, false, false, false, false, false, false, false, false
+                true, true, true, true, false, false, false, false, false, false, false, false, false
             ]
         )
     }
@@ -439,7 +447,7 @@ struct RetranslatePlanTests {
         #expect(
             plan.options.map(\.engine) == [
                 .appleFast, .google, .deepl, .openrouter, .openai,
-                .anthropic, .moonshot, .zai, .deepseek, .xai, .opencodeGo
+                .anthropic, .moonshot, .zai, .deepseek, .xai, .opencodeGo, .opencodeConsole
             ]
         )
     }

@@ -24,6 +24,7 @@ struct RetranslateEngineTests {
         #expect(RetranslateEngine.deepseek.rawValue == "deepseek")
         #expect(RetranslateEngine.xai.rawValue == "xai")
         #expect(RetranslateEngine.opencodeGo.rawValue == "opencodeGo")
+        #expect(RetranslateEngine.opencodeConsole.rawValue == "opencodeConsole")
 
         #expect(TranslationEngineKind.appleHighFidelity.rawValue == "appleHighFidelity")
         #expect(TranslationEngineKind.appleFast.rawValue == "appleFast")
@@ -37,9 +38,10 @@ struct RetranslateEngineTests {
         #expect(TranslationEngineKind.deepseek.rawValue == "deepseek")
         #expect(TranslationEngineKind.xai.rawValue == "xai")
         #expect(TranslationEngineKind.opencodeGo.rawValue == "opencodeGo")
+        #expect(TranslationEngineKind.opencodeConsole.rawValue == "opencodeConsole")
     }
 
-    @Test("the new raw values round-trip through Codable")
+    @Test("the Go raw values round-trip through Codable")
     func opencodeGoCodableRoundTrip() throws {
         let decodedSelection = try JSONDecoder().decode(
             RetranslateEngine.self, from: Data(#""opencodeGo""#.utf8)
@@ -56,6 +58,25 @@ struct RetranslateEngineTests {
             )
         )
         #expect(encoded == #""opencodeGo""#)
+    }
+
+    @Test("the Console raw values round-trip through Codable")
+    func opencodeConsoleCodableRoundTrip() throws {
+        let decodedSelection = try JSONDecoder().decode(
+            RetranslateEngine.self, from: Data(#""opencodeConsole""#.utf8)
+        )
+        #expect(decodedSelection == .opencodeConsole)
+        let decodedKind = try JSONDecoder().decode(
+            TranslationEngineKind.self, from: Data(#""opencodeConsole""#.utf8)
+        )
+        #expect(decodedKind == .opencodeConsole)
+        let encoded = try #require(
+            try String(
+                bytes: JSONEncoder().encode(decodedSelection),
+                encoding: .utf8
+            )
+        )
+        #expect(encoded == #""opencodeConsole""#)
     }
 
     @Test("the on-device selections name no provider")
@@ -77,6 +98,7 @@ struct RetranslateEngineTests {
         #expect(RetranslateEngine.deepseek.provider == .deepseek)
         #expect(RetranslateEngine.xai.provider == .xai)
         #expect(RetranslateEngine.opencodeGo.provider == .opencodeGo)
+        #expect(RetranslateEngine.opencodeConsole.provider == .opencodeConsole)
 
         #expect(RetranslateEngine(provider: .apple) == nil)
         #expect(RetranslateEngine(provider: .google) == .google)
@@ -89,6 +111,7 @@ struct RetranslateEngineTests {
         #expect(RetranslateEngine(provider: .deepseek) == .deepseek)
         #expect(RetranslateEngine(provider: .xai) == .xai)
         #expect(RetranslateEngine(provider: .opencodeGo) == .opencodeGo)
+        #expect(RetranslateEngine(provider: .opencodeConsole) == .opencodeConsole)
     }
 
     @Test("kind mapping names no kind for Apple — the live Apple identity is probed")
@@ -104,6 +127,7 @@ struct RetranslateEngineTests {
         #expect(TranslationEngineKind(provider: .deepseek) == .deepseek)
         #expect(TranslationEngineKind(provider: .xai) == .xai)
         #expect(TranslationEngineKind(provider: .opencodeGo) == .opencodeGo)
+        #expect(TranslationEngineKind(provider: .opencodeConsole) == .opencodeConsole)
     }
 
     @Test("marker names match the labels shown on retried rows")
@@ -120,6 +144,7 @@ struct RetranslateEngineTests {
         #expect(TranslationEngineKind.deepseek.markerName == "DeepSeek")
         #expect(TranslationEngineKind.xai.markerName == "xAI")
         #expect(TranslationEngineKind.opencodeGo.markerName == "OpenCode Go")
+        #expect(TranslationEngineKind.opencodeConsole.markerName == "OpenCode Console")
     }
 
     @Test("engine display names match the picker labels")
@@ -137,6 +162,7 @@ struct RetranslateEngineTests {
         #expect(RetranslateEngine.deepseek.displayName == "DeepSeek")
         #expect(RetranslateEngine.xai.displayName == "xAI")
         #expect(RetranslateEngine.opencodeGo.displayName == "OpenCode Go")
+        #expect(RetranslateEngine.opencodeConsole.displayName == "OpenCode Console")
     }
 
     @Test("the new re-translate selections name their engine kinds")
@@ -148,6 +174,7 @@ struct RetranslateEngineTests {
         #expect(RetranslateEngine.deepseek.kind == .deepseek)
         #expect(RetranslateEngine.xai.kind == .xai)
         #expect(RetranslateEngine.opencodeGo.kind == .opencodeGo)
+        #expect(RetranslateEngine.opencodeConsole.kind == .opencodeConsole)
     }
 
     @Test("disclosure intents identify themselves for the sheet and name their provider")

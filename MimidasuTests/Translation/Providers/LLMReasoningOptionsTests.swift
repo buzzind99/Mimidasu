@@ -204,6 +204,22 @@ struct LLMReasoningOptionsTests {
         #expect(options(for: .opencodeGo, model: "unlisted-model") == LLMRequestOptions())
     }
 
+    // MARK: - OpenCode Console
+
+    @Test("OpenCode Console disables thinking only for the known DeepSeek IDs")
+    func opencodeConsoleFamilies() {
+        for model in ["deepseek-v4.1-flash", "deepseek-v4-pro"] {
+            #expect(
+                options(for: .opencodeConsole, model: model)
+                    == LLMRequestOptions(thinking: .init(type: "disabled")),
+                "unexpected fields for \(model)"
+            )
+        }
+        #expect(options(for: .opencodeConsole, model: "glm-5.3-flash") == LLMRequestOptions())
+        #expect(options(for: .opencodeConsole, model: "kimi-k3") == LLMRequestOptions())
+        #expect(options(for: .opencodeConsole, model: "unlisted-model") == LLMRequestOptions())
+    }
+
     // MARK: - OpenRouter
 
     @Test("OpenRouter never sends reasoning fields")

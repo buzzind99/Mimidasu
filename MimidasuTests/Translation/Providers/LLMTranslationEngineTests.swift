@@ -514,6 +514,39 @@ extension LLMTranslationEngineTests {
         )
     }
 
+    @Test("the Console gateway drops thinking on the retry and never sends a session header")
+    func consoleGatewayDropsThinkingWithoutSessionHeader() async throws {
+        let script = Script(handler: { index in
+            if index == 0 {
+                return try Self.status(400)(index)
+            }
+            return try Self.okContent("hello")(index)
+        })
+        let engine = try makeEngine(
+            script: script, provider: .opencodeConsole
+        )
+        let endpoint = try #require(
+            ProviderCatalog.spec(for: .opencodeConsole).llm?.endpoint
+        )
+
+        let translations = try await engine.translate(["こんにちは"])
+
+        #expect(translations == ["hello"])
+        #expect(engine.usedCompatibleMode)
+        #expect(script.requestCount == 2)
+        let firstBody = try Self.decodedBody(script.bodies.first)
+        #expect(firstBody.thinking?.type == "disabled")
+        let retryBody = try Self.decodedBody(script.bodies.last)
+        #expect(retryBody.thinking == nil)
+        #expect(
+            script.requests.allSatisfy { request in
+                request.url == endpoint
+                    && request.value(forHTTPHeaderField: "x-opencode-session") == nil
+            },
+            "every Console attempt must hit the catalog endpoint and send no session header"
+        )
+    }
+
     @Test("a second configuration rejection surfaces the fixed copy after exactly two requests")
     func fastModeDowngradeFinalRejection() async throws {
         let script = Script(handler: Self.status(400))

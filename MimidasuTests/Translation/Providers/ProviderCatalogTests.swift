@@ -61,6 +61,11 @@ struct ProviderCatalogTests {
             provider: .opencodeGo,
             endpoint: "https://opencode.ai/inference/go/openai/v1/chat/completions",
             defaultModel: "deepseek-v4.1-flash"
+        ),
+        ExpectedEndpoint(
+            provider: .opencodeConsole,
+            endpoint: "https://opencode.ai/inference/openai/v1/chat/completions",
+            defaultModel: "deepseek-v4.1-flash"
         )
     ]
 
@@ -171,6 +176,12 @@ struct ProviderCatalogTests {
                 kind: .opencodeGo,
                 icon: "chevron.left.forwardslash.chevron.right",
                 shortName: "OpenCode Go"
+            ),
+            ExpectedPresentation(
+                provider: .opencodeConsole,
+                kind: .opencodeConsole,
+                icon: "c.circle.fill",
+                shortName: "OpenCode Console"
             )
         ]
 
@@ -241,7 +252,7 @@ struct ProviderCatalogTests {
     func everyEngineKindNamesItsProvider() {
         let kinds = RetranslateEngine.allCases.compactMap(\.kind)
 
-        #expect(kinds.count == 12, "the selection names 12 engine kinds")
+        #expect(kinds.count == 13, "the selection names 13 engine kinds")
         #expect(
             RetranslateEngine.allCases
                 .filter { selection in selection != .session }
@@ -295,7 +306,8 @@ struct ProviderCatalogTests {
             (.zai, .zai),
             (.deepseek, .deepSeek),
             (.xai, .xAI),
-            (.opencodeGo, .opencodeGo)
+            (.opencodeGo, .opencodeGateway),
+            (.opencodeConsole, .opencodeGateway)
         ]
 
         for entry in expected {

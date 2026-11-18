@@ -16,7 +16,8 @@ private let canonicalTierNames: [(tier: TranslationTier, name: String)] = [
     (.zai, "Z.ai"),
     (.deepSeek, "DeepSeek"),
     (.xAI, "xAI"),
-    (.opencodeGo, "OpenCode Go")
+    (.opencodeGo, "OpenCode Go"),
+    (.opencodeConsole, "OpenCode Console")
 ]
 
 struct EngineSurface: Sendable {
@@ -37,7 +38,8 @@ private let engineSurfaceNames: [EngineSurface] = [
     EngineSurface(kind: .zai, selection: .zai, name: "Z.ai"),
     EngineSurface(kind: .deepseek, selection: .deepseek, name: "DeepSeek"),
     EngineSurface(kind: .xai, selection: .xai, name: "xAI"),
-    EngineSurface(kind: .opencodeGo, selection: .opencodeGo, name: "OpenCode Go")
+    EngineSurface(kind: .opencodeGo, selection: .opencodeGo, name: "OpenCode Go"),
+    EngineSurface(kind: .opencodeConsole, selection: .opencodeConsole, name: "OpenCode Console")
 ]
 
 /// Tests the shared engine-tier vocabulary: the one table every provider
@@ -76,6 +78,7 @@ struct TierVocabularyTests {
         #expect(TranslationProvider.deepseek.tier() == .deepSeek)
         #expect(TranslationProvider.xai.tier() == .xAI)
         #expect(TranslationProvider.opencodeGo.tier() == .opencodeGo)
+        #expect(TranslationProvider.opencodeConsole.tier() == .opencodeConsole)
 
         #expect(TranslationProvider.deepl.tier() == .deepL(.unknown))
         #expect(TranslationProvider.deepl.tier(deepLTier: .free) == .deepL(.free))
@@ -134,6 +137,7 @@ struct TierVocabularyTests {
         #expect(TranslationEngineKind.deepseek.tier == .deepSeek)
         #expect(TranslationEngineKind.xai.tier == .xAI)
         #expect(TranslationEngineKind.opencodeGo.tier == .opencodeGo)
+        #expect(TranslationEngineKind.opencodeConsole.tier == .opencodeConsole)
     }
 
     @Test("markers and re-translate selections read the tier's canonical name", arguments: engineSurfaceNames)

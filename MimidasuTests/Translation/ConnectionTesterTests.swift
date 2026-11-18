@@ -14,6 +14,7 @@ struct TranslationConnectionTesterTests {
     private static let openRouterEndpoint = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
     private static let openAIEndpoint = URL(string: "https://api.openai.com/v1/chat/completions")!
     private static let anthropicEndpoint = URL(string: "https://api.anthropic.com/v1/messages")!
+    private static let opencodeConsoleEndpoint = URL(string: "https://opencode.ai/inference/openai/v1/chat/completions")!
 
     private static func httpResponse(_ url: URL, _ status: Int) -> HTTPURLResponse {
         HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
@@ -187,6 +188,28 @@ struct TranslationConnectionTesterTests {
             request.value(forHTTPHeaderField: "x-opencode-session")?
                 .hasPrefix("ses_") == true
         )
+        let body = try JSONDecoder().decode(ChatProbeBody.self, from: #require(script.bodies.first))
+        #expect(body.model == "deepseek-v4.1-flash")
+        #expect(script.requestCount == 1)
+    }
+
+    @Test("OpenCode Console probes without a session header and its catalog default model")
+    func opencodeConsoleProbe() async throws {
+        let script = Script(handler: { _ in
+            (Self.chatReply, Self.httpResponse(Self.opencodeConsoleEndpoint, 200))
+        })
+        let transport = makeTransport(script)
+
+        let compatibleMode = try await TranslationConnectionTester.test(
+            provider: .opencodeConsole, key: "console-key", transport: transport
+        )
+
+        #expect(compatibleMode == false)
+        let request = try #require(script.requests.first)
+        #expect(request.httpMethod == "POST")
+        #expect(request.url == Self.opencodeConsoleEndpoint)
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer console-key")
+        #expect(request.value(forHTTPHeaderField: "x-opencode-session") == nil)
         let body = try JSONDecoder().decode(ChatProbeBody.self, from: #require(script.bodies.first))
         #expect(body.model == "deepseek-v4.1-flash")
         #expect(script.requestCount == 1)

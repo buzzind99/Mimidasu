@@ -306,7 +306,7 @@ struct TranslationSettingsTests {
 
     @Test(
         "re-translate selection and marker toggle persist",
-        arguments: [RetranslateEngine.appleFast, .appleHighFidelity]
+        arguments: [RetranslateEngine.appleFast, .appleHighFidelity, .opencodeConsole]
     )
     func retranslateSelectionAndMarkerPersist(engine: RetranslateEngine) {
         let (first, defaults) = makeSUT()
@@ -330,13 +330,17 @@ struct TranslationSettingsTests {
         #expect(settings.retranslateEngine == .session)
     }
 
-    @Test("removing a provider's key resets a provider-named re-translate engine")
-    func removingProviderKeyResetsRetranslateEngine() throws {
+    @Test(
+        "removing a provider's key resets a provider-named re-translate engine",
+        arguments: [TranslationProvider.deepl, .opencodeConsole]
+    )
+    func removingProviderKeyResetsRetranslateEngine(provider: TranslationProvider) throws {
         let (settings, _) = makeSUT()
-        try settings.saveKey("sk-deepl", for: .deepl)
-        settings.selectRetranslate(.deepl)
+        try settings.saveKey("sk-\(provider.rawValue)", for: provider)
+        let engine = try #require(RetranslateEngine(provider: provider))
+        settings.selectRetranslate(engine)
 
-        settings.removeKey(for: .deepl)
+        settings.removeKey(for: provider)
 
         #expect(settings.retranslateEngine == .session)
     }
@@ -361,7 +365,7 @@ struct TranslationSettingsTests {
     func providerIdentityAndDisplayNames() {
         let expectedIDs = [
             "apple", "google", "deepl", "openrouter", "openai",
-            "anthropic", "moonshot", "zai", "deepseek", "xai", "opencodeGo"
+            "anthropic", "moonshot", "zai", "deepseek", "xai", "opencodeGo", "opencodeConsole"
         ]
         #expect(TranslationProvider.allCases.map(\.id) == expectedIDs)
         #expect(TranslationProvider.apple.displayName == "Apple (NMT)")
@@ -383,6 +387,7 @@ struct TranslationSettingsTests {
             TranslationProvider.opencodeGo.settingsIcon
                 == "chevron.left.forwardslash.chevron.right"
         )
+        #expect(TranslationProvider.opencodeConsole.settingsIcon == "c.circle.fill")
         #expect(TranslationProvider.apple.settingsDetail(configured: false) == "On-device")
         #expect(TranslationProvider.google.settingsDetail(configured: false) == "External · API key")
         #expect(TranslationProvider.google.settingsDetail(configured: true) == "External · API key · Configured")
@@ -392,15 +397,20 @@ struct TranslationSettingsTests {
         #expect(TranslationProvider.openrouter.settingsDetail(configured: true) == "External · API key + model · Configured")
         #expect(TranslationProvider.opencodeGo.settingsDetail(configured: false) == "External · API key + model")
         #expect(TranslationProvider.opencodeGo.settingsDetail(configured: true) == "External · API key + model · Configured")
+        #expect(TranslationProvider.opencodeConsole.settingsDetail(configured: false) == "External · API key + model")
+        #expect(TranslationProvider.opencodeConsole.settingsDetail(configured: true) == "External · API key + model · Configured")
         #expect(TranslationProvider.google.settingsName(deepLTier: .unknown) == "Google Translate")
         #expect(TranslationProvider.openrouter.settingsName(deepLTier: .unknown) == "OpenRouter")
         #expect(TranslationProvider.opencodeGo.settingsName(deepLTier: .unknown) == "OpenCode Go")
         #expect(TranslationProvider.opencodeGo.displayName == "OpenCode Go")
+        #expect(TranslationProvider.opencodeConsole.settingsName(deepLTier: .unknown) == "OpenCode Console")
+        #expect(TranslationProvider.opencodeConsole.displayName == "OpenCode Console")
         #expect(TranslationProvider.apple.shortName == "Apple")
         #expect(TranslationProvider.google.shortName == "Google")
         #expect(TranslationProvider.deepl.shortName == "DeepL")
         #expect(TranslationProvider.openrouter.shortName == "OpenRouter")
         #expect(TranslationProvider.opencodeGo.shortName == "OpenCode Go")
+        #expect(TranslationProvider.opencodeConsole.shortName == "OpenCode Console")
     }
 
     // MARK: - Short keys
