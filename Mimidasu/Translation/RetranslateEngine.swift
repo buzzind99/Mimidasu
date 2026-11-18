@@ -14,6 +14,7 @@ enum RetranslateEngine: String, Codable, CaseIterable, Sendable, Equatable, Hash
     case deepseek
     case xai
     case opencodeGo
+    case opencodeConsole
 
     /// The external provider this selection routes through; nil for the
     /// on-device selections, which need no key. The engine kind resolves the
@@ -35,7 +36,7 @@ enum RetranslateEngine: String, Codable, CaseIterable, Sendable, Equatable, Hash
         case .appleHighFidelity:
             return .appleHighFidelity
         case .google, .deepl, .openrouter, .openai, .anthropic, .moonshot, .zai, .deepseek, .xai,
-             .opencodeGo:
+             .opencodeGo, .opencodeConsole:
             guard let kind = TranslationEngineKind(rawValue: rawValue) else {
                 assertionFailure("external selection \(rawValue) has no engine kind")
                 return nil
@@ -79,6 +80,7 @@ enum TranslationEngineKind: String, Codable, Sendable, Equatable {
     case deepseek
     case xai
     case opencodeGo
+    case opencodeConsole
 
     /// The external provider this identity names; nil for the two Apple
     /// engine identities, which have no provider row of their own. The
@@ -128,6 +130,8 @@ enum TranslationEngineKind: String, Codable, Sendable, Equatable {
             .xAI
         case .opencodeGo:
             .opencodeGo
+        case .opencodeConsole:
+            .opencodeConsole
         }
     }
 

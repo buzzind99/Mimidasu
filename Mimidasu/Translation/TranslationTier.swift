@@ -32,6 +32,8 @@ enum TranslationTier: Equatable, Sendable {
     case xAI
     /// OpenCode Go.
     case opencodeGo
+    /// OpenCode Console.
+    case opencodeConsole
 
     /// The DeepL subscription tier. `.unknown` while no key is stored — the
     /// tier cannot be known until one is.
@@ -58,6 +60,7 @@ enum TranslationTier: Equatable, Sendable {
         case .deepSeek: "DeepSeek"
         case .xAI: "xAI"
         case .opencodeGo: "OpenCode Go"
+        case .opencodeConsole: "OpenCode Console"
         }
     }
 }

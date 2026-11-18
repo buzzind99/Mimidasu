@@ -33,7 +33,7 @@ enum LLMReasoningDialect: Sendable, Equatable {
     case zai
     case deepSeek
     case xAI
-    case opencodeGo
+    case opencodeGateway
 }
 
 /// One provider's fixed identity: how its tier resolves, how requests reach
@@ -126,7 +126,8 @@ enum ProviderCatalog {
         case .apple: appleRow
         case .google: googleRow
         case .deepl: deepLRow
-        case .openrouter, .openai, .anthropic, .moonshot, .zai, .deepseek, .xai, .opencodeGo:
+        case .openrouter, .openai, .anthropic, .moonshot, .zai, .deepseek, .xai, .opencodeGo,
+             .opencodeConsole:
             chatModelSpec(for: provider)
         }
     }
@@ -141,6 +142,7 @@ enum ProviderCatalog {
         case .deepseek: deepSeekRow
         case .xai: xAIRow
         case .opencodeGo: opencodeGoRow
+        case .opencodeConsole: opencodeConsoleRow
         case .apple, .google, .deepl:
             preconditionFailure("\(provider.rawValue) has no chat-model row")
         }
@@ -273,14 +275,17 @@ enum ProviderCatalog {
     )
 
     /// OpenCode's subscription gateway. Chat completions is available for
-    /// every Go text model; the key is the Console API key.
+    /// every Go text model. Go asks every client to send a stable session id
+    /// so it can optimize routing and prompt caching, so every Go request
+    /// carries one id per app run (see `GatewaySession`). The key is an
+    /// OpenCode Console API key, stored under this row's own Keychain account.
     private static let opencodeGoRow = chatModelRow(
         tier: .opencodeGo,
         llm: LLMProviderSpec(
             endpoint: URL(string: "https://opencode.ai/inference/go/openai/v1/chat/completions")!,
             api: .chatCompletions,
             defaultModel: "deepseek-v4.1-flash",
-            reasoning: .opencodeGo,
+            reasoning: .opencodeGateway,
             treatsClientErrorsAsConfiguration: true,
             extraHeaders: [GatewaySession.header: GatewaySession.id]
         ),
@@ -289,10 +294,28 @@ enum ProviderCatalog {
         shortName: "OpenCode Go"
     )
 
-    /// Console asks every client to send a stable session id with its
-    /// requests so it can optimize routing and prompt caching, so every Go
-    /// request carries one id per app run. Translations share no conversation
-    /// context, so a per-run id is enough.
+    /// OpenCode's pay-as-you-go inference gateway. The Console API key is
+    /// stored under this row's own Keychain account, separate from Go's. The
+    /// gateway routes on the key alone, so no session header is sent. The
+    /// default is a paid model because free-tier models are refused outside
+    /// OpenCode.
+    private static let opencodeConsoleRow = chatModelRow(
+        tier: .opencodeConsole,
+        llm: LLMProviderSpec(
+            endpoint: URL(string: "https://opencode.ai/inference/openai/v1/chat/completions")!,
+            api: .chatCompletions,
+            defaultModel: "deepseek-v4.1-flash",
+            reasoning: .opencodeGateway,
+            treatsClientErrorsAsConfiguration: true
+        ),
+        engineKind: .opencodeConsole,
+        settingsIcon: "c.circle.fill",
+        shortName: "OpenCode Console"
+    )
+
+    /// The Go gateway's per-run session id, sent on every Go request.
+    /// Translations share no conversation context, so one id per app run is
+    /// enough.
     private enum GatewaySession {
         static let header = "x-opencode-session"
         static let id = "ses_\(UUID().uuidString)"
