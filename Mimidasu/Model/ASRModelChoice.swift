@@ -99,7 +99,7 @@ enum ASRModelChoice: String, CaseIterable, Identifiable {
         case .haas:
             "Medium download & memory usage, near-Full accuracy with about 3.5× faster decoding — a strong balance for most Macs."
         case .full:
-            "Largest download & memory usage, slowest inference — kept for compatibility with existing installs."
+            "Largest download & memory usage, slowest inference — for potentially more accurate transcription."
         }
     }
 }
