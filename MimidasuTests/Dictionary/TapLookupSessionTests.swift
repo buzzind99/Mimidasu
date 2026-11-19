@@ -227,7 +227,7 @@ struct TapLookupSessionTests {
         // card page together from there. The clamp an out-of-range request
         // would take is pinned by `LookupPresentationTests.initialClampsEntryIndex`.
         #expect(presentation.entryIndex == 0)
-        #expect(presentation.anchor == .liveStrip)
+        #expect(harness.session.anchor == .liveStrip)
         #expect(harness.session.popoverItem(for: .liveStrip) == presentation)
     }
 
@@ -339,7 +339,7 @@ struct TapLookupSessionTests {
         )
 
         #expect(harness.session.presentation?.content == second)
-        #expect(harness.session.presentation?.anchor == word)
+        #expect(harness.session.anchor == word)
 
         let thirdTask = harness.session.tap(request("雨"), anchor: .liveStrip, favorites: .empty)
         try await landAndWait(
@@ -350,7 +350,7 @@ struct TapLookupSessionTests {
         )
 
         #expect(harness.session.presentation?.content == third)
-        #expect(harness.session.presentation?.anchor == .liveStrip)
+        #expect(harness.session.anchor == .liveStrip)
         #expect(harness.session.popoverItem(for: word) == nil)
         #expect(harness.session.popoverItem(for: .liveStrip) == harness.session.presentation)
     }
@@ -373,12 +373,12 @@ struct TapLookupSessionTests {
 
         harness.session.dismissPopover(from: other)
 
-        #expect(harness.session.presentation?.anchor == word)
+        #expect(harness.session.anchor == word)
         #expect(harness.session.presentation?.entryIndex == 1)
 
         harness.session.dismissPopover(from: word)
 
-        #expect(harness.session.presentation?.anchor == nil)
+        #expect(harness.session.anchor == nil)
         #expect(harness.session.presentation?.content == content)
         #expect(harness.session.presentation?.entryIndex == 1)
         #expect(harness.session.popoverItem(for: word) == nil)
@@ -407,14 +407,14 @@ struct TapLookupSessionTests {
 
         #expect(harness.session.presentation?.content.displayResult == firstFallback)
         #expect(harness.session.presentation?.entryIndex == 0)
-        #expect(harness.session.presentation?.anchor == word)
+        #expect(harness.session.anchor == word)
 
         harness.session.dismissPopover(from: word)
         harness.session.selectFallback(secondFallback, favorites: .empty)
 
         #expect(harness.session.presentation?.content.displayResult == secondFallback)
         #expect(harness.session.presentation?.entryIndex == 0)
-        #expect(harness.session.presentation?.anchor == nil)
+        #expect(harness.session.anchor == nil)
     }
 
     @Test("a fallback without a presentation or a foreign result is a no-op")
@@ -461,6 +461,7 @@ struct TapLookupSessionTests {
 
         #expect(harness.session.presentation?.entryIndex == 0)
         #expect(harness.session.presentation?.content == content)
+        #expect(harness.session.anchor == .liveStrip, "a not-found tap still opens its popover")
     }
 
     @Test("stepEntry before any lookup is a no-op")
@@ -490,7 +491,7 @@ struct TapLookupSessionTests {
 
         #expect(harness.session.presentation?.content == content)
         #expect(harness.session.presentation?.entryIndex == 1)
-        #expect(harness.session.presentation?.anchor == .liveStrip)
+        #expect(harness.session.anchor == .liveStrip)
     }
 
     @Test("a fallback selection re-promotes favorites, resets the pager, and keeps the anchor")
@@ -525,7 +526,7 @@ struct TapLookupSessionTests {
         #expect(promoted.entries.map(\.entSeq) == [4, 3], "the favorite leads the new display")
         #expect(promoted.entries.first?.keb == "雨")
         #expect(harness.session.presentation?.entryIndex == 0, "the pager restarts")
-        #expect(harness.session.presentation?.anchor == word, "the anchor is kept")
+        #expect(harness.session.anchor == word, "the anchor is kept")
     }
 
     // MARK: - Clear and staleness
@@ -600,6 +601,7 @@ struct TapLookupSessionTests {
         await task.value
 
         #expect(harness.session.presentation == nil)
+        #expect(harness.session.anchor == nil)
         #expect(harness.session.popoverItem(for: .liveStrip) == nil)
     }
 

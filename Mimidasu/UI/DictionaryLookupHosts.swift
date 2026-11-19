@@ -5,13 +5,13 @@ import SwiftUI
 extension AppModel {
     /// The "get: anchor match / set: dismiss" binding behind every
     /// dictionary-popover presentation (the live strip and each transcript
-    /// word anchor): true only while the presentation's anchor is `anchor`;
+    /// word anchor): true while the lookup is anchored at `anchor`;
     /// dismissal (and Escape) clears the anchor only when this surface
     /// owns it, so a stale binding from a virtualized-off-screen row can
-    /// never clobber a newer presentation.
+    /// never clobber a newer popover.
     func lookupPopoverBinding(for anchor: LookupAnchor) -> Binding<Bool> {
         Binding(
-            get: { self.lookupPresentation?.anchor == anchor },
+            get: { self.lookupAnchor == anchor },
             set: { isPresented in
                 if !isPresented {
                     self.dismissLookupPopover(from: anchor)
@@ -430,12 +430,18 @@ func dictionaryPinnedContent(
     }
 }
 
-/// The popover presented by the surface that owns the presentation: the shared
+/// The popover presented by the surface that owns the lookup: the shared
 /// entry content with the icon copy control, or the not-found state with
 /// its related suggestions.
+///
+/// The lookup is read in this body, so a pager step or a fallback promotion
+/// refreshes a presented popover. While the popover closes, the pinned
+/// presentation keeps the content in place, so a dismissal animates out
+/// instead of collapsing.
 struct DictionaryPopoverView: View {
     var model: AppModel
-    let presentation: LookupPresentation
+    /// The surface that owns this popover, so the reading host is the owner.
+    let anchor: LookupAnchor
     /// Raises the window-level un-star question. The popover cannot own it: an
     /// alert inside a `.popover` presents as a sheet on the popover's own
     /// window, and closing the popover underneath it strands that sheet's
@@ -444,16 +450,18 @@ struct DictionaryPopoverView: View {
     let onFavoriteRemovalRequest: (String) -> Void
 
     var body: some View {
-        dictionaryPinnedContent(
-            for: presentation,
-            plan: DictionaryDefinitionPlan(mode: .popover),
-            model: model,
-            onFavoriteRemovalRequest: onFavoriteRemovalRequest,
-            emptyDefinition: { EmptyView() }
-        )
-        .padding(16)
-        .frame(width: 400, alignment: .topLeading)
-        .background(Theme.toastBackground)
+        if let presentation = model.lookupPopoverItem(for: anchor) ?? model.lookupPresentation {
+            dictionaryPinnedContent(
+                for: presentation,
+                plan: DictionaryDefinitionPlan(mode: .popover),
+                model: model,
+                onFavoriteRemovalRequest: onFavoriteRemovalRequest,
+                emptyDefinition: { EmptyView() }
+            )
+            .padding(16)
+            .frame(width: 400, alignment: .topLeading)
+            .background(Theme.toastBackground)
+        }
     }
 }
 

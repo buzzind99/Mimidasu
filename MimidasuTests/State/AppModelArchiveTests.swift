@@ -151,6 +151,7 @@ struct AppModelArchiveTests {
         model.sessionEndedAt = ContinuousClock.now
         await seedLookup(model)
         #expect(model.lookupPresentation != nil)
+        #expect(model.lookupAnchor == .liveStrip)
 
         let opened = model.openArchiveSession(id: id)
 
@@ -159,6 +160,7 @@ struct AppModelArchiveTests {
         #expect(model.pane.entries.map { entry in entry.sentence.text } == ["こんにちは", "さようなら"])
         #expect(model.pane.characterCount == "こんにちは".count + "さようなら".count)
         #expect(model.lookupPresentation == nil)
+        #expect(model.lookupAnchor == nil)
         #expect(!model.hudVisible)
         #expect(!model.translationOverlayVisible)
         #expect(model.sessionStartedAt == nil)
@@ -184,6 +186,7 @@ struct AppModelArchiveTests {
         #expect(!model.pane.entries.isEmpty)
         await seedLookup(model)
         #expect(model.lookupPresentation != nil)
+        #expect(model.lookupAnchor != nil)
 
         model.closeArchive()
 
@@ -191,6 +194,7 @@ struct AppModelArchiveTests {
         #expect(model.pane.entries.isEmpty)
         #expect(model.pane.characterCount == 0)
         #expect(model.lookupPresentation == nil)
+        #expect(model.lookupAnchor == nil)
     }
 
     @Test("opening and closing an archive bumps the transcript revision")

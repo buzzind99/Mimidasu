@@ -251,22 +251,19 @@ struct DictionaryContentTests {
     func identityToken() {
         let found = LookupPresentation(
             content: .found(result: result("お"), also: [], origin: .tappedSurface),
-            entryIndex: 0,
-            anchor: .liveStrip
+            entryIndex: 0
         )
         let promoted = LookupPresentation(
             content: .found(result: result("お土産"), also: [], origin: .tappedSurface),
-            entryIndex: 0,
-            anchor: .liveStrip
+            entryIndex: 0
         )
         let notFound = LookupPresentation(
             content: .notFound(surface: "雨尾", related: []),
-            entryIndex: 0,
-            anchor: .liveStrip
+            entryIndex: 0
         )
 
-        #expect(found.id.hasSuffix("-お"))
+        #expect(found.id == "お")
         #expect(found.id != promoted.id, "a pill promotion swaps the content identity")
-        #expect(notFound.id.contains("not-found:雨尾"))
+        #expect(notFound.id == "not-found:雨尾")
     }
 }

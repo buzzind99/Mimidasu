@@ -11,7 +11,7 @@ import SwiftUI
 /// `RubyTextView` applies `.equatable()`, whose witness compares values plus
 /// handler presence, the anchor token, and the annotation epoch, so a moved
 /// anchor or a newly ready dictionary still reaches the body. The body's own
-/// reads still observe favorites and popover presentation directly.
+/// reads still observe favorites and the popover's anchor directly.
 struct TranscriptRow: View {
     /// Shared label for the one retry affordance: the row's named
     /// accessibility action and the hover button's help tag must not drift.
@@ -34,11 +34,11 @@ struct TranscriptRow: View {
     /// The anchor word's popover presentation resolver, invoked only when
     /// `lookupAnchorToken` matches that word's segment index. The binding
     /// getter it returns is read by the anchor word's `.popover` leaf, where
-    /// the presentation observation registers.
+    /// the anchor observation registers.
     var lookupPopover: ((Int) -> RubyTextView.LookupPopover)?
-    /// The row's popover anchor reader: resolves the live presentation's
-    /// anchor for this sentence, so only that word receives the host's
-    /// popover binding. The reader's own body carries the presentation read.
+    /// The row's popover anchor reader: resolves the live lookup anchor for
+    /// this sentence, so only that word receives the host's popover binding.
+    /// The reader's own body carries the anchor read.
     var lookupAnchorToken: () -> Int?
     /// The annotation epoch the row renders with; a change forces the
     /// equatable `RubyTextView` body to re-run after dictionary readiness.
@@ -129,9 +129,12 @@ struct TranscriptRow: View {
         .onDisappear { hovering = false }
     }
 
-    /// The sentence view, scoped to the host's current popover anchor. Every
-    /// row's reader re-runs when the presentation changes; only the rows
-    /// whose token changed re-run the `RubyTextView` body.
+    /// The sentence view, scoped to the host's current lookup anchor. The
+    /// reader re-runs when the anchor changes — a new tap elsewhere, a
+    /// dismissal, or a clear — and it reads only the anchor, not the paged
+    /// presentation, so pager steps and fallback promotions leave the rows
+    /// alone. Only the rows whose token changed re-run the `RubyTextView`
+    /// body.
     private var rubyText: some View {
         TranscriptRowLookupAnchor(token: lookupAnchorToken) { token in
             rubyTextView(popoverAnchorToken: token)
@@ -257,11 +260,11 @@ struct TranscriptRow: View {
     }
 }
 
-/// Per-row reader for the transcript's word-popover anchor: the presentation
-/// read lands in this view's body, so every row's reader observes the live
-/// presentation and a tap re-evaluates all readers. Only the affected rows'
-/// tokens change, and only the anchor word resolves the host's binding and
-/// content.
+/// Per-row reader for the transcript's word-popover anchor: the anchor read
+/// lands in this view's body, so every row's reader observes the lookup
+/// anchor and re-evaluates only when a tap moves it, a dismissal clears it,
+/// or a clear resets it. Only the affected rows' tokens change, and only the
+/// anchor word resolves the host's binding and content.
 private struct TranscriptRowLookupAnchor<Content: View>: View {
     let token: () -> Int?
     let content: (Int?) -> Content

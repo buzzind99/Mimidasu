@@ -16,8 +16,13 @@ protocol TapLookupFeedbackSink: AnyObject {
 }
 
 /// Owns one tap-to-pin lifecycle: resolution dispatch, generation drops,
-/// the presentation both hosts render, fallback promotion, pager clamping,
-/// dismissal, and feedback routing.
+/// the pinned presentation both hosts render, the popover anchor, fallback
+/// promotion, pager clamping, dismissal, and feedback routing.
+///
+/// The pinned presentation and the popover anchor are separate observable
+/// values on purpose: the pinned card outlives the popover, and pager steps
+/// and fallback promotions write only the presentation. Transcript rows that
+/// read the anchor alone are therefore not invalidated by either.
 ///
 /// Every tap asks the injected resolver off the main actor and keeps its
 /// generation; a landing whose generation has since moved on is dropped whole
@@ -27,9 +32,12 @@ protocol TapLookupFeedbackSink: AnyObject {
 @Observable
 @MainActor
 final class TapLookupSession {
-    /// The one lookup both the popover and the pinned card read; nil when no
+    /// The pinned content and paged entry index both hosts read; nil when no
     /// lookup has landed or after a clear.
     private(set) var presentation: LookupPresentation?
+    /// Where the popover is up: the tapped transcript word or the live strip;
+    /// nil while it is dismissed. Paging and fallback promotion never write it.
+    private(set) var anchor: LookupAnchor?
     /// Staleness token: every tap and clear advances it, and a landing answer
     /// applies only when its captured value still matches.
     private var generation = 0
@@ -57,12 +65,12 @@ final class TapLookupSession {
         }
     }
 
-    /// Dismisses the popover only when `anchor` owns it, so a stale binding
-    /// from a row that has since scrolled away cannot close a newer popover.
-    /// The pinned content and entry index stay.
+    /// Clears the popover ownership only when the calling surface owns it, so
+    /// a stale binding from a row that has since scrolled away cannot close a
+    /// newer popover. The pinned content and entry index stay.
     func dismissPopover(from anchor: LookupAnchor) {
-        guard presentation?.anchor == anchor else { return }
-        presentation?.anchor = nil
+        guard self.anchor == anchor else { return }
+        self.anchor = nil
     }
 
     /// Re-selects a fallback pill over the current presentation. A foreign
@@ -80,17 +88,19 @@ final class TapLookupSession {
         presentation?.stepEntry(to: index)
     }
 
-    /// Ends the current lookup surface: the presentation empties and an
+    /// Ends the current lookup surface: the anchor empties before the
+    /// presentation, so a presented popover never renders nil content, and an
     /// in-flight lookup is invalidated so it cannot present afterward.
     func clear() {
+        anchor = nil
         presentation = nil
         generation &+= 1
     }
 
-    /// The popover item `anchor` presents, or nil when no presentation is up
-    /// or another anchor owns it.
+    /// The popover item `anchor` presents, or nil when the popover is down or
+    /// another anchor owns it.
     func popoverItem(for anchor: LookupAnchor) -> LookupPresentation? {
-        presentation?.popoverItem(for: anchor)
+        self.anchor == anchor ? presentation : nil
     }
 
     /// Routes a landed answer: only the pinnable two pin, at the first entry
@@ -98,11 +108,19 @@ final class TapLookupSession {
     /// warns and a failure toasts through the feedback sink; a dropped
     /// (nil) answer — a superseded lookup — applies nothing at all: no pin,
     /// no warning, no toast. Cancellation never surfaces as feedback.
+    ///
+    /// The content is written before the anchor, and an unchanged anchor is
+    /// left alone: the owning row never observes a nil presentation behind an
+    /// up popover, and a same-anchor re-tap does not invalidate readers of the
+    /// anchor alone.
     private func apply(_ answer: LookupAnswer?, anchor: LookupAnchor) {
         guard let answer else { return }
         switch answer {
         case .found, .notFound:
-            presentation = .initial(content: answer, entryIndex: 0, anchor: anchor)
+            presentation = .initial(content: answer, entryIndex: 0)
+            if self.anchor != anchor {
+                self.anchor = anchor
+            }
         case let .noHit(surface):
             feedback?.tapLookupDidWarnNoHit(surface: surface)
         case let .failure(error):

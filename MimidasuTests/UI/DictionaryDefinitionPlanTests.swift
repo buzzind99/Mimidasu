@@ -294,8 +294,7 @@ struct DictionaryDefinitionPlanTests {
                 also: [],
                 origin: .tappedSurface
             ),
-            entryIndex: 2,
-            anchor: .liveStrip
+            entryIndex: 2
         )
         guard case let .found(result, _, _) = presentation.content else {
             Issue.record("the fixture presentation is found")
@@ -320,8 +319,7 @@ struct DictionaryDefinitionPlanTests {
                 also: [],
                 origin: .tappedSurface
             ),
-            entryIndex: 3,
-            anchor: nil
+            entryIndex: 3
         )
         guard case let .found(result, _, _) = presentation.content else {
             Issue.record("the fixture presentation is found")

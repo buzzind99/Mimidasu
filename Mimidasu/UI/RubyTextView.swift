@@ -55,11 +55,11 @@ struct RubyTextView: View, Equatable {
     /// — the HUD, the live strip — keeps word units popover-free. Its
     /// presence is part of `==` (it decides whether the anchor word mounts a
     /// presenter); its identity is not. The binding getter is the
-    /// presentation observation for the anchor word.
+    /// anchor observation for the anchor word.
     var lookupPopover: ((Int) -> LookupPopover?)?
     /// The segment index that receives the host's popover binding and
     /// content, or nil for none. The host's per-row anchor reader derives it
-    /// from the live presentation, so a tap rebuilds only the owning row's
+    /// from the live anchor, so a tap rebuilds only the owning row's
     /// word units. Part of `==`: a moved anchor must reach the body.
     var popoverAnchorToken: Int?
     /// Bumped when a dictionary artifact finishes preparing, so an equatable
@@ -75,10 +75,11 @@ struct RubyTextView: View, Equatable {
 
     /// One word unit's popover presentation, resolved by the host for the
     /// anchor word only: the binding presents only while that word is the
-    /// presentation's anchor, and the binding getter is the presentation
-    /// observation. SwiftUI evaluates the content closure when the popover
-    /// presents, and re-evaluates it when the pager, a promotion, a retap, or
-    /// a dismissal changes the presentation.
+    /// lookup's anchor, and the binding getter is the anchor observation.
+    /// SwiftUI evaluates the content closure when the popover presents; the
+    /// content itself re-reads the live lookup in its own body, so a pager
+    /// step, a promotion, or a retap refreshes it without re-presenting, and
+    /// a dismissal only closes it.
     struct LookupPopover {
         let isPresented: Binding<Bool>
         let content: () -> DictionaryPopoverView?

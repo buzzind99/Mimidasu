@@ -2,9 +2,9 @@
 import Testing
 
 /// Value tests for one lookup presentation: fallback promotion, origin and
-/// identity preservation, pager clamping, and popover anchor matching. Pure
-/// transforms — no engine, database, or app state — plus the one routing
-/// rule a presentation depends on: only a pinnable answer ever becomes one.
+/// identity preservation, and pager clamping. Pure transforms — no engine,
+/// database, or app state — plus the one routing rule the session applies:
+/// only a pinnable answer ever becomes one.
 @Suite("LookupPresentation")
 struct LookupPresentationTests {
 
@@ -70,14 +70,13 @@ struct LookupPresentationTests {
         let content = LookupAnswer.found(
             result: display, also: [firstFallback, secondFallback], origin: .tappedSurface
         )
-        let presentation = LookupPresentation(content: content, entryIndex: 1, anchor: .liveStrip)
+        let presentation = LookupPresentation(content: content, entryIndex: 1)
 
         let promoted = try #require(presentation.promoting(firstFallback, favorites: .empty))
 
         #expect(promoted.content.displayResult == firstFallback)
         #expect(promoted.content.fallbackResults == [display, secondFallback])
         #expect(promoted.entryIndex == 0)
-        #expect(promoted.anchor == .liveStrip)
     }
 
     @Test("a related-pill promotion opens it as found and re-promotes its fallbacks")
@@ -92,7 +91,7 @@ struct LookupPresentationTests {
         ])
         let content = LookupAnswer.notFound(surface: "雨尾", related: [tapped, sibling])
         let favorites = FavoriteIdentity(keys: [FavoriteIdentity.normalize("雨")])
-        let presentation = LookupPresentation(content: content, entryIndex: 0, anchor: .liveStrip)
+        let presentation = LookupPresentation(content: content, entryIndex: 0)
 
         let promoted = try #require(presentation.promoting(tapped, favorites: favorites))
 
@@ -115,7 +114,7 @@ struct LookupPresentationTests {
         ])
         let content = LookupAnswer.found(result: joined, also: [], origin: .join)
         let favorites = FavoriteIdentity(keys: [FavoriteIdentity.normalize("雨")])
-        let presentation = LookupPresentation(content: content, entryIndex: 1, anchor: .liveStrip)
+        let presentation = LookupPresentation(content: content, entryIndex: 1)
 
         let promoted = try #require(presentation.promoting(joined, favorites: favorites))
 
@@ -137,7 +136,7 @@ struct LookupPresentationTests {
         let joined = result(["お土産"])
         let single = result(["お"])
         let content = LookupAnswer.found(result: joined, also: [single], origin: .join)
-        let presentation = LookupPresentation(content: content, entryIndex: 0, anchor: .liveStrip)
+        let presentation = LookupPresentation(content: content, entryIndex: 0)
 
         let moved = try #require(presentation.promoting(single, favorites: .empty))
         let back = try #require(moved.promoting(joined, favorites: .empty))
@@ -156,8 +155,7 @@ struct LookupPresentationTests {
             content: .found(
                 result: result(["お"]), also: [result(["お土産"])], origin: .tappedSurface
             ),
-            entryIndex: 0,
-            anchor: .liveStrip
+            entryIndex: 0
         )
 
         let promoted = presentation.promoting(result(["foreign"]), favorites: .empty)
@@ -173,7 +171,7 @@ struct LookupPresentationTests {
     )
     func pagerStepsAndClamps(target: Int, expected: Int) {
         var presentation = LookupPresentation(
-            content: twoEntryFound(), entryIndex: 0, anchor: .liveStrip
+            content: twoEntryFound(), entryIndex: 0
         )
 
         presentation.stepEntry(to: target)
@@ -185,16 +183,14 @@ struct LookupPresentationTests {
     func pagerInertWithoutEntries() {
         var notFound = LookupPresentation(
             content: .notFound(surface: "雨尾", related: [result(["雨"])]),
-            entryIndex: 0,
-            anchor: .liveStrip
+            entryIndex: 0
         )
         var empty = LookupPresentation(
             content: .found(
                 result: LookupResult(matched: "無", entries: []),
                 also: [], origin: .tappedSurface
             ),
-            entryIndex: 0,
-            anchor: .liveStrip
+            entryIndex: 0
         )
 
         notFound.stepEntry(to: 42)
@@ -204,62 +200,35 @@ struct LookupPresentationTests {
         #expect(empty.entryIndex == 0)
     }
 
-    // MARK: - Identity and anchor
+    // MARK: - Identity
 
-    @Test("the presentation identity survives paging and tracks the matched content")
-    func identitySurvivesPaging() {
-        let anchor = LookupAnchor.transcript(sentenceIndex: 1, tokenIndex: 2)
-        var presentation = LookupPresentation(
-            content: twoEntryFound(), entryIndex: 0, anchor: anchor
-        )
+    @Test("the presentation identity is the matched content and survives paging")
+    func identityFollowsContentOnly() {
+        var presentation = LookupPresentation(content: twoEntryFound(), entryIndex: 0)
         let id = presentation.id
 
         presentation.stepEntry(to: 1)
 
-        #expect(id.hasPrefix("transcript(sentenceIndex: 1, tokenIndex: 2)-"))
-        #expect(id.hasSuffix("-飴"))
-        #expect(presentation.id == id)
+        #expect(id == "飴", "the matched headword is the whole identity")
+        #expect(presentation.id == id, "paging does not change identity")
+        #expect(!id.hasPrefix("pinned-"), "no dismissed-state prefix exists")
 
         // Identity is keyed on the matched token: a different match changes it.
         let replacement = LookupPresentation.initial(
             content: .found(result: result(["あめ"]), also: [], origin: .tappedSurface),
-            entryIndex: 0,
-            anchor: anchor
+            entryIndex: 0
         )
+        #expect(replacement.id == "あめ")
         #expect(replacement.id != id)
 
         let notFound = LookupPresentation(
             content: .notFound(surface: "雨尾", related: [result(["雨"])]),
-            entryIndex: 0,
-            anchor: .liveStrip
+            entryIndex: 0
         )
-        #expect(notFound.id.hasSuffix("-not-found:雨尾"))
+        #expect(notFound.id == "not-found:雨尾")
     }
 
-    @Test("the popover item matches only its own anchor")
-    func popoverItemMatchesOnlyItsAnchor() {
-        let word = LookupAnchor.transcript(sentenceIndex: 2, tokenIndex: 1)
-        let transcript = LookupPresentation(
-            content: twoEntryFound(), entryIndex: 0, anchor: word
-        )
-
-        #expect(transcript.popoverItem(for: word) == transcript)
-        #expect(transcript.popoverItem(for: .transcript(sentenceIndex: 1, tokenIndex: 1)) == nil)
-        #expect(transcript.popoverItem(for: .transcript(sentenceIndex: 2, tokenIndex: 0)) == nil)
-        #expect(transcript.popoverItem(for: .liveStrip) == nil)
-
-        let live = LookupPresentation(content: twoEntryFound(), entryIndex: 0, anchor: .liveStrip)
-
-        #expect(live.popoverItem(for: .liveStrip) == live)
-        #expect(live.popoverItem(for: word) == nil)
-
-        let dismissed = LookupPresentation(content: twoEntryFound(), entryIndex: 1, anchor: nil)
-
-        #expect(dismissed.popoverItem(for: .liveStrip) == nil)
-        #expect(dismissed.popoverItem(for: word) == nil)
-    }
-
-    // MARK: - Initial and dismissal
+    // MARK: - Initial and promotion
 
     @Test(
         "initial clamps the entry index into the display entries",
@@ -267,7 +236,7 @@ struct LookupPresentationTests {
     )
     func initialClampsEntryIndex(requested: Int, expected: Int) {
         let presentation = LookupPresentation.initial(
-            content: twoEntryFound(), entryIndex: requested, anchor: .liveStrip
+            content: twoEntryFound(), entryIndex: requested
         )
 
         #expect(presentation.entryIndex == expected)
@@ -277,37 +246,33 @@ struct LookupPresentationTests {
     func initialWithoutDisplayEntries() {
         let notFound = LookupPresentation.initial(
             content: .notFound(surface: "雨尾", related: [result(["雨"])]),
-            entryIndex: 9,
-            anchor: .liveStrip
+            entryIndex: 9
         )
         let empty = LookupPresentation.initial(
             content: .found(
                 result: LookupResult(matched: "無", entries: []),
                 also: [], origin: .tappedSurface
             ),
-            entryIndex: 4,
-            anchor: .liveStrip
+            entryIndex: 4
         )
 
         #expect(notFound.entryIndex == 0)
         #expect(empty.entryIndex == 0)
     }
 
-    @Test("a dismissed presentation keeps its content and entry, and promotion keeps it dismissed")
-    func dismissedPresentationKeepsContentAndEntry() throws {
+    @Test("a promotion starts the pager at zero and leaves its source value untouched")
+    func promotionStartsAtZeroAndLeavesSourceUnchanged() throws {
         let content = LookupAnswer.found(
             result: result(["お", "御"]), also: [result(["お土産"])], origin: .tappedSurface
         )
-        let presentation = LookupPresentation(content: content, entryIndex: 1, anchor: nil)
+        let presentation = LookupPresentation(content: content, entryIndex: 1)
 
         let promoted = try #require(presentation.promoting(result(["お土産"]), favorites: .empty))
 
-        #expect(presentation.id.hasPrefix("pinned-"))
-        #expect(presentation.content == content)
-        #expect(presentation.entryIndex == 1)
+        #expect(presentation.entryIndex == 1, "the source value keeps its page")
+        #expect(promoted.id == "お土産")
         #expect(promoted.content.displayResult?.matched == "お土産")
         #expect(promoted.entryIndex == 0)
-        #expect(promoted.anchor == nil)
     }
 
     // MARK: - What may be stored
@@ -355,6 +320,7 @@ struct LookupPresentationTests {
             await task.value
 
             #expect(session.presentation == nil)
+            #expect(session.anchor == nil)
         }
     }
 
@@ -389,5 +355,6 @@ struct LookupPresentationTests {
         #expect(session.presentation == shown)
         #expect(session.presentation?.content == pinned)
         #expect(session.presentation?.entryIndex == 0)
+        #expect(session.anchor == .liveStrip, "an unpinnable verdict never moves the popover")
     }
 }

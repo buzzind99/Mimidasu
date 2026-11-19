@@ -71,7 +71,7 @@ func requirePinnable(_ answer: LookupAnswer?) -> LookupAnswer? {
 /// opens on — the popover and the pinned card page together from the first
 /// entry.
 func pagerStart(for answer: LookupAnswer) -> Int {
-    LookupPresentation.initial(content: answer, entryIndex: 0, anchor: .liveStrip).entryIndex
+    LookupPresentation.initial(content: answer, entryIndex: 0).entryIndex
 }
 
 @Suite("LookupDisplay")

@@ -107,9 +107,8 @@ struct TranscriptView: View {
                             lookupPopover(entry.sentence.index, tokenIndex)
                         },
                         lookupAnchorToken: {
-                            guard case let .transcript(sentenceIndex, tokenIndex) =
-                                model.lookupPresentation?.anchor,
-                                sentenceIndex == entry.sentence.index
+                            guard case let .transcript(sentenceIndex, tokenIndex) = model.lookupAnchor,
+                                  sentenceIndex == entry.sentence.index
                             else { return nil }
                             return tokenIndex
                         },
@@ -221,15 +220,16 @@ struct TranscriptView: View {
     }
 
     /// The anchor word's popover presentation: the binding is true only while
-    /// this exact word is the presentation's anchor (a different-word retap
-    /// dismisses and re-presents), and the content is resolved only when the
-    /// popover presents — reading the live presentation then, so pager steps,
-    /// promotions, and dismissals cannot leave stale content behind.
+    /// this exact word is the lookup's anchor (a different-word retap
+    /// dismisses and re-presents). The popover content reads the pinned lookup
+    /// in its own body, so pager steps and fallback promotions refresh it
+    /// without re-presenting.
     ///
     /// Handed to each row as a closure that only the anchor word's
-    /// `RubyTextView` body invokes. The binding getter is that word's
-    /// presentation observation; the lazy content closure re-reads the live
-    /// presentation when the popover presents.
+    /// `RubyTextView` body invokes; the binding getter is that word's anchor
+    /// observation. Only a new tap at another anchor, a dismissal, or a clear
+    /// re-runs every row's anchor reader — pager steps and fallback promotions
+    /// leave the rows alone.
     private func lookupPopover(
         _ sentenceIndex: Int, _ tokenIndex: Int
     ) -> RubyTextView.LookupPopover {
@@ -239,13 +239,11 @@ struct TranscriptView: View {
         return RubyTextView.LookupPopover(
             isPresented: model.lookupPopoverBinding(for: anchor),
             content: {
-                model.lookupPresentation?.popoverItem(for: anchor).map { presentation in
-                    DictionaryPopoverView(
-                        model: model,
-                        presentation: presentation,
-                        onFavoriteRemovalRequest: onFavoriteRemovalRequest
-                    )
-                }
+                DictionaryPopoverView(
+                    model: model,
+                    anchor: anchor,
+                    onFavoriteRemovalRequest: onFavoriteRemovalRequest
+                )
             }
         )
     }

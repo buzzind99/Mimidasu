@@ -197,7 +197,7 @@ struct TapLookupSessionRaceTests {
             resolver: harness.resolver
         )
         #expect(harness.session.presentation?.content == currentContent)
-        #expect(harness.session.presentation?.anchor == currentAnchor)
+        #expect(harness.session.anchor == currentAnchor)
 
         await landAndWait(
             staleContent,
@@ -207,7 +207,7 @@ struct TapLookupSessionRaceTests {
         )
 
         #expect(harness.session.presentation?.content == currentContent)
-        #expect(harness.session.presentation?.anchor == currentAnchor)
+        #expect(harness.session.anchor == currentAnchor)
         #expect(harness.session.popoverItem(for: staleAnchor) == nil)
         #expect(harness.feedback.warnings.isEmpty)
         #expect(harness.feedback.faults.isEmpty)
@@ -247,7 +247,7 @@ struct TapLookupSessionRaceTests {
         )
 
         #expect(harness.session.presentation?.content == currentContent)
-        #expect(harness.session.presentation?.anchor == currentAnchor)
+        #expect(harness.session.anchor == currentAnchor)
         #expect(harness.feedback.warnings.isEmpty)
         #expect(harness.feedback.faults.isEmpty)
     }
@@ -282,7 +282,7 @@ struct TapLookupSessionRaceTests {
 
         let presentation = try #require(harness.session.presentation)
         #expect(presentation.content == secondContent)
-        #expect(presentation.anchor == anchor)
+        #expect(harness.session.anchor == anchor)
         #expect(harness.session.popoverItem(for: anchor) == presentation)
         #expect(harness.feedback.warnings.isEmpty)
         #expect(harness.feedback.faults.isEmpty)
@@ -310,6 +310,7 @@ struct TapLookupSessionRaceTests {
         )
 
         #expect(harness.session.presentation == nil)
+        #expect(harness.session.anchor == nil)
         #expect(harness.session.popoverItem(for: anchor) == nil)
         #expect(harness.feedback.warnings.isEmpty)
         #expect(harness.feedback.faults.isEmpty)

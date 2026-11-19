@@ -6,14 +6,14 @@ enum LookupAnchor: Equatable, Hashable, Sendable {
     case liveStrip
 }
 
-/// One finished lookup as both hosts read it: the content, the paged entry
-/// index, and the anchor whose popover presents it. A nil anchor is the
-/// dismissed-popover state — the pinned card still shows `content` at
-/// `entryIndex`, while no row owns a popover.
+/// One finished lookup as both hosts read it: the pinned content and the paged
+/// entry index. Popover ownership lives on `TapLookupSession.anchor`, so a
+/// pager step or a fallback promotion republishes this value without touching
+/// the anchor — transcript rows that only read the anchor are not invalidated.
 ///
-/// Value semantics on purpose: paging, promotion, and dismissal are pure
-/// derivations over the same state, so the popover and the pinned card can
-/// never disagree about which lookup is up.
+/// Value semantics on purpose: paging and promotion are pure derivations over
+/// the same content, so the popover and the pinned card can never disagree
+/// about which entry is up.
 struct LookupPresentation: Equatable, Sendable, Identifiable {
     /// The pinned display content. A stored presentation only ever holds the
     /// pinnable answers — `.found` (a hit with its fallback results) or
@@ -25,14 +25,11 @@ struct LookupPresentation: Equatable, Sendable, Identifiable {
     var content: LookupAnswer
     /// The paged entry index into the display result's entries.
     var entryIndex: Int
-    /// nil means the popover is dismissed; the pinned card still shows.
-    var anchor: LookupAnchor?
 
-    /// Presentation identity. The anchor and the matched token key it — entry
-    /// paging does not change identity, a new content does. A dismissed
-    /// presentation keeps a content-derived id so a re-pin can be recognized.
+    /// Presentation identity: content-derived — entry paging does not change
+    /// it, a new content does.
     var id: String {
-        let token: String = switch content {
+        switch content {
         case let .found(result, _, _): result.matched
         case let .notFound(surface, _): "not-found:\(surface)"
         // Unreachable in a stored presentation (see `content`); named so the
@@ -40,15 +37,6 @@ struct LookupPresentation: Equatable, Sendable, Identifiable {
         case let .noHit(surface): "no-hit:\(surface)"
         case .failure: "failure"
         }
-        guard let anchor else { return "pinned-\(token)" }
-        return "\(anchor)-\(token)"
-    }
-
-    /// The popover item `anchor` presents — only the owning anchor shows the
-    /// popover; every other surface sees nothing. A dismissed presentation
-    /// matches no anchor.
-    func popoverItem(for anchor: LookupAnchor) -> LookupPresentation? {
-        self.anchor == anchor ? self : nil
     }
 
     /// Turns the entry pager to `index`, clamped into the display result's
@@ -70,7 +58,6 @@ struct LookupPresentation: Equatable, Sendable, Identifiable {
     /// fresh tap gets, so a selection opens on a favorited entry when one is
     /// eligible. A foreign result — one the tap never resolved — fails closed
     /// with nil, and so does a promotion that leaves the content unchanged.
-    /// The anchor is preserved, dismissed included.
     func promoting(
         _ choice: LookupResult, favorites: FavoriteIdentity
     ) -> LookupPresentation? {
@@ -97,17 +84,15 @@ struct LookupPresentation: Equatable, Sendable, Identifiable {
             )
         }
         guard promoted != content else { return nil }
-        return LookupPresentation(content: promoted, entryIndex: 0, anchor: anchor)
+        return LookupPresentation(content: promoted, entryIndex: 0)
     }
 
-    /// A freshly resolved presentation: the popover is up at `anchor` and the
-    /// pinned card shows the same lookup. The entry index is clamped into the
+    /// A freshly resolved presentation for the pinned card — the caller sets
+    /// the owning anchor separately. The entry index is clamped into the
     /// display entries — a not-found or empty display has none and opens at
     /// zero.
-    static func initial(
-        content: LookupAnswer, entryIndex: Int, anchor: LookupAnchor
-    ) -> LookupPresentation {
-        var presentation = LookupPresentation(content: content, entryIndex: 0, anchor: anchor)
+    static func initial(content: LookupAnswer, entryIndex: Int) -> LookupPresentation {
+        var presentation = LookupPresentation(content: content, entryIndex: 0)
         presentation.stepEntry(to: entryIndex)
         return presentation
     }

@@ -5,11 +5,10 @@ import Synchronization
 import Testing
 
 /// Host wiring for dictionary taps on `AppModel`: the request forwarder, the
-/// one presentation both hosts read, popover anchor exclusivity and dismissal,
-/// fallback and pager forwarding, and session clear. The lookup lifecycle
-/// itself — dispatch, staleness, effect routing, fallback promotion, and
-/// paging — belongs to `TapLookupSessionTests`; verdicts stay behind
-/// `LookupDisplay`.
+/// content-only presentation, the separately owned popover anchor, fallback
+/// and pager forwarding, and session clear. The lookup lifecycle itself —
+/// dispatch, staleness, effect routing, fallback promotion, and paging —
+/// belongs to `TapLookupSessionTests`; verdicts stay behind `LookupDisplay`.
 @MainActor
 @Suite("AppModel dictionary lookup")
 final class AppModelLookupTests {
@@ -93,7 +92,7 @@ final class AppModelLookupTests {
     }
 
     @Test(
-        "a lookup selection carries its anchor, matched headword, and debug id",
+        "a tap forwards its anchor and lands the matched headword with a content id",
         arguments: [
             LookupAnchor.transcript(sentenceIndex: 0, tokenIndex: 0),
             LookupAnchor.liveStrip
@@ -108,12 +107,9 @@ final class AppModelLookupTests {
         ).value
 
         let presentation = try #require(model.lookupPresentation)
-        #expect(presentation.anchor == anchor)
+        #expect(model.lookupAnchor == anchor)
         #expect(presentation.content.displayResult?.matched == "お")
-        #expect(
-            presentation.id.hasSuffix("-お"),
-            "the identity format joins the anchor and the matched token"
-        )
+        #expect(presentation.id == "お", "the identity is the matched content alone")
     }
 
     @Test("sequential taps land in order")
@@ -190,28 +186,33 @@ final class AppModelLookupTests {
         await tapHit(model, anchor: anchor)
 
         let presentation = try #require(model.lookupPresentation)
-        #expect(presentation.popoverItem(for: anchor) == presentation)
+        #expect(model.lookupAnchor == anchor)
+        #expect(model.lookupPopoverItem(for: anchor) == presentation)
         // A different word on the same row is a different anchor…
         #expect(
-            presentation.popoverItem(for: .transcript(sentenceIndex: 3, tokenIndex: 2)) == nil
+            model.lookupPopoverItem(for: .transcript(sentenceIndex: 3, tokenIndex: 2)) == nil
         )
         // …as is the same word on a different row, and the strip.
         #expect(
-            presentation.popoverItem(for: .transcript(sentenceIndex: 4, tokenIndex: 1)) == nil
+            model.lookupPopoverItem(for: .transcript(sentenceIndex: 4, tokenIndex: 1)) == nil
         )
-        #expect(presentation.popoverItem(for: .liveStrip) == nil)
+        #expect(model.lookupPopoverItem(for: .liveStrip) == nil)
     }
 
-    @Test("a second tap moves the selection to the new surface")
-    func secondTapMovesPopover() async {
+    @Test("a second tap moves the anchor while the presentation identity stays content-only")
+    func secondTapMovesAnchor() async {
         let model = makeModel()
+        let word = LookupAnchor.transcript(sentenceIndex: 1, tokenIndex: 0)
 
-        await tapHit(model, anchor: .transcript(sentenceIndex: 1, tokenIndex: 0))
-        let transcriptID = model.lookupPresentation?.id
+        await tapHit(model, anchor: word)
+        let contentID = model.lookupPresentation?.id
+
         await tapHit(model, anchor: .liveStrip)
 
-        #expect(model.lookupPresentation?.anchor == .liveStrip)
-        #expect(model.lookupPresentation?.id != transcriptID, "the anchor is part of the identity")
+        #expect(model.lookupAnchor == .liveStrip)
+        #expect(model.lookupPresentation?.id == contentID, "the anchor is not part of the identity")
+        #expect(model.lookupPopoverItem(for: .liveStrip) == model.lookupPresentation)
+        #expect(model.lookupPopoverItem(for: word) == nil)
     }
 
     @Test("a second tap on the same word swaps the content while the anchor stays")
@@ -228,7 +229,7 @@ final class AppModelLookupTests {
             anchor: anchor
         ).value
 
-        #expect(model.lookupPresentation?.anchor == anchor)
+        #expect(model.lookupAnchor == anchor)
         #expect(model.lookupPresentation?.content.displayResult?.matched == "あめ")
     }
 
@@ -245,7 +246,7 @@ final class AppModelLookupTests {
             anchor: .transcript(sentenceIndex: 1, tokenIndex: 5)
         ).value
 
-        #expect(model.lookupPresentation?.anchor == .transcript(sentenceIndex: 1, tokenIndex: 5))
+        #expect(model.lookupAnchor == .transcript(sentenceIndex: 1, tokenIndex: 5))
         #expect(model.lookupPresentation?.content.displayResult?.matched == "あめ")
     }
 
@@ -266,15 +267,17 @@ final class AppModelLookupTests {
         // A stale transcript-row binding (virtualized-off anchor) cannot
         // clobber the live strip's selection…
         model.dismissLookupPopover(from: .transcript(sentenceIndex: 7, tokenIndex: 0))
-        #expect(model.lookupPresentation?.anchor == .liveStrip)
+        #expect(model.lookupAnchor == .liveStrip)
 
         // …the strip's own dismiss clears it, and the pinned content and
         // entry stay.
         model.dismissLookupPopover(from: .liveStrip)
-        #expect(model.lookupPresentation?.anchor == nil)
-        #expect(model.lookupPresentation?.content == pinned.content)
-        #expect(model.lookupPresentation?.entryIndex == pinned.entryIndex)
-        #expect(model.lookupPresentation?.popoverItem(for: .liveStrip) == nil)
+        #expect(model.lookupAnchor == nil)
+        #expect(
+            model.lookupPresentation == pinned,
+            "dismissal leaves the pinned presentation intact"
+        )
+        #expect(model.lookupPopoverItem(for: .liveStrip) == nil)
     }
 
     // MARK: - Fallback pills
@@ -290,7 +293,7 @@ final class AppModelLookupTests {
 
         #expect(model.lookupPresentation?.content.displayResult == fallback)
         #expect(model.lookupPresentation?.entryIndex == 0)
-        #expect(model.lookupPresentation?.anchor == .liveStrip)
+        #expect(model.lookupAnchor == .liveStrip)
     }
 
     @Test("reading lookupPresentation registers the session observation")
@@ -314,10 +317,12 @@ final class AppModelLookupTests {
     func sessionClearResets() async {
         let model = makeModel()
         await tapHit(model, anchor: .liveStrip)
+        #expect(model.lookupAnchor == .liveStrip)
 
         model.sessionController.onSessionBegin?()
 
         #expect(model.lookupPresentation == nil)
+        #expect(model.lookupAnchor == nil)
     }
 
     // MARK: - Favorites probe

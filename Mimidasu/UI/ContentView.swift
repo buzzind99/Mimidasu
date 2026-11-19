@@ -175,7 +175,7 @@ struct ContentView: View {
     }
 
     /// Whether the live strip owns the app's single dictionary
-    /// popover: true only while the presentation is anchored to the strip.
+    /// popover: true only while the lookup is anchored at the live strip.
     /// Dismissal clears the anchor only when the strip still owns it.
     /// (Binding shape shared via `AppModel.lookupPopoverBinding`.)
     private var liveStripLookupPresented: Binding<Bool> {
@@ -296,17 +296,17 @@ struct ContentView: View {
                     isFavorite: model.favoriteSegmentMatcher
                 )
                 // Strip-anchored popover: single non-virtualized view, so
-                // the strip owns it while the presentation's anchor is the
-                // live strip. Anchor-keyed so a strip retap swaps content
-                // in place instead of a dismiss+replace.
+                // the strip presents while the lookup is anchored at the live
+                // strip. Anchor-keyed so a strip retap swaps content in place
+                // instead of a dismiss+replace; the content reads the live
+                // lookup in its own body, so pager steps and promotions stay
+                // current.
                 .popover(isPresented: liveStripLookupPresented) {
-                    if let presentation = model.lookupPresentation?.popoverItem(for: .liveStrip) {
-                        DictionaryPopoverView(
-                            model: model,
-                            presentation: presentation,
-                            onFavoriteRemovalRequest: requestFavoriteRemoval
-                        )
-                    }
+                    DictionaryPopoverView(
+                        model: model,
+                        anchor: .liveStrip,
+                        onFavoriteRemovalRequest: requestFavoriteRemoval
+                    )
                 }
             }
         }

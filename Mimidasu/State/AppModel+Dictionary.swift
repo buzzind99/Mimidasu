@@ -5,8 +5,10 @@ import Foundation
 // the starred words behind every dictionary header.
 //
 // Taps, dismissal, fallback selection, and pager steps forward to `tapLookup`,
-// the one owner of lookup state. `lookupPresentation` is the single value both
-// hosts read; no host keeps a second copy.
+// the one owner of lookup state. `lookupPresentation` is the pinned content
+// both hosts render; `lookupAnchor` is the popover's ownership, separate so a
+// pager step or a promotion never invalidates a reader that only needs the
+// anchor. No host keeps a second copy.
 //
 // **Seam rule:** a feature file that outgrows 600 **code** lines splits at the
 // next feature boundary — never mid-feature, never because it grew more
@@ -16,11 +18,23 @@ extension AppModel {
 
     // MARK: - Presentation
 
-    /// The one lookup both dictionary hosts read: content, paged entry, and
-    /// the anchor whose popover is up (nil after dismissal). The session owns
-    /// it; this is a read-only view.
+    /// The pinned lookup both dictionary hosts read: content and paged entry
+    /// index. The session owns it; this is a read-only view.
     var lookupPresentation: LookupPresentation? {
         tapLookup.presentation
+    }
+
+    /// The surface the dictionary popover is up from — a transcript word or
+    /// the live strip; nil while it is dismissed. Paging and fallback
+    /// promotion never write it.
+    var lookupAnchor: LookupAnchor? {
+        tapLookup.anchor
+    }
+
+    /// The popover item `anchor` presents, or nil when the popover is down or
+    /// another anchor owns it.
+    func lookupPopoverItem(for anchor: LookupAnchor) -> LookupPresentation? {
+        tapLookup.popoverItem(for: anchor)
     }
 
     // MARK: - Tap entry point
