@@ -626,3 +626,65 @@ struct TapLookupSessionTests {
         #expect(harness.spy.faults.isEmpty)
     }
 }
+
+/// Anchor ownership over the session surface: the pager keeps it, a fallback
+/// promotion outlives a later dismissal, and clear empties both halves.
+extension TapLookupSessionTests {
+
+    @Test("a pager step leaves the anchor and popover ownership unchanged")
+    func pagerStepKeepsAnchor() async throws {
+        let harness = TapLookupSessionHarness()
+        let word = LookupAnchor.transcript(sentenceIndex: 0, tokenIndex: 1)
+
+        _ = try await present(found(["飴", "雨"]), surface: "あめ", anchor: word, in: harness)
+
+        harness.session.stepEntry(to: 1)
+
+        #expect(harness.session.anchor == word)
+        #expect(harness.session.presentation?.entryIndex == 1)
+        #expect(harness.session.popoverItem(for: word) == harness.session.presentation)
+    }
+
+    @Test("a fallback promotion keeps the anchor and outlives the later dismissal")
+    func fallbackPromotionSurvivesDismissal() async throws {
+        let harness = TapLookupSessionHarness()
+        let content = found(["お", "御"], also: ["お土産"])
+        let fallback = try #require(content.fallbackResults.first)
+        let word = LookupAnchor.transcript(sentenceIndex: 1, tokenIndex: 2)
+
+        _ = try await present(content, surface: "お", anchor: word, in: harness)
+        harness.session.stepEntry(to: 1)
+
+        harness.session.selectFallback(fallback, favorites: .empty)
+
+        #expect(harness.session.presentation?.content.displayResult == fallback)
+        #expect(harness.session.presentation?.entryIndex == 0)
+        #expect(harness.session.anchor == word)
+
+        harness.session.dismissPopover(from: word)
+
+        #expect(harness.session.anchor == nil)
+        #expect(
+            harness.session.presentation?.content.displayResult == fallback,
+            "the pinned content stays after the dismissal"
+        )
+        #expect(harness.session.presentation?.entryIndex == 0)
+        #expect(harness.session.popoverItem(for: word) == nil)
+    }
+
+    @Test("clear empties the anchor and the presentation")
+    func clearEmptiesAnchorAndPresentation() async throws {
+        let harness = TapLookupSessionHarness()
+        let word = LookupAnchor.transcript(sentenceIndex: 2, tokenIndex: 4)
+
+        _ = try await present(found(["あめ"]), surface: "あめ", anchor: word, in: harness)
+        #expect(harness.session.anchor == word)
+
+        harness.session.clear()
+
+        #expect(harness.session.anchor == nil)
+        #expect(harness.session.presentation == nil)
+        #expect(harness.session.popoverItem(for: word) == nil)
+        #expect(harness.session.popoverItem(for: .liveStrip) == nil)
+    }
+}

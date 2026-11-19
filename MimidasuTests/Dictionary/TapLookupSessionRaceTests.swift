@@ -288,6 +288,52 @@ struct TapLookupSessionRaceTests {
         #expect(harness.feedback.faults.isEmpty)
     }
 
+    @Test("a superseded landing after a dismissal cannot re-present the popover")
+    func staleAnswerDoesNotResurrectDismissedAnchor() async throws {
+        let harness = TapLookupRaceHarness()
+        let dismissedAnchor = LookupAnchor.transcript(sentenceIndex: 0, tokenIndex: 1)
+        let staleAnchor = LookupAnchor.transcript(sentenceIndex: 2, tokenIndex: 0)
+        let currentContent = found(["飴"])
+        let staleContent = found(["雨"])
+
+        let staleTask = harness.session.tap(
+            request("雨"), anchor: staleAnchor, favorites: .empty
+        )
+        let currentTask = harness.session.tap(
+            request("飴"), anchor: dismissedAnchor, favorites: .empty
+        )
+        try await waitOrCancel(2, in: harness.resolver)
+
+        await landAndWait(
+            currentContent,
+            surface: "飴",
+            on: currentTask,
+            resolver: harness.resolver
+        )
+        #expect(harness.session.anchor == dismissedAnchor)
+
+        harness.session.dismissPopover(from: dismissedAnchor)
+        #expect(harness.session.anchor == nil)
+
+        await landAndWait(
+            staleContent,
+            surface: "雨",
+            on: staleTask,
+            resolver: harness.resolver
+        )
+
+        #expect(harness.session.anchor == nil, "the stale landing does not resurrect an anchor")
+        #expect(
+            harness.session.presentation?.content == currentContent,
+            "nor replace the dismissed content"
+        )
+        #expect(harness.session.presentation?.entryIndex == 0)
+        #expect(harness.session.popoverItem(for: dismissedAnchor) == nil)
+        #expect(harness.session.popoverItem(for: staleAnchor) == nil)
+        #expect(harness.feedback.warnings.isEmpty)
+        #expect(harness.feedback.faults.isEmpty)
+    }
+
     // MARK: - Session boundaries
 
     @Test("clear while a pinnable answer is in flight drops the landing")

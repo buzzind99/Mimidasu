@@ -250,6 +250,20 @@ final class AppModelLookupTests {
         #expect(model.lookupPresentation?.content.displayResult?.matched == "あめ")
     }
 
+    @Test("the model forwards the session anchor after a tap")
+    func lookupAnchorForwardsAfterTap() async {
+        let model = makeModel()
+        let word = LookupAnchor.transcript(sentenceIndex: 6, tokenIndex: 2)
+
+        #expect(model.lookupAnchor == nil)
+
+        await tapHit(model, anchor: word)
+
+        #expect(model.lookupAnchor == word)
+        #expect(model.lookupPopoverItem(for: word) == model.lookupPresentation)
+        #expect(model.lookupPresentation?.id == "お")
+    }
+
     @Test("dismissal clears the anchor only when the dismissing surface owns it; pinned persists")
     func dismissClearsSelectionOnly() async throws {
         let model = makeModel()
@@ -346,5 +360,151 @@ final class AppModelLookupTests {
 
         #expect(model.isFavoriteLead(unpromoted) == false)
         #expect(model.isFavoriteLead(promoted) == true)
+    }
+}
+
+/// Observation forwarding across the two lookup surfaces: a tap touches both,
+/// while a pager step and a fallback promotion touch the presentation alone.
+/// `withObservationTracking` is one-shot, so each property gets a fresh
+/// registration and the test triggers exactly one mutation.
+extension AppModelLookupTests {
+
+    @Test("a tap notifies both the presentation and the anchor observers")
+    func tapNotifiesPresentationAndAnchor() async {
+        let model = makeModel()
+        let presentationChanges = Mutex(0)
+        withObservationTracking {
+            _ = model.lookupPresentation
+        } onChange: {
+            presentationChanges.withLock { count in count += 1 }
+        }
+        let anchorChanges = Mutex(0)
+        withObservationTracking {
+            _ = model.lookupAnchor
+        } onChange: {
+            anchorChanges.withLock { count in count += 1 }
+        }
+
+        await tapHit(model, anchor: .liveStrip)
+
+        #expect(presentationChanges.withLock { count in count } == 1)
+        #expect(anchorChanges.withLock { count in count } == 1)
+    }
+
+    @Test("a pager step notifies the presentation but not the anchor")
+    func pagerStepLeavesAnchorUnobserved() async {
+        let model = makeModel()
+        let anchor = LookupAnchor.transcript(sentenceIndex: 1, tokenIndex: 2)
+        await model.handleLookupTap(
+            request(
+                segments: [LookupSegment(surface: "あめ")],
+                sentenceText: "あめ", surface: "あめ"
+            ),
+            anchor: anchor
+        ).value
+        let presentationChanges = Mutex(0)
+        withObservationTracking {
+            _ = model.lookupPresentation
+        } onChange: {
+            presentationChanges.withLock { count in count += 1 }
+        }
+        let anchorChanges = Mutex(0)
+        withObservationTracking {
+            _ = model.lookupAnchor
+        } onChange: {
+            anchorChanges.withLock { count in count += 1 }
+        }
+
+        model.stepLookupEntry(to: 1)
+
+        #expect(model.lookupPresentation?.entryIndex == 1, "the step moved the page")
+        #expect(presentationChanges.withLock { count in count } == 1)
+        #expect(anchorChanges.withLock { count in count } == 0)
+    }
+
+    @Test("a same-anchor retap notifies the presentation but not the anchor")
+    func sameAnchorRetapLeavesAnchorUnobserved() async {
+        let model = makeModel()
+        let anchor = LookupAnchor.transcript(sentenceIndex: 1, tokenIndex: 2)
+        await tapHit(model, anchor: anchor)
+        let presentationChanges = Mutex(0)
+        withObservationTracking {
+            _ = model.lookupPresentation
+        } onChange: {
+            presentationChanges.withLock { count in count += 1 }
+        }
+        let anchorChanges = Mutex(0)
+        withObservationTracking {
+            _ = model.lookupAnchor
+        } onChange: {
+            anchorChanges.withLock { count in count += 1 }
+        }
+
+        await model.handleLookupTap(
+            request(
+                segments: [LookupSegment(surface: "あめ")],
+                sentenceText: "あめ", surface: "あめ"
+            ),
+            anchor: anchor
+        ).value
+
+        #expect(model.lookupPresentation?.content.displayResult?.matched == "あめ")
+        #expect(presentationChanges.withLock { count in count } == 1)
+        #expect(
+            anchorChanges.withLock { count in count } == 0,
+            "an unchanged anchor is not written again"
+        )
+    }
+
+    @Test("the popover binding observes the anchor, not the presentation")
+    func popoverBindingReadsTheAnchorOnly() async {
+        let model = makeModel()
+        let anchor = LookupAnchor.transcript(sentenceIndex: 2, tokenIndex: 1)
+        await tapHit(model, anchor: anchor)
+
+        let changes = Mutex(0)
+        withObservationTracking {
+            _ = model.lookupPopoverBinding(for: anchor).wrappedValue
+        } onChange: {
+            changes.withLock { count in count += 1 }
+        }
+
+        model.stepLookupEntry(to: 1)
+
+        #expect(
+            changes.withLock { count in count } == 0,
+            "a pager step must not touch the binding"
+        )
+
+        model.dismissLookupPopover(from: anchor)
+
+        #expect(
+            changes.withLock { count in count } == 1,
+            "dismissal moves the anchor the binding reads"
+        )
+    }
+
+    @Test("a fallback promotion notifies the presentation but not the anchor")
+    func fallbackPromotionLeavesAnchorUnobserved() async throws {
+        let model = makeModel()
+        await tapHit(model, anchor: .liveStrip)
+        let fallback = try #require(model.lookupPresentation?.content.fallbackResults.first)
+        let presentationChanges = Mutex(0)
+        withObservationTracking {
+            _ = model.lookupPresentation
+        } onChange: {
+            presentationChanges.withLock { count in count += 1 }
+        }
+        let anchorChanges = Mutex(0)
+        withObservationTracking {
+            _ = model.lookupAnchor
+        } onChange: {
+            anchorChanges.withLock { count in count += 1 }
+        }
+
+        model.selectAlsoPill(fallback)
+
+        #expect(presentationChanges.withLock { count in count } == 1)
+        #expect(anchorChanges.withLock { count in count } == 0)
     }
 }
