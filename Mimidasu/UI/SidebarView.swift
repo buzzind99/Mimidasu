@@ -21,9 +21,6 @@ struct SidebarView: View {
     @AppStorage(CursorMode.storageKey) private var cursorMode = CursorMode.none
     @AppStorage(UIScale.storageKey) private var uiScale = UIScale.default
 
-    @State private var exportPresented = false
-    @State private var exportFormat: SessionExporter.Format = .txt
-    @State private var exportData: Data?
     @State private var isSettingsOpen = false
     /// When the Settings window last closed. A gear click is itself a click
     /// outside Settings — resign-key closes the window before this button's
@@ -56,7 +53,7 @@ struct SidebarView: View {
             // Archive mode hides the SESSION card: the archived stats live
             // in the transcript pane's banner instead.
             if model.pane.openArchive == nil {
-                sessionCard
+                SidebarSessionCard(model: model)
                     .padding(.bottom, 14)
             }
 
@@ -67,27 +64,6 @@ struct SidebarView: View {
         .frame(width: 282, alignment: .topLeading)
         .frame(maxHeight: .infinity)
         .background(Theme.sidebar)
-        .fileExporter(
-            isPresented: $exportPresented,
-            document: exportData.map { data in ExportDocument(data: data) },
-            contentTypes: [exportFormat.contentType],
-            // An opened archive's name (sanitized) when it has one; the
-            // shared default otherwise.
-            defaultFilename: "\(model.exportFilenameBase).\(exportFormat.fileExtension)"
-        ) { result in
-            if case let .failure(error) = result {
-                postExportFailure(error)
-            }
-        }
-    }
-
-    /// The one export-failure toast: the exporter's own failure and the
-    /// export build's failure report the same way.
-    private func postExportFailure(_ error: Error) {
-        model.toasts.post(
-            key: ToastKey.exportFailed, style: .yellowAuto,
-            title: "Export failed", body: error.localizedDescription
-        )
     }
 
     // MARK: - Brand header
@@ -239,6 +215,80 @@ struct SidebarView: View {
     }
 }
 
+// MARK: - Export menu
+
+/// Sidebar transcript export: the copy/export menu plus the save-panel
+/// presentation. Its own view so the transcript-entry observation behind
+/// the menu's enabled state stays out of `SidebarView.body`.
+private struct SidebarExportMenu: View {
+    let model: AppModel
+
+    @State private var exportPresented = false
+    @State private var exportFormat: SessionExporter.Format = .txt
+    @State private var exportData: Data?
+
+    var body: some View {
+        Menu {
+            Button("Copy transcript") {
+                model.copyTranscript()
+            }
+            .disabled(!model.isExportable)
+
+            Divider()
+
+            ForEach(SessionExporter.Format.allCases) { format in
+                Button("Export \(format.rawValue)…") {
+                    runExport(format)
+                }
+                .disabled(!model.isExportable)
+            }
+        } label: {
+            Image(systemName: "square.and.arrow.up")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .disabled(!model.isExportable)
+        .frame(width: 34, height: 32)
+        .cardSurface(radius: 9)
+        .hoverHighlight(
+            RoundedRectangle(cornerRadius: 9, style: .continuous),
+            isEnabled: model.isExportable
+        )
+        .help("Copy or export the session transcript")
+        .fileExporter(
+            isPresented: $exportPresented,
+            document: exportData.map { data in ExportDocument(data: data) },
+            contentTypes: [exportFormat.contentType],
+            // An opened archive's name (sanitized) when it has one; the
+            // shared default otherwise.
+            defaultFilename: "\(model.exportFilenameBase).\(exportFormat.fileExtension)"
+        ) { result in
+            if case let .failure(error) = result {
+                postExportFailure(error)
+            }
+        }
+    }
+
+    /// The one export-failure toast: the exporter's own failure and the
+    /// export build's failure report the same way.
+    private func postExportFailure(_ error: Error) {
+        model.toasts.post(
+            key: ToastKey.exportFailed, style: .yellowAuto,
+            title: "Export failed", body: error.localizedDescription
+        )
+    }
+
+    private func runExport(_ format: SessionExporter.Format) {
+        do {
+            exportFormat = format
+            exportData = try model.export(format: format)
+            exportPresented = true
+        } catch {
+            postExportFailure(error)
+        }
+    }
+}
+
 // MARK: - Cards
 
 extension SidebarView {
@@ -386,8 +436,8 @@ extension SidebarView {
         AudioCardView(state: model.audioLevel)
     }
 
-    // The SESSION card (and the MARK: - Session card block) lives in
-    // `SidebarSessionCard.swift` (file split for the lint gate).
+    // The SESSION card is its own `SidebarSessionCard` view so the latency
+    // and transcript reads behind its stats stay local to the card.
 }
 
 // MARK: - Toolbar
@@ -396,39 +446,12 @@ extension SidebarView {
 
     private var toolbar: some View {
         HStack(spacing: 8) {
-            exportMenu
+            SidebarExportMenu(model: model)
             overlayToggleButton
             Spacer()
             scaleStepper
             settingsButton
         }
-    }
-
-    private var exportMenu: some View {
-        Menu {
-            Button("Copy transcript") {
-                model.copyTranscript()
-            }
-            .disabled(!model.isExportable)
-
-            Divider()
-
-            ForEach(SessionExporter.Format.allCases) { format in
-                Button("Export \(format.rawValue)…") {
-                    runExport(format)
-                }
-                .disabled(!model.isExportable)
-            }
-        } label: {
-            Image(systemName: "square.and.arrow.up")
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .disabled(!model.isExportable)
-        .frame(width: 34, height: 32)
-        .cardSurface(radius: 9)
-        .hoverHighlight(iconButtonShape, isEnabled: model.isExportable)
-        .help("Copy or export the session transcript")
     }
 
     private var overlayToggleButton: some View {
@@ -545,15 +568,5 @@ extension SidebarView {
             topTrailingRadius: isLeading ? 0 : 9,
             style: .continuous
         )
-    }
-
-    private func runExport(_ format: SessionExporter.Format) {
-        do {
-            exportFormat = format
-            exportData = try model.export(format: format)
-            exportPresented = true
-        } catch {
-            postExportFailure(error)
-        }
     }
 }

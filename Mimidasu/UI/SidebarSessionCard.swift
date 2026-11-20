@@ -1,11 +1,13 @@
 import SwiftUI
 
-/// SESSION card of the sidebar (file split for the lint gate): sentence,
-/// duration, character, and lag stats over the shared card chrome. The
-/// card shows in every cursor mode.
-extension SidebarView {
+/// SESSION card of the sidebar: sentence, duration, character, and lag stats
+/// over the shared card chrome. Its own view so the latency and transcript
+/// reads that refresh it stay local to the card instead of re-running the
+/// whole sidebar. The card shows in every cursor mode.
+struct SidebarSessionCard: View {
+    let model: AppModel
 
-    var sessionCard: some View {
+    var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             KickerLabel("SESSION")
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
@@ -49,7 +51,7 @@ extension SidebarView {
         return Self.durationText(from: model.activeSessionStart(at: end), to: end)
     }
 
-    static func durationText(
+    private static func durationText(
         from start: ContinuousClock.Instant?, to end: ContinuousClock.Instant
     ) -> String {
         guard let start else { return "—" }
