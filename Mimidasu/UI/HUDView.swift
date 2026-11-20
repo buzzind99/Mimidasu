@@ -1,30 +1,21 @@
 import SwiftUI
 
-/// Floating HUD content: the in-flight JP partial on top, the displayed
-/// translated entry (JP + target language) below. Hosted by `HUDHostingView`
-/// inside `HUDPanel` (HUDWindow.swift).
+/// Floating HUD content: the in-flight JP partial in `HUDLiveSection` above
+/// the divider, the displayed translated entry (JP + target language) in
+/// `HUDCompletedSection` below. Each section follows only the state it
+/// renders: a live partial tick re-renders the partial section alone, an
+/// entries or pin change re-renders the completed section alone, and a
+/// cursor-mode change refreshes the completed section; annotation and scale
+/// changes refresh both. Hosted by `HUDHostingView` inside `HUDPanel`
+/// (HUDWindow.swift).
 struct HUDView: View {
     var model: AppModel
     var live: LivePartialState
     @ObservedObject var panel: HUDPanel
-    @AppStorage(ReadingAnnotation.storageKey) private var readingAnnotation = ReadingAnnotation.romaji
-    @AppStorage(CursorMode.storageKey) private var cursorMode = CursorMode.none
-    @AppStorage(UIScale.storageKey) private var uiScale = UIScale.default
 
     /// Set on offscreen measurement copies: fixes the layout width so the
     /// measured ideal height reflects text wrapped at the real HUD width.
     var fixedWidth: CGFloat?
-    /// Favorite matcher for both JP surfaces. The snapshot read here is
-    /// belt-and-braces: `RubyTextView`'s own body resolves membership and so
-    /// observes the store directly, but this keeps the HUD's dependence on
-    /// favorite state visible at the surface handing the matcher down. The
-    /// value is discarded — the matcher resolves membership when a surface
-    /// renders. The HUD passes no `onLookup`, so it never reaches the
-    /// segmented path, and in None annotation both surfaces stay on the plain
-    /// fallback.
-    private func observeFavorites() {
-        _ = model.favorites.snapshot
-    }
 
     var body: some View {
         if let fixedWidth {
@@ -36,13 +27,13 @@ struct HUDView: View {
 
     private var hudContent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            liveSection
+            HUDLiveSection(model: model, live: live)
                 .padding(.bottom, 8)
             Rectangle()
                 .fill(.white.opacity(0.14))
                 .frame(height: 1)
                 .padding(.bottom, 8)
-            completedSection
+            HUDCompletedSection(model: model)
         }
         .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -116,9 +107,23 @@ struct HUDView: View {
         .buttonStyle(.plain)
         .help(panel.locked ? "Unlock to move/resize (HUD is click-through when locked)" : "Lock (click-through)")
     }
+}
 
-    private var liveSection: some View {
-        observeFavorites()
+/// In-flight JP partial: the only section that follows the live partial
+/// state, so partial ticks re-render this leaf alone.
+private struct HUDLiveSection: View {
+    let model: AppModel
+    let live: LivePartialState
+    @AppStorage(ReadingAnnotation.storageKey) private var readingAnnotation = ReadingAnnotation.romaji
+    @AppStorage(UIScale.storageKey) private var uiScale = UIScale.default
+
+    var body: some View {
+        // The matcher handed to `RubyTextView` resolves membership when a
+        // surface renders; this read keeps the section's dependence on
+        // favorite state explicit. The HUD passes no `onLookup`, so it never
+        // reaches the segmented path, and in None annotation the surface
+        // stays on the plain fallback.
+        _ = model.favorites.snapshot
         return Group {
             if !live.partial.isEmpty {
                 // RubyTextView renders .none as plain text, so one call
@@ -147,15 +152,25 @@ struct HUDView: View {
         }
         .frame(maxWidth: .infinity, minHeight: 56, alignment: .topLeading)
     }
+}
 
-    /// Translated entries only; finalized-but-untranslated sentences never
-    /// enter the cycle (the view doesn't move until their translation lands).
-    private var translatedEntries: [SessionEntry] {
-        model.pane.entries.filter { entry in entry.joinedTranslations != nil }
-    }
+/// Latest (or history-pinned) translated entry: owns the entries filter and
+/// the history controls, so entries, pin, and cursor-mode writes refresh this
+/// section without re-running the partial section (annotation and scale
+/// refresh both sections).
+private struct HUDCompletedSection: View {
+    let model: AppModel
+    @AppStorage(ReadingAnnotation.storageKey) private var readingAnnotation = ReadingAnnotation.romaji
+    @AppStorage(CursorMode.storageKey) private var cursorMode = CursorMode.none
+    @AppStorage(UIScale.storageKey) private var uiScale = UIScale.default
 
-    private var completedSection: some View {
-        Group {
+    var body: some View {
+        // This section hands the favorite matcher to the JP text surface
+        // below, so it reads the snapshot itself to keep favorite changes
+        // refreshing this section's JP text; the partial section's read does
+        // not cover this section.
+        _ = model.favorites.snapshot
+        return Group {
             let entries = translatedEntries
             if entries.isEmpty {
                 Text("Waiting for the first sentence…")
@@ -169,6 +184,12 @@ struct HUDView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    /// Translated entries only; finalized-but-untranslated sentences never
+    /// enter the cycle (the view doesn't move until their translation lands).
+    private var translatedEntries: [SessionEntry] {
+        model.pane.entries.filter { entry in entry.joinedTranslations != nil }
     }
 
     /// The pinned entry while browsing history; otherwise (nil pin, or a pin
@@ -210,10 +231,9 @@ struct HUDView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    /// Shared JP text call (RubyTextView renders .none as plain text). No
-    /// `observeFavorites()` here: both this and `liveSection` are evaluated
-    /// inside `hudContent`'s body, so the read in `liveSection` already
-    /// registers the observation for the whole HUD.
+    /// Shared JP text call (RubyTextView renders .none as plain text). The
+    /// section body reads the favorite snapshot, so this surface refreshes
+    /// with favorite changes without a read of its own.
     private func jpText(of entry: SessionEntry) -> some View {
         RubyTextView(
             text: entry.sentence.text,

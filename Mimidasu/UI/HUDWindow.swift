@@ -23,10 +23,23 @@ final class HUDWindowController {
 
     func setVisible(_ visible: Bool) {
         guard visible else {
-            panel?.orderOut(nil)
+            guard let panel else { return }
+            panel.orderOut(nil)
+            // A hidden hosting view keeps evaluating its SwiftUI bodies (live
+            // partial, entries filter) even while ordered out. Detach it so
+            // the hidden HUD does no observation or layout work; the next
+            // show rebuilds it from current state.
+            if panel.contentView is HUDHostingView {
+                panel.contentView = NSView()
+            }
             return
         }
         let panel: HUDPanel = panel ?? makePanel()
+        // `bind` normally reinstalls fresh content before every show; this
+        // guard covers a show that follows a hide without a re-bind.
+        if !(panel.contentView is HUDHostingView) {
+            installContent(in: panel)
+        }
         panel.orderFrontRegardless()
     }
 
