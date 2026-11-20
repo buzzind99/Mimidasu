@@ -101,6 +101,46 @@ private struct TranscriptOverlayColumn: View {
     }
 }
 
+/// Owns the live-strip dictionary popover: the anchor binding, the
+/// presentation modifier, and the popover content. A leaf, so a lookup
+/// anchor write re-runs this host alone rather than the shell body that
+/// also lays out the sidebar and transcript.
+private struct LiveStripLookupHost: View {
+    let model: AppModel
+    let live: LivePartialState
+    let onFavoriteRemovalRequest: (String) -> Void
+
+    /// Whether the live strip owns the app's single dictionary popover:
+    /// true only while the lookup is anchored at the live strip. Dismissal
+    /// clears the anchor only when the strip still owns it.
+    private var lookupPresented: Binding<Bool> {
+        model.lookupPopoverBinding(for: .liveStrip)
+    }
+
+    var body: some View {
+        LiveStripView(
+            live: live,
+            onCopy: { text in model.copySnippet(text) },
+            onLookup: { request in
+                model.handleLookupTap(request, anchor: .liveStrip)
+            },
+            isFavorite: model.favoriteSegmentMatcher
+        )
+        // Strip-anchored popover: a single non-virtualized view, so the
+        // strip presents while the lookup is anchored at the live strip.
+        // Anchor-keyed so a strip retap swaps content in place instead of
+        // a dismiss-and-replace; the content reads the live lookup in its
+        // own body, so pager steps and promotions stay current.
+        .popover(isPresented: lookupPresented) {
+            DictionaryPopoverView(
+                model: model,
+                anchor: .liveStrip,
+                onFavoriteRemovalRequest: onFavoriteRemovalRequest
+            )
+        }
+    }
+}
+
 /// Root view: onboarding until the model resolves, then the main shell —
 /// sidebar | 1pt divider | transcript pane with the live strip, the toast
 /// stack overlaid top-trailing, and the notice pill overlaid top.
@@ -172,14 +212,6 @@ struct ContentView: View {
     /// welcome window instead of the main shell's footprint.
     private var isOnboarding: Bool {
         model.phase == .needsModel
-    }
-
-    /// Whether the live strip owns the app's single dictionary
-    /// popover: true only while the lookup is anchored at the live strip.
-    /// Dismissal clears the anchor only when the strip still owns it.
-    /// (Binding shape shared via `AppModel.lookupPopoverBinding`.)
-    private var liveStripLookupPresented: Binding<Bool> {
-        model.lookupPopoverBinding(for: .liveStrip)
     }
 
     /// The shared disclosure slot, filtered to the main window's archive
@@ -287,27 +319,11 @@ struct ContentView: View {
             // live; the banner carries the archived stats) and its
             // strip-anchored popover has no anchor to mount on.
             if model.pane.openArchive == nil {
-                LiveStripView(
+                LiveStripLookupHost(
+                    model: model,
                     live: live,
-                    onCopy: { text in model.copySnippet(text) },
-                    onLookup: { request in
-                        model.handleLookupTap(request, anchor: .liveStrip)
-                    },
-                    isFavorite: model.favoriteSegmentMatcher
+                    onFavoriteRemovalRequest: requestFavoriteRemoval
                 )
-                // Strip-anchored popover: single non-virtualized view, so
-                // the strip presents while the lookup is anchored at the live
-                // strip. Anchor-keyed so a strip retap swaps content in place
-                // instead of a dismiss+replace; the content reads the live
-                // lookup in its own body, so pager steps and promotions stay
-                // current.
-                .popover(isPresented: liveStripLookupPresented) {
-                    DictionaryPopoverView(
-                        model: model,
-                        anchor: .liveStrip,
-                        onFavoriteRemovalRequest: requestFavoriteRemoval
-                    )
-                }
             }
         }
         // Toast stack and the reference openers share one top-trailing
