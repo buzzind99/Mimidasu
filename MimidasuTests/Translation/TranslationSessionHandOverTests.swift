@@ -46,14 +46,14 @@ struct TranslationSessionHandOverTests {
     func handOverRefusedWhileExternalAttached() async {
         let coordinator = makeCoordinator()
         coordinator.activeTranslationEngine = .external
-        let statusBefore = coordinator.runtime.status
+        let statusBefore = coordinator.translationStatus
 
         await coordinator.sessionHandOver(QueueEchoEngine())
 
         #expect(!coordinator.queue.hasWorker, "the refused hand-over never runs the queue")
         #expect(!coordinator.workerAttached, "the refused hand-over attaches no worker")
         #expect(
-            coordinator.runtime.status == statusBefore,
+            coordinator.translationStatus == statusBefore,
             "the refused hand-over leaves the status untouched"
         )
     }

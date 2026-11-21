@@ -52,7 +52,7 @@ struct SidebarView: View {
 
             // Archive mode hides the SESSION card: the archived stats live
             // in the transcript pane's banner instead.
-            if model.pane.openArchive == nil {
+            if model.pane.openSessionID == nil {
                 SidebarSessionCard(model: model)
                     .padding(.bottom, 14)
             }
@@ -122,7 +122,7 @@ struct SidebarView: View {
     private var status: SidebarStatus {
         SidebarStatus.map(
             phase: model.phase, isCheckingModel: model.isCheckingModel,
-            archiveOpen: model.pane.openArchive != nil
+            archiveOpen: model.pane.openSessionID != nil
         )
     }
 
@@ -365,7 +365,9 @@ extension SidebarView {
     }
 
     /// The coordinator's live translation runtime snapshot — the one source
-    /// for engine, provider, status and the fallback latch.
+    /// for engine, provider, worker attachment and the fallback latch. The
+    /// queue's status is its own value (`translationStatus`), not a field of
+    /// this snapshot.
     private var runtime: TranslationRuntime {
         model.translationRuntime
     }
@@ -392,7 +394,7 @@ extension SidebarView {
 
     private var translationDetail: String {
         SidebarStatus.translationDetail(
-            status: runtime.status,
+            status: model.translationStatus,
             activeEngine: runtime.engine,
             fallbackActive: translationFallbackLatched
         )
@@ -400,7 +402,7 @@ extension SidebarView {
 
     private var translationDotColor: Color {
         dotColor(TranslationPill.map(
-            status: runtime.status,
+            status: model.translationStatus,
             activeEngine: runtime.engine,
             fallbackActive: translationFallbackLatched
         ).tone)
@@ -467,12 +469,12 @@ extension SidebarView {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .hoverHighlight(iconButtonShape, isEnabled: model.pane.openArchive == nil)
+        .hoverHighlight(iconButtonShape, isEnabled: model.pane.openSessionID == nil)
         // The floating overlays are live-session chrome: forced hidden and
         // untogglable while an archived session fills the pane.
-        .disabled(model.pane.openArchive != nil)
+        .disabled(model.pane.openSessionID != nil)
         .help(
-            model.pane.openArchive != nil
+            model.pane.openSessionID != nil
                 ? "Unavailable in archive mode"
                 : "Show or hide the floating overlays (subtitle + translations)"
         )

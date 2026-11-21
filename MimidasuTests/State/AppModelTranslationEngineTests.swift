@@ -114,7 +114,7 @@ struct AppModelTranslationEngineTests {
 
             model.retryTranslation()
             #expect(
-                await pollUntil { model.translationRuntime.status == .ready },
+                await pollUntil { model.translationStatus == .ready },
                 "retryTranslation publishes .ready (\(provider))"
             )
 
@@ -144,7 +144,7 @@ struct AppModelTranslationEngineTests {
         #expect(model.translationRuntime.engine == .apple)
         #expect(model.translationConfig != nil, "the Apple host must be re-activated")
         #expect(
-            model.translationRuntime.status
+            model.translationStatus
                 == .degraded(
                     "External translation failed — using Apple on-device. "
                         + "Invalid API key. Check the key in Settings, then reconnect.",
@@ -269,7 +269,7 @@ extension AppModelTranslationEngineTests {
 
         // Attach the external engine (as session start would).
         model.retryTranslation()
-        #expect(await pollUntil { model.translationRuntime.status == .ready })
+        #expect(await pollUntil { model.translationStatus == .ready })
         #expect(model.translationRuntime.engine == .external)
         #expect(model.translationRuntime.externalProvider == .openrouter)
 
@@ -345,7 +345,7 @@ extension AppModelTranslationEngineTests {
         )
 
         model.retryTranslation()
-        #expect(await pollUntil { model.translationRuntime.status == .ready })
+        #expect(await pollUntil { model.translationStatus == .ready })
         #expect(model.translationRuntime.externalProvider == .openrouter)
 
         // Selecting DeepL with no key: the OpenRouter engine stays attached.
@@ -383,7 +383,7 @@ extension AppModelTranslationEngineTests {
         )
         await model.initialModelCheck?.value
         model.retryTranslation()
-        #expect(await pollUntil { model.translationRuntime.status == .ready })
+        #expect(await pollUntil { model.translationStatus == .ready })
         model.phase = .running
 
         _ = await model.verifyAndSelectTranslationProvider(.openrouter)
@@ -439,7 +439,7 @@ extension AppModelTranslationEngineTests {
             transport: constantStatusTransport(403)
         )
         model.retryTranslation()
-        #expect(await pollUntil { model.translationRuntime.status == .ready })
+        #expect(await pollUntil { model.translationStatus == .ready })
         model.phase = .running
 
         let verified = await model.verifyAndSelectTranslationProvider(.google)
@@ -476,7 +476,7 @@ extension AppModelTranslationEngineTests {
         )
         await model.initialModelCheck?.value
         model.retryTranslation()
-        #expect(await pollUntil { model.translationRuntime.status == .ready })
+        #expect(await pollUntil { model.translationStatus == .ready })
 
         // A failed translation latches the Apple fallback…
         model.translationQueue.enqueue(makeSentence(index: 0, text: "テスト"))
@@ -511,7 +511,7 @@ extension AppModelTranslationEngineTests {
         )
         await model.initialModelCheck?.value
         model.retryTranslation()
-        #expect(await pollUntil { model.translationRuntime.status == .ready })
+        #expect(await pollUntil { model.translationStatus == .ready })
         model.phase = .running
 
         let verified = await model.verifyModel("gpt-6-luna", for: .openai)
@@ -541,7 +541,7 @@ extension AppModelTranslationEngineTests {
         let model = makeModel(settings: settings, transport: transport)
         await model.initialModelCheck?.value
         model.retryTranslation()
-        #expect(await pollUntil { model.translationRuntime.status == .ready })
+        #expect(await pollUntil { model.translationStatus == .ready })
         model.phase = .running
 
         let verified = await model.verifyModel("gpt-6-luna", for: .openai)
@@ -585,7 +585,7 @@ extension AppModelTranslationEngineTests {
         let model = makeModel(settings: settings, transport: transport)
         await model.initialModelCheck?.value
         model.retryTranslation()
-        #expect(await pollUntil { model.translationRuntime.status == .ready })
+        #expect(await pollUntil { model.translationStatus == .ready })
         model.phase = .running
 
         let verified = await model.verifyModel("gpt-6-sol", for: .openai)

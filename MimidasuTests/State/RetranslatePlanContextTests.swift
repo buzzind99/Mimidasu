@@ -85,14 +85,22 @@ struct RetranslatePlanContextTests {
         #expect(!plan.context.live.runsHighFidelity)
     }
 
-    @Test("copies the live runtime status")
+    @Test("copies the live queue's unavailable gate")
     func copiesRuntimeStatus() async {
         let model = await makeModel()
-        model.translationSession.translationStatus = .unavailable("boom", .permanent)
+        model.translationSession.handleStatus(.unavailable("boom", .permanent))
 
-        let plan = model.retranslatePlan(surface: .live, target: .english)
+        #expect(model.retranslatePlan(surface: .live, target: .english).context.live.queueUnavailable)
 
-        #expect(plan.context.live.status == .unavailable("boom", .permanent))
+        model.translationSession.handleStatus(.ready)
+        #expect(!model.retranslatePlan(surface: .live, target: .english).context.live.queueUnavailable)
+
+        model.translationSession.handleStatus(.unavailable("boom", .permanent))
+        model.translationSession.sessionDidEnd()
+        #expect(
+            !model.retranslatePlan(surface: .live, target: .english).context.live.queueUnavailable,
+            "a session boundary leaves the gate open for the next session"
+        )
     }
 
     @Test("reads the observable worker mirror the queue's callback keeps in sync")

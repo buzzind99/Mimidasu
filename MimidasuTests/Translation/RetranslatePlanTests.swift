@@ -15,7 +15,7 @@ struct RetranslatePlanFixture: Sendable {
     var runsHighFidelity = false
     var attachedProvider: TranslationProvider?
     var workerAttached = true
-    var status: TranslationStatus = .ready
+    var queueUnavailable = false
     var phaseIsLive = true
     var keyed: Set<TranslationProvider> = []
     var configured: Set<TranslationProvider> = []
@@ -40,7 +40,7 @@ struct RetranslatePlanFixture: Sendable {
                 runsHighFidelity: runsHighFidelity,
                 attachedProvider: attachedProvider,
                 workerAttached: workerAttached,
-                status: status,
+                queueUnavailable: queueUnavailable,
                 phaseIsLive: phaseIsLive
             ),
             keys: RetranslateKeyFacts(keyed: keyed, configured: configured),
@@ -279,7 +279,7 @@ private let liveOptionsCases: [RetranslateOptionsCase] = [
 struct RetranslateGateCase: Sendable, CustomTestStringConvertible {
     let name: String
     let workerAttached: Bool
-    let status: TranslationStatus
+    let queueUnavailable: Bool
     let expected: Bool
 
     var testDescription: String {
@@ -291,19 +291,19 @@ private let sessionGateCases: [RetranslateGateCase] = [
     RetranslateGateCase(
         name: "no worker",
         workerAttached: false,
-        status: .ready,
+        queueUnavailable: false,
         expected: false
     ),
     RetranslateGateCase(
         name: "unavailable status",
         workerAttached: true,
-        status: .unavailable("boom", .permanent),
+        queueUnavailable: true,
         expected: false
     ),
     RetranslateGateCase(
         name: "attached worker and ready status",
         workerAttached: true,
-        status: .ready,
+        queueUnavailable: false,
         expected: true
     )
 ]
@@ -548,7 +548,7 @@ struct RetranslatePlanTests {
         fixture.effectiveSelection = .deepl
         fixture.keyed = [.deepl]
         fixture.workerAttached = false
-        fixture.status = .unavailable("boom", .permanent)
+        fixture.queueUnavailable = true
         let plan = fixture.plan()
 
         #expect(plan.route == .lane(.deepl))
@@ -559,7 +559,7 @@ struct RetranslatePlanTests {
     func gateLiveSession(_ testCase: RetranslateGateCase) {
         var fixture = RetranslatePlanFixture()
         fixture.workerAttached = testCase.workerAttached
-        fixture.status = testCase.status
+        fixture.queueUnavailable = testCase.queueUnavailable
         let row = fixture.plan().row(for: makeEntry())
 
         #expect(row.isEnabled == testCase.expected)

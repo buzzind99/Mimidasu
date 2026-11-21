@@ -266,7 +266,15 @@ final class RetranslateCoordinator {
     }
 
     /// Retires the row's re-translation marker for a landed result.
+    ///
+    /// A landing usually has no marker to retire — the live queue delivers
+    /// every sentence — and an unconditional `remove` would notify anyway:
+    /// `pendingRetranslations` is read by the transcript's row plan, so every
+    /// landing would re-diff the whole list. Touching the set only when it
+    /// holds the index keeps the ordinary landing free of transcript churn.
     func clearMarkers(at index: Int) {
+        guard pendingRetranslations.contains(index) || lanePendingRetranslations.contains(index)
+        else { return }
         pendingRetranslations.remove(index)
         lanePendingRetranslations.remove(index)
     }

@@ -15,7 +15,6 @@ struct TranslationRuntimeTests {
         #expect(runtime.engine == .apple)
         #expect(runtime.externalProvider == nil)
         #expect(!runtime.workerAttached)
-        #expect(runtime.status == .idle)
         #expect(!runtime.fallbackLatched)
         #expect(!runtime.isAppleFallbackLatched)
     }
@@ -46,7 +45,6 @@ struct TranslationRuntimeTests {
         first.engine = .external
         first.externalProvider = .google
         first.workerAttached = true
-        first.status = .translating
         first.fallbackLatched = true
 
         let second = first
@@ -60,7 +58,6 @@ struct TranslationRuntimeTests {
         first.engine = .external
         first.externalProvider = .google
         first.workerAttached = true
-        first.status = .translating
         first.fallbackLatched = true
 
         var second = first

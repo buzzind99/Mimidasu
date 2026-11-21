@@ -93,9 +93,10 @@ enum PendingCloudDisclosure: Equatable, Identifiable {
 @Observable
 @MainActor
 final class TranslationSessionCoordinator {
-    /// The one live-translation truth. Written only through the accessors below
-    /// (activation, status landing, fallback latch, worker attach, session
-    /// boundary); read through `AppModel.translationRuntime`.
+    /// The live engine's identity and attachment. Written only through the
+    /// accessors below (activation, fallback latch, worker attach, session
+    /// boundary); read through `AppModel.translationRuntime`. The queue's
+    /// status is published separately — see `translationStatus`.
     private(set) var runtime = TranslationRuntime()
 
     /// The engine currently attached to the queue — Apple's via the hidden
@@ -114,11 +115,31 @@ final class TranslationSessionCoordinator {
         set { runtime.externalProvider = newValue }
     }
 
-    /// Drives the queue-status surface: the sidebar pill, the footer, and
-    /// the failure cards all read this through the app model.
-    var translationStatus: TranslationStatus {
-        get { runtime.status }
-        set { runtime.status = newValue }
+    /// The queue's status, published for the surfaces that name it: the
+    /// sidebar pill, the footer, and the failure cards. It is kept out of
+    /// `runtime` on purpose — the transcript's row plan reads `runtime`, and
+    /// the queue's per-batch `.translating` → `.ready` churn must not
+    /// re-render every transcript row.
+    private(set) var translationStatus: TranslationStatus = .idle
+
+    /// Whether the queue's last status was `.unavailable` — the one status
+    /// fact the transcript's retry gate needs. Published on its own and only
+    /// when it flips, so the batch churn above never reaches a row.
+    private(set) var queueUnavailable = false
+
+    /// Our published status and the row gate's view of it, in one write.
+    /// Every status landing funnels through here — including the ones in the
+    /// status split — so the two can never disagree. Internal for that split.
+    func publishStatus(_ status: TranslationStatus) {
+        translationStatus = status
+        let unavailable = if case .unavailable = status {
+            true
+        } else {
+            false
+        }
+        if queueUnavailable != unavailable {
+            queueUnavailable = unavailable
+        }
     }
 
     /// True once this session has latched onto Apple on-device after an
@@ -581,6 +602,6 @@ extension TranslationSessionCoordinator {
         // backlog the drain timed out on is dropped rather than carried.
         queue.resetForNewSession()
         tierAvailability.supersedeInFlightProbe()
-        translationStatus = .idle
+        publishStatus(.idle)
     }
 }

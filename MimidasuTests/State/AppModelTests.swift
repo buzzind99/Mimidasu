@@ -55,13 +55,13 @@ struct AppModelTests {
     func stopWindsDownToIdle(phase: SessionPhase) async {
         let model = await makeSUT()
         model.phase = phase
-        model.translationSession.translationStatus = .translating
+        model.translationSession.publishStatus(.translating)
 
         model.stop()
 
         #expect(model.phase == .stopping)
         #expect(await pollUntil { model.phase == .idle }, "stop winds down to idle")
-        #expect(model.translationRuntime.status == .idle, "the teardown parks the status")
+        #expect(model.translationStatus == .idle, "the teardown parks the status")
     }
 
     // MARK: - retryTranslation()
@@ -135,10 +135,11 @@ struct AppModelTests {
 
     // MARK: - Transcript revision
 
-    @Test("entriesRevision bumps on every pane write shape")
+    @Test("entriesRevision tracks structure and landingRevision tracks landings")
     func entriesRevisionTracksWrites() async {
         let model = await makeSUT()
         let start = model.pane.entriesRevision
+        let startLanding = model.pane.landingRevision
 
         model.sessionController.onSessionBegin?()
         #expect(model.pane.entriesRevision == start + 1, "session-begin clear")
@@ -149,13 +150,62 @@ struct AppModelTests {
         model.applyTranslation(
             index: 0, translation: SentenceTranslation(lang: "en", text: translationText)
         )
-        #expect(model.pane.entriesRevision == start + 3, "live translation landing")
+        #expect(
+            model.pane.entriesRevision == start + 2,
+            "a landing is not a structural change: every rows reader must stay put"
+        )
+        #expect(model.pane.landingRevision == startLanding + 1, "the landing carries its own signal")
 
         model.pane.append(makeSentence(index: 1))
-        #expect(model.pane.entriesRevision == start + 4, "append")
+        #expect(model.pane.entriesRevision == start + 3, "append")
 
         model.pane.beginLiveSession()
-        #expect(model.pane.entriesRevision == start + 5, "live clear")
+        #expect(model.pane.entriesRevision == start + 4, "live clear")
+    }
+
+    @Test("an ordinary landing wakes neither the row plan nor the rows")
+    func landingWakesNeitherRowPlanNorRows() async {
+        let model = await makeSUT()
+        model.sessionController.onSessionBegin?()
+        model.sessionController.onSentence?(makeSentence(index: 0))
+        let markers = ObservedValuesRecorder(read: { model.retranslate.pendingRetranslations })
+        let rows = ObservedValuesRecorder(read: { model.pane.entries })
+
+        model.applyTranslation(
+            index: 0, translation: SentenceTranslation(lang: "en", text: translationText)
+        )
+        await flushObservations()
+
+        #expect(markers.values.isEmpty, "an ordinary landing has no marker to retire")
+        #expect(
+            rows.values.isEmpty,
+            "and the transcript body's rows dependency stays asleep"
+        )
+
+        // The recorders are live: the next structural change wakes them.
+        model.sessionController.onSentence?(makeSentence(index: 1))
+        await flushObservations()
+        #expect(rows.values.count == 1, "an append does wake the rows reader")
+
+        // The marker channel is live too: a marker write wakes the same read.
+        model.retranslate.markPending(5, laneOwned: false)
+        await flushObservations()
+        #expect(markers.values.count == 1, "a marker write does wake the plan's reader")
+        model.retranslate.clearMarkers(at: 5)
+    }
+
+    @Test("a landed translation reaches the landing-inclusive rows and export")
+    func landingReachesExport() async {
+        let model = await makeSUT()
+        model.sessionController.onSessionBegin?()
+        model.sessionController.onSentence?(makeSentence(index: 0))
+
+        model.applyTranslation(
+            index: 0, translation: SentenceTranslation(lang: "en", text: translationText)
+        )
+
+        #expect(model.pane.entriesIncludingLandings.first?.joinedTranslations == translationText)
+        #expect(model.exportText().contains(translationText), "export reads the row snapshot")
     }
 
     // MARK: - Capture errors

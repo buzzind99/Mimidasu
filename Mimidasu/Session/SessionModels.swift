@@ -80,6 +80,21 @@ struct SessionEntry: Identifiable, Equatable, Sendable {
 }
 
 extension SessionEntry {
+    /// A copy of this row carrying `translations`, with its joined display
+    /// text rebuilt: the row's landing cell holds the live value, so the row
+    /// body renders the same value the pane's snapshot holds.
+    func withTranslations(_ translations: [SentenceTranslation]) -> SessionEntry {
+        var copy = self
+        copy.translations = []
+        copy.joinedTranslations = nil
+        for translation in translations {
+            copy.replaceTranslation(translation)
+        }
+        return copy
+    }
+}
+
+extension SessionEntry {
     /// The translation shown for one display language, or nil (the row's
     /// `…` placeholder). Archive mode renders one language at a time; the
     /// live pane keeps the joined display. `replaceTranslation` keeps at

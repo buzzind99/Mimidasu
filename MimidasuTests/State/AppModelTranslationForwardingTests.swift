@@ -31,9 +31,9 @@ struct AppModelTranslationForwardingTests {
     @Test("a coordinator-side status change propagates through the AppModel forwarder")
     func statusForwarderPropagates() async {
         let model = await makeModel()
-        let observed = ObservedValuesRecorder(read: { model.translationRuntime.status })
+        let observed = ObservedValuesRecorder(read: { model.translationStatus })
 
-        model.translationSession.translationStatus = .translating
+        model.translationSession.publishStatus(.translating)
 
         #expect(
             await pollUntil { observed.values == [.translating] },
@@ -44,7 +44,7 @@ struct AppModelTranslationForwardingTests {
     @Test("a status landing through handleTranslationStatus propagates")
     func statusHandlerPropagates() async {
         let model = await makeModel()
-        let observed = ObservedValuesRecorder(read: { model.translationRuntime.status })
+        let observed = ObservedValuesRecorder(read: { model.translationStatus })
 
         model.handleTranslationStatus(.retrying("External translation failed, 1 retries left"))
 

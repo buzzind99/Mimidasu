@@ -16,7 +16,7 @@ extension TranslationSessionCoordinator {
     /// run, and the surviving `pending` replays onto Apple. Internal so
     /// tests can drive the queue's status callback directly.
     func handleStatus(_ status: TranslationStatus) {
-        translationStatus = status
+        publishStatus(status)
         reconcileToasts(status)
         guard case let .unavailable(message, severity) = status else { return }
         guard activeTranslationEngine == .external, !translationFallbackActive else {
@@ -104,8 +104,8 @@ extension TranslationSessionCoordinator {
         // user, so it keeps its own wording rather than borrowing the
         // canonical tier vocabulary. The provider's failure reason is kept
         // because the unavailable card it came from is dismissed here.
-        translationStatus = .degraded(
-            "External translation failed — using Apple on-device. \(reason)", severity
+        publishStatus(
+            .degraded("External translation failed — using Apple on-device. \(reason)", severity)
         )
         reconcileToasts(translationStatus)
         refreshConfig()

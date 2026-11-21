@@ -110,6 +110,100 @@ struct TranscriptPaneTests {
         )
     }
 
+    // MARK: - Landing observations
+
+    @Test("a landing writes the row's cell and leaves the structural revision alone")
+    func landingWritesTheRowCellOnly() throws {
+        let pane = makePane()
+        pane.append(sentence(0, text: "おはよう"))
+        let cell = try #require(pane.translationCell(for: 0), "the append seeds a cell")
+        let structural = pane.entriesRevision
+        let landings = pane.landingRevision
+        let translation = SentenceTranslation(lang: "fr", text: "Bonjour")
+
+        #expect(pane.replaceTranslation(index: 0, translation: translation))
+
+        #expect(cell.translations == [translation], "the row's own reader sees the landing")
+        #expect(
+            pane.entries[0].translations == [translation],
+            "the row snapshot every non-observing reader uses agrees"
+        )
+        #expect(pane.entriesRevision == structural, "appends are the only structural signal")
+        #expect(pane.landingRevision == landings + 1)
+    }
+
+    @Test("a landing notifies no rows reader")
+    func landingNotifiesNoRowsReader() async {
+        let pane = makePane()
+        pane.append(sentence(0, text: "おはよう"))
+        let rows = ObservedValuesRecorder(read: { pane.entries })
+        let inclusive = ObservedValuesRecorder(read: { pane.entriesIncludingLandings })
+
+        pane.replaceTranslation(
+            index: 0, translation: SentenceTranslation(lang: "fr", text: "Bonjour")
+        )
+        await flushObservations()
+
+        #expect(rows.values.isEmpty, "a landing re-runs no surface that renders structure")
+        #expect(inclusive.values.count == 1, "the landing-inclusive read refreshes once")
+        #expect(inclusive.values.first?.first?.translations.map(\.text) == ["Bonjour"])
+    }
+
+    @Test("a landing notifies only that row's own cell")
+    func landingNotifiesOnlyItsOwnCell() async throws {
+        let pane = makePane()
+        pane.append(sentence(0, text: "おはよう"))
+        pane.append(sentence(1, text: "こんにちは"))
+        let first = try #require(pane.translationCell(for: 0))
+        let second = try #require(pane.translationCell(for: 1))
+        let firstReader = ObservedValuesRecorder(read: { first.translations })
+        let secondReader = ObservedValuesRecorder(read: { second.translations })
+
+        pane.replaceTranslation(
+            index: 0, translation: SentenceTranslation(lang: "fr", text: "Bonjour")
+        )
+        await flushObservations()
+
+        #expect(firstReader.values.count == 1, "the affected row refreshes")
+        #expect(
+            firstReader.values.first?.map(\.text) == ["Bonjour"],
+            "the refreshed value is the landed one"
+        )
+        #expect(secondReader.values.isEmpty, "no other row's body re-runs")
+    }
+
+    @Test("opening a record seeds the landing cells from its stored rows")
+    func openSessionSeedsLandingCells() throws {
+        let fixture = makeArchiveFixture()
+        let id = try #require(fixture.id)
+        let stored = SentenceTranslation(lang: "fr", text: "Bonjour")
+        #expect(fixture.store.upsert(translation: stored, index: 0, session: id))
+
+        #expect(fixture.pane.openSession(id: id))
+
+        #expect(fixture.pane.translationCell(for: 0)?.translations == [stored])
+        #expect(fixture.pane.entries[0].translations == [stored])
+        #expect(fixture.pane.translationCell(for: 1)?.translations.isEmpty == true)
+    }
+
+    @Test("clearing the pane drops its landing cells")
+    func clearingDropsLandingCells() throws {
+        let fixture = makeArchiveFixture()
+        let id = try #require(fixture.id)
+        fixture.pane.openSession(id: id)
+        #expect(fixture.pane.translationCell(for: 0) != nil)
+
+        fixture.pane.closeSession()
+        #expect(fixture.pane.translationCell(for: 0) == nil)
+        #expect(fixture.pane.translationCell(for: 1) == nil)
+
+        fixture.pane.openSession(id: id)
+        #expect(fixture.pane.translationCell(for: 0) != nil, "reopening seeds them again")
+
+        fixture.pane.beginLiveSession()
+        #expect(fixture.pane.translationCell(for: 0) == nil, "a fresh live session starts empty")
+    }
+
     @Test("replaceTranslation rejects an index the pane does not hold")
     func replaceTranslationRejectsUnknownIndex() {
         let pane = makePane()

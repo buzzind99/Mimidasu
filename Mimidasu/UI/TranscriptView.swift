@@ -65,6 +65,17 @@ struct TranscriptView: View {
         // dictionary artifact becomes ready: degraded cold-start renders are
         // not cached, and the epoch also remeasures FlowLayout.
         let annotationEpoch = model.dictionaryRevision
+        // Everything the rows share is hoisted out of the row closure: the
+        // closure runs once per row, so a member access inside it is an O(n)
+        // pass over the transcript per body evaluation.
+        let pane = model.pane
+        let entries = pane.entries
+        let mode = scrollMode
+        let newestID = entries.last?.id
+        // The opened record's identity gates the viewing override, and the
+        // override itself is read once here rather than per row.
+        let displayLanguage = pane.openSessionID == nil ? nil : model.archiveViewingCode
+        let favorites = model.favoriteSegmentMatcher
         let plan = model.retranslatePlan(
             surface: retranslateSurface,
             target: retranslateTarget
@@ -78,18 +89,17 @@ struct TranscriptView: View {
                     .listRowInsets(EdgeInsets())
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
-                if model.pane.entries.isEmpty {
+                if entries.isEmpty {
                     emptyState
                         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                 }
-                ForEach(model.pane.entries) { entry in
-                    let rowPlan = plan.row(for: entry)
+                ForEach(entries) { entry in
                     TranscriptRow(
                         entry: entry,
-                        displayLanguage: model.pane.openArchive != nil
-                            ? model.archiveViewingCode : nil,
+                        translationCell: pane.translationCell(for: entry.sentence.index),
+                        displayLanguage: displayLanguage,
                         annotation: readingAnnotation,
                         scale: uiScale,
                         cursorMode: cursorMode,
@@ -113,11 +123,11 @@ struct TranscriptView: View {
                             return tokenIndex
                         },
                         annotationEpoch: annotationEpoch,
-                        isFavorite: model.favoriteSegmentMatcher,
+                        isFavorite: favorites,
                         onRetry: { sentence in model.retranslate.retranslateSentence(sentence) },
-                        rowPlan: rowPlan,
+                        plan: plan,
                         fadesIn: TranscriptScrollPin.rowFadesIn(
-                            in: scrollMode, isNewest: entry.id == model.pane.entries.last?.id
+                            in: mode, isNewest: entry.id == newestID
                         )
                     )
                     .id(entry.id)
@@ -158,13 +168,14 @@ struct TranscriptView: View {
                 scroll.handle(old: old, new: new, proxy: proxy)
             }
             .onChange(of: model.pane.entriesRevision) { _, _ in
-                // Covers appends and rows growing when a translation lands.
-                // Only the live feed follows its tail: a finished record
-                // stays where the reader put it.
-                guard TranscriptScrollPin.followsTail(in: scrollMode) else { return }
+                // Structural changes only — a new entry, a record swap, a
+                // clear. A landed translation grows its row instead, and the
+                // geometry tick re-anchors for that while pinned; it must not
+                // re-diff the list for every landing.
+                guard TranscriptScrollPin.followsTail(in: mode) else { return }
                 scroll.reAnchor(proxy)
             }
-            .onChange(of: model.pane.openArchive?.id) { _, newID in
+            .onChange(of: model.pane.openSessionID) { _, newID in
                 // A record opens at its oldest sentence; the live feed
                 // resumes following its tail. A second record is a change
                 // too: the mode does not move, the content does.
@@ -174,7 +185,7 @@ struct TranscriptView: View {
                 // List has no `.initialOffset` anchor (ScrollView-only);
                 // start pinned at the newest sentence — unless a record is
                 // already open, which starts at its oldest.
-                scroll.applyRecord(model.pane.openArchive?.id, proxy: proxy)
+                scroll.applyRecord(model.pane.openSessionID, proxy: proxy)
                 guard TranscriptScrollPin.followsTail(in: scrollMode) else { return }
                 scroll.reAnchor(proxy)
             }
@@ -201,19 +212,19 @@ struct TranscriptView: View {
     /// decided from one source — the record is already open when its rows
     /// land, and a content change must not be read as a live append.
     private var scrollMode: TranscriptScrollPin.Mode {
-        model.pane.openArchive == nil ? .live : .archive
+        model.pane.openSessionID == nil ? .live : .archive
     }
 
     /// Which surface the transcript is rendering for the re-translate plan:
     /// the opened record's pane, or the live feed.
     private var retranslateSurface: RetranslateSurface {
-        model.pane.openArchive == nil ? .live : .archive
+        model.pane.openSessionID == nil ? .live : .archive
     }
 
     /// The language the pane retries toward: the opened record's viewed
     /// language, or the configured live target.
     private var retranslateTarget: TargetLanguage {
-        guard model.pane.openArchive != nil else { return model.translationSettings.targetLanguage }
+        guard model.pane.openSessionID != nil else { return model.translationSettings.targetLanguage }
         return TargetLanguage(
             code: model.archiveViewingCode ?? model.translationSettings.targetLanguage.code
         )

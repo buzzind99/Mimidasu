@@ -147,6 +147,44 @@ struct SessionModelsTests {
         ])
     }
 
+    // MARK: - SessionEntry.withTranslations
+
+    @Test("withTranslations applies the landing and rebuilds the joined text")
+    func withTranslationsAppliesTheLanding() {
+        let entry = makeEntry()
+
+        let landed = entry.withTranslations([
+            SentenceTranslation(lang: "en", text: firstTranslationText),
+            SentenceTranslation(lang: "ko", text: secondTranslationText)
+        ])
+
+        #expect(landed.joinedTranslations == "\(firstTranslationText) / \(secondTranslationText)")
+        #expect(landed.translations.count == 2)
+        #expect(entry.joinedTranslations == nil, "the row it was derived from is untouched")
+    }
+
+    @Test("withTranslations keeps one entry per language")
+    func withTranslationsKeepsOneEntryPerLanguage() {
+        let landed = makeEntry().withTranslations([
+            SentenceTranslation(lang: "en", text: "First"),
+            SentenceTranslation(lang: "en", text: "Second")
+        ])
+
+        #expect(landed.translations == [SentenceTranslation(lang: "en", text: "Second")])
+        #expect(landed.joinedTranslations == "Second")
+    }
+
+    @Test("withTranslations clears the joined text when nothing landed")
+    func withTranslationsClearsWhenEmpty() {
+        var entry = makeEntry()
+        entry.replaceTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
+
+        let cleared = entry.withTranslations([])
+
+        #expect(cleared.translations.isEmpty)
+        #expect(cleared.joinedTranslations == nil)
+    }
+
     // MARK: - SessionEntry.translation(for:)
 
     @Test("translation(for:) returns the matching language's entry with its engine stamp")

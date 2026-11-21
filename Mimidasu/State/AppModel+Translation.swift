@@ -103,6 +103,13 @@ extension AppModel {
         translationSession.runtime
     }
 
+    /// The queue's published status — the sidebar pill, footer, and failure
+    /// cards read it here rather than through `translationRuntime`, whose
+    /// value the transcript also reads.
+    var translationStatus: TranslationStatus {
+        translationSession.translationStatus
+    }
+
     var appleHighFidelityProbe: (installed: Bool, targetCode: String?) {
         get { translationSession.appleHighFidelityProbe }
         set { translationSession.appleHighFidelityProbe = newValue }

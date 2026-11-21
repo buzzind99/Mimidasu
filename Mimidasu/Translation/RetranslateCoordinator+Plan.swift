@@ -68,7 +68,7 @@ extension RetranslateCoordinator {
             runsHighFidelity: liveSessionRunsKind(.appleHighFidelity),
             attachedProvider: live?.activeExternalProvider,
             workerAttached: live?.runtime.workerAttached ?? queue.hasWorker,
-            status: live?.runtime.status ?? .idle,
+            queueUnavailable: live?.queueUnavailable ?? false,
             phaseIsLive: SessionPhaseMachine.isLive(sessionPhase)
         )
     }

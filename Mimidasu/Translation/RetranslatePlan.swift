@@ -25,7 +25,7 @@ struct RetranslateLiveFacts: Equatable, Sendable {
     let runsHighFidelity: Bool
     let attachedProvider: TranslationProvider?
     let workerAttached: Bool
-    let status: TranslationStatus
+    let queueUnavailable: Bool
     let phaseIsLive: Bool
 }
 
@@ -247,10 +247,7 @@ struct RetranslatePlan: Equatable, Sendable {
                 return true
             case .session:
                 guard context.live.workerAttached else { return false }
-                if case .unavailable = context.live.status {
-                    return false
-                }
-                return true
+                return !context.live.queueUnavailable
             case .unavailable:
                 return false
             }

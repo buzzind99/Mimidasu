@@ -60,7 +60,7 @@ struct AppModelTranslationTests {
         #expect(translation.lang == "en")
         #expect(!translation.text.isEmpty)
         #expect(model.pane.entries[0].joinedTranslations == translation.text)
-        #expect(model.translationRuntime.status == .ready)
+        #expect(model.translationStatus == .ready)
     }
 
     // MARK: - Enqueue cache

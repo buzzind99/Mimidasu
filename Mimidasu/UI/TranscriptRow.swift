@@ -11,13 +11,18 @@ import SwiftUI
 /// `RubyTextView` applies `.equatable()`, whose witness compares values plus
 /// handler presence, the anchor token, and the annotation epoch, so a moved
 /// anchor or a newly ready dictionary still reaches the body. The body's own
-/// reads still observe favorites and the popover's anchor directly.
+/// reads still observe favorites, the popover's anchor, and the row's
+/// translation cell.
 struct TranscriptRow: View {
     /// Shared label for the one retry affordance: the row's named
     /// accessibility action and the hover button's help tag must not drift.
     static let retryActionTitle = "Re-translate this line"
 
     let entry: SessionEntry
+    /// The row's landing cell: this sentence's translations, observed here
+    /// and nowhere else. Reading it in this body is what makes a translation
+    /// landing re-run one row instead of the whole transcript.
+    let translationCell: TranscriptTranslationCell?
     /// Archive mode's viewed language: the row renders that language's
     /// translation alone. Nil (the live pane) keeps the joined
     /// multi-language line.
@@ -46,14 +51,13 @@ struct TranscriptRow: View {
     var isFavorite: ((ReadingSegment) -> Bool)?
     /// Invoked with the row's sentence when the hover retry button fires.
     var onRetry: ((Sentence) -> Void)?
-    /// The row's re-translate decision: whether the retry affordance may be
-    /// shown, whether the sentence is already retranslating, and the
-    /// provenance suffix for the translation the row shows. The plan is
-    /// built by the transcript from the current surface, target, and live
-    /// evidence; the enabled flag already folds in every precondition a
-    /// click would enforce, so a shown button is always one that would be
-    /// served rather than silently refused.
-    let rowPlan: RetranslateRowPlan
+    /// The surface's re-translate decision. The row derives its own row plan
+    /// from this and its current translations, so the provenance marker
+    /// reflects a landing that arrived after the row was built. The enabled
+    /// flag already folds in every precondition a click would enforce, so a
+    /// shown button is always one that would be served rather than silently
+    /// refused.
+    let plan: RetranslatePlan
     /// True only while this row is the live feed's newest entry: a freshly
     /// appended row fades in, while older rows render opaque so recycled
     /// rows scrolling back into view don't re-fade. A record's rows never
@@ -71,7 +75,16 @@ struct TranscriptRow: View {
     @State private var hovering = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
+        // The row's own landing read. A translation mutates this cell alone,
+        // so only this body re-runs; the plan is derived from the merged row,
+        // so the provenance marker is the landed value's rather than the one
+        // the row was built with. The merge allocates nothing while the cell
+        // and the row agree — the append path's steady state.
+        let translations = translationCell?.translations ?? entry.translations
+        let rowEntry = translations == entry.translations
+            ? entry : entry.withTranslations(translations)
+        let rowPlan = plan.row(for: rowEntry)
+        return HStack(alignment: .top, spacing: 14) {
             Text(entry.startTimestamp)
                 .font(.system(size: 11 * scale.factor, design: .monospaced))
                 .foregroundStyle(Theme.gutterText)
@@ -82,7 +95,7 @@ struct TranscriptRow: View {
                 rubyText
                     .textSelection(.enabled)
 
-                translationRow
+                translationRow(shown: shownTranslation(rowEntry), rowPlan: rowPlan)
                     // A manual re-translation dims the stale line (bar and
                     // placeholder alike) until the fresh one lands; applied
                     // here rather than inside `translationRow` so it covers
@@ -205,11 +218,11 @@ struct TranscriptRow: View {
     }
 
     @ViewBuilder
-    private var translationRow: some View {
-        if let shown = shownTranslation {
+    private func translationRow(shown: String?, rowPlan: RetranslateRowPlan) -> some View {
+        if let shown {
             // The bar overlays the text's leading edge so it stretches to the
             // full height of the (possibly multi-line) translation.
-            translationText(shown)
+            translationText(shown, marker: rowPlan.marker)
                 .font(.system(size: 13 * scale.factor))
                 .textSelection(.enabled)
                 .overlay(alignment: .leading) {
@@ -233,7 +246,7 @@ struct TranscriptRow: View {
     /// archive mode — never the joined string, so an untranslated row keeps
     /// its placeholder however many other languages it holds — and the
     /// joined multi-language text live.
-    private var shownTranslation: String? {
+    private func shownTranslation(_ entry: SessionEntry) -> String? {
         guard let displayLanguage else { return entry.joinedTranslations }
         return entry.translation(for: displayLanguage)?.text
     }
@@ -250,9 +263,9 @@ struct TranscriptRow: View {
     /// sentence's last word, so it can neither split internally nor wrap
     /// alone onto a new line. The trade of living inside the selectable
     /// text: the suffix copies with the sentence.
-    private func translationText(_ text: String) -> some View {
+    private func translationText(_ text: String, marker: String?) -> some View {
         let translation = Text(text).foregroundStyle(Theme.translationTeal)
-        guard let marker = rowPlan.marker else { return translation }
+        guard let marker else { return translation }
         let glued = marker.replacingOccurrences(of: " ", with: "\u{00A0}")
         let suffix = Text("\u{00A0}\u{00A0}\(glued)")
             .foregroundStyle(Theme.secondaryText)

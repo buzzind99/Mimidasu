@@ -294,7 +294,7 @@ struct ContentView: View {
                 .frame(width: 1)
                 .ignoresSafeArea()
             VStack(spacing: 0) {
-                if model.pane.openArchive != nil {
+                if model.pane.openSessionID != nil {
                     ArchiveBannerView(model: model)
                 }
                 transcriptArea
@@ -318,7 +318,7 @@ struct ContentView: View {
             // Archive mode: the live strip hides entirely (nothing is
             // live; the banner carries the archived stats) and its
             // strip-anchored popover has no anchor to mount on.
-            if model.pane.openArchive == nil {
+            if model.pane.openSessionID == nil {
                 LiveStripLookupHost(
                     model: model,
                     live: live,

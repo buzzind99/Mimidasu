@@ -22,7 +22,10 @@ struct TranslationOverlayView: View {
     )
 
     var body: some View {
-        ScrollViewReader { proxy in
+        // One filter per body pass: the empty state and the list read the
+        // same snapshot, and every landing re-runs this body while visible.
+        let entries = translatedEntries
+        return ScrollViewReader { proxy in
             List {
                 Color.clear
                     .frame(height: 1)
@@ -30,13 +33,13 @@ struct TranslationOverlayView: View {
                     .listRowInsets(EdgeInsets())
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
-                if translatedEntries.isEmpty {
+                if entries.isEmpty {
                     emptyState
                         .listRowInsets(EdgeInsets())
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                 }
-                ForEach(translatedEntries) { entry in
+                ForEach(entries) { entry in
                     row(for: entry)
                         .id(entry.id)
                         .listRowInsets(EdgeInsets())
@@ -70,7 +73,12 @@ struct TranslationOverlayView: View {
                 scroll.handle(old: old, new: new, proxy: proxy)
             }
             .onChange(of: model.pane.entriesRevision) { _, _ in
-                // Covers appends and rows growing when a translation lands.
+                // A new sentence finalized.
+                scroll.reAnchor(proxy)
+            }
+            .onChange(of: model.pane.landingRevision) { _, _ in
+                // A translation landed: the row joins the list, so the
+                // content grew under the viewport.
                 scroll.reAnchor(proxy)
             }
             .onChange(of: uiScale) { _, _ in
@@ -99,9 +107,11 @@ struct TranslationOverlayView: View {
     }
 
     /// Translated entries only; finalized-but-untranslated sentences never
-    /// enter the list (each row's text lands with its translation).
+    /// enter the list (each row's text lands with its translation). Reads the
+    /// landing-inclusive rows: a landing adds a row here without changing the
+    /// transcript's structure.
     private var translatedEntries: [SessionEntry] {
-        model.pane.entries.filter { entry in entry.joinedTranslations != nil }
+        model.pane.entriesIncludingLandings.filter { entry in entry.joinedTranslations != nil }
     }
 
     private var emptyState: some View {
