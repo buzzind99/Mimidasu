@@ -440,9 +440,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             KickerLabel("SESSION", color: Palette.label)
             row(label: "Entries") {
-                Text("\(model.pane.entries.count)")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Palette.primaryText)
+                SessionEntryCountText(pane: model.pane)
             }
             settingsDivider()
             row(label: "Engine") {
@@ -476,6 +474,20 @@ struct SettingsView: View {
         }
         .padding(16)
         .cardSurface(shadow: Palette.cardShadow)
+    }
+}
+
+/// The session card's entry count, read in its own body. The Settings scene
+/// stays mounted after its window closes, so a count read higher up would
+/// re-run the whole card stack on every transcript append; only this text
+/// re-evaluates and re-reads the pane.
+private struct SessionEntryCountText: View {
+    let pane: TranscriptPane
+
+    var body: some View {
+        Text("\(pane.entries.count)")
+            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+            .foregroundStyle(Palette.primaryText)
     }
 }
 

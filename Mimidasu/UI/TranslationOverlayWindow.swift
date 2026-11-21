@@ -16,17 +16,35 @@ final class TranslationOverlayWindowController {
 
     func bind(model: AppModel) {
         self.model = model
-        if let panel {
+        // A hidden panel has no content installed on purpose; reattaching it
+        // here would restart the observation and layout work the hide
+        // detached. The next show installs it from the current model.
+        if let panel, panel.isVisible {
             installContent(in: panel)
         }
     }
 
     func setVisible(_ visible: Bool) {
         guard visible else {
-            panel?.orderOut(nil)
+            guard let panel else { return }
+            panel.orderOut(nil)
+            // A hidden hosting view keeps evaluating its SwiftUI bodies (the
+            // List's translated-entry filter and every row) even while
+            // ordered out. Detach it so the hidden overlay does no
+            // observation or layout work; the next show rebuilds it from
+            // current state, so it starts pinned at the newest translation
+            // again, as on its first show.
+            if panel.contentView is TranslationOverlayHostingView {
+                panel.contentView = NSView()
+            }
             return
         }
         let panel: TranslationOverlayPanel = panel ?? makePanel()
+        // A prior hide detached the content, so rebuild it from current
+        // state before ordering in (a fresh bind skips hidden panels too).
+        if !(panel.contentView is TranslationOverlayHostingView) {
+            installContent(in: panel)
+        }
         panel.orderFrontRegardless()
     }
 
