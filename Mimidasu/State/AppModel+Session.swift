@@ -35,8 +35,20 @@ extension AppModel {
         cancelArchiveTranslation()
 
         Task { @MainActor in
+            // A stop that already flipped the phase back to idle may still be
+            // finalizing the previous recording row; the next session must
+            // not begin (and take its own row id) underneath that finalize.
+            await self.stopTask?.value
+            // A stop or quit that landed inside that wait has superseded this
+            // start: beginning now would clear the transcript and bring up a
+            // capture the machine has already refused.
+            guard self.phase == .starting else { return }
             do {
                 try await self.ensureDictionaryReady()
+                // The dictionary wait can be seconds long on a fresh build:
+                // a stop or quit that lands inside it supersedes this start
+                // exactly like one that landed during the teardown wait.
+                guard self.phase == .starting else { return }
                 try await self.beginSession()
             } catch {
                 // A raced teardown (quit-time shutdown, or a stop during
@@ -72,6 +84,9 @@ extension AppModel {
         let interruption = reducePhase(.beginInterruptedByTeardown)
         if interruption.requiresTeardown {
             await sessionController.stop()
+            // The session the capture belonged to is over: a late pause sync
+            // or landing must not enqueue against it.
+            recordingWritesOpen = false
             // The wind-back lands **after** the teardown: a session left in
             // `.stopping` would keep the stop confirmation, the sidebar title,
             // the archive gate and the target-language card reading
@@ -193,11 +208,13 @@ extension AppModel {
         syncPausedToArchive()
     }
 
-    /// Persists the accumulated paused time on the live recording row (a
-    /// no-op before the first sentence created it).
+    /// Persists the accumulated paused time on the live recording row. The
+    /// write is queued behind the session's sentence appends, so it lands
+    /// against the row the first sentence created (a no-op when none did, and
+    /// when the session's write window has already closed).
     func syncPausedToArchive() {
-        guard let sessionID = recordingSessionID else { return }
-        archiveProjection.syncPaused(session: sessionID, pausedMS: Self.milliseconds(of: sessionPausedTotal))
+        guard recordingWritesOpen, !archiveWriteFailed else { return }
+        archiveWriteLane.syncPaused(pausedMS: Self.milliseconds(of: sessionPausedTotal))
     }
 
     /// The effective session start with paused spans excluded: advancing the
@@ -238,9 +255,20 @@ extension AppModel {
         // set; a refused request is a no-op, not a second teardown.
         guard reducePhase(.stopRequested).isLegal else { return }
 
+        stopGeneration &+= 1
+        let generation = stopGeneration
+        // A stop requested while an earlier teardown is still finalizing (an
+        // accepted start makes `.starting` stoppable) waits that teardown out
+        // instead of running a second `performStop` beside it; a start that
+        // reads `stopTask` therefore waits for every pending teardown. The
+        // generation keeps a finishing task from clearing a newer handle.
+        let previous = stopTask
         stopTask = Task { @MainActor in
+            await previous?.value
             await performStop()
-            stopTask = nil
+            if stopGeneration == generation {
+                stopTask = nil
+            }
         }
     }
 

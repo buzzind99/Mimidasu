@@ -409,7 +409,7 @@ struct AppModelArchiveTests {
         let (model, _) = await makeModel()
         let summariesBefore = model.archiveProjection.summaries
 
-        let finalized = model.finalizeLiveSession(durationMS: 5000)
+        let finalized = await model.finalizeLiveSession(durationMS: 5000)
 
         #expect(!finalized)
         #expect(model.archiveProjection.summaries == summariesBefore, "the cached list is unchanged")

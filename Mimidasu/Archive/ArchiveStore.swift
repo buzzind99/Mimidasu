@@ -7,8 +7,9 @@ import Foundation
 /// "not persisted" state on the first failure instead of retrying per
 /// sentence; reads map failures to empty results, and `isDegraded` exposes
 /// the terminal open failure for the window's unavailable state. Every call
-/// is synchronous under the database's mutex — the same main-actor contract
-/// `FavoritesStore` has, valid because per-sentence writes are ms-scale.
+/// is synchronous under the database's mutex; the live session's writes reach
+/// it from `ArchiveWriteLane`'s writer task, while archive-mode and bulk-run
+/// writes still call it from the main actor.
 final class ArchiveStore: Sendable {
     /// The recents cap: the newest 10 unsaved sessions are kept, older ones
     /// are evicted silently at finalize/sweep. Saved sessions never count.

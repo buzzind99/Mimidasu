@@ -78,7 +78,7 @@ struct AppModelArchiveProjectionTests {
         model.recordingSessionID = id
         #expect(cachedRow(model, id: id) == nil, "the recording row is not listed yet")
 
-        let finalized = model.finalizeLiveSession(durationMS: 4000)
+        let finalized = await model.finalizeLiveSession(durationMS: 4000)
 
         #expect(finalized, "the finalize lands against the seeded row")
         let row = cachedRow(model, id: id)
@@ -161,9 +161,11 @@ struct AppModelArchiveProjectionTests {
     func liveRecordingWriteAddsNoWindowRow() async throws {
         let store = isolatedArchive()
         let model = await makeModel(store: store)
-        let id = try #require(seedRecording(store))
-        model.recordingSessionID = id
         let seed = archiveSentence(0, text: "こんにちは")
+        model.archiveWriteLane.append(sentence: seed, metadata: archiveMetadata(target: "en"))
+        await model.archiveWriteLane.drain()
+        let id = try #require(model.recordingSessionID, "the queued append creates the recording row")
+        model.recordingWritesOpen = true
         model.pane.append(seed)
         #expect(model.archiveProjection.summaries.isEmpty, "the recording row is not listed")
 
@@ -176,8 +178,10 @@ struct AppModelArchiveProjectionTests {
         #expect(model.archiveProjection.openSummary == nil, "a live write opens no session")
         #expect(model.pane.openArchive == nil, "the pane stays empty")
         #expect(
-            store.load(id: id)?.entries.first?.translations
-                == [SentenceTranslation(lang: "en", text: "Hello")],
+            await pollUntil {
+                store.load(id: id)?.entries.first?.translations
+                    == [SentenceTranslation(lang: "en", text: "Hello")]
+            },
             "the recording row carries the write"
         )
     }
@@ -241,7 +245,7 @@ struct AppModelArchiveProjectionTests {
         )
         model.recordingSessionID = recordingID
 
-        #expect(model.finalizeLiveSession(durationMS: 4000), "finalize lands")
+        #expect(await model.finalizeLiveSession(durationMS: 4000), "finalize lands")
         #expect(cachedRow(model, id: recordingID)?.status == .complete, "the finalized row joins the cache")
         #expect(cachedRow(model, id: recordingID) == store.summary(id: recordingID))
         #expect(model.archiveProjection.openSummary == nil, "finalizing opens no session")

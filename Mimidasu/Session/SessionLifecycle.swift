@@ -3,7 +3,7 @@ protocol SessionLifecycleHost: AnyObject {
     func finishPauseSpan()
     func sessionTeardownDidFinish(at endedAt: ContinuousClock.Instant)
     func activeSessionDurationMS(to endedAt: ContinuousClock.Instant) -> Int?
-    @discardableResult func finalizeLiveSession(durationMS: Int) -> Bool
+    @discardableResult func finalizeLiveSession(durationMS: Int) async -> Bool
     func postArchivedRecentToast()
 }
 
@@ -26,7 +26,8 @@ struct SessionLifecycle {
     /// The one ordered end sequence. Steps must not be reordered: the pause
     /// span folds before the recording row is finalized; the controller
     /// drains before either coordinator retires its boundary; the archive
-    /// finalize runs after the chrome clear so its toast survives.
+    /// finalize drains the live writer so the row is complete, and runs after
+    /// the chrome clear so its toast survives.
     func end(host: any SessionLifecycleHost) async {
         host.finishPauseSpan()
         await controller.stop()
@@ -35,7 +36,7 @@ struct SessionLifecycle {
         let endedAt = ContinuousClock.now
         host.sessionTeardownDidFinish(at: endedAt)
         if let durationMS = host.activeSessionDurationMS(to: endedAt),
-           host.finalizeLiveSession(durationMS: durationMS)
+           await host.finalizeLiveSession(durationMS: durationMS)
         {
             host.postArchivedRecentToast()
         }

@@ -2,8 +2,8 @@ import Foundation
 
 // The archive surface of `AppModel`: the live session's continuous persistence,
 // the launch sweep, archive mode (open/close in the transcript pane), the
-// promote/rename/delete commands, and the single write-back seam every landed
-// translation funnels through.
+// promote/rename/delete commands, and the write-back seam archive mode and
+// bulk runs funnel through.
 //
 // **Seam rule:** a feature file that outgrows 600 **code** lines splits at the
 // next feature boundary — never mid-feature, never because it grew more
@@ -26,23 +26,31 @@ extension AppModel {
         // The metadata is assigned by `SessionController.begin` before any
         // chunk can flow, so it is always present when a sentence lands.
         guard let metadata = sessionController.sessionMetadata else { return }
-        guard let id = archiveProjection.append(
-            sentence: sentence, sessionID: recordingSessionID, metadata: metadata
-        ) else {
-            latchArchiveWriteFailure(
-                body: "The session store couldn't be written to. "
-                    + "Sessions can't be saved or listed; transcription continues."
-            )
-            return
-        }
-        recordingSessionID = id
+        // Queued, not written: the lane owns the row id and the FIFO order
+        // that keeps this append ahead of the pause sync and translation
+        // upserts that may follow it.
+        archiveWriteLane.append(sentence: sentence, metadata: metadata)
     }
 
     /// Finalizes the live recording as a Recent. Returns whether a row was
     /// finalized — the post-stop toast's gate. Persists nothing once the
     /// session's writes have failed (or the store is terminally degraded).
     @discardableResult
-    func finalizeLiveSession(durationMS: Int) -> Bool {
+    func finalizeLiveSession(durationMS: Int) async -> Bool {
+        // The window closes first: everything the session accepted is already
+        // queued ahead of the drain below, while a result that lands after
+        // this point is refused instead of written against a row the archive
+        // is about to close (and instead of latching a session that saved).
+        recordingWritesOpen = false
+        // The writer owns the row id and the pause ledger, and both may still
+        // be queued when the teardown reaches this point: the drain is the
+        // barrier that makes every append, upsert, and pause sync enqueued
+        // during the session visible to the finalize below.
+        await archiveWriteLane.drain()
+        // The session is over either way: the writer forgets its row, so a
+        // pause sync or landing that arrives after this stop cannot land
+        // against a row the archive is closing (or has refused).
+        archiveWriteLane.reset()
         guard let id = recordingSessionID else { return false }
         recordingSessionID = nil
         guard !archiveWriteFailed, !archive.isDegraded,
@@ -72,9 +80,15 @@ extension AppModel {
         !archive.isDegraded && !archiveWriteFailed
     }
 
+    /// The one body for a live session whose archive writes failed: a
+    /// sentence append and a translation write-back share the consequence.
+    static let liveArchiveWriteFailureWarning =
+        "The session store couldn't be written to. "
+            + "Sessions can't be saved or listed; transcription continues."
+
     /// Latches the live session's write failure — the one-shot warning for a
     /// session whose persistence can no longer be trusted — and posts it.
-    /// Internal so the translation write-back can latch through it.
+    /// Internal so the write lane's failure report can latch through it.
     func latchArchiveWriteFailure(body: String) {
         archiveWriteFailed = true
         postArchiveWriteWarning(body: body)
@@ -257,12 +271,12 @@ extension AppModel {
     }
 }
 
-// The single write-back seam every landed translation funnels through —
-// per-row re-translate, bulk runs, and the live recording alike: one upsert
-// through the archive projection, whose landed write refreshes the listed
-// row and/or the open summary from one read, plus one landed report. Callers
-// keep their row swaps and their own warning policies (archive-mode cards
-// closable; the live latch persistent).
+// The write-back seam archive mode and bulk runs funnel through — one upsert
+// through the archive projection, whose landed write refreshes the listed row
+// and/or the open summary from one read, plus one landed report. The live
+// recording writes its landings through the write lane instead (a `recording`
+// row is never listed), and its callers keep their row swaps and their own
+// warning policies (archive-mode cards closable; the live latch persistent).
 
 extension AppModel {
     /// The one shared body for a translation whose store write was lost —

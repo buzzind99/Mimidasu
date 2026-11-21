@@ -96,7 +96,8 @@ final class ArchiveProjection {
     // MARK: - Mutations
 
     /// A recording row is never listed, so the append returns its session id
-    /// without touching the cache.
+    /// without touching the cache. The live session's writer calls the store
+    /// directly; this seam is what tests drive.
     @discardableResult
     func append(sentence: Sentence, sessionID: Int64?, metadata: SessionMetadata) -> Int64? {
         store.append(sentence: sentence, sessionID: sessionID, metadata: metadata)
@@ -113,7 +114,9 @@ final class ArchiveProjection {
         return true
     }
 
-    /// Live pause bookkeeping never changes what the list shows.
+    /// Live pause bookkeeping never changes what the list shows. The live
+    /// session's writer calls the store directly; this seam is what tests
+    /// drive.
     @discardableResult
     func syncPaused(session: Int64, pausedMS: Int) -> Bool {
         store.syncPaused(session: session, pausedMS: pausedMS)

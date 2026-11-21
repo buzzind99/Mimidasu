@@ -149,6 +149,13 @@ struct AppModelArchivePersistenceTests {
 
         await stop(sut)
 
+        #expect(sut.model.recordingWritesOpen == false, "the stop closes the session's write window")
+        #expect(
+            await pollUntil {
+                sut.model.recordingSessionID == nil && sut.store.list().first != nil
+            },
+            "the stop drains the queued writes and finalizes the row"
+        )
         #expect(sut.model.recordingSessionID == nil)
         guard let summary = sut.store.list().first else {
             Issue.record("stop finalizes the session into the archive")
@@ -169,10 +176,20 @@ struct AppModelArchivePersistenceTests {
         ])
         await startRunning(sut)
         #expect(await pollUntil { sut.model.pane.entries.count == 2 }, "both sentences land")
+        #expect(
+            await pollUntil { sut.model.recordingSessionID != nil },
+            "the first sentence should adopt the recording row"
+        )
 
-        guard let id = sut.model.recordingSessionID,
-              let loaded = sut.store.load(id: id)
-        else {
+        guard let id = sut.model.recordingSessionID else {
+            Issue.record("the first sentence should adopt the recording row")
+            return
+        }
+        #expect(
+            await pollUntil { sut.store.load(id: id)?.entries.count == 2 },
+            "both queued appends reach the store"
+        )
+        guard let loaded = sut.store.load(id: id) else {
             Issue.record("recording session should load mid-flight")
             return
         }
@@ -180,6 +197,10 @@ struct AppModelArchivePersistenceTests {
         #expect(loaded.summary.status == .recording)
 
         await stop(sut)
+        #expect(
+            await pollUntil { sut.store.list().first?.status == .complete },
+            "the stop finalizes the recording row"
+        )
         #expect(sut.store.list().first?.sentenceCount == 2)
     }
 
@@ -209,6 +230,10 @@ struct AppModelArchivePersistenceTests {
         }
         await stop(sut)
 
+        #expect(
+            await pollUntil { sut.store.list().count == 2 },
+            "both stops finalize their rows"
+        )
         let summaries = sut.store.list()
         #expect(summaries.count == 2, "two stopped sessions, two rows")
         #expect(Set(summaries.map(\.id)) == Set([firstID, secondID]))
@@ -242,12 +267,18 @@ struct AppModelArchivePersistenceTests {
         sut.model.applyTranslation(index: 0, translation: translation)
 
         #expect(
-            sut.store.load(id: id)?.entries.first?.translations == [translation],
-            "the recording row carries the landing immediately"
+            await pollUntil {
+                sut.store.load(id: id)?.entries.first?.translations == [translation]
+            },
+            "the recording row carries the landing from the queued upsert"
         )
 
         await stop(sut)
 
+        #expect(
+            await pollUntil { sut.store.load(id: id)?.summary.status == .complete },
+            "the finalize lands after the queued writes"
+        )
         guard let reopened = sut.store.load(id: id) else {
             Issue.record("the stopped session should still load")
             return
@@ -317,6 +348,10 @@ struct AppModelArchivePersistenceTests {
 
         await stop(sut)
 
+        #expect(
+            await pollUntil { sut.store.list().first?.status == .complete },
+            "the stop finalizes the row after the pause ledger is queued"
+        )
         #expect(sut.model.pauseStartedAt == nil, "the stop closes the open pause span")
         guard let summary = sut.store.list().first,
               let started = sut.model.sessionStartedAt,

@@ -40,11 +40,18 @@ struct AppModelArchiveWriteBackTests {
         let sentence = Sentence(index: 0, startS: 0, endS: 1, lang: "ja", text: "こんにちは")
         let model = makeIdleModel(suite: "test.AppModelArchiveWriteBack", archive: store)
         await model.initialModelCheck?.value
+        // The row is created the way a live session creates it — through the
+        // write lane — so the fixture's store reads see the same ordering the
+        // app relies on.
+        model.archiveWriteLane.append(sentence: sentence, metadata: metadata)
+        await model.archiveWriteLane.drain()
         let recordingID = try #require(
-            store.append(sentence: sentence, sessionID: nil, metadata: metadata),
-            "the live fixture seeds its recording row after launch"
+            model.recordingSessionID,
+            "the first queued append adopts the recording row"
         )
-        model.recordingSessionID = recordingID
+        // The fixture stands in for a live session: its write window is open
+        // even though no controller began one.
+        model.recordingWritesOpen = true
         model.pane.append(sentence)
         return LiveSUT(model: model, store: store, recordingID: recordingID)
     }
@@ -323,8 +330,10 @@ extension AppModelArchiveWriteBackTests {
 
         #expect(landed, "the live landing reports its row swap")
         #expect(
-            sut.store.load(id: sut.recordingID)?.entries.first?.translations == [translation],
-            "the recording row carries the landed write"
+            await pollUntil {
+                sut.store.load(id: sut.recordingID)?.entries.first?.translations == [translation]
+            },
+            "the recording row carries the queued landing"
         )
         #expect(
             sut.model.pane.entries.first?.translation(for: "en") == translation,
@@ -333,6 +342,56 @@ extension AppModelArchiveWriteBackTests {
         #expect(sut.model.archiveProjection.summaries.isEmpty, "the recording row never joins the window list")
         #expect(sut.model.archiveProjection.openSummary == nil, "a live write opens no session")
         #expect(!sut.model.archiveWriteFailed, "a landed write never latches")
+    }
+
+    @Test("a landing queued before the row id is adopted still persists")
+    func landingBeforeAdoptionPersists() async throws {
+        let store = isolatedArchive()
+        let model = makeIdleModel(suite: "test.AppModelArchiveWriteBack.adoption", archive: store)
+        await model.initialModelCheck?.value
+        model.sessionController.onSessionBegin?()
+        let sentence = Sentence(index: 0, startS: 0, endS: 1, lang: "ja", text: "こんにちは")
+        model.pane.append(sentence)
+        // Queued, not drained: the writer adopts the row id on its own hop,
+        // so the main-actor mirror is still nil when the result lands.
+        model.archiveWriteLane.append(
+            sentence: sentence,
+            metadata: SessionMetadata(
+                startedAt: Date(timeIntervalSince1970: 1_000_000),
+                sourceLang: "ja", targetLang: "en", model: "test-model", chunkMS: 160
+            )
+        )
+        #expect(model.recordingSessionID == nil, "the adoption has not hopped yet")
+        let translation = SentenceTranslation(lang: "en", text: "Hello")
+
+        let landed = model.applyTranslation(index: 0, translation: translation)
+        await model.archiveWriteLane.drain()
+
+        #expect(landed)
+        let id = try #require(model.recordingSessionID, "the drained append adopts the row")
+        #expect(
+            store.load(id: id)?.entries.first?.translations == [translation],
+            "the queued landing lands behind the append that creates the row"
+        )
+    }
+
+    @Test("a landing after the write window closes swaps the row and writes nothing")
+    func landingAfterWindowCloseSwapsOnly() async throws {
+        let sut = try await makeLiveSUT()
+        let translation = SentenceTranslation(lang: "en", text: "Hello")
+        #expect(await sut.model.finalizeLiveSession(durationMS: 4000), "the session finalizes")
+        let storedBefore = sut.store.load(id: sut.recordingID)?.entries.first?.translations
+
+        let landed = sut.model.applyTranslation(index: 0, translation: translation)
+        await sut.model.archiveWriteLane.drain()
+
+        #expect(landed, "the row still swaps from memory")
+        #expect(
+            sut.store.load(id: sut.recordingID)?.entries.first?.translations == storedBefore,
+            "the closed session's store row is untouched"
+        )
+        #expect(!sut.model.archiveWriteFailed, "a refused landing is not a write failure")
+        #expect(archiveWarnings(sut.model).isEmpty, "and it posts no warning")
     }
 
     @Test("a live loss latches and still swaps the row")
@@ -345,7 +404,10 @@ extension AppModelArchiveWriteBackTests {
         let landed = sut.model.applyTranslation(index: 0, translation: translation)
 
         #expect(landed, "the display-from-memory swap still reports itself")
-        #expect(sut.model.archiveWriteFailed, "the lost write latches the session")
+        #expect(
+            await pollUntil { sut.model.archiveWriteFailed },
+            "the lost write latches the session"
+        )
         #expect(!sut.model.archiveAvailable, "the latched session reads as unavailable")
         let warnings = archiveWarnings(sut.model)
         #expect(warnings.count == 1, "one warning for the session")

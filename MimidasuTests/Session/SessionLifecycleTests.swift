@@ -207,7 +207,7 @@ final class SpyLifecycleHost: SessionLifecycleHost {
         return durationMS
     }
 
-    @discardableResult func finalizeLiveSession(durationMS: Int) -> Bool {
+    @discardableResult func finalizeLiveSession(durationMS: Int) async -> Bool {
         finalizeDurationsMS.append(durationMS)
         log.record("finalize")
         return finalizeResult

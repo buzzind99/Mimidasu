@@ -408,6 +408,10 @@ struct AppModelPauseTests {
         sut.model.stop()
         #expect(await pollUntil(timeout: 8) { sut.model.phase == .idle }, "stop winds down")
 
+        #expect(
+            await pollUntil { sut.store.list().first?.status == .complete },
+            "the stop finalizes the row after the pause ledger is queued"
+        )
         #expect(sut.model.pauseStartedAt == nil, "the open pause span is closed by the stop")
         guard let summary = sut.store.list().first,
               let started = sut.model.sessionStartedAt,

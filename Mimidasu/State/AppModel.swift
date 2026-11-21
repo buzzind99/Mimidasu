@@ -161,11 +161,19 @@ final class AppModel {
     let favorites: FavoritesStore
 
     /// The session archive (SQLite): the live session persists through it
-    /// sentence by sentence, and the archive window reads it. Writes are
-    /// synchronous from the main actor under the store's mutex — per-
-    /// sentence/translation writes are ms-scale. Injectable for tests: the
-    /// default opens the production Application Support file.
+    /// sentence by sentence, and the archive window reads it. The live
+    /// session's writes are queued to `archiveWriteLane` and run off the main
+    /// actor; archive-mode and bulk-run writes stay synchronous under the
+    /// store's mutex. Injectable for tests: the default opens the production
+    /// Application Support file.
     let archive: ArchiveStore
+
+    /// The live session's ordered, off-main archive writer over `archive`.
+    /// Sentence appends, translation upserts, and the pause sync are enqueued
+    /// here instead of running on the main actor, and `finalizeLiveSession`
+    /// drains it before finalizing the row. Internal so tests can drive and
+    /// drain it directly.
+    let archiveWriteLane: ArchiveWriteLane
 
     /// The archive's one cached read surface over `archive`: it owns the
     /// listed summaries, the opened session's summary, and the typed
@@ -182,14 +190,22 @@ final class AppModel {
 
     /// The stored row of the live recording, created lazily with the first
     /// finalized sentence. Nil before that (and when the archive is
-    /// unavailable). Mutated from the persistence path in the archive
-    /// surface; reset at finalize (session end).
+    /// unavailable). Assigned by `archiveWriteLane`'s adoption callback when
+    /// the first append lands; reset at finalize (session end).
     var recordingSessionID: Int64?
 
-    /// Latched by the first failed archive write of a session: writes stop
-    /// being attempted, one warning toast is posted, and stop persists
-    /// nothing (and skips its prompt) for the rest of the session. Reset at
-    /// session begin. Mutated from the archive surface.
+    /// Whether the live recording still accepts writes: open from the
+    /// session's begin, closed once its row is final. The landing path gates
+    /// on this rather than on `recordingSessionID`, because the writer adopts
+    /// the id a hop after the first append — a landing in that window must
+    /// still be queued (the lane resolves the id when the upsert runs), while
+    /// a landing that outlives the finalize must not be.
+    var recordingWritesOpen = false
+
+    /// Latched by the first failed archive write of a session — reported by
+    /// `archiveWriteLane` one hop after the write: writes stop being
+    /// attempted, one warning toast is posted, and stop persists nothing (and
+    /// skips its prompt) for the rest of the session. Reset at session begin.
     var archiveWriteFailed = false
 
     /// The bulk archive-translation job: one run at a time over the opened
@@ -227,6 +243,11 @@ final class AppModel {
     /// awaits it so quit never runs a second teardown concurrently with a
     /// user-initiated one. Internal: managed from the termination surface.
     var stopTask: Task<Void, Never>?
+
+    /// Bumped per `stop()` request. A teardown clears `stopTask` only while
+    /// its own generation is current, so a finishing teardown cannot drop a
+    /// newer one that replaced it. Internal: managed with the teardown.
+    var stopGeneration = 0
 
     /// Latched by `shutdownForTermination`: once quit-time teardown begins,
     /// `start` is refused — a session begun during the `.terminateLater`
@@ -312,6 +333,7 @@ final class AppModel {
         self.asrModelSettings = asrModelSettings ?? ASRModelSettings()
         self.favorites = favorites ?? FavoritesStore()
         self.archive = archive ?? ArchiveStore()
+        archiveWriteLane = ArchiveWriteLane(store: self.archive)
         archiveProjection = ArchiveProjection(store: self.archive)
         pane = TranscriptPane(projection: archiveProjection)
         let jmDict = jmDictLookup ?? JMDictLookup()
@@ -346,6 +368,17 @@ final class AppModel {
             )
         }
         wireSessionController()
+        // The lane's callbacks need the fully initialized model: adoption
+        // updates the main-actor mirror the rest of the app reads, and a
+        // failure report lands on the existing per-session latch.
+        archiveWriteLane.bind(
+            recordingIDAdopted: { [weak self] id in
+                self?.recordingSessionID = id
+            },
+            writeFailed: { [weak self] in
+                self?.latchArchiveWriteFailure(body: Self.liveArchiveWriteFailureWarning)
+            }
+        )
         // The coordinators captured only values (queue, settings) above, so
         // no `self` escaped before full init. The host wiring below runs
         // after every stored property is initialized: the coordinators reach
@@ -414,8 +447,11 @@ final class AppModel {
             pauseStartedAt = nil
             deferredCaptureError = nil
             // Archive persistence is per session too: a previous session's
-            // write latch must not disable this one.
+            // write latch must not disable this one, and the writer must
+            // forget the previous row before this session's first append.
             archiveWriteFailed = false
+            archiveWriteLane.reset()
+            recordingWritesOpen = true
             // Dictionary state is per session too; a new session starts clean.
             tapLookup.clear()
         }
@@ -527,8 +563,8 @@ final class AppModel {
 
     private func handleSentence(_ sentence: Sentence) {
         pane.append(sentence)
-        // The archive row follows the transcript: persistence is the same
-        // synchronous main-actor path, governed by the per-session latch.
+        // The archive row follows the transcript, queued behind the writer's
+        // FIFO and governed by the per-session latch.
         persistSentence(sentence)
         // Synchronous main-actor enqueue: by the time `stop` drains, every
         // emitted sentence is observably in the queue.

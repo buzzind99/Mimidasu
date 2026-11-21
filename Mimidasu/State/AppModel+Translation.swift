@@ -63,9 +63,12 @@ extension AppModel: TranslationSessionPort {
         // A live session's recording row is durable home too, but only
         // while its writes are trusted: once the per-session latch trips,
         // sentence appends stop, so a write-back would leave an orphan row.
-        // Both branches funnel through the one write-back seam, which
-        // precedes the row lookup so a result landing while the archive is
-        // closing still persists (its marker is retired either way).
+        // Archive mode persists synchronously, so a lost write can keep its
+        // row on the previous text; the live path queues the upsert through
+        // the write lane (which owns the row id) and lets a loss latch one
+        // hop later without withholding the row swap. Both branches precede
+        // the row lookup so a result landing while the archive is closing
+        // still persists (its marker is retired either way).
         if let archiveID = archiveSessionID {
             guard writeBackTranslation(translation, index: index, session: archiveID) else {
                 // The row keeps its previous text: a displayed translation
@@ -77,13 +80,12 @@ extension AppModel: TranslationSessionPort {
                 )
                 return false
             }
-        } else if let recordingID = recordingSessionID, !archiveWriteFailed {
-            if !writeBackTranslation(translation, index: index, session: recordingID) {
-                latchArchiveWriteFailure(
-                    body: "The session store couldn't be written to. "
-                        + "Sessions can't be saved or listed; transcription continues."
-                )
-            }
+        } else if recordingWritesOpen, !archiveWriteFailed {
+            // The writer owns the row id and the FIFO that puts this upsert
+            // behind the append that creates the row, so the gate is the
+            // session's write window — not the id mirror, which the writer
+            // adopts a hop later.
+            archiveWriteLane.upsert(translation: translation, index: index)
         }
         return pane.replaceTranslation(index: index, translation: translation)
     }

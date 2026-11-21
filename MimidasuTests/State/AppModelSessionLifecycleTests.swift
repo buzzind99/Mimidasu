@@ -216,6 +216,13 @@ struct AppModelSessionLifecycleTests {
 
         await stopAndWait(sut)
 
+        // The phase reaches idle when the host completion runs, one step
+        // before the archive finalize: the row shows up only after the
+        // writer's drain and the finalize that follows it.
+        #expect(
+            await pollUntil { sut.store.list().first?.status == .complete },
+            "the drain-flushed sentence should finalize into a Recent row"
+        )
         guard let summary = sut.store.list().first else {
             Issue.record("the drain-flushed sentence should finalize into a Recent row")
             return
