@@ -288,6 +288,27 @@ extension AppModelArchiveWriteBackTests {
         )
     }
 
+    @Test("an archived landing leaves the transcript's identity readers asleep")
+    func archivedLandingLeavesIdentityReadersAsleep() async {
+        let sut = await makeSUT()
+        let opened = ObservedValuesRecorder(read: { sut.model.pane.openSessionID })
+        let viewingCode = ObservedValuesRecorder(read: { sut.model.archiveViewingCode })
+
+        let landed = sut.model.applyTranslation(
+            index: 0, translation: SentenceTranslation(lang: "fr", text: "Bonjour")
+        )
+        await flushObservations()
+
+        #expect(landed, "the archived landing lands")
+        #expect(
+            opened.values.isEmpty,
+            "the opened identity is not the summary a landing rewrites"
+        )
+        #expect(viewingCode.values.isEmpty, "nor the viewing code derived from it")
+        #expect(sut.model.pane.openSessionID == sut.id)
+        #expect(sut.model.archiveViewingCode == "fr")
+    }
+
     @Test("a per-row archive loss keeps the previous text, warns, and changes neither surface")
     func perRowLossKeepsPreviousTextAndWarns() async {
         let sut = await makeSUT(translations: [0: "Seed"])

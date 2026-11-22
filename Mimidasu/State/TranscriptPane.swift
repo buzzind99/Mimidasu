@@ -96,13 +96,21 @@ final class TranscriptPane {
         return rows
     }
 
-    /// The stored session opened read-only in the pane, or nil.
-    var openSessionID: Int64? {
-        projection.openSummary?.id
-    }
+    /// The stored session opened read-only in the pane, or nil. Held as the
+    /// record's own identity rather than derived from the projection's
+    /// summary: every archived landing rewrites that summary's counts, and
+    /// the transcript body reads this identity on every pass, so deriving it
+    /// would re-invalidate the whole list once per landed sentence.
+    private(set) var openSessionID: Int64?
+
+    /// The opened record's stored target language — the fallback for the
+    /// viewing code while no override is selected. Held for the same reason
+    /// as the identity: the summary it lives in is rewritten per landing.
+    private(set) var openSessionTargetLang: String?
 
     /// The opened record: the projection's one summary copy joined with the
-    /// pane's rows.
+    /// pane's rows. Views that render the record's stored stats (the banner)
+    /// read this; identity-only readers take `openSessionID` instead.
     var openArchive: ArchivedSession? {
         guard let summary = projection.openSummary else { return nil }
         return ArchivedSession(summary: summary, entries: entries)
@@ -115,6 +123,8 @@ final class TranscriptPane {
     /// override reset; the projection's open summary closes with it.
     func beginLiveSession() {
         projection.closeOpen()
+        openSessionID = nil
+        openSessionTargetLang = nil
         viewingLanguage = nil
         replaceRows(with: [])
         characterCount = 0
@@ -134,11 +144,16 @@ final class TranscriptPane {
     ///
     /// The landing mutates the row (the snapshot every non-observing reader
     /// uses) and the row's cell (the value its body observes), then bumps the
-    /// landing signal. `entriesRevision` deliberately stays put.
+    /// landing signal. `entriesRevision` deliberately stays put. A delivery
+    /// that leaves the row's translations unchanged writes neither the cell
+    /// nor the signal: re-sending identical text (a retranslate with the same
+    /// engine) must not re-run the landing-inclusive readers.
     @discardableResult
     func replaceTranslation(index: Int, translation: SentenceTranslation) -> Bool {
         guard let at = positionBySentence[index] else { return false }
+        let previous = rows[at].translations
         rows[at].replaceTranslation(translation)
+        guard rows[at].translations != previous else { return true }
         cells[index]?.translations = rows[at].translations
         landingRevision &+= 1
         return true
@@ -170,6 +185,8 @@ final class TranscriptPane {
     func openSession(id: Int64) -> Bool {
         guard let loaded = projection.open(id: id) else { return false }
         viewingLanguage = nil
+        openSessionID = loaded.summary.id
+        openSessionTargetLang = loaded.summary.targetLang
         replaceRows(with: loaded.entries)
         characterCount = loaded.characterCount
         return true
@@ -179,6 +196,8 @@ final class TranscriptPane {
     /// projection drops its open summary.
     func closeSession() {
         projection.closeOpen()
+        openSessionID = nil
+        openSessionTargetLang = nil
         viewingLanguage = nil
         replaceRows(with: [])
         characterCount = 0

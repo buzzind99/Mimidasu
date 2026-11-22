@@ -132,6 +132,25 @@ struct TranscriptPaneTests {
         #expect(pane.landingRevision == landings + 1)
     }
 
+    @Test("an identical redelivery writes neither the cell nor the landing signal")
+    func identicalRedeliverySkipsTheLandingSignal() async throws {
+        let pane = makePane()
+        pane.append(sentence(0, text: "おはよう"))
+        let translation = SentenceTranslation(lang: "fr", text: "Bonjour")
+        #expect(pane.replaceTranslation(index: 0, translation: translation))
+        let cell = try #require(pane.translationCell(for: 0))
+        let landing = pane.landingRevision
+        let cellReader = ObservedValuesRecorder(read: { cell.translations })
+
+        // A retranslate with the same engine delivers byte-identical text.
+        #expect(pane.replaceTranslation(index: 0, translation: translation))
+        await flushObservations()
+
+        #expect(cellReader.values.isEmpty, "a same-value delivery re-runs no row body")
+        #expect(pane.landingRevision == landing, "and bumps no landing signal")
+        #expect(pane.entries[0].translations == [translation])
+    }
+
     @Test("a landing notifies no rows reader")
     func landingNotifiesNoRowsReader() async {
         let pane = makePane()
@@ -147,6 +166,23 @@ struct TranscriptPaneTests {
         #expect(rows.values.isEmpty, "a landing re-runs no surface that renders structure")
         #expect(inclusive.values.count == 1, "the landing-inclusive read refreshes once")
         #expect(inclusive.values.first?.first?.translations.map(\.text) == ["Bonjour"])
+    }
+
+    @Test("a structural change wakes the landing-inclusive reader too")
+    func structuralChangeWakesInclusiveReader() async {
+        let pane = makePane()
+        pane.append(sentence(0, text: "おはよう"))
+        let inclusive = ObservedValuesRecorder(read: { pane.entriesIncludingLandings })
+
+        pane.append(sentence(1, text: "こんにちは"))
+        await flushObservations()
+        #expect(inclusive.values.count == 1, "an append refreshes the inclusive read")
+        #expect(inclusive.values.first?.count == 2)
+
+        pane.beginLiveSession()
+        await flushObservations()
+        #expect(inclusive.values.count == 2, "a clear refreshes it too")
+        #expect(inclusive.values.last?.isEmpty == true)
     }
 
     @Test("a landing notifies only that row's own cell")
@@ -184,6 +220,40 @@ struct TranscriptPaneTests {
         #expect(fixture.pane.translationCell(for: 0)?.translations == [stored])
         #expect(fixture.pane.entries[0].translations == [stored])
         #expect(fixture.pane.translationCell(for: 1)?.translations.isEmpty == true)
+    }
+
+    @Test("swapping records reseeds the landing cells from the new session")
+    func recordSwapReseedsLandingCells() throws {
+        let store = isolatedArchive()
+        let firstID = try #require(seedFinalized(store, sentences: ["こんにちは", "さようなら"]))
+        let secondID = try #require(seedFinalized(store, sentences: ["おはよう", "こんばんは"]))
+        let firstStored = SentenceTranslation(lang: "fr", text: "Bonjour")
+        let secondStored = SentenceTranslation(lang: "fr", text: "Salut")
+        #expect(store.upsert(translation: firstStored, index: 0, session: firstID))
+        #expect(store.upsert(translation: secondStored, index: 0, session: secondID))
+        let pane = TranscriptPane(projection: ArchiveProjection(store: store))
+
+        #expect(pane.openSession(id: firstID))
+        let firstCell = try #require(pane.translationCell(for: 0))
+
+        // Swap records without an intervening clear: index 0 exists in both.
+        #expect(pane.openSession(id: secondID))
+        #expect(pane.openSessionID == secondID)
+        #expect(
+            pane.translationCell(for: 0)?.translations == [secondStored],
+            "the swapped-in row observes its own session's cell"
+        )
+        #expect(firstCell.translations == [firstStored], "the replaced record's cell is untouched")
+
+        let landing = SentenceTranslation(lang: "de", text: "Hallo")
+        #expect(pane.replaceTranslation(index: 0, translation: landing))
+        #expect(
+            pane.translationCell(for: 0)?.translations.contains(where: { entry in
+                entry.lang == "de"
+            }) == true,
+            "a landing on the new record writes its cell"
+        )
+        #expect(firstCell.translations == [firstStored], "and never the replaced record's")
     }
 
     @Test("clearing the pane drops its landing cells")

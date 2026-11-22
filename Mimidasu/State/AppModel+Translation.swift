@@ -28,8 +28,8 @@ extension AppModel: TranslationSessionPort {
     /// time, so a row retried after the viewing language switched (or after
     /// the archive closed) re-resolves against whatever is current then.
     var archiveViewingCode: String? {
-        guard let archive = pane.openArchive else { return nil }
-        return pane.viewingLanguage ?? archive.summary.targetLang
+        guard let storedTarget = pane.openSessionTargetLang else { return nil }
+        return pane.viewingLanguage ?? storedTarget
     }
 
     /// True from the bulk job's synchronous claim (engine resolution
