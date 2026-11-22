@@ -197,10 +197,14 @@ for the CLI and dev builds.
 - **Coordination:** `TranslationSessionCoordinator` owns the live
   attach/retry/fallback/provider machinery and is the one live-translation
   authority: it stores a single `TranslationRuntime` value (`engine` ·
-  `externalProvider` · `workerAttached` · `status` · `fallbackLatched`, plus
+  `externalProvider` · `workerAttached` · `fallbackLatched`, plus
   the derived `isAppleFallbackLatched`) that only the coordinator's
-  long-named accessors write (activation, status landing, fallback latch,
-  worker attach, session boundary). It also installs the queue's callbacks
+  long-named accessors write (activation, fallback latch, worker attach,
+  session begin), and it publishes the queue's status separately
+  (`translationStatus`, plus the change-guarded `queueUnavailable` the
+  transcript's retry gate reads) so the queue's per-batch
+  `.translating`/`.ready` churn never invalidates the transcript rows. It
+  also installs the queue's callbacks
   itself — `installQueueHandlers()`, once at the end of `init`, wires
   `result` (host row landing), `status` (`handleStatus`), and
   `workerChanged` (the runtime snapshot) — so worker truth is published at
