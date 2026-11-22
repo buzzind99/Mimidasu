@@ -288,48 +288,67 @@ struct TapLookupSessionRaceTests {
         #expect(harness.feedback.faults.isEmpty)
     }
 
-    @Test("a superseded landing after a dismissal cannot re-present the popover")
-    func staleAnswerDoesNotResurrectDismissedAnchor() async throws {
+    @Test("a dismissal is not a generation boundary: an airborne answer still re-presents")
+    func dismissalDoesNotInvalidateAnAirborneAnswer() async throws {
         let harness = TapLookupRaceHarness()
         let dismissedAnchor = LookupAnchor.transcript(sentenceIndex: 0, tokenIndex: 1)
-        let staleAnchor = LookupAnchor.transcript(sentenceIndex: 2, tokenIndex: 0)
-        let currentContent = found(["飴"])
-        let staleContent = found(["雨"])
+        let pendingAnchor = LookupAnchor.transcript(sentenceIndex: 2, tokenIndex: 0)
+        let firstContent = found(["飴"])
+        let pendingContent = found(["雨"])
 
-        let staleTask = harness.session.tap(
-            request("雨"), anchor: staleAnchor, favorites: .empty
-        )
-        let currentTask = harness.session.tap(
+        // Prime the popover at one anchor.
+        let firstTask = harness.session.tap(
             request("飴"), anchor: dismissedAnchor, favorites: .empty
         )
-        try await waitOrCancel(2, in: harness.resolver)
-
+        try await waitOrCancel(1, in: harness.resolver)
         await landAndWait(
-            currentContent,
+            firstContent,
             surface: "飴",
-            on: currentTask,
+            on: firstTask,
             resolver: harness.resolver
         )
         #expect(harness.session.anchor == dismissedAnchor)
 
+        // A second lookup goes airborne, and the first popover is dismissed
+        // while it is still parked — the dismissal is the only state change.
+        let pendingTask = harness.session.tap(
+            request("雨"), anchor: pendingAnchor, favorites: .empty
+        )
+        try await waitOrCancel(1, in: harness.resolver)
         harness.session.dismissPopover(from: dismissedAnchor)
         #expect(harness.session.anchor == nil)
 
         await landAndWait(
-            staleContent,
+            pendingContent,
             surface: "雨",
-            on: staleTask,
+            on: pendingTask,
             resolver: harness.resolver
         )
 
-        #expect(harness.session.anchor == nil, "the stale landing does not resurrect an anchor")
         #expect(
-            harness.session.presentation?.content == currentContent,
-            "nor replace the dismissed content"
+            harness.session.anchor == pendingAnchor,
+            "only a tap, a clear, or a session boundary retires an airborne answer — a dismissal does not"
         )
-        #expect(harness.session.presentation?.entryIndex == 0)
-        #expect(harness.session.popoverItem(for: dismissedAnchor) == nil)
-        #expect(harness.session.popoverItem(for: staleAnchor) == nil)
+        #expect(harness.session.presentation?.content == pendingContent)
+        #expect(harness.feedback.warnings.isEmpty)
+        #expect(harness.feedback.faults.isEmpty)
+    }
+
+    @Test("clear is the generation boundary: an airborne answer never presents after it")
+    func clearDropsAnAirborneAnswerAfterADismissal() async throws {
+        let harness = TapLookupRaceHarness()
+        let anchor = LookupAnchor.transcript(sentenceIndex: 1, tokenIndex: 2)
+        let content = found(["雨"])
+
+        let task = harness.session.tap(request("雨"), anchor: anchor, favorites: .empty)
+        try await waitOrCancel(1, in: harness.resolver)
+        harness.session.clear()
+
+        await landAndWait(content, surface: "雨", on: task, resolver: harness.resolver)
+
+        #expect(harness.session.anchor == nil, "a cleared session never re-presents")
+        #expect(harness.session.presentation == nil)
+        #expect(harness.session.popoverItem(for: anchor) == nil)
         #expect(harness.feedback.warnings.isEmpty)
         #expect(harness.feedback.faults.isEmpty)
     }
