@@ -305,6 +305,36 @@ struct AppModelSessionTests {
         #expect(sut.log.contains(inOrder: ["capture.start", "capture.stop"]))
     }
 
+    @Test("a stop during a start parked on the previous teardown ends the session once")
+    func stopDuringParkedStartWindsBackWithoutASecondEnd() async {
+        let sut = await makeSUT()
+        // A teardown the next start must wait out; the test releases it when
+        // the stop has superseded the start.
+        let gate = AsyncStream<Void>.makeStream()
+        sut.model.stopTask = Task { @MainActor in
+            var iterator = gate.stream.makeAsyncIterator()
+            _ = await iterator.next()
+        }
+
+        sut.model.start()
+        #expect(sut.model.phase == .starting)
+        #expect(!sut.model.recordingWritesOpen, "the start is parked before begin")
+
+        sut.model.stop()
+        #expect(sut.model.phase == .stopping)
+
+        gate.continuation.yield(())
+        gate.continuation.finish()
+
+        #expect(await pollUntil { sut.model.phase == .idle }, "the cancelled start winds back")
+        #expect(!sut.log.names.contains("capture.start"), "the superseded start never began")
+        #expect(
+            sut.model.sessionEndedAt == nil,
+            "the cancelled start runs no second host end sequence"
+        )
+        #expect(sut.model.stopTask == nil, "and clears its own teardown handle")
+    }
+
     // MARK: - capture.lost + restartCapture
 
     /// The capture error path: a mid-session stream death parks the model

@@ -20,9 +20,11 @@ extension AppModel {
     /// Persists one finalized sentence of the live session. The first
     /// success creates the `recording` row (empty sessions never create
     /// one); the first failure latches `archiveWriteFailed` for the rest of
-    /// the session, posts one warning toast, and keeps transcribing.
+    /// the session, posts one warning toast, and keeps transcribing. Gated on
+    /// the session's write window like every other live producer: a sentence
+    /// that outlives the finalize must not create a row nothing will close.
     func persistSentence(_ sentence: Sentence) {
-        guard !archiveWriteFailed else { return }
+        guard recordingWritesOpen, !archiveWriteFailed else { return }
         // The metadata is assigned by `SessionController.begin` before any
         // chunk can flow, so it is always present when a sentence lands.
         guard let metadata = sessionController.sessionMetadata else { return }
@@ -48,9 +50,12 @@ extension AppModel {
         // during the session visible to the finalize below.
         await archiveWriteLane.drain()
         // The session is over either way: the writer forgets its row, so a
-        // pause sync or landing that arrives after this stop cannot land
-        // against a row the archive is closing (or has refused).
+        // pause sync, landing, or straggler append that arrives after this
+        // stop cannot land against a row the archive is closing (or has
+        // refused). Awaited so the forget is ordered before the finalize
+        // below and the reset itself is observable in tests.
         archiveWriteLane.reset()
+        await archiveWriteLane.drain()
         guard let id = recordingSessionID else { return false }
         recordingSessionID = nil
         guard !archiveWriteFailed, !archive.isDegraded,

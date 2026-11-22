@@ -33,7 +33,7 @@ enum ProductionSiteTable {
     static let sites: [Site] = [
         // 1
         Site(
-            number: 1, file: "Mimidasu/State/AppModel+Session.swift", line: 372, value: ".needsModel",
+            number: 1, file: "Mimidasu/State/AppModel+Session.swift", line: 415, value: ".needsModel",
             guardDescription: "the machine's `.idle` + unresolved pair (was: `if url == nil, phase == .idle`)",
             from: .idle,
             action: .modelResolved(resolved: false),
@@ -42,7 +42,7 @@ enum ProductionSiteTable {
         ),
         // 2
         Site(
-            number: 2, file: "Mimidasu/State/AppModel+Session.swift", line: 372, value: ".idle",
+            number: 2, file: "Mimidasu/State/AppModel+Session.swift", line: 415, value: ".idle",
             guardDescription: "the machine's `.needsModel` + resolved pair (was: `else if url != nil, phase == .needsModel`)",
             from: .needsModel,
             action: .modelResolved(resolved: true),
@@ -51,7 +51,7 @@ enum ProductionSiteTable {
         ),
         // 3
         Site(
-            number: 3, file: "Mimidasu/State/AppModel.swift", line: 479, value: ".sourceLost",
+            number: 3, file: "Mimidasu/State/AppModel.swift", line: 489, value: ".sourceLost",
             guardDescription: "the machine's `.running`/`.starting` legal-from set (after the .paused deferral)",
             from: .running,
             action: .captureLost("stream died"),
@@ -60,7 +60,7 @@ enum ProductionSiteTable {
         ),
         // 3 — the second legal from-phase of the same write
         Site(
-            number: 3, file: "Mimidasu/State/AppModel.swift", line: 479, value: ".sourceLost",
+            number: 3, file: "Mimidasu/State/AppModel.swift", line: 489, value: ".sourceLost",
             guardDescription: "the machine's `.running`/`.starting` legal-from set (after the .paused deferral)",
             from: .starting,
             action: .captureLost("stream died"),
@@ -69,7 +69,7 @@ enum ProductionSiteTable {
         ),
         // 4
         Site(
-            number: 4, file: "Mimidasu/State/AppModel.swift", line: 534, value: ".starting",
+            number: 4, file: "Mimidasu/State/AppModel.swift", line: 544, value: ".starting",
             guardDescription: "the machine's `.sourceLost`/`.paused` legal-from set (was an unconditional write)",
             from: .sourceLost,
             action: .captureRestartRequested,
@@ -78,7 +78,7 @@ enum ProductionSiteTable {
         ),
         // 4 — the resume-deferred caller of the same write
         Site(
-            number: 4, file: "Mimidasu/State/AppModel.swift", line: 534, value: ".starting",
+            number: 4, file: "Mimidasu/State/AppModel.swift", line: 544, value: ".starting",
             guardDescription: "the machine's `.sourceLost`/`.paused` legal-from set (was an unconditional write)",
             from: .paused,
             action: .captureRestartRequested,
@@ -87,7 +87,7 @@ enum ProductionSiteTable {
         ),
         // 5
         Site(
-            number: 5, file: "Mimidasu/State/AppModel.swift", line: 547, value: ".running",
+            number: 5, file: "Mimidasu/State/AppModel.swift", line: 557, value: ".running",
             guardDescription: "the machine's `.starting` legal-from set (was: `guard phase == .starting`)",
             from: .starting,
             action: .captureRestartSucceeded,
@@ -96,7 +96,7 @@ enum ProductionSiteTable {
         ),
         // 6
         Site(
-            number: 6, file: "Mimidasu/State/AppModel.swift", line: 556, value: ".sourceLost",
+            number: 6, file: "Mimidasu/State/AppModel.swift", line: 566, value: ".sourceLost",
             guardDescription: "the machine's `.starting` legal-from set (was: `guard phase == .starting`)",
             from: .starting,
             action: .captureRestartFailed("boom"),
@@ -105,7 +105,7 @@ enum ProductionSiteTable {
         ),
         // 7
         Site(
-            number: 7, file: "Mimidasu/State/AppModel+Session.swift", line: 139, value: ".paused",
+            number: 7, file: "Mimidasu/State/AppModel+Session.swift", line: 159, value: ".paused",
             guardDescription: "the machine's `.running` legal-from set (was: `guard phase == .running`)",
             from: .running,
             action: .pauseRequested,
@@ -114,7 +114,7 @@ enum ProductionSiteTable {
         ),
         // 8
         Site(
-            number: 8, file: "Mimidasu/State/AppModel+Session.swift", line: 184, value: ".running",
+            number: 8, file: "Mimidasu/State/AppModel+Session.swift", line: 204, value: ".running",
             guardDescription: "the machine's `.paused` legal-from set (was: `guard phase == .paused`)",
             from: .paused,
             action: .resumeSucceeded,
@@ -123,7 +123,7 @@ enum ProductionSiteTable {
         ),
         // 9
         Site(
-            number: 9, file: "Mimidasu/State/AppModel+Session.swift", line: 190, value: ".sourceLost",
+            number: 9, file: "Mimidasu/State/AppModel+Session.swift", line: 210, value: ".sourceLost",
             guardDescription: "the machine's `.paused` legal-from set (was: `guard phase == .paused`)",
             from: .paused,
             action: .resumeFailed("boom"),
@@ -152,7 +152,7 @@ enum ProductionSiteTable {
         ),
         // 11
         Site(
-            number: 11, file: "Mimidasu/State/AppModel+Session.swift", line: 58, value: ".failed(error.localizedDescription)",
+            number: 11, file: "Mimidasu/State/AppModel+Session.swift", line: 67, value: ".failed(error.localizedDescription)",
             guardDescription: "the machine's `.starting` legal-from set (was: `guard self.phase == .starting`)",
             from: .starting,
             action: .beginFailed("boom"),
@@ -161,7 +161,7 @@ enum ProductionSiteTable {
         ),
         // 12 — the teardown the interrupted bring-up owes
         Site(
-            number: 12, file: "Mimidasu/State/AppModel+Session.swift", line: 84, value: "(none — the phase stays)",
+            number: 12, file: "Mimidasu/State/AppModel+Session.swift", line: 100, value: "(none — the phase stays)",
             guardDescription: "the machine's compensating branch (was: `guard phase == .starting else"
                 + " { await sessionController.stop(); ... }`)",
             from: .stopping,
@@ -171,7 +171,7 @@ enum ProductionSiteTable {
         ),
         // 12 — the wind-back, after the teardown has landed
         Site(
-            number: 12, file: "Mimidasu/State/AppModel+Session.swift", line: 94, value: ".idle",
+            number: 12, file: "Mimidasu/State/AppModel+Session.swift", line: 114, value: ".idle",
             guardDescription: "the machine's wind-back (was: `if phase == .stopping { phase = .idle }`"
                 + " after the teardown)",
             from: .stopping,
@@ -179,9 +179,19 @@ enum ProductionSiteTable {
             to: .idle,
             category: .legal
         ),
+        // 12 — a stop that targets a start still parked on the previous
+        // teardown: nothing began, so the wind-back runs without a host end.
+        Site(
+            number: 12, file: "Mimidasu/State/AppModel+Session.swift", line: 301, value: ".idle",
+            guardDescription: "the machine's wind-back for a cancelled bring-up that never reached `begin`",
+            from: .stopping,
+            action: .teardownCompleted,
+            to: .idle,
+            category: .legal
+        ),
         // 13
         Site(
-            number: 13, file: "Mimidasu/State/AppModel+Session.swift", line: 98, value: ".needsModel",
+            number: 13, file: "Mimidasu/State/AppModel+Session.swift", line: 118, value: ".needsModel",
             guardDescription: "guard started (begin() returned false), after the interruption check",
             from: .starting,
             action: .beginReturnedNoModel,
@@ -190,7 +200,7 @@ enum ProductionSiteTable {
         ),
         // 14
         Site(
-            number: 14, file: "Mimidasu/State/AppModel+Session.swift", line: 102, value: ".running",
+            number: 14, file: "Mimidasu/State/AppModel+Session.swift", line: 122, value: ".running",
             guardDescription: "the machine's `.starting` legal-from set",
             from: .starting,
             action: .beginSucceeded,
@@ -199,7 +209,7 @@ enum ProductionSiteTable {
         ),
         // 15 — the `.running` arm
         Site(
-            number: 15, file: "Mimidasu/State/AppModel+Session.swift", line: 256, value: ".stopping",
+            number: 15, file: "Mimidasu/State/AppModel+Session.swift", line: 279, value: ".stopping",
             guardDescription: "the machine's `.starting`/`.running`/`.paused`/`.sourceLost` legal-from set",
             from: .running,
             action: .stopRequested,
@@ -208,7 +218,7 @@ enum ProductionSiteTable {
         ),
         // 15 — the `.paused` arm
         Site(
-            number: 15, file: "Mimidasu/State/AppModel+Session.swift", line: 256, value: ".stopping",
+            number: 15, file: "Mimidasu/State/AppModel+Session.swift", line: 279, value: ".stopping",
             guardDescription: "the machine's `.starting`/`.running`/`.paused`/`.sourceLost` legal-from set",
             from: .paused,
             action: .stopRequested,
@@ -217,7 +227,7 @@ enum ProductionSiteTable {
         ),
         // 15 — the `.sourceLost` arm
         Site(
-            number: 15, file: "Mimidasu/State/AppModel+Session.swift", line: 256, value: ".stopping",
+            number: 15, file: "Mimidasu/State/AppModel+Session.swift", line: 279, value: ".stopping",
             guardDescription: "the machine's `.starting`/`.running`/`.paused`/`.sourceLost` legal-from set",
             from: .sourceLost,
             action: .stopRequested,
@@ -228,7 +238,7 @@ enum ProductionSiteTable {
         // stoppable, and a stop during the bring-up must never let the
         // session come up afterwards.
         Site(
-            number: 15, file: "Mimidasu/State/AppModel+Session.swift", line: 256, value: ".stopping",
+            number: 15, file: "Mimidasu/State/AppModel+Session.swift", line: 279, value: ".stopping",
             guardDescription: "the machine's `.starting`/`.running`/`.paused`/`.sourceLost` legal-from set",
             from: .starting,
             action: .stopRequested,
@@ -255,7 +265,7 @@ enum ProductionSiteTable {
         ),
         // 17 — the `.running` arm
         Site(
-            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 318, value: ".stopping",
+            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 361, value: ".stopping",
             guardDescription: "the machine's live-phase branch (was: `else if phase == .starting || .running"
                 + " || .paused || .stopping || .sourceLost`)",
             from: .running,
@@ -265,7 +275,7 @@ enum ProductionSiteTable {
         ),
         // 17 — the `.sourceLost` arm
         Site(
-            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 318, value: ".stopping",
+            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 361, value: ".stopping",
             guardDescription: "the machine's live-phase branch (was: `else if phase == .starting || .running"
                 + " || .paused || .stopping || .sourceLost`)",
             from: .sourceLost,
@@ -275,7 +285,7 @@ enum ProductionSiteTable {
         ),
         // 17 — the `.starting` arm: quitting during the TCC-prompted bring-up
         Site(
-            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 318, value: ".stopping",
+            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 361, value: ".stopping",
             guardDescription: "the machine's live-phase branch (was: `else if phase == .starting || .running"
                 + " || .paused || .stopping || .sourceLost`)",
             from: .starting,
@@ -285,7 +295,7 @@ enum ProductionSiteTable {
         ),
         // 17 — the `.paused` arm: quitting while the session is paused
         Site(
-            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 318, value: ".stopping",
+            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 361, value: ".stopping",
             guardDescription: "the machine's live-phase branch (was: `else if phase == .starting || .running"
                 + " || .paused || .stopping || .sourceLost`)",
             from: .paused,
@@ -296,7 +306,7 @@ enum ProductionSiteTable {
         // 17 — the `.stopping` arm: a stop is already staged and owns the
         // teardown, so the machine waits for it before retiring the engine.
         Site(
-            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 318, value: "(none — the staged stop owns the teardown)",
+            number: 17, file: "Mimidasu/State/AppModel+Session.swift", line: 361, value: "(none — the staged stop owns the teardown)",
             guardDescription: "the machine's staged-stop branch (was: `await stopTask.value`)",
             from: .stopping,
             action: .terminationStarted,
@@ -306,7 +316,7 @@ enum ProductionSiteTable {
         // 18 — the resume request: the machine arms the resume latch, and
         // the phase stays `.paused` until the IOProc is actually back.
         Site(
-            number: 18, file: "Mimidasu/State/AppModel+Session.swift", line: 158, value: "(none — the phase stays `.paused`)",
+            number: 18, file: "Mimidasu/State/AppModel+Session.swift", line: 178, value: "(none — the phase stays `.paused`)",
             guardDescription: "the machine's `.paused` legal-from set + the resume latch",
             from: .paused,
             action: .resumeRequested,
@@ -315,7 +325,7 @@ enum ProductionSiteTable {
         ),
         // 19 — the latch release when a stop won the resume race
         Site(
-            number: 19, file: "Mimidasu/State/AppModel+Session.swift", line: 170, value: "(none — the phase stays)",
+            number: 19, file: "Mimidasu/State/AppModel+Session.swift", line: 190, value: "(none — the phase stays)",
             guardDescription: "the machine's latch release (the stop won the race)",
             from: .stopping,
             action: .resumeAbandoned,
@@ -324,7 +334,7 @@ enum ProductionSiteTable {
         ),
         // 19 — the latch release after the deferred capture rebuild took over
         Site(
-            number: 19, file: "Mimidasu/State/AppModel+Session.swift", line: 177, value: "(none — the phase stays)",
+            number: 19, file: "Mimidasu/State/AppModel+Session.swift", line: 197, value: "(none — the phase stays)",
             guardDescription: "the machine's latch release (the rebuild moved the phase to `.starting`)",
             from: .starting,
             action: .resumeAbandoned,

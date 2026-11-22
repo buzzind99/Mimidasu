@@ -34,6 +34,10 @@ extension AppModel {
         // card clears here so no stale retry survives into live capture.
         cancelArchiveTranslation()
 
+        // This attempt's identity: a stop, a quit, or a newer start bumps the
+        // generation, and the task below refuses to go on once superseded.
+        startGeneration &+= 1
+        let generation = startGeneration
         Task { @MainActor in
             // A stop that already flipped the phase back to idle may still be
             // finalizing the previous recording row; the next session must
@@ -41,16 +45,21 @@ extension AppModel {
             await self.stopTask?.value
             // A stop or quit that landed inside that wait has superseded this
             // start: beginning now would clear the transcript and bring up a
-            // capture the machine has already refused.
-            guard self.phase == .starting else { return }
+            // capture the machine has already refused. The generation catches
+            // a superseded attempt that would otherwise find a newer start's
+            // `.starting` phase and mistake it for its own.
+            guard self.isCurrentStart(generation) else { return }
             do {
                 try await self.ensureDictionaryReady()
                 // The dictionary wait can be seconds long on a fresh build:
                 // a stop or quit that lands inside it supersedes this start
                 // exactly like one that landed during the teardown wait.
-                guard self.phase == .starting else { return }
+                guard self.isCurrentStart(generation) else { return }
                 try await self.beginSession()
             } catch {
+                // Nothing the session queued will be finalized on this path,
+                // so the live write window closes with the failed bring-up.
+                self.recordingWritesOpen = false
                 // A raced teardown (quit-time shutdown, or a stop during
                 // start) already moved the phase off `.starting` and cleared
                 // the toasts: a failure landing after it must not resurrect
@@ -70,6 +79,13 @@ extension AppModel {
         }
     }
 
+    /// Whether the start task created for `generation` still owns the
+    /// bring-up. A newer start or stop request, or a phase that already moved
+    /// off `.starting`, supersedes it.
+    private func isCurrentStart(_ generation: Int) -> Bool {
+        startGeneration == generation && phase == .starting
+    }
+
     private func beginSession() async throws {
         let started = try await sessionController.begin(
             modelURL: modelURL,
@@ -83,10 +99,14 @@ extension AppModel {
         // and the session may come up.
         let interruption = reducePhase(.beginInterruptedByTeardown)
         if interruption.requiresTeardown {
-            await sessionController.stop()
-            // The session the capture belonged to is over: a late pause sync
-            // or landing must not enqueue against it.
+            // The session the capture belonged to is over: close the write
+            // window *before* the teardown flush. The concurrent stop's
+            // finalize may already have drained and reset the writer, so an
+            // append queued by the flush would create a fresh `recording` row
+            // nothing finalizes; a cancelled bring-up's last flushed sentence
+            // is dropped rather than risk that orphan row.
             recordingWritesOpen = false
+            await sessionController.stop()
             // The wind-back lands **after** the teardown: a session left in
             // `.stopping` would keep the stop confirmation, the sidebar title,
             // the archive gate and the target-language card reading
@@ -248,6 +268,9 @@ extension AppModel {
 /// session and releasing the warm ASR engine.
 extension AppModel {
     func stop() {
+        // Captured before the phase moves: a stop requested during a bring-up
+        // that never reached `begin` names a session that does not exist.
+        let wasStarting = phase == .starting
         // `.starting` is stoppable too: begin() is a multi-await operation
         // (TCC prompt, capture, engine), and a session the user cancels
         // mid-start must never come up afterwards. `.paused` is live: stop
@@ -255,6 +278,9 @@ extension AppModel {
         // set; a refused request is a no-op, not a second teardown.
         guard reducePhase(.stopRequested).isLegal else { return }
 
+        // Supersede a start task still waiting out the teardown below: its
+        // generation no longer matches, so it cannot begin after this stop.
+        startGeneration &+= 1
         stopGeneration &+= 1
         let generation = stopGeneration
         // A stop requested while an earlier teardown is still finalizing (an
@@ -263,6 +289,23 @@ extension AppModel {
         // reads `stopTask` therefore waits for every pending teardown. The
         // generation keeps a finishing task from clearing a newer handle.
         let previous = stopTask
+        if wasStarting, let previous {
+            // The start this stop names is still parked on the previous
+            // teardown, so it never reached `begin` and there is no session to
+            // end. Running the host end sequence again would clear the
+            // finished session's post-stop toast and restamp its end anchor:
+            // just wait that teardown out and wind this attempt's phase back.
+            stopTask = Task { @MainActor in
+                await previous.value
+                if self.phase == .stopping {
+                    self.reducePhase(.teardownCompleted)
+                }
+                if self.stopGeneration == generation {
+                    self.stopTask = nil
+                }
+            }
+            return
+        }
         stopTask = Task { @MainActor in
             await previous?.value
             await performStop()

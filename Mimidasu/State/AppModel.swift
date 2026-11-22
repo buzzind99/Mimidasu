@@ -194,12 +194,15 @@ final class AppModel {
     /// the first append lands; reset at finalize (session end).
     var recordingSessionID: Int64?
 
-    /// Whether the live recording still accepts writes: open from the
-    /// session's begin, closed once its row is final. The landing path gates
-    /// on this rather than on `recordingSessionID`, because the writer adopts
-    /// the id a hop after the first append — a landing in that window must
-    /// still be queued (the lane resolves the id when the upsert runs), while
-    /// a landing that outlives the finalize must not be.
+    /// Whether the live recording still accepts writes: open at the session's
+    /// begin, closed when the row is final or the bring-up failed. Every live
+    /// producer gates on this: the landing path queues on it rather than on
+    /// `recordingSessionID`, because the writer adopts the id a hop after the
+    /// first append — a landing in that window must still be queued (the lane
+    /// resolves the id when the upsert runs), while a landing that outlives
+    /// the finalize must not be. The sentence append gates on it too, so a
+    /// straggler can never create a fresh `recording` row after the drain
+    /// reset the writer.
     var recordingWritesOpen = false
 
     /// Latched by the first failed archive write of a session — reported by
@@ -248,6 +251,13 @@ final class AppModel {
     /// its own generation is current, so a finishing teardown cannot drop a
     /// newer one that replaced it. Internal: managed with the teardown.
     var stopGeneration = 0
+
+    /// Bumped per `start()` and `stop()` request. A start task carries the
+    /// value it was created with and aborts once a newer request replaced it,
+    /// so a start superseded while it waited out the previous teardown (or the
+    /// dictionary) can never begin under the session a newer request owns.
+    /// Internal: managed with session control.
+    var startGeneration = 0
 
     /// Latched by `shutdownForTermination`: once quit-time teardown begins,
     /// `start` is refused — a session begun during the `.terminateLater`

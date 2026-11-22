@@ -400,10 +400,13 @@ extension AppModelArchiveWriteBackTests {
     func landingAfterWindowCloseSwapsOnly() async throws {
         let sut = try await makeLiveSUT()
         let translation = SentenceTranslation(lang: "en", text: "Hello")
+        let pausedBefore = sut.store.load(id: sut.recordingID)?.summary.pausedMS
         #expect(await sut.model.finalizeLiveSession(durationMS: 4000), "the session finalizes")
         let storedBefore = sut.store.load(id: sut.recordingID)?.entries.first?.translations
 
         let landed = sut.model.applyTranslation(index: 0, translation: translation)
+        await sut.model.archiveWriteLane.drain()
+        sut.model.syncPausedToArchive()
         await sut.model.archiveWriteLane.drain()
 
         #expect(landed, "the row still swaps from memory")
@@ -411,8 +414,72 @@ extension AppModelArchiveWriteBackTests {
             sut.store.load(id: sut.recordingID)?.entries.first?.translations == storedBefore,
             "the closed session's store row is untouched"
         )
+        #expect(
+            sut.store.load(id: sut.recordingID)?.summary.pausedMS == pausedBefore,
+            "and so is its pause ledger"
+        )
         #expect(!sut.model.archiveWriteFailed, "a refused landing is not a write failure")
         #expect(archiveWarnings(sut.model).isEmpty, "and it posts no warning")
+
+        // The writer itself forgot the row, independent of the window gate:
+        // a direct upsert after the finalize is dropped by the reset.
+        sut.model.archiveWriteLane.upsert(translation: translation, index: 0)
+        await sut.model.archiveWriteLane.drain()
+        #expect(
+            sut.store.load(id: sut.recordingID)?.entries.first?.translations == storedBefore,
+            "the finalized writer no longer targets the closed row"
+        )
+    }
+
+    @Test("the closed window alone refuses a landing, before any finalize")
+    func closedWindowRefusesLandingWithoutFinalize() async throws {
+        let sut = try await makeLiveSUT()
+        let storedBefore = sut.store.load(id: sut.recordingID)?.entries.first?.translations
+
+        // Close the window without finalizing: the writer still holds the
+        // row, so only the window gate can refuse the landing.
+        sut.model.recordingWritesOpen = false
+        let landed = sut.model.applyTranslation(
+            index: 0, translation: SentenceTranslation(lang: "en", text: "Hello")
+        )
+        await sut.model.archiveWriteLane.drain()
+
+        #expect(landed, "the display row still swaps")
+        #expect(
+            sut.store.load(id: sut.recordingID)?.entries.first?.translations == storedBefore,
+            "the store row keeps its previous value"
+        )
+        #expect(!sut.model.archiveWriteFailed, "a window refusal is not a write failure")
+        #expect(archiveWarnings(sut.model).isEmpty, "and it posts no warning")
+    }
+
+    @Test("a latched session's writer starts clean at the next begin")
+    func latchedWriterStartsCleanAtTheNextBegin() async throws {
+        let sut = try await makeLiveSUT()
+        let oldID = sut.recordingID
+        #expect(sut.store.delete(id: oldID), "the recording row is removed underneath")
+
+        // The append that finds no row latches the session one hop later.
+        sut.model.archiveWriteLane.append(
+            sentence: archiveSentence(1, text: "さようなら"),
+            metadata: archiveMetadata(target: "en")
+        )
+        #expect(await pollUntil { sut.model.archiveWriteFailed }, "the lost append latches")
+
+        // The next session's begin resets both the latch and the writer.
+        sut.model.sessionController.onSessionBegin?()
+        #expect(!sut.model.archiveWriteFailed, "the begin clears the latch")
+        sut.model.archiveWriteLane.append(
+            sentence: archiveSentence(0, text: "おはよう"),
+            metadata: archiveMetadata(target: "en")
+        )
+        await sut.model.archiveWriteLane.drain()
+
+        let newID = try #require(sut.model.recordingSessionID, "the new session adopts its own row")
+        #expect(
+            sut.store.load(id: newID)?.entries.map { entry in entry.sentence.text } == ["おはよう"],
+            "the new session's append lands on its own row"
+        )
     }
 
     @Test("a live loss latches and still swaps the row")
