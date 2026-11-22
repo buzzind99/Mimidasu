@@ -94,9 +94,10 @@ enum PendingCloudDisclosure: Equatable, Identifiable {
 @MainActor
 final class TranslationSessionCoordinator {
     /// The live engine's identity and attachment. Written only through the
-    /// accessors below (activation, fallback latch, worker attach, session
-    /// boundary); read through `AppModel.translationRuntime`. The queue's
-    /// status is published separately — see `translationStatus`.
+    /// accessors below (activation, fallback latch — including the session
+    /// begin's reset — and worker attach); read through
+    /// `AppModel.translationRuntime`. The queue's status is published
+    /// separately — see `translationStatus`.
     private(set) var runtime = TranslationRuntime()
 
     /// The engine currently attached to the queue — Apple's via the hidden

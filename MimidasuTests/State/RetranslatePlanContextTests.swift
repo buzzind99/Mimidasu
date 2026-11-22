@@ -86,7 +86,7 @@ struct RetranslatePlanContextTests {
     }
 
     @Test("copies the live queue's unavailable gate")
-    func copiesRuntimeStatus() async {
+    func copiesQueueUnavailableGate() async {
         let model = await makeModel()
         model.translationSession.handleStatus(.unavailable("boom", .permanent))
 
@@ -101,6 +101,40 @@ struct RetranslatePlanContextTests {
             !model.retranslatePlan(surface: .live, target: .english).context.live.queueUnavailable,
             "a session boundary leaves the gate open for the next session"
         )
+    }
+
+    @Test("the gate publishes on the flip only, never on the per-batch churn")
+    func queueUnavailableGatePublishesOnlyOnFlip() async {
+        let model = await makeModel()
+        model.phase = .running
+        model.translationSettings.selectRetranslate(.session)
+        model.translationSession.workerAttached = true
+        let entry = SessionEntry(sentence: makeSentence(index: 0))
+        let row = model.retranslatePlan(surface: .live, target: .english).row(for: entry)
+        #expect(row.isEnabled, "precondition: a live row with a worker can be retried")
+
+        let gate = ObservedValuesRecorder(read: { model.translationSession.queueUnavailable })
+        let rowEnabled = ObservedValuesRecorder(read: {
+            model.retranslatePlan(surface: .live, target: .english).row(for: entry).isEnabled
+        })
+
+        // The queue's per-batch churn: neither reader may wake.
+        model.translationSession.handleStatus(.translating)
+        model.translationSession.handleStatus(.ready)
+        await flushObservations()
+        #expect(gate.values.isEmpty, "batch churn never writes the gate")
+        #expect(rowEnabled.values.isEmpty, "so the row plan's reader stays asleep")
+
+        // The one status fact the gate owns wakes both.
+        model.translationSession.handleStatus(.unavailable("offline", .permanent))
+        await flushObservations()
+        #expect(gate.values == [true], "the gate publishes the flip")
+        #expect(rowEnabled.values == [false], "and the row gate re-reads disabled")
+
+        model.translationSession.handleStatus(.ready)
+        await flushObservations()
+        #expect(gate.values == [true, false], "and publishes the recovery")
+        #expect(rowEnabled.values == [false, true], "re-enabling the row")
     }
 
     @Test("reads the observable worker mirror the queue's callback keeps in sync")

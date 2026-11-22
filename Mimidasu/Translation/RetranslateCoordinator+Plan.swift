@@ -2,10 +2,11 @@ extension RetranslateCoordinator {
     /// Builds the re-translate decision for one surface, target, and
     /// selection. Every fact is read from current observable state, so a view
     /// body that reads a derived member also observes the settings, probe
-    /// evidence, live runtime (status and worker attachment), phase, and
-    /// pending markers that can change the decision. The selection defaults
-    /// to the persisted Settings choice; callers with an explicit picker
-    /// selection pass it in.
+    /// evidence, the live runtime (engine identity and worker attachment) and
+    /// its change-guarded `queueUnavailable`, the phase, and the pending
+    /// markers that can change the decision. The selection defaults to the
+    /// persisted Settings choice; callers with an explicit picker selection
+    /// pass it in.
     func plan(
         surface: RetranslateSurface,
         target: TargetLanguage,
