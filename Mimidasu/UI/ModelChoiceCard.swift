@@ -4,7 +4,7 @@ import SwiftUI
 /// the Settings model row and the onboarding model row alike.
 ///
 /// The card owns the chrome — the title, the surface, the hover treatment,
-/// the download overlay and the footer — and none of the decisions: the
+/// the overlay controls and the footer — and none of the decisions: the
 /// selection action arrives as a closure, the downloader arrives injected,
 /// and every difference between the two surfaces arrives as a flag.
 ///
@@ -78,6 +78,8 @@ struct ModelChoiceCard: View {
         var showsHover: Bool
         /// The download overlay renders.
         var showsDownloadOverlay: Bool
+        /// The delete overlay renders.
+        var showsDelete: Bool
         /// What the footer shows.
         var footer: Footer
     }
@@ -107,6 +109,13 @@ struct ModelChoiceCard: View {
     let showsSelectionBadge: Bool
     /// Whether the download overlay renders.
     let showsDownloadControls: Bool
+
+    /// Whether the delete control renders in the overlay slot.
+    var showsDelete: Bool = false
+    /// The delete action. The row owns the confirmation; the card only reports
+    /// the press.
+    var onDelete: () -> Void = {}
+
     /// Whether the footer's progress/error branch is limited to the selected
     /// card.
     let statusOnlyWhenSelected: Bool
@@ -120,7 +129,9 @@ struct ModelChoiceCard: View {
     var body: some View {
         card
             .overlay(alignment: .topTrailing) {
-                if chrome.showsDownloadOverlay {
+                if chrome.showsDelete {
+                    deleteControl.padding(density.padding)
+                } else if chrome.showsDownloadOverlay {
                     downloadControls.padding(density.padding)
                 }
             }
@@ -154,6 +165,7 @@ struct ModelChoiceCard: View {
             actionIsBlocked: blocksSelection,
             showsHover: showsHover,
             showsDownloadOverlay: showsDownloadControls,
+            showsDelete: showsDelete,
             footer: footerPlan
         )
     }
@@ -305,7 +317,33 @@ struct ModelChoiceCard: View {
         }
     }
 
-    // MARK: - Download controls
+    // MARK: - Footer
+
+    @ViewBuilder
+    private var footer: some View {
+        switch chrome.footer {
+        case let .progress(bytes, total):
+            ModelDownloadProgressView(bytes: bytes, total: total)
+        case let .error(message):
+            Text(message)
+                .font(.system(size: 10.5))
+                .foregroundStyle(Palette.statusRed)
+                .fixedSize(horizontal: false, vertical: true)
+        case let .sizeOnly(size):
+            Text(size)
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(Palette.mutedText)
+        case let .sizeAndStatus(size, downloaded):
+            Text("\(size) · \(downloaded ? "downloaded" : "not downloaded")")
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(downloaded ? Palette.mutedText : Palette.statusRed)
+        }
+    }
+}
+
+private extension ModelChoiceCard {
+
+    // MARK: - Overlay controls
 
     /// Download affordances for a missing model; these stay enabled even
     /// while selection is disabled (mid-session or not-yet-downloaded).
@@ -335,26 +373,22 @@ struct ModelChoiceCard: View {
         }
     }
 
-    // MARK: - Footer
-
-    @ViewBuilder
-    private var footer: some View {
-        switch chrome.footer {
-        case let .progress(bytes, total):
-            ModelDownloadProgressView(bytes: bytes, total: total)
-        case let .error(message):
-            Text(message)
-                .font(.system(size: 10.5))
-                .foregroundStyle(Palette.statusRed)
-                .fixedSize(horizontal: false, vertical: true)
-        case let .sizeOnly(size):
-            Text(size)
-                .font(.system(size: 10.5, design: .monospaced))
-                .foregroundStyle(Palette.mutedText)
-        case let .sizeAndStatus(size, downloaded):
-            Text("\(size) · \(downloaded ? "downloaded" : "not downloaded")")
-                .font(.system(size: 10.5, design: .monospaced))
-                .foregroundStyle(downloaded ? Palette.mutedText : Palette.statusRed)
+    /// The delete affordance for a downloaded model; like the download
+    /// overlay it stays enabled while selection is disabled.
+    private var deleteControl: some View {
+        Button {
+            onDelete()
+        } label: {
+            Image(systemName: "trash")
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.secondaryText)
+                .padding(6)
+                .background(Circle().fill(Palette.pillFill))
+                .contentShape(Circle())
         }
+        .buttonStyle(.plain)
+        .hoverHighlight(Circle(), tint: Palette.statusRed, opacity: 0.16)
+        .help("Delete downloaded model")
+        .accessibilityLabel("Delete downloaded \(choice.displayName) model")
     }
 }

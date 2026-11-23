@@ -9,6 +9,7 @@ struct SettingsModelRow: View {
     let choice: ASRModelChoice
     var model: AppModel
     @State private var downloader: ModelDownloader
+    @State private var isConfirmingDeletion = false
 
     init(choice: ASRModelChoice, model: AppModel) {
         self.choice = choice
@@ -41,6 +42,14 @@ struct SettingsModelRow: View {
                     Task { await model.adoptDownloadedModel(choice) }
                 }
             }
+            .alert("Delete \(choice.displayName)?", isPresented: $isConfirmingDeletion) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    Task { await model.deleteDownloadedModel(choice) }
+                }
+            } message: {
+                Text("Are you sure you want to delete \(choice.displayName)? You can download it again later.")
+            }
     }
 
     /// The card this row renders. Exposed so the row's wiring to the shared
@@ -56,6 +65,8 @@ struct SettingsModelRow: View {
             onSelect: { model.selectModel(choice) },
             showsSelectionBadge: Self.showsSelectionBadge,
             showsDownloadControls: Self.showsDownloadControls,
+            showsDelete: model.canDeleteModel(choice),
+            onDelete: { isConfirmingDeletion = true },
             statusOnlyWhenSelected: Self.statusOnlyWhenSelected,
             footerStyle: Self.footerStyle
         )

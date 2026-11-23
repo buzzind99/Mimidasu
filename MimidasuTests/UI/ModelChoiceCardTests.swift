@@ -3,9 +3,10 @@ import Foundation
 import Testing
 
 /// Tests the shared model-choice card: what each flag does to the card's
-/// chrome (the badge, the disabled state, the hover wash, the download
-/// overlay and the footer), and the two surfaces' own flag tables — the
-/// Settings row and the onboarding row differ in exactly those flags.
+/// chrome (the badge, the disabled state, the hover wash, the overlay
+/// controls, the delete control and the footer), and the two surfaces' own
+/// flag tables — the Settings row and the onboarding row differ in exactly
+/// those flags.
 @MainActor
 @Suite("ModelChoiceCard")
 struct ModelChoiceCardTests {
@@ -43,6 +44,8 @@ struct ModelChoiceCardTests {
         selectionDisabled: Bool = false,
         showsSelectionBadge: Bool = true,
         showsDownloadControls: Bool = true,
+        showsDelete: Bool = false,
+        onDelete: @escaping () -> Void = {},
         statusOnlyWhenSelected: Bool = false,
         footerStyle: ModelChoiceCard.FooterStyle = .sizeAndStatus,
         density: ModelChoiceCard.Density = .regular
@@ -56,20 +59,23 @@ struct ModelChoiceCardTests {
             onSelect: {},
             showsSelectionBadge: showsSelectionBadge,
             showsDownloadControls: showsDownloadControls,
+            showsDelete: showsDelete,
+            onDelete: onDelete,
             statusOnlyWhenSelected: statusOnlyWhenSelected,
             footerStyle: footerStyle,
             density: density
         )
     }
 
-    private func makeSUT() async -> AppModel {
+    private func makeSUT(modelFilesDirectory: URL = ModelLocator.modelsDirectory) async -> AppModel {
         let model = AppModel(
             translationSettings: isolatedTranslationSettings(suite: "test.ModelChoiceCard"),
             asrModelSettings: isolatedASRModelSettings(suite: "test.ModelChoiceCard"),
             favorites: isolatedFavorites(),
             archive: isolatedArchive(),
             highFidelityProbe: { _ in false },
-            initialModelResolve: { _ in nil }
+            initialModelResolve: { _ in nil },
+            modelFilesDirectory: modelFilesDirectory
         )
         await model.initialModelCheck?.value
         return model
@@ -101,6 +107,34 @@ struct ModelChoiceCardTests {
     func enabledCardHoversUntilSelected() {
         #expect(makeCard(isSelected: false).chrome.showsHover)
         #expect(makeCard(isSelected: true).chrome.showsHover == false)
+    }
+
+    // MARK: - Delete control
+
+    @Test("the chrome carries the delete flag")
+    func chromeCarriesTheDeleteFlag() {
+        #expect(makeCard().chrome.showsDelete == false, "a card offers no delete by default")
+        #expect(makeCard(showsDelete: true).chrome.showsDelete, "the delete flag reaches the chrome")
+    }
+
+    @Test("offering the delete control does not block selection")
+    func deleteDoesNotBlockSelection() {
+        var selections = 0
+        let card = makeSelectableCard(showsDelete: true) { selections += 1 }
+
+        #expect(card.chrome.actionIsBlocked == false)
+
+        card.select()
+
+        #expect(selections == 1, "a card with the delete control still selects")
+    }
+
+    @Test("the model in use stays deletable while its selection is blocked")
+    func inUseCardStaysDeletable() {
+        let card = makeCard(isSelected: true, showsDelete: true)
+
+        #expect(card.chrome.actionIsBlocked, "pressing the model in use does nothing")
+        #expect(card.chrome.showsDelete, "the delete control sits outside the selection gate")
     }
 
     // MARK: - Footer
@@ -235,6 +269,47 @@ struct ModelChoiceCardTests {
         )
     }
 
+    @Test("the Settings card offers no delete for a model the app did not download")
+    func settingsDeleteRequiresAnInstalledModel() async {
+        let model = await makeSUT()
+        let card = SettingsModelRow(choice: .lite, model: model).makeCard()
+
+        #expect(card.chrome.showsDelete == false)
+    }
+
+    @Test("the Settings card offers the trash only while the rule allows it")
+    func settingsDeleteFollowsTheRule() async throws {
+        let lite = try temporary.write(Data(), named: ASRModelChoice.lite.ggufFileName)
+        let haas = try temporary.write(Data(), named: ASRModelChoice.haas.ggufFileName)
+        let model = await makeSUT(modelFilesDirectory: temporary.url)
+        await model.refreshModelAvailability(resolve: { choice in
+            switch choice {
+            case .lite: lite
+            case .haas: haas
+            case .full: nil
+            }
+        })
+
+        #expect(
+            SettingsModelRow(choice: .lite, model: model).makeCard().chrome.showsDelete,
+            "two app-owned models: the selected card stays deletable"
+        )
+        #expect(
+            SettingsModelRow(choice: .haas, model: model).makeCard().chrome.showsDelete,
+            "two app-owned models: the other card offers the trash too"
+        )
+        #expect(
+            SettingsModelRow(choice: .full, model: model).makeCard().chrome.showsDelete == false,
+            "a model the app did not download offers no trash"
+        )
+
+        model.phase = .running
+        #expect(
+            SettingsModelRow(choice: .lite, model: model).makeCard().chrome.showsDelete == false,
+            "the trash is hidden while a session is live"
+        )
+    }
+
     @Test("the onboarding card shows no badge and gates the download status on the picked card")
     func onboardingFlagTable() async {
         let model = await makeSUT()
@@ -242,6 +317,7 @@ struct ModelChoiceCardTests {
         let card = row.makeCard()
 
         #expect(card.chrome.showsSelectionBadge == false, "the onboarding card never badges")
+        #expect(card.chrome.showsDelete == false, "the onboarding card never offers deletion")
         #expect(
             card.chrome.footer == .sizeOnly(size: ASRModelChoice.lite.approximateSize),
             "the onboarding footer is the size alone"
@@ -272,6 +348,7 @@ struct ModelChoiceCardTests {
     private func makeSelectableCard(
         isSelected: Bool = false,
         selectionDisabled: Bool = false,
+        showsDelete: Bool = false,
         onSelect: @escaping () -> Void
     ) -> ModelChoiceCard {
         ModelChoiceCard(
@@ -283,6 +360,8 @@ struct ModelChoiceCardTests {
             onSelect: onSelect,
             showsSelectionBadge: true,
             showsDownloadControls: true,
+            showsDelete: showsDelete,
+            onDelete: {},
             statusOnlyWhenSelected: false,
             footerStyle: .sizeAndStatus
         )
