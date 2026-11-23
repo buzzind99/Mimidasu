@@ -21,6 +21,8 @@ enum ToastKey {
     /// The bulk archive-translation job: one card that morphs from progress
     /// into the run's summary.
     static let archiveTranslation = "archive.translation"
+    /// A downloaded model was deleted, or could not be.
+    static let modelDelete = "model.delete"
 }
 
 /// State behind the toast stack. Posts are deduped by key — a repeat event

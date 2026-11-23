@@ -386,12 +386,21 @@ extension AppModel {
     /// resolver injected at init drives the lookup. The active choice's URL
     /// also lands in `modelURL` and every choice's result in
     /// `modelAvailability` (Settings rows).
+    ///
+    /// Passes do not serialize: launch, Settings re-checks, a selection, and a
+    /// delete can overlap. Each pass carries the generation it started with
+    /// and only the newest one publishes, so a snapshot computed against an
+    /// older disk cannot replace a fresher map. The selection is read after
+    /// the wait, so a selection change that lands mid-pass is not published
+    /// under the old choice.
     func refreshModelAvailability(
         resolve: (@Sendable (ASRModelChoice) -> URL?)? = nil
     ) async {
         let resolve = resolve ?? modelResolve
+        modelAvailabilityGeneration &+= 1
+        let generation = modelAvailabilityGeneration
+        modelAvailabilityPassesInFlight += 1
         isCheckingModel = true
-        let selected = asrModelSettings.selected
         let resolved = await Task.detached(priority: .userInitiated) { () -> [ASRModelChoice: URL] in
             // All choices resolve concurrently: each verify hashes up to
             // ~1.2 GB, and parallel keeps the wall time at the slower one
@@ -407,14 +416,28 @@ extension AppModel {
                 return availability
             }
         }.value
-        modelAvailability = resolved
-        let url = resolved[selected]
+        modelAvailabilityPassesInFlight -= 1
+        isCheckingModel = modelAvailabilityPassesInFlight > 0
+        guard generation == modelAvailabilityGeneration else { return }
+        let selected = asrModelSettings.selected
+        // A pass can resolve a file the delete has just unlinked. A tombstoned
+        // path is not a model any more; a re-downloaded file at the same path
+        // is real again, so existence decides.
+        let live = resolved.filter { _, url in
+            guard deletedModelURLs.contains(url) else { return true }
+            if FileManager.default.fileExists(atPath: url.path) {
+                deletedModelURLs.remove(url)
+                return true
+            }
+            return false
+        }
+        modelAvailability = live
+        let url = live[selected]
         modelURL = url
         // The machine owns the idle↔needsModel move; the warm-up runs either
         // way — it is not gated on the phase.
         reducePhase(.modelResolved(resolved: url != nil))
         sessionController.warmUpIfNeeded(modelURL: url)
-        isCheckingModel = false
     }
 
     // MARK: - Selection
@@ -445,5 +468,95 @@ extension AppModel {
         // extra pass, never overlapping `refreshModelAvailability`) means the
         // new model is live (modelURL + warm-up) before we return.
         await modelSelectionRefresh?.value
+    }
+
+    // MARK: - Deletion
+
+    /// The models the app itself downloaded, in picker order. The map is a
+    /// snapshot: a file deleted outside the app keeps its entry until the next
+    /// check, so a choice whose file is gone is not installed — it neither
+    /// counts toward the last-model rule nor becomes a hand-over target.
+    var installedModels: [ASRModelChoice] {
+        ModelInventory.installed(
+            in: modelAvailability, modelsDirectory: modelFilesDirectory
+        ).filter { choice in
+            guard let url = modelAvailability[choice] else { return false }
+            return FileManager.default.fileExists(atPath: url.path)
+        }
+    }
+
+    /// Whether this card may offer its delete control right now.
+    func canDeleteModel(_ choice: ASRModelChoice) -> Bool {
+        ModelInventory.canDelete(
+            choice,
+            installed: installedModels,
+            isLiveOrStopping: SessionPhaseMachine.isLiveOrStopping(phase)
+        )
+    }
+
+    /// Deletes one downloaded model file. The last installed model is refused
+    /// here as well as hidden in the UI — the rule is enforced twice on purpose.
+    ///
+    /// Deleting the model in use hands over to the first remaining one in picker
+    /// order before any refresh runs, so the selection never resolves to nil and
+    /// the phase never leaves idle. A delete of any other model drops its
+    /// availability entry and nothing else.
+    @discardableResult
+    func deleteDownloadedModel(_ choice: ASRModelChoice) async -> Bool {
+        guard canDeleteModel(choice) else { return false }
+        // An in-flight pass would otherwise publish a map computed before the
+        // unlink and resurrect the entry.
+        await initialModelCheck?.value
+        await modelSelectionRefresh?.value
+        guard canDeleteModel(choice) else { return false }
+
+        let replacement = ModelInventory.replacement(
+            deleting: choice, installed: installedModels
+        )
+        let wasSelected = asrModelSettings.selected == choice
+        // The countable set is all app-owned, so a selected delete always has a
+        // successor; refuse rather than strand the selection if it ever does not.
+        if wasSelected, replacement == nil {
+            return false
+        }
+
+        let removedURL = modelAvailability[choice]
+        do {
+            try modelRemove(choice)
+        } catch {
+            toasts.post(
+                key: ToastKey.modelDelete,
+                style: .yellowAuto,
+                title: "Couldn't delete \(choice.displayName) model",
+                body: "The model is still installed. \(error.localizedDescription)"
+            )
+            return false
+        }
+
+        // A pass that started before the unlink could still publish this path;
+        // the tombstone keeps the deleted file out of every later map.
+        if let removedURL {
+            deletedModelURLs.insert(removedURL)
+        }
+        modelAvailability.removeValue(forKey: choice)
+        if wasSelected, let replacement {
+            // The hand-over refresh publishes the replacement's URL a hop
+            // later; point the active model at it now so no render can start a
+            // session from the path that was just unlinked.
+            modelURL = modelAvailability[replacement]
+            selectModel(replacement) // persists, then runs the one refresh
+            await modelSelectionRefresh?.value
+            // A concurrent selection change owns the switch now; the card flip
+            // is the feedback, and the toast must not claim a stale successor.
+            if asrModelSettings.selected == replacement {
+                toasts.post(
+                    key: ToastKey.modelDelete,
+                    style: .info,
+                    title: "Deleted \(choice.displayName) model",
+                    body: "Switched to \(replacement.displayName)."
+                )
+            }
+        }
+        return true
     }
 }

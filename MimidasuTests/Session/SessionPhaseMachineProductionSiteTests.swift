@@ -33,7 +33,7 @@ enum ProductionSiteTable {
     static let sites: [Site] = [
         // 1
         Site(
-            number: 1, file: "Mimidasu/State/AppModel+Session.swift", line: 415, value: ".needsModel",
+            number: 1, file: "Mimidasu/State/AppModel+Session.swift", line: 439, value: ".needsModel",
             guardDescription: "the machine's `.idle` + unresolved pair (was: `if url == nil, phase == .idle`)",
             from: .idle,
             action: .modelResolved(resolved: false),
@@ -42,7 +42,7 @@ enum ProductionSiteTable {
         ),
         // 2
         Site(
-            number: 2, file: "Mimidasu/State/AppModel+Session.swift", line: 415, value: ".idle",
+            number: 2, file: "Mimidasu/State/AppModel+Session.swift", line: 439, value: ".idle",
             guardDescription: "the machine's `.needsModel` + resolved pair (was: `else if url != nil, phase == .needsModel`)",
             from: .needsModel,
             action: .modelResolved(resolved: true),
@@ -51,7 +51,7 @@ enum ProductionSiteTable {
         ),
         // 3
         Site(
-            number: 3, file: "Mimidasu/State/AppModel.swift", line: 489, value: ".sourceLost",
+            number: 3, file: "Mimidasu/State/AppModel.swift", line: 521, value: ".sourceLost",
             guardDescription: "the machine's `.running`/`.starting` legal-from set (after the .paused deferral)",
             from: .running,
             action: .captureLost("stream died"),
@@ -60,7 +60,7 @@ enum ProductionSiteTable {
         ),
         // 3 — the second legal from-phase of the same write
         Site(
-            number: 3, file: "Mimidasu/State/AppModel.swift", line: 489, value: ".sourceLost",
+            number: 3, file: "Mimidasu/State/AppModel.swift", line: 521, value: ".sourceLost",
             guardDescription: "the machine's `.running`/`.starting` legal-from set (after the .paused deferral)",
             from: .starting,
             action: .captureLost("stream died"),
@@ -69,7 +69,7 @@ enum ProductionSiteTable {
         ),
         // 4
         Site(
-            number: 4, file: "Mimidasu/State/AppModel.swift", line: 544, value: ".starting",
+            number: 4, file: "Mimidasu/State/AppModel.swift", line: 576, value: ".starting",
             guardDescription: "the machine's `.sourceLost`/`.paused` legal-from set (was an unconditional write)",
             from: .sourceLost,
             action: .captureRestartRequested,
@@ -78,7 +78,7 @@ enum ProductionSiteTable {
         ),
         // 4 — the resume-deferred caller of the same write
         Site(
-            number: 4, file: "Mimidasu/State/AppModel.swift", line: 544, value: ".starting",
+            number: 4, file: "Mimidasu/State/AppModel.swift", line: 576, value: ".starting",
             guardDescription: "the machine's `.sourceLost`/`.paused` legal-from set (was an unconditional write)",
             from: .paused,
             action: .captureRestartRequested,
@@ -87,7 +87,7 @@ enum ProductionSiteTable {
         ),
         // 5
         Site(
-            number: 5, file: "Mimidasu/State/AppModel.swift", line: 557, value: ".running",
+            number: 5, file: "Mimidasu/State/AppModel.swift", line: 589, value: ".running",
             guardDescription: "the machine's `.starting` legal-from set (was: `guard phase == .starting`)",
             from: .starting,
             action: .captureRestartSucceeded,
@@ -96,7 +96,7 @@ enum ProductionSiteTable {
         ),
         // 6
         Site(
-            number: 6, file: "Mimidasu/State/AppModel.swift", line: 566, value: ".sourceLost",
+            number: 6, file: "Mimidasu/State/AppModel.swift", line: 598, value: ".sourceLost",
             guardDescription: "the machine's `.starting` legal-from set (was: `guard phase == .starting`)",
             from: .starting,
             action: .captureRestartFailed("boom"),

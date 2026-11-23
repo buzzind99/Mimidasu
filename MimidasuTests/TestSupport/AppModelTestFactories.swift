@@ -16,6 +16,10 @@ func makeIdleModel(
     highFidelityProbe: @escaping @Sendable (String) async -> Bool = { _ in false },
     jmDictLookup: JMDictLookup? = nil,
     initialModelResolve: @escaping @Sendable (ASRModelChoice) -> URL? = { _ in nil },
+    modelFilesDirectory: URL = ModelLocator.modelsDirectory,
+    modelRemove: @escaping @Sendable (ASRModelChoice) throws -> Void = { choice in
+        try ModelRemoval.remove(choice)
+    },
     willTerminateNotifications: NotificationCenter = .default
 ) -> AppModel {
     AppModel(
@@ -27,6 +31,8 @@ func makeIdleModel(
         highFidelityProbe: highFidelityProbe,
         jmDictLookup: jmDictLookup,
         initialModelResolve: initialModelResolve,
+        modelFilesDirectory: modelFilesDirectory,
+        modelRemove: modelRemove,
         willTerminateNotifications: willTerminateNotifications
     )
 }

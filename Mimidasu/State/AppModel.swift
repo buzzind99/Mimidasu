@@ -131,6 +131,13 @@ final class AppModel {
     /// model-selection surface.
     let modelResolve: @Sendable (ASRModelChoice) -> URL?
 
+    /// Where the app's own model downloads live. Injectable so tests point the
+    /// inventory at a temporary directory instead of Application Support.
+    let modelFilesDirectory: URL
+    /// Removes one downloaded model file and forgets its verification verdict.
+    /// Injectable so the refusal tests never touch Application Support.
+    let modelRemove: @Sendable (ASRModelChoice) throws -> Void
+
     let live = LivePartialState()
     let latency = LatencyState()
     let audioLevel = AudioLevelState()
@@ -221,6 +228,26 @@ final class AppModel {
     /// `modelURL` is the active choice's entry. Internal setter: written by
     /// the availability refresh in the model-selection surface.
     var modelAvailability: [ASRModelChoice: URL] = [:]
+
+    /// Bumped by every availability pass. A pass publishes only while its
+    /// generation is still the newest, so overlapping checks publish in start
+    /// order instead of letting an older snapshot replace a fresher map.
+    /// Internal: managed from the model-selection surface.
+    @ObservationIgnored var modelAvailabilityGeneration = 0
+
+    /// Model files the delete command unlinked. A pass that started before the
+    /// unlink can still resolve the old path; publishing that entry would
+    /// resurrect a model that is gone, so a tombstoned path is dropped from a
+    /// pass's result unless the file is back (a re-download). Tombstones are
+    /// keyed by URL, so they cannot hide a different copy of the same choice.
+    /// Internal: managed from the model-selection surface.
+    @ObservationIgnored var deletedModelURLs: Set<URL> = []
+
+    /// Availability passes currently running. A stale pass still clears its
+    /// share of the Start gate when it returns, so this counts passes rather
+    /// than letting the newest writer write the flag. Internal: managed from
+    /// the model-selection surface.
+    @ObservationIgnored var modelAvailabilityPassesInFlight = 0
 
     /// The live translation session — engine attach, manual retry, the
     /// one-way Apple fallback latch, the high-fidelity probe, and the
@@ -334,6 +361,10 @@ final class AppModel {
         initialModelResolve: @escaping @Sendable (ASRModelChoice) -> URL? = { choice in
             ModelLocator.resolve(for: choice)
         },
+        modelFilesDirectory: URL = ModelLocator.modelsDirectory,
+        modelRemove: @escaping @Sendable (ASRModelChoice) throws -> Void = { choice in
+            try ModelRemoval.remove(choice)
+        },
         retireWarmEngine: @escaping @Sendable () -> Void = {
             ASREngineFactory.retireWarmEngine()
         },
@@ -351,6 +382,7 @@ final class AppModel {
         tapLookup = TapLookupSession(resolver: tapLookupResolver ?? LookupDisplay(lookup: jmDict))
         self.dictionarySearch = dictionarySearch ?? DictionarySearchEngine()
         modelResolve = initialModelResolve
+        (self.modelFilesDirectory, self.modelRemove) = (modelFilesDirectory, modelRemove)
         self.retireWarmEngine = retireWarmEngine
         self.willTerminateNotifications = willTerminateNotifications
         let tierAvailability = AppleTierAvailability(check: highFidelityProbe)
