@@ -125,7 +125,8 @@ struct ModelDownloaderDelegateTests {
     func didFinishDownloadingToDigestMatch() async throws {
         let tempFile = try #require(try ModelTestFixtures.cloneRepoModel())
         let destination = temporary.fileURL("installed.gguf")
-        let downloader = ModelDownloader(destination: destination, verdictStore: makeStore())
+        let store = makeStore()
+        let downloader = ModelDownloader(destination: destination, verdictStore: store)
         let task = try makeDownloadTask()
 
         downloader.urlSession(.shared, downloadTask: task, didFinishDownloadingTo: tempFile)
@@ -141,6 +142,18 @@ struct ModelDownloaderDelegateTests {
         #expect(downloader.state == .done(destination))
         #expect(FileManager.default.fileExists(atPath: destination.path))
         #expect(!FileManager.default.fileExists(atPath: tempFile.path), "temp file is consumed by the move")
+
+        let destinationAttrs = try FileManager.default.attributesOfItem(atPath: destination.path)
+        let destinationKey = try ModelVerifier.CacheKey(
+            path: destination.path,
+            size: #require(destinationAttrs[.size] as? Int64),
+            modified: #require(destinationAttrs[.modificationDate] as? Date)
+        )
+        #expect(store.contains(destinationKey), "a completed download records its verification verdict")
+        #expect(
+            ModelVerifier.VerdictStore(url: store.url).contains(destinationKey),
+            "the recorded verdict is persisted for the next launch"
+        )
     }
 
     // MARK: - didCompleteWithError

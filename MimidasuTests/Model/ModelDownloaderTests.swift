@@ -89,12 +89,12 @@ struct ModelDownloaderTests {
     }
 
     @Test(
-        "start finishes done for an already-verified model and ignores further starts",
+        "start re-checks the disk and keeps done for an already-verified model",
         .enabled(if: ModelVerifier.isVerified(
             ModelLocator.downloadedURL(for: .lite), for: .lite, store: .sharedReadOnly
         ))
     )
-    func startWhenVerifiedModelAlreadyPresent() async {
+    func startRechecksDiskForVerifiedModel() async {
         let destination = ModelLocator.downloadedURL(for: .lite)
         let downloader = ModelDownloader(verdictStore: .sharedReadOnly)
 
@@ -114,7 +114,11 @@ struct ModelDownloaderTests {
         downloader.start()
         await flushObservations()
 
-        #expect(emissions.values.isEmpty, "start() once .done must be a no-op")
+        #expect(downloader.state == .done(destination), "the re-check finds the verified file again")
+        #expect(
+            emissions.values.isEmpty,
+            "re-checking a present, verified file settles on the same .done without a .downloading flash"
+        )
     }
 
     @Test(
@@ -140,9 +144,9 @@ struct ModelDownloaderTests {
 
     /// A recorded verdict lets `begin()` finish done for a file the pin
     /// cannot match — the persisted store is trusted without a re-hash — so
-    /// the already-done short-circuit in `start()` runs offline.
-    @Test("start after done is a no-op via the persisted-verdict arm")
-    func startWhenAlreadyDoneIsNoOp() async throws {
+    /// the disk re-check in `start()` runs offline.
+    @Test("start re-checks the disk and keeps done from the persisted verdict")
+    func startRechecksDiskFromPersistedVerdict() async throws {
         let file = try temporary.write(Data([0x00]), named: "installed.gguf")
         let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
         let key = try ModelVerifier.CacheKey(
@@ -169,7 +173,72 @@ struct ModelDownloaderTests {
         downloader.start()
         await flushObservations()
 
-        #expect(emissions.values.isEmpty, "start() once .done must be a no-op")
+        #expect(downloader.state == .done(file), "the re-check trusts the persisted verdict again")
+        #expect(
+            emissions.values.isEmpty,
+            "re-checking a present, verified file settles on the same .done without a .downloading flash"
+        )
+    }
+
+    @Test("start after a done whose file vanished downloads again")
+    func startAfterVanishedVerdictDownloadsAgain() async throws {
+        let file = try temporary.write(Data([0x00]), named: "vanished.gguf")
+        let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
+        let key = try ModelVerifier.CacheKey(
+            path: file.path,
+            size: #require(attrs[.size] as? Int64),
+            modified: #require(attrs[.modificationDate] as? Date)
+        )
+        let store = makeStore()
+        store.record(key)
+        let downloader = makeOfflineTransport(destination: file, verdictStore: store)
+
+        downloader.start()
+        #expect(
+            await pollUntil(timeout: 5) { downloader.state == .done(file) },
+            "the recorded verdict finishes done"
+        )
+        try FileManager.default.removeItem(at: file)
+
+        downloader.start()
+        #expect(
+            await pollUntil(timeout: 5) {
+                if case .downloading = downloader.state {
+                    return true
+                }
+                return false
+            },
+            "a deleted model must be downloadable again, not stuck on .done"
+        )
+        downloader.cancel()
+    }
+
+    @Test(
+        "start after a done whose file vanished downloads again (downloaded fixture)",
+        .enabled(if: TestEnvironment.repoDevModelInstalled)
+    )
+    func startAfterVanishedDoneDownloadsAgain() async throws {
+        let file = try #require(try ModelTestFixtures.cloneRepoModel())
+        let downloader = makeOfflineTransport(destination: file, verdictStore: makeStore())
+
+        downloader.start()
+        #expect(
+            await pollUntil(timeout: 30) { downloader.state == .done(file) },
+            "the cloned fixture verifies into .done"
+        )
+        try FileManager.default.removeItem(at: file)
+
+        downloader.start()
+        #expect(
+            await pollUntil(timeout: 5) {
+                if case .downloading = downloader.state {
+                    return true
+                }
+                return false
+            },
+            "a deleted model must be downloadable again, not stuck on .done"
+        )
+        downloader.cancel()
     }
 
     /// Omitting the session factory exercises the production default: a real

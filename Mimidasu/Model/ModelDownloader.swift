@@ -89,13 +89,13 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
     private var lastPublishedProgress: Double = -1
     private var lastPublishDate: Date?
 
+    /// Starts the download decision from scratch. A `.done` state is a cached
+    /// outcome, re-checked against the disk: a model deleted after a completed
+    /// download downloads again, instead of leaving a button that does
+    /// nothing. A transfer already in flight is refused by `begin()`'s own
+    /// session guard.
     func start() {
-        Task { @MainActor in
-            if case .done = self.state {
-                return
-            }
-            self.begin()
-        }
+        Task { @MainActor in self.begin() }
     }
 
     private func begin() {
@@ -192,10 +192,15 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
         // State updates hop to the main actor afterwards.
         let fm = FileManager.default
         var failure: Error?
+        var verdictKey: ModelVerifier.CacheKey?
         do {
             try Self.verify(location, choice: choice)
             try? fm.removeItem(at: destination)
             try fm.moveItem(at: location, to: destination)
+            // The completed file is verified: record it now, so the
+            // post-download resolve does not re-hash the whole model and a
+            // later `start()` re-check in the UI stays cheap.
+            verdictKey = Self.verdictKey(for: destination)
         } catch {
             failure = error
         }
@@ -206,6 +211,9 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
                 try? fm.removeItem(at: location)
                 self.state = .failed(Self.verificationFailureMessage(failure))
             } else {
+                if let verdictKey {
+                    self.verdictStore.record(verdictKey)
+                }
                 self.resumeData = nil
                 self.state = .done(destination)
             }
@@ -228,5 +236,16 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
         throws(ModelVerifier.VerificationError)
     {
         try ModelVerifier.verify(file, for: choice)
+    }
+
+    /// The cache key for a freshly downloaded file, from its current
+    /// attributes. Nil when they cannot be read — the resolve pass then hashes
+    /// the file and records the verdict itself.
+    private nonisolated static func verdictKey(for file: URL) -> ModelVerifier.CacheKey? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: file.path),
+              let size = attrs[.size] as? Int64,
+              let modified = attrs[.modificationDate] as? Date
+        else { return nil }
+        return ModelVerifier.CacheKey(path: file.path, size: size, modified: modified)
     }
 }
