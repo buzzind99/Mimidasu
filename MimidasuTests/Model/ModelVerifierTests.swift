@@ -22,6 +22,16 @@ struct ModelVerifierTests {
         ModelVerifier.VerdictStore(url: temporary.fileURL(name))
     }
 
+    /// The cache key for a file at its current size and modification date.
+    private func cacheKey(for file: URL) throws -> ModelVerifier.CacheKey {
+        let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+        return try ModelVerifier.CacheKey(
+            path: file.path,
+            size: #require(attributes[.size] as? Int64),
+            modified: #require(attributes[.modificationDate] as? Date)
+        )
+    }
+
     // MARK: - isVerified
 
     @Test("a missing file is not verified")
@@ -231,6 +241,76 @@ struct ModelVerifierTests {
             ModelVerifier.CacheKey(path: "/m", size: 1, modified: base)
                 == ModelVerifier.CacheKey(path: "/m", size: 1, modified: rounded)
         )
+    }
+
+    /// `forget` drops the path from both cache tiers and rewrites the store.
+    /// The hot tier is only reachable through a verification hit, so the keys
+    /// describe real (tiny) files: the persisted verdict answers first and
+    /// promotes the key without re-hashing.
+    @Test("forget evicts both tiers and persists the removal")
+    func forgetEvictsBothTiersAndPersists() throws {
+        let forgottenFile = try temporary.write(Data([0x01, 0x02]), named: "forgotten.gguf")
+        let keptFile = try temporary.write(Data([0x01, 0x02, 0x03]), named: "kept.gguf")
+        let forgottenKey = try cacheKey(for: forgottenFile)
+        let keptKey = try cacheKey(for: keptFile)
+        let store = makeStore()
+        store.record(forgottenKey)
+        store.record(keptKey)
+        #expect(store.isVerified(forgottenFile, for: .lite), "the persisted verdict answers without a re-hash")
+        #expect(store.isVerified(keptFile, for: .lite), "the persisted verdict answers without a re-hash")
+        #expect(store.hotContains(forgottenKey), "the persisted hit promoted the forgotten key")
+        #expect(store.hotContains(keptKey), "the persisted hit promoted the kept key")
+
+        store.forget(path: forgottenKey.path)
+
+        #expect(!store.hotContains(forgottenKey), "the hot tier dropped the forgotten path")
+        #expect(!store.contains(forgottenKey), "the persisted tier dropped the forgotten path")
+        #expect(store.hotContains(keptKey), "the hot tier keeps the unrelated path")
+        #expect(store.contains(keptKey), "the persisted tier keeps the unrelated path")
+
+        let reloaded = ModelVerifier.VerdictStore(url: store.url)
+        #expect(!reloaded.contains(forgottenKey), "the removal was written to disk")
+        #expect(reloaded.contains(keptKey), "the surviving verdict is still on disk")
+    }
+
+    @Test("forget on an unknown path changes nothing")
+    func forgetOnUnknownPathChangesNothing() throws {
+        let file = try temporary.write(Data([0x04, 0x05, 0x06, 0x07]), named: "recorded.gguf")
+        let key = try cacheKey(for: file)
+        let store = makeStore()
+        store.record(key)
+        #expect(store.isVerified(file, for: .lite), "the persisted verdict answers without a re-hash")
+
+        store.forget(path: "~/Mimidasu/models/never-recorded.gguf")
+
+        #expect(store.hotContains(key), "the hot tier still holds the recorded key")
+        #expect(store.contains(key), "the persisted tier still holds the recorded key")
+        #expect(
+            ModelVerifier.VerdictStore(url: store.url).contains(key),
+            "the store file still holds the recorded key"
+        )
+    }
+
+    @Test("a read-only store reads but never records or forgets")
+    func readOnlyStoreNeverWrites() throws {
+        let file = try temporary.write(Data([0x08]), named: "read-only.gguf")
+        let key = try cacheKey(for: file)
+        let writable = makeStore()
+        writable.record(key)
+
+        let readOnly = ModelVerifier.VerdictStore(url: writable.url, recordsVerdicts: false)
+        #expect(readOnly.contains(key), "a read-only store still reads the persisted verdicts")
+
+        let unreported = ModelVerifier.CacheKey(
+            path: "~/Mimidasu/models/never-recorded.gguf", size: 1, modified: Date()
+        )
+        readOnly.record(unreported)
+        readOnly.forget(path: key.path)
+
+        let reloaded = ModelVerifier.VerdictStore(url: writable.url)
+        #expect(!reloaded.contains(unreported), "a read-only store never records")
+        #expect(reloaded.contains(key), "a read-only store never forgets")
+        #expect(!readOnly.hotContains(unreported), "a read-only store does not seed its hot tier")
     }
 
     // MARK: - verify

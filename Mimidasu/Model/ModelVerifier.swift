@@ -84,8 +84,8 @@ enum ModelVerifier {
         static let shared = VerdictStore(url: sharedURL)
 
         /// Read-only view of the production location: reads persisted verdicts
-        /// but never records new ones. Used by probes that must not mutate
-        /// user state (test gating).
+        /// but never writes to the store (neither records nor forgets). Used by
+        /// probes that must not mutate user state (test gating).
         static let sharedReadOnly = VerdictStore(url: sharedURL, recordsVerdicts: false)
 
         let url: URL
@@ -145,9 +145,24 @@ enum ModelVerifier {
             }
         }
 
+        /// Drops any verdict for this path from both tiers and persists.
+        /// Idempotent; a path with no verdict changes nothing on disk. A
+        /// read-only store drops nothing: it never writes.
+        func forget(path: String) {
+            guard recordsVerdicts else { return }
+            state.withLock { state in
+                loadIfNeeded(&state)
+                state.hot = state.hot.filter { key in key.path != path }
+                guard state.entries.removeValue(forKey: path) != nil else { return }
+                save(&state)
+            }
+        }
+
         /// Records a successful verification, overwriting any prior verdict
-        /// for the same path and persisting the store.
+        /// for the same path and persisting the store. A read-only store
+        /// records nothing.
         func record(_ key: CacheKey) {
+            guard recordsVerdicts else { return }
             state.withLock { state in
                 loadIfNeeded(&state)
                 state.entries[key.path] = VerdictStoreEntry(size: key.size, mtime: key.modified)
